@@ -81,12 +81,24 @@ the cascade actually finished:
 > 1. Look the address up in the user directory, or ask the data subject.
 > 2. Confirm out of band that the address is theirs — for example a reply from that
 >    mailbox to a message you sent it.
-> 3. Run the erasure again with the **address** as the user id:
->    `DELETE /admin/gdpr/{address}`. That also erases what the email channel stored
->    under that address (step 15, email identities).
+> 3. Check that **no user account uses the address itself as its user id** (search
+>    the user directory for that principal). There is no address-scoped erasure of
+>    the email ledger: a request under the address is the whole cascade for whatever
+>    principal that string names, so if an account is signed in under that address,
+>    `DELETE /admin/gdpr/{address}` would erase that account's data too.
+> 4. If no account uses it, run the erasure again with the **address** as the user
+>    id: `DELETE /admin/gdpr/{address}`. That reaches the email ledger rows and
+>    suppression entries of the address and what the email channel stored under it
+>    (step 15, email identities). If an account does use it, do not re-run: clear the
+>    suppression entries per email integration with
+>    `POST /channelstore/channels/{id}/email-suppressions/clear` (body
+>    `{"address": "…"}`), and let the ledger rows expire with
+>    `eddi.email.ledger-retention`, or remove them at the database layer.
 >
-> Exports carry the same field, and the same procedure applies with
-> `GET /admin/gdpr/{address}/export`.
+> Exports carry the same field. The same check comes first there: an export under the
+> address (`GET /admin/gdpr/{address}/export`) returns everything keyed by that user
+> id, so if an account uses the address as its id it would hand that account's data
+> to the requester.
 
 **Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`. It
 reports the same outcome: `status` is `"completed"` only when every step

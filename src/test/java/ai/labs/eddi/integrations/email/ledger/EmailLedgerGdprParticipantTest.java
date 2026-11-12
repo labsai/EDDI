@@ -104,9 +104,17 @@ class EmailLedgerGdprParticipantTest {
         List<String> erasure = participant.notices("mallory", IGdprParticipant.Operation.ERASURE);
         assertEquals(1, erasure.size());
         assertTrue(erasure.getFirst().startsWith(EmailLedgerGdprParticipant.UNVERIFIED_DIRECTORY_EMAIL));
-        assertTrue(erasure.getFirst().contains("not erased") && erasure.getFirst().contains("with the address as the user id"));
+        assertTrue(erasure.getFirst().contains("not erased"), erasure.getFirst());
+        // the remedy warns that a re-run under the address reaches whichever account
+        // uses it as its id
+        assertTrue(erasure.getFirst().contains("no user account uses the address itself as its user id"), erasure.getFirst());
+        assertTrue(erasure.getFirst().contains("deletes everything"), erasure.getFirst());
+        assertTrue(erasure.getFirst().contains("email-suppressions/clear"), "points at the address-scoped clear that does exist");
         assertFalse(erasure.getFirst().contains("carol@example.com"), "the response must not carry the address");
-        assertTrue(participant.notices("mallory", IGdprParticipant.Operation.EXPORT).getFirst().contains("not exported"));
+        String export = participant.notices("mallory", IGdprParticipant.Operation.EXPORT).getFirst();
+        assertTrue(export.contains("not exported"), export);
+        assertTrue(export.contains("no user account uses the address itself as its user id"), export);
+        assertFalse(export.contains("carol@example.com"));
         assertTrue(participant.notices("carol", IGdprParticipant.Operation.ERASURE).isEmpty());
     }
 

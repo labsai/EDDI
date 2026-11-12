@@ -129,12 +129,23 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
         if (!resolve(userId).unverifiedDirectoryEmailSkipped()) {
             return List.of();
         }
-        String verb = operation == Operation.EXPORT ? "exported" : "erased";
-        String request = operation == Operation.EXPORT ? "export" : "erasure";
+        // There is no address-scoped erase or export of the email ledger; a request
+        // under the address as user id is the full cascade for whatever principal
+        // that string names, so the notice spells out what it would reach.
+        if (operation == Operation.EXPORT) {
+            return List.of(UNVERIFIED_DIRECTORY_EMAIL + ": the user directory records an e-mail address for this user that the identity "
+                    + "provider has not marked verified, so the email ledger rows and email suppression entries recorded under that "
+                    + "address were not exported. Before exporting under the address, confirm out of band that it belongs to this "
+                    + "person and that no user account uses the address itself as its user id: an export under the address returns "
+                    + "everything EDDI keys by that user id, which would be that account's data.");
+        }
         return List.of(UNVERIFIED_DIRECTORY_EMAIL + ": the user directory records an e-mail address for this user that the identity "
-                + "provider has not marked verified, so the email ledger and suppression rows under that address were not " + verb
-                + ". Confirm out of band that the address belongs to this person, then run the " + request
-                + " again with the address as the user id.");
+                + "provider has not marked verified, so the email ledger rows and email suppression entries recorded under that "
+                + "address were not erased. Before any re-run, confirm out of band that the address belongs to this person and "
+                + "that no user account uses the address itself as its user id: an erasure under the address deletes everything "
+                + "EDDI keys by that user id, that account included. Suppression entries alone can be cleared per email "
+                + "integration (POST /channelstore/channels/{id}/email-suppressions/clear); ledger rows have no address-scoped "
+                + "erase and otherwise expire with eddi.email.ledger-retention.");
     }
 
     /**
