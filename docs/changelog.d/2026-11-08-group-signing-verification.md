@@ -1,4 +1,4 @@
-## fix(signing): peer verification is fail-closed and binds the conversation, position and key version (2026-11-08)
+## fix(signing): peer verification withholds unverified agent entries and binds the conversation, position and key version (2026-11-08)
 
 **Repo:** EDDI (`fix/group-signing-verification`, on top of `feat/agent-signing-key-provisioning`)
 
@@ -11,7 +11,7 @@ another discussion, into another phase or round of the same one, or retyped, sti
 verifier checked no nonce, so a duplicated entry verified twice; and key validity windows were
 never enforced.
 
-- **Fail-closed.** `GroupSigningGuard.viewFor` gives one verdict per transcript entry
+- **Withheld, for a member that verifies.** `GroupSigningGuard.viewFor` gives one verdict per transcript entry
   (`VERIFIED`, `NOT_AGENT_AUTHORED`, `RECEIVERS_OWN`, `UNSIGNED`, `UNKNOWN_KEY`, `REVOKED`,
   `OUT_OF_WINDOW`, `BAD_SIGNATURE`, `WRONG_ROUND`, `DUPLICATE`, `ENGINE_SYNTHESIS`, `NO_SUCH_AGENT`). For a member
   that requires peer verification, every agent entry that must verify and does not is replaced, in place, by a
@@ -25,6 +25,14 @@ never enforced.
   unsigned by design, so it keeps its place, speaker id, type, phase index and target but loses its
   error reason, display name and phase name, which a store writer could otherwise fill under a
   member agent's id for a verifying member's `groupTranscript` to carry.
+  This is not fail-closed in general, and is not described so any more: a member without
+  `requirePeerVerification` (the default, unchanged) gets the stored transcript with nothing checked
+  and nothing logged; for a verifying member, entries no agent wrote (`NOT_AGENT_AUTHORED`) and its
+  own when it does not sign (`RECEIVERS_OWN`) are shown, and the engine's other prompts and a
+  follow-up still quote the stored transcript (see "Not filtered yet" below). An agent entry that is
+  unsigned or names an undeclared key is withheld only from that member's phase prompt and
+  `groupTranscript`. The `Verdict` enum now has one constant per line, each with a Javadoc line
+  saying whether an entry with it is shown or withheld.
 - **The member's own entries** are checked like a peer's when it signs: every honest one is signed,
   and REVISION and DEFENSE quote its latest entry from the group transcript as the answer it revises
   or defends, so an answer planted under its id, or its own signed answer edited in the store, is

@@ -149,7 +149,12 @@ and record covered, and its "Not yet supported" row now names only what is still
 [`architecture.md`](../architecture.md#cryptographic-agent-identity) item 8 describes the combined
 behaviour of this stack: every prompt filtered, own entries checked when the member signs, the
 reserved names, withheld engine-named syntheses, the ballot taken from the voter's view and the
-group-wide records rule; the "Not filtered yet" sentence is gone. The Platform Operator's prompt
+group-wide records rule; the "Not filtered yet" sentence is gone. Item 8, the `GroupSigningGuard`
+class Javadoc and group-conversations.md call it opt-in per receiving member, not fail-closed (the
+wording #1366 settled on): a member without `requirePeerVerification` is shown the stored
+transcript, and entries no agent wrote reach a verifying member relabelled but unauthenticated.
+The `Verdict` enum keeps #1366's one-constant-per-line form, with `NOT_IN_TRANSCRIPT` (a record
+quoting an entry that is not in the view's transcript: withheld) added. The Platform Operator's prompt
 names the same rules and the two failure messages an admin will ask about (`The vote could not
 run: only 0 option(s) were available`, `Its task text could not be verified, and this member
 requires peer verification`); operator revision bumped. The Manager's "Require peer

@@ -1428,12 +1428,20 @@ each of its turns:
   entry past the round-2 question (but not past a signed round-2 entry) and it
   still verifies. Moving an entry between repeats of one phase within a round
   is not detected either.
-- **Fail-closed.** Every entry another agent wrote that does not verify, or
-  that carries no signature, reaches a verifying member as
-  `[withheld: this message could not be verified, because ...]` in its phase
-  prompt and its `groupTranscript` context, named by the speaker's agent id and
-  with no phase name, since the stored display name and phase name are
-  unverified text too. So every agent that writes to the
+- **Withheld for a member that verifies.** Every entry another agent wrote
+  that does not verify, or that carries no signature or names a key its
+  speaker does not declare, reaches a member with `requirePeerVerification`
+  as `[withheld: this message could not be verified, because ...]` in its
+  phase prompt and its `groupTranscript` context, named by the speaker's agent
+  id and with no phase name, since the stored display name and phase name are
+  unverified text too; the engine's other prompts for it read the transcript
+  the same way (next item). It is not a blanket fail-closed: a member without
+  the setting (the default) is shown the stored transcript with nothing
+  checked and nothing logged, entries no agent wrote are shown to a verifying
+  member too, unauthenticated (labelled, below), and the texts that still
+  reach it without a signature of their own are listed under
+  [Not yet supported](#not-yet-supported). So every agent
+  that writes to the
   discussion should sign: each member, and the moderator or synthesizer too
   when it is not a member, or its synthesis is withheld from verifying
   members.
