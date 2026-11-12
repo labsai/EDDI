@@ -34,10 +34,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * its debounced flush — therefore never leaves a day stale; the re-mark of a
  * day already dirty only gives its entry a new token. At most
  * {@link #SELF_HEAL_MAX} pairs per pass: a window holding more is halved until
- * one fits, and the watermark moves only to the end of what was marked. A row
- * that reaches the store after the grace has passed its capture time marks its
- * days before it is written instead ({@link HealthDirtyDays#markLateWrite}),
- * since this scan may already be past it.</li>
+ * one fits, and the watermark moves only to the end of what was marked; a
+ * window already {@link #SELF_HEAL_MIN_WINDOW} wide that still holds more is
+ * streamed whole, in chunks, rather than cut — so the watermark never passes a
+ * pair it did not mark. A row that reaches the store after the grace has passed
+ * its capture time marks its days before it is written instead
+ * ({@link HealthDirtyDays#markLateWrite}), since this scan may already be past
+ * it.</li>
  * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
  * each streams the agent-day's turn rows through a
  * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}
@@ -77,7 +80,7 @@ public class HealthRollupService {
     static final int SELF_HEAL_MAX = 10_000;
     /**
      * The narrowest window the self-heal halves an overfull one down to; past it,
-     * it marks what fits and moves on.
+     * it streams every pair of that window instead of halving further.
      */
     static final Duration SELF_HEAL_MIN_WINDOW = Duration.ofSeconds(1);
 
@@ -195,7 +198,8 @@ public class HealthRollupService {
      * comment. Never throws: a failure leaves the watermark where it was. A window
      * with more than {@link #SELF_HEAL_MAX} pairs is halved until one fits, and the
      * watermark only moves to the end of the part fully marked; the rest is the
-     * next pass's.
+     * next pass's. A {@link #SELF_HEAL_MIN_WINDOW} window that still overflows is
+     * marked whole ({@link #markAll}).
      */
     void selfHeal(Instant now) {
         try {
@@ -212,14 +216,20 @@ public class HealthRollupService {
                 pairs = scan(since, until, overflow);
             }
             if (overflow[0]) {
-                // Even the narrowest window holds more: mark what fits and move on.
-                LOGGER.warnf("The Agent Health self-heal pass re-marks only %d agent days written in %s .. %s; the others rely on their "
-                        + "own marks", SELF_HEAL_MAX, since, until);
-            } else if (until.isBefore(end)) {
-                LOGGER.infof("The Agent Health self-heal pass re-marked rows written up to %s; the rest, up to %s, is the next pass's", until,
-                        end);
+                // Even the narrowest window holds more pairs than one scan returns. Its
+                // pairs carry no order to resume from, so moving the watermark past a
+                // truncated scan would skip the rest for good: stream all of them,
+                // marked in chunks, so the watermark only passes what was marked.
+                int marked = markAll(since, until);
+                LOGGER.warnf("The Agent Health self-heal pass re-marked %d agent days written in %s .. %s, more than one scan holds (%d)", marked,
+                        since, until, SELF_HEAL_MAX);
+            } else {
+                if (until.isBefore(end)) {
+                    LOGGER.infof("The Agent Health self-heal pass re-marked rows written up to %s; the rest, up to %s, is the next pass's", until,
+                            end);
+                }
+                pairs.forEach(dirtyStore::mark);
             }
-            pairs.forEach(dirtyStore::mark);
             dirtyStore.setSelfHealWatermark(until);
         } catch (RuntimeException e) {
             LOGGER.warnf("The Agent Health self-heal pass failed; the next pass retries from the same watermark: %s", sanitize(e.getMessage()));
@@ -241,6 +251,29 @@ public class HealthRollupService {
         });
         overflow[0] = count[0] > SELF_HEAL_MAX;
         return pairs;
+    }
+
+    /**
+     * Marks every (agent, day) pair of rows written in [{@code since},
+     * {@code until}) — uncapped, for a window already as narrow as
+     * {@link #SELF_HEAL_MIN_WINDOW} — flushing every {@link #SELF_HEAL_MAX} pairs
+     * so memory stays bounded. A pair met twice is marked twice, which only gives
+     * its dirty entry a new token.
+     *
+     * @return how many pairs were marked
+     */
+    private int markAll(Instant since, Instant until) {
+        Map<String, Set<LocalDate>> chunk = new LinkedHashMap<>();
+        int[] count = {0};
+        turnStore.forEachAgentDayUpdatedSince(since, until, Integer.MAX_VALUE, (agentId, day) -> {
+            chunk.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
+            if (++count[0] % SELF_HEAL_MAX == 0) {
+                chunk.forEach(dirtyStore::mark);
+                chunk.clear();
+            }
+        });
+        chunk.forEach(dirtyStore::mark);
+        return count[0];
     }
 
     /**
