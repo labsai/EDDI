@@ -139,7 +139,8 @@ class CompatibilityRulesTest {
     // ---- templates ----
 
     private static List<Finding> scan(Object node) {
-        var engine = new TemplatingEngine(Engine.builder().addDefaults().build());
+        var engine = new TemplatingEngine(
+                Engine.builder().addDefaults().build());
         var findings = new ArrayList<Finding>();
         CompatibilityRules.scanTemplates("doc", node, engine::validateTemplate, findings);
         return findings;
@@ -171,5 +172,46 @@ class CompatibilityRulesTest {
     @DisplayName("credential parameters are never scanned")
     void credentialsSkipped() {
         assertEquals(List.of(), scan(Map.of("parameters", Map.of("apiKey", "{userInfo.m : 'x') : 'y')}"))));
+    }
+
+    private static List<Finding> scanLlmTask(Object node) {
+        var engine = new TemplatingEngine(
+                Engine.builder().addDefaults().build());
+        var findings = new ArrayList<Finding>();
+        CompatibilityRules.scanLlmTaskTemplates("llm task 'gemini'", node, engine::validateTemplate, findings);
+        return findings;
+    }
+
+    @Test
+    @DisplayName("a prompt that merely documents a vault reference renders at runtime, so it is not reported")
+    void promptMentioningVaultReferenceIsNotReported() {
+        String prose = "Store the key as a ${vault:...} URL; use ${vars:name} and ${connection:x} too. Hello {properties.name}";
+        var node = Map.of("parameters", Map.of("systemMessage", prose, "prompt", prose));
+
+        assertEquals(List.of(), scanLlmTask(node));
+        // the generic scan has no such pre-processing and still reports it
+        assertEquals(List.of(CompatibilityRules.TEMPLATE_DOES_NOT_PARSE), codes(scan(Map.of("systemMessage", "see ${vault:...}"))));
+    }
+
+    @Test
+    @DisplayName("a genuinely broken prompt is still reported, also next to a vault mention")
+    void brokenPromptStillReported() {
+        String broken = "${vault:...} {userInfo.n}{userInfo.m : ' a') : 'b')}";
+        var findings = scanLlmTask(Map.of("parameters", Map.of("systemMessage", broken)));
+
+        assertEquals(List.of(CompatibilityRules.TEMPLATE_DOES_NOT_PARSE), codes(findings));
+        assertEquals("llm task 'gemini'.parameters.systemMessage", findings.get(0).location());
+    }
+
+    @Test
+    @DisplayName("only the task's own parameters are escaped as at runtime; cascade step parameters and other strings are not")
+    void escapeScopedToTaskParameters() {
+        var node = Map.of("parameters", Map.of("systemMessage", "ok"), "modelCascade",
+                Map.of("steps", List.of(Map.of("parameters", Map.of("systemMessage", "see ${vault:...}")))));
+
+        var findings = scanLlmTask(node);
+
+        assertEquals(1, findings.size(), findings.toString());
+        assertEquals("llm task 'gemini'.modelCascade.steps[0].parameters.systemMessage", findings.get(0).location());
     }
 }

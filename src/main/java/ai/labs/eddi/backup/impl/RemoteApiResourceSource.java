@@ -395,7 +395,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             // Resolve version if not specified
             int version = agentVersion != null ? agentVersion : resolveLatestAgentVersion();
 
-            String agentJson = readDocument("/agentstore/agents/" + agentId + "?version=" + version);
+            // One path segment, encoded as exportAgentArchive encodes it: concatenated
+            // raw, an id with "../" in it resolved to another path on the source.
+            String agentJson = readDocument("/agentstore/agents/" + encodePathSegment(agentId) + "?version=" + version);
             AgentConfiguration config = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
             String agentName = readRemoteDescriptorName("/agentstore/agents/descriptors", agentId);

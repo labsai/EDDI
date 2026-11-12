@@ -244,14 +244,25 @@ final class JdkOutboundEngine implements OutboundEngine {
         }
 
         boolean bypasses(String host) {
-            for (String pattern : patterns) {
-                if (pattern.startsWith("*") && host.endsWith(pattern.substring(1))) {
+            return matches(patterns, host);
+        }
+
+        /**
+         * Whether {@code host} matches one of {@code patterns}, case-insensitively —
+         * the rule both engines apply to
+         * {@code eddi.http.outbound.proxy.non-proxy-hosts}.
+         */
+        static boolean matches(List<String> patterns, String host) {
+            String lowerHost = host.toLowerCase(Locale.ROOT);
+            for (String raw : patterns) {
+                String pattern = raw.toLowerCase(Locale.ROOT);
+                if (pattern.startsWith("*") && lowerHost.endsWith(pattern.substring(1))) {
                     return true;
                 }
-                if (pattern.endsWith("*") && host.startsWith(pattern.substring(0, pattern.length() - 1))) {
+                if (pattern.endsWith("*") && lowerHost.startsWith(pattern.substring(0, pattern.length() - 1))) {
                     return true;
                 }
-                if (pattern.equals(host)) {
+                if (pattern.equals(lowerHost)) {
                     return true;
                 }
             }
