@@ -42,6 +42,25 @@ Seven confirmed findings from a security review of the outbound paths.
 - **`HtmlToMarkdownConverter`** keeps only `http`, `https` and `mailto` destinations (at most 2048 chars), drops
   link targets it cannot resolve, and routes image `src` through `asDestination`.
 
+### Review follow-ups
+
+- **Decision paths are judged raw as well as decoded**: a matrix value with an encoded slash (`approve;x=%2Fzzz`)
+  made the decoded path end in `zzz` while the router served `approve`. The filter now also reads the raw path,
+  strips matrix parameters per raw segment before decoding, and refuses when either reading is a decision path.
+- **Every MCP request to this deployment is marked**, whatever its credential (static key, connection, none), not
+  only one carrying `${caller:token}`.
+- **OpenAPI bundling**: the output is capped at 32 M characters while it is written (a shared large value
+  referenced many times no longer builds an unbounded string); a relative or `#` `` under an `` that
+  changes the base is refused instead of resolved against the wrong document; `` siblings are merged keeping
+  the stricter bound, the union of `required` and the intersection of `enum` (holder wins otherwise), because
+  `OpenApiArgumentSchemas` turns a non-object `allOf` into an untyped schema; redirect aliases no longer count
+  twice toward the 32-document cap.
+- **Ingestion**: `maxBytesPerPage` above 50 MB is refused on save and import only; a source stored with one runs,
+  clamped (`validateStored` on the run paths). Crawl redirect hops are held to the crawl scope before they are
+  requested. Adjacent slashes no longer absorb a `..` in the robots/scope path.
+- **Uploaded HTML** keeps relative links and images relative again (a real relative reference only: no scheme, no
+  authority, no whitespace), as `HtmlDocumentExtractor` documents.
+- **Attachments**: an image URL refused by validation now leaves the model a generic note, like a failed download.
 ### Design decisions
 
 - Inline-and-bundle rather than refusing remote refs: multi-file specs keep working, and no new property is needed.

@@ -381,6 +381,9 @@ class AttachmentForwarderTest {
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertTrue(enhanced.contents().stream().noneMatch(c -> c instanceof ImageContent), url + " must not be forwarded");
+            // the model is told, generically, that the image did not come through
+            assertTrue(enhanced.contents().stream().anyMatch(c -> c instanceof TextContent tc && tc.text().contains("photo.png")
+                    && tc.text().contains("could not be attached") && !tc.text().contains(url)), enhanced.contents().toString());
             verifyNoInteractions(httpClient);
         }
 

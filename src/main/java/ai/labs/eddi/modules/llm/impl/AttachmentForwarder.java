@@ -354,7 +354,10 @@ public class AttachmentForwarder {
                 return ImageContent.from(URI.create(att.getUrl()));
             } catch (Exception e) {
                 errors.add("Image '" + name + "' URL could not be attached: " + e.getMessage());
-                return null;
+                // Told to the model as the download path tells it, so it does not answer
+                // about an image it never received. Generic: the refusal's detail stays
+                // in the error record.
+                return TextContent.from("Image '" + name + "' could not be attached and was not sent.");
             }
         }
 
