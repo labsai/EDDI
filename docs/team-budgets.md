@@ -139,6 +139,11 @@ is exactly when nobody is watching the spend.
 | PUT | `/groupstore/groups/{groupId}/budget/current-month` | admin | `{"capUsd": 50, "reason": "launch week"}`; not below what is spent |
 | POST | `/administration/team-budgets/transfers` | admin | `{"fromGroupId", "toGroupId", "amountUsd", "reason"}` plus an `Idempotency-Key` header |
 
+Setting the cap writes the cap, not a difference: when two administrators (or an administrator and an approved
+proposal) set this month's cap at the same moment, the one that lands second ends at exactly the cap it asked for,
+and its audit entry names the cap it replaced. A set re-reads and tries again when the cap changed under it; after
+three such attempts it gives up with **503**, and nothing was changed by that request.
+
 A transfer debits the source first, conditional on the source keeping a cap at or above its spend, then credits
 the target; if the credit fails the debit is reversed (an attempted reversal, recorded as `TRANSFER_OUT_REVERSED`
 and audited as `REVERSED`). If the reversal fails too, the audit entry says `PARTIAL`: the source was debited and the
