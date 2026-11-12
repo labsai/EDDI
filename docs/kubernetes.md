@@ -614,6 +614,20 @@ agent, conversation and the audit ledger. Now:
 NetworkPolicies need a CNI that enforces them (Calico, Cilium and most managed
 offerings do); authentication is what holds without one.
 
+**The unauthenticated EDDI is covered too.** `quickstart.yaml` and `k8s/base` run
+EDDI with all three `*_ALLOW_UNAUTHENTICATED` flags on, so anyone who can open a
+connection to the `eddi` Service is an administrator. Both now ship an `eddi-ingress`
+NetworkPolicy that admits only the pods of EDDI's own namespace on port 7070; the
+`ingress` component adds `eddi-ingress-controller` for an Ingress controller in
+another namespace (edit its namespace and pod labels if yours is not ingress-nginx).
+Every pod it admits is still an unauthenticated administrator, and on a CNI that
+does not enforce NetworkPolicy (kindnet, a stock minikube) it does nothing, so keep
+other workloads out of the namespace and turn authentication on
+([Authentication (Keycloak)](#authentication-keycloak)) before exposing the Service.
+The one-file quickstart MongoDB stays unauthenticated: the authenticated pattern in
+`overlays/mongodb` needs a separately created Secret, an init container and a second
+config file, which does not fit a single `kubectl apply -f`.
+
 > ⚠️ **Upgrading a Kustomize install whose MongoDB ran without authentication.**
 > The mongo image creates the root user only when it initialises an **empty** data
 > directory, but it switches `--auth` on every time. So create the user in the
@@ -756,6 +770,9 @@ helm install eddi ./helm/eddi \
 | Value | Default | In cluster mode |
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
+| `eddi.security.ssrfProtection.enabled` | `""` | `EDDI_SECURITY_SSRF_PROTECTION_ENABLED`. Empty follows the install: `true` when `eddi.oidc.enabled` or `ingress.enabled` is true, otherwise `false` (chart 2.15.0). Set `true`/`false` to override. With it on, an httpCall to an in-cluster Service is refused unless listed below |
+| `eddi.security.ssrfProtection.allowedHosts` | `["127.0.0.1:7070"]` | Internal `host` or `host:port` entries that stay reachable with protection on (a list or one comma-separated string). The default keeps the Platform Operator's calls to EDDI's own API; the cloud-metadata check still applies. [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `ingress.allowPlainHttp` | `false` | With `ingress.enabled` and `eddi.oidc.enabled` the chart refuses to render an Ingress with no `ingress.tls` entry, because bearer tokens, secret values and vault master keys would cross it in cleartext. `true` acknowledges that TLS is terminated in front of the Ingress (chart 2.15.0) |
 | `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %). `targetMemoryUtilizationPercentage` is `null` since chart 2.14.0: a JVM keeps the heap it grew to, so a memory target ratcheted the HPA up to `maxReplicas` |
 | `autoscaling.extraMetrics` / `autoscaling.behavior` | `[]` / `{}` | Further `autoscaling/v2` metrics and scaling behavior, as given. CPU is a weak signal for a node that mostly waits on LLMs; scale on in-flight turns instead — see [Clustering → Autoscaling](clustering.md#autoscaling). A target set to `null` drops that metric |
 | `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |

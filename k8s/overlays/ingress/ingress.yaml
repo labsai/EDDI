@@ -47,7 +47,9 @@ spec:
                 name: eddi
                 port:
                   name: http
-  # Uncomment for TLS:
+  # Uncomment for TLS. Required once OIDC is on: bearer tokens, secret values and
+  # vault master keys cross this Ingress, and over plain HTTP anyone on the path
+  # can read them. (The Helm chart refuses to render that combination.)
   # tls:
   #   - hosts:
   #       - eddi.example.com

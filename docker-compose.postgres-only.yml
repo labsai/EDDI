@@ -43,7 +43,13 @@ services:
       EDDI_UPDATE_CHECK_ENABLED: "${EDDI_UPDATE_CHECK_ENABLED:-true}"
       # Host allow-list while authentication is off — see docker-compose.yml.
       EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: "${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
+      # Empty DISABLES the vault (it fails closed); set a key in .env to use it.
       EDDI_VAULT_MASTER_KEY: "${EDDI_VAULT_MASTER_KEY:-}"
+      # SSRF protection is off by default (service names are private addresses).
+      # To turn it on, uncomment and list the internal hosts agents may call;
+      # 127.0.0.1:7070 keeps the Platform Operator working. See docs/security.md.
+      # EDDI_SECURITY_SSRF_PROTECTION_ENABLED: "${EDDI_SECURITY_SSRF_PROTECTION_ENABLED:-false}"
+      # EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS: "${EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS:-127.0.0.1:7070}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Bound to 127.0.0.1 by default, same reasoning as docker-compose.yml: EDDI

@@ -2,7 +2,16 @@ services:
   eddi:
     image: labsai/eddi:${EDDI_VERSION:-latest}
     environment:
+      # Empty DISABLES the vault (it fails closed): a plain `docker compose up`
+      # runs without one, and ${vault:...} references cannot be resolved. Set a
+      # key in .env (openssl rand -base64 32) to use the vault.
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
+      # SSRF protection is off by default (compose service names are private
+      # addresses). To turn it on, uncomment and list the internal hosts agents
+      # may call; 127.0.0.1:7070 keeps the Platform Operator working.
+      # See .env.example and docs/security.md.
+      # - "EDDI_SECURITY_SSRF_PROTECTION_ENABLED=${EDDI_SECURITY_SSRF_PROTECTION_ENABLED:-false}"
+      # - "EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS=${EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS:-127.0.0.1:7070}"
       - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"
       # ⚠️  Authentication escape hatch — defaults to "true" so the README
       # quick start works out of the box on a laptop. Every API endpoint is

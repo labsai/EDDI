@@ -581,6 +581,18 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `false`. The default stays `false` because configured targets legitimately reach
 > internal hosts (the rule-based reference agent calls `http://localhost:7070`).
 >
+> **The shipped Kubernetes paths turn it on.** The Helm chart renders
+> `eddi.security.ssrfProtection.enabled` as `true` whenever `eddi.oidc.enabled` or
+> `ingress.enabled` is true (an install other people can reach) and as `false`
+> otherwise; set the value explicitly to override either way.
+> `eddi.security.ssrfProtection.allowedHosts` defaults to `127.0.0.1:7070`, which
+> keeps the Platform Operator's calls to EDDI's own API working — add your internal
+> API hosts to the list, because with protection on an httpCall to an in-cluster
+> Service name is refused. The `k8s/overlays/production` component sets the same
+> two properties. Docker Compose keeps the application default (service names are
+> its internal APIs); `.env.example` and the compose files carry the commented
+> `EDDI_SECURITY_SSRF_PROTECTION_*` lines to turn it on.
+>
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse
 > `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`, `168.63.129.16`,
