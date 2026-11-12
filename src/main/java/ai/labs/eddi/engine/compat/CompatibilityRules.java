@@ -131,9 +131,7 @@ public final class CompatibilityRules {
         }
 
         if (taskConvertsToObject && !"on".equalsIgnoreCase(task.getJsonResponseFormat())) {
-            boolean toolsOn = task.isAgentMode() || (hasApiCalls && !Boolean.FALSE.equals(task.getEnableHttpCallTools()))
-                    || (hasMcpCalls && !Boolean.FALSE.equals(task.getEnableMcpCallTools()));
-            if (toolsOn) {
+            if (task.usesTools(hasApiCalls, hasMcpCalls)) {
                 Set<String> providers = new LinkedHashSet<>();
                 if (task.getType() != null) {
                     providers.add(task.getType());
