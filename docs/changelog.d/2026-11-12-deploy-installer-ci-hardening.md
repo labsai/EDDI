@@ -102,6 +102,14 @@ Windows update is all-or-nothing; the GCP wait loops cap each probe and each sle
 time left in their 120 s / 900 s budgets; the Windows `EDDI_BRANCH` examples (docs and the
 text `eddi.cmd` prints) use `set "EDDI_BRANCH=main"` and show how to clear the variable.
 
+Fourth round: a rollback that cannot restore a file is reported (the file is named, its
+`<name>.eddi-old` original is kept, exit code 4 and a distinct `eddi.cmd` message) instead of
+being called restored; `Initialize-SensitiveFile` protects an existing `.env` before emptying
+it; the cluster dashboard is a monitoring asset in both installers (a test pins parity with
+the compose bind mounts); `eddi update --local` keeps the checkout's `docker-compose.local.yml`
+when the ref does not carry it (the only optional file); the PowerShell `EDDI_BRANCH` example
+restores the previous value; the 120 s update wait recomputes the time left for each probe.
+
 ### Not changed
 
 `io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform

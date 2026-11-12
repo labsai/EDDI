@@ -15,6 +15,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -281,6 +285,72 @@ class DeploymentHardeningTest {
             assertFalse(helper.contains("-Recurse"), "a directory at an asset path may hold content");
             assertTrue(helper.indexOf("Remove-Item -LiteralPath $s[1] -Force") > helper.indexOf("if ($missing.Count -gt 0) { throw"),
                     "an empty directory is removed only once every item passed");
+        }
+
+        @Test
+        @DisplayName("a failed rollback is reported and keeps the backups, with its own exit code")
+        void rollbackFailuresAreReportedSeparately() throws IOException {
+            String ps = read("install.ps1");
+            String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
+            assertFalse(helper.contains("-ErrorAction SilentlyContinue }\n            elseif"), "restore errors must not be swallowed");
+            assertTrue(helper.contains("Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction Stop"));
+            assertTrue(helper.contains("ROLLBACK FAILED") && helper.contains("the original is kept at"));
+            assertTrue(helper.contains("$script:rollbackFailed = $true") && helper.contains("exit 4"));
+            String cmd = between(ps, ":cmd_update", ":cmd_uninstall");
+            assertTrue(cmd.contains("if \"!errorlevel!\"==\"4\" goto update_rollback_failed"));
+            assertTrue(cmd.contains(":update_rollback_failed") && cmd.contains("COULD NOT BE ROLLED BACK"));
+        }
+
+        @Test
+        @DisplayName("an existing sensitive file is protected before it is emptied, and the cluster dashboard is a monitoring asset")
+        void sensitiveFileIsNotEmptiedBeforeProtection() throws IOException {
+            String ps = read("install.ps1");
+            String initialise = between(ps, "function Initialize-SensitiveFile", "# Owner-only access to a file holding secrets.");
+            int existing = initialise.indexOf("Test-Path -LiteralPath $SecurePath -PathType Leaf");
+            assertTrue(existing > 0 && existing < initialise.indexOf("& install -m 600"), "the re-run branch comes first");
+            String rerun = initialise.substring(existing, initialise.indexOf("return", existing));
+            assertTrue(rerun.indexOf("Protect-SensitiveFile $SecurePath") < rerun.indexOf("WriteAllBytes"),
+                    "protect first, empty second: a failed ACL change must leave the old content");
+        }
+
+        @Test
+        @DisplayName("install.sh, install.ps1 and the monitoring compose file agree on the monitoring assets")
+        void monitoringAssetListsAgree() throws IOException {
+            Pattern mount = Pattern.compile("\\./(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))(?=:)");
+            Set<String> mounted = new TreeSet<>();
+            Matcher matcher = mount.matcher(read("docker-compose.monitoring.yml"));
+            while (matcher.find()) {
+                mounted.add(matcher.group(1));
+            }
+            assertFalse(mounted.isEmpty());
+            assertTrue(mounted.contains("docs/monitoring/eddi-cluster-dashboard.json"));
+            Pattern quoted = Pattern.compile("\"(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))\"");
+            Set<String> shell = new TreeSet<>();
+            Set<String> powershell = new TreeSet<>();
+            String sh = between(read("install.sh"), "local monitoring_files=(", ")\n");
+            matcher = quoted.matcher(sh);
+            while (matcher.find()) {
+                shell.add(matcher.group(1));
+            }
+            String ps = between(read("install.ps1"), "$script:MonitoringFiles = @(", "\n)");
+            matcher = quoted.matcher(ps);
+            while (matcher.find()) {
+                powershell.add(matcher.group(1));
+            }
+            assertEquals(shell, powershell, "install.sh and install.ps1 fetch different monitoring files");
+            assertTrue(shell.containsAll(mounted), "a bind-mounted file is missing from the installers: " + mounted);
+        }
+
+        @Test
+        @DisplayName("the --local overlay may stay as the checkout copy; no other compose file may")
+        void localOverlayIsTheOnlyOptionalComposeFile() throws IOException {
+            String sh = read("install.sh");
+            String update = between(sh, "    # Same checks as a fresh install:", "Pulling images...");
+            assertTrue(update.contains("\"$local_name\" == \"docker-compose.local.yml\" && -s \"$f\""));
+            assertEquals(1, update.split("kept the checkout copy", -1).length - 1);
+            assertTrue(update.indexOf("kept the checkout copy") < update.indexOf("could not be downloaded from ${EDDI_BRANCH}"));
+            String ps = read("install.ps1");
+            assertTrue(ps.contains("$rel -eq 'docker-compose.local.yml' -and (Test-Path -LiteralPath $target -PathType Leaf)"));
         }
 
         @Test

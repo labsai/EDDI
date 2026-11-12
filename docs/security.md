@@ -1123,8 +1123,8 @@ release fails — retry, name a version, or choose `main` on purpose by setting
 `EDDI_BRANCH` to `main` for that one run: `EDDI_BRANCH=main eddi update` (bash),
 `set "EDDI_BRANCH=main" & eddi update & set "EDDI_BRANCH="` (Windows cmd; the quotes stop
 a trailing space being stored in the value, `eddi.cmd` trims one anyway, and the last
-command clears the variable, which otherwise stays set for that cmd session) or `& { $env:EDDI_BRANCH = 'main'; try { eddi update } finally { Remove-Item Env:EDDI_BRANCH } }`
-(PowerShell; restores the unset state). A required file that cannot be downloaded also
+command clears the variable, which otherwise stays set for that cmd session) or `& { $previousBranch = $env:EDDI_BRANCH; try { $env:EDDI_BRANCH = 'main'; eddi update } finally { $env:EDDI_BRANCH = $previousBranch } }`
+(PowerShell; restores the previous value, and assigning `$null` removes the variable when it was unset). A required file that cannot be downloaded also
 refuses the update: nothing is replaced, and the recorded version and ref stay as they were. The GCP provisioner
 (`gcp/provision-vm.sh`) defaults `--eddi-branch` to `--eddi-version`'s tag or the
 newest stable release instead of `main`, falling back to `main` with a warning when the

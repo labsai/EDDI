@@ -818,6 +818,29 @@ class DeploymentManifestsTest {
          * situation rotation is for.
          */
         @Test
+        @DisplayName("the batch kubectl stub captures the key from a path that contains spaces")
+        void batchStubKeepsSpacesInTheKeyPath() throws Exception {
+            assumeTrue(WINDOWS, "the batch stub only exists on Windows");
+            Path stubDirectory = kubectlStub("pwsh", true);
+            Path spaced = Files.createDirectories(Path.of("target", "kubectl stub with spaces")).toAbsolutePath();
+            Path properties = spaced.resolve("application secrets.properties");
+            Files.writeString(properties, "eddi.vault.master-key=spaced-path-key-0123456789\n", StandardCharsets.UTF_8);
+            Path log = freshLog("batch-spaces");
+            ProcessBuilder builder = new ProcessBuilder(stubDirectory.resolve("kubectl.cmd").toAbsolutePath().toString(),
+                    "create", "secret", "generic", "eddi-secrets", "--namespace=eddi-stub",
+                    "--from-file=application-secrets.properties=" + properties);
+            builder.redirectErrorStream(true);
+            builder.environment().put("KUBECTL_LOG", log.toAbsolutePath().toString());
+            builder.environment().put("KUBECTL_STUB_MODE", "notfound");
+            Process process = builder.start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(process.waitFor(2, TimeUnit.MINUTES), output);
+            Path key = Path.of(log.toAbsolutePath() + ".key");
+            assertTrue(Files.exists(key), "the stub lost a key path with spaces; it printed: " + output);
+            assertTrue(Files.readString(key, StandardCharsets.UTF_8).contains("spaced-path-key-0123456789"));
+        }
+
+        @Test
         @DisplayName("the generators print the key only when --show-key / -ShowKey asks for it")
         void generatorsPrintTheKeyOnlyOnRequest() throws Exception {
             GeneratorRun shell = runShellGeneratorShowingKey();
@@ -5318,6 +5341,8 @@ class DeploymentManifestsTest {
     private static Path freshLog(String name) throws IOException {
         Path log = Files.createDirectories(Path.of("target", "kubectl-stub")).resolve(name + ".log");
         Files.deleteIfExists(log);
+        // The captured key of an earlier run must not satisfy this run's capture check.
+        Files.deleteIfExists(Path.of(log.toAbsolutePath() + ".key"));
         return log;
     }
 
