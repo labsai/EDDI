@@ -55,7 +55,9 @@ import java.util.function.UnaryOperator;
  * {@link OutboundEngine.PeerCheck} judges the address the connection actually
  * reached, so a name that rebinds between {@link OutboundHttp}'s check and the
  * connect is refused before the request goes out, not after its response
- * arrived. The connection is reset, never reused.</li>
+ * arrived. The connection is closed and so evicted from the pool
+ * ({@link #discardRefused}); since the check runs on every request, a pooled
+ * connection is judged again each time it is handed out.</li>
  * <li><b>A per-host pool limit</b>
  * ({@code eddi.http.outbound.<profile>.max-connections-per-host}). A request
  * beyond it waits for a connection, inside the hop's deadline.</li>
@@ -177,7 +179,7 @@ final class VertxOutboundEngine implements OutboundEngine {
                 try {
                     check.check(peerAddress(request));
                 } catch (RuntimeException refused) {
-                    request.reset();
+                    discardRefused(request);
                     result.completeExceptionally(refused);
                     return;
                 }
@@ -273,6 +275,30 @@ final class VertxOutboundEngine implements OutboundEngine {
 
     private static OutboundTimeoutException deadlineExceeded(URI uri) {
         return new OutboundTimeoutException("Total request timeout exceeded for: " + OutboundHttp.withoutQuery(uri));
+    }
+
+    /**
+     * Ends a request whose peer was refused: closes its connection, then resets the
+     * request. The close is what matters. A reset alone of a request with nothing
+     * written yet does not close an HTTP/1 connection — Vert.x hands it back to the
+     * pool, still open to the refused address, for the next request to the same
+     * host and port. That request would be checked again (the check runs on every
+     * request, pooled connection or not), but the socket would stay open until the
+     * keep-alive timeout. Closing evicts it from the pool at once; on HTTP/2 it
+     * also ends the other streams on that connection, which reach the same refused
+     * peer.
+     */
+    static void discardRefused(HttpClientRequest request) {
+        HttpConnection connection;
+        try {
+            connection = request.connection();
+        } catch (RuntimeException e) {
+            connection = null;
+        }
+        if (connection != null) {
+            connection.close();
+        }
+        request.reset();
     }
 
     /** The IP the request's connection reached, or {@code null} when unknown. */
