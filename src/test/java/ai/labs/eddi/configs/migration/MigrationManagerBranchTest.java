@@ -96,18 +96,15 @@ class MigrationManagerBranchTest {
         }
 
         @Test
-        @DisplayName("concurrent calls are prevented by isCurrentlyRunning flag")
-        void concurrentCallsPrevented() {
+        @DisplayName("two calls in a row each run and each report completion")
+        void sequentialCallsEachComplete() {
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
 
             var finished = mock(IMigrationManager.IMigrationFinished.class);
 
-            // First call
             migrationManager.startMigrationIfFirstTimeRun(finished);
-            // Second call should also work (isCurrentlyRunning is reset after first call)
             migrationManager.startMigrationIfFirstTimeRun(finished);
 
-            // Should be called twice since each completes before the next starts
             verify(finished, times(2)).onComplete();
         }
     }

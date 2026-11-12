@@ -815,10 +815,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         // === Helper Methods ===
 
         /**
-         * Determines if this task should run in agent mode (with tools). Note:
-         * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
-         * when already triggered by tools, builtInTools, or a2aAgents. Httpcall and
-         * mcpcall auto-discovery is checked at execution time.
+         * Whether the task configures tools of its own: {@code tools},
+         * {@code enableBuiltInTools} or {@code a2aAgents}. It does not say whether the
+         * task runs the tool loop: the tools a workflow's httpcalls and mcpcalls
+         * contribute (unless {@code enableHttpCallTools} / {@code enableMcpCallTools}
+         * is {@code false}) and an attachment-reading tool are offered too, and only
+         * the tool assembly of the turn sees them — at runtime ask
+         * {@code IAgentOrchestrator#offersTools}, at configuration time
+         * {@link #usesTools(boolean, boolean)}.
          * <p>
          * {@code @JsonIgnore} because this is derived state, not stored state: it is a
          * pure function of {@code tools}, {@code enableBuiltInTools} and
@@ -835,6 +839,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
                     || (a2aAgents != null && !a2aAgents.isEmpty());
+        }
+
+        /**
+         * Whether the task is offered tools in a workflow that has, or has not, an
+         * httpcalls and an mcpcalls step: its own tools ({@link #isAgentMode()}), or
+         * the workflow's, which {@code enableHttpCallTools} /
+         * {@code enableMcpCallTools} {@code false} switch off. The configuration-time
+         * approximation, for checks that run without a conversation, not the runtime
+         * assembly's answer ({@code IAgentOrchestrator.offersTools}): it may be true
+         * when discovery produces no usable tools, and it cannot see an
+         * attachment-reading tool, which depends on the turn.
+         */
+        @JsonIgnore
+        public boolean usesTools(boolean workflowHasHttpCalls, boolean workflowHasMcpCalls) {
+            return isAgentMode() || (workflowHasHttpCalls && !Boolean.FALSE.equals(enableHttpCallTools))
+                    || (workflowHasMcpCalls && !Boolean.FALSE.equals(enableMcpCallTools));
         }
 
         /**

@@ -19,6 +19,10 @@ const h = vi.hoisted(() => ({
   /** Thrown instead of the next snapshot, when set. */
   logError: null as unknown,
   descriptors: [] as ConversationDescriptor[],
+  /** Other users' conversations: listed only when the request does not ask for `mine`. */
+  othersDescriptors: [] as ConversationDescriptor[],
+  /** The `mine` option of every descriptor request, in call order. */
+  descriptorMine: [] as Array<boolean | undefined>,
   descriptorPages: null as ConversationDescriptor[][] | null,
   descriptorCalls: [] as Array<{ limit: number; agentId: string }>,
   logCalls: [] as Array<{ conversationId: string; returnCurrentStepOnly: boolean }>,
@@ -52,12 +56,23 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
       },
     ),
     getConversationDescriptors: vi.fn(
-      async (limit: number, index: number, _filter: string, agentId: string) => {
+      async (
+        limit: number,
+        index: number,
+        _filter: string,
+        agentId: string,
+        _agentVersion?: number,
+        _conversationState?: string,
+        _viewState?: string,
+        options: { mine?: boolean } = {},
+      ) => {
         h.descriptorCalls.push({ limit, agentId });
+        h.descriptorMine.push(options.mine);
         // `descriptorPages` drives the paging tests; `descriptors` stays the
         // single-page shorthand every other test uses.
         if (h.descriptorPages) return h.descriptorPages[index] ?? [];
-        return index === 0 ? h.descriptors : [];
+        if (index !== 0) return [];
+        return options.mine ? h.descriptors : [...h.othersDescriptors, ...h.descriptors];
       },
     ),
   };
@@ -118,6 +133,8 @@ beforeEach(() => {
   h.logs = [];
   h.logError = null;
   h.descriptors = [];
+  h.othersDescriptors = [];
+  h.descriptorMine = [];
   h.descriptorPages = null;
   h.descriptorCalls = [];
   h.logCalls = [];
@@ -744,6 +761,25 @@ describe("hydrate: recovering after a browser restart", () => {
 
     expect(h.descriptorCalls).toHaveLength(1);
     expect(result.current.conversationId).toBe("conv-only");
+  });
+
+  /**
+   * The operator is an admin's tool, and an admin's listing holds every user's
+   * conversations: a fresh tab restored ANOTHER admin's newest investigation,
+   * pending approval card included, and the next message went into it.
+   */
+  it("restores the caller's own conversation, never another admin's newer one", async () => {
+    h.othersDescriptors = [descriptor("conv-other-admin", { lastModifiedOn: 9000, userId: "other-admin" })];
+    h.descriptors = [descriptor("conv-mine", { lastModifiedOn: 100, userId: "admin" })];
+    h.logs = [TWO_TURNS];
+
+    const { result } = renderHook(() => useOperatorChat(config()));
+    await act(async () => {
+      await result.current.hydrate();
+    });
+
+    expect(h.descriptorMine).toEqual([true]);
+    expect(result.current.conversationId).toBe("conv-mine");
   });
 
   it("starts clean when the operator has no usable conversation at all", async () => {
