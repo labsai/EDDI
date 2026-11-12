@@ -286,6 +286,18 @@ Applies only if you run more than one node.
   `false` until every pod runs 6.7:** a 6.5 or 6.6 scheduler does not recognise the `alertType` marker
   on that schedule, so it may claim the row and treat it as an ordinary conversation fire, which has no
   agent target and can fail, retry or dead-letter. Enable it once the rollout is complete.
+  **Setting it to `false` afterwards does not remove a schedule a 6.7 pod already created** (it only stops
+  creating one), and the REST API and the schedule MCP tool refuse to delete or disable it (`409
+  SYSTEM_SCHEDULE`). Before you roll back to 6.6 or run mixed versions, stop the 6.7 pods, then delete the row
+  directly in the datastore. It is the schedule named `alerts-maintenance` whose `metadata.alertType` is
+  `alert_maintenance`; a same-named row without that marker is an ordinary schedule, so match on the marker:
+  - MongoDB, collection `eddi_schedules`: `db.eddi_schedules.deleteMany({ "metadata.alertType": "alert_maintenance" })`
+  - PostgreSQL, table `eddi_schedules`: `DELETE FROM eddi_schedules WHERE metadata->>'alertType' = 'alert_maintenance';`
+
+  Alert rules, events and windows are separate collections or tables and are untouched. To confirm that
+  re-enabling recreates the schedule, return to 6.7 with `eddi.alerts.enabled=true` and restart (or save an
+  alert rule): the log shows `Created the alerts-maintenance system schedule`, and the schedule is listed
+  again under Schedules.
 
 ### New opt-in features
 
