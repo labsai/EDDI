@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.net.BoundedHostResolver;
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
@@ -44,9 +45,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -197,6 +202,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     @Inject
     AgentCallMarker agentCallMarker;
+
+    /**
+     * Deadline of one DNS lookup made to check a target (deploy and per call).
+     * Field-injected for the same reason as above; the default applies in
+     * direct-construction tests.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.security.ssrf-protection.dns-timeout", defaultValue = "5s")
+    Duration dnsTimeout = Duration.ofMillis(BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+
+    /**
+     * The JDK resolver, bounded so a black-holed name server cannot hold a thread.
+     */
+    private UrlValidationUtils.HostResolver boundedResolver() {
+        return BoundedHostResolver.jdk(dnsTimeout != null ? dnsTimeout.toMillis() : BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+    }
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -1684,24 +1705,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
-        // Off by default to preserve calls to internal/private APIs. A host on the
-        // operator's allow-list skips the address check (it is an internal API the
-        // operator named on purpose) but never the metadata check.
-        if (ssrfProtectionEnabled) {
-            if (isAllowListed(targetUri)) {
-                UrlValidationUtils.validateUrlSyntax(targetUri.toString());
-                UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-            } else {
-                UrlValidationUtils.validateUrl(targetUri.toString());
-            }
-        } else {
-            // Opting out of SSRF protection keeps private and loopback targets
-            // reachable (configured internal APIs), but never the cloud instance-
-            // metadata service: that is a credential endpoint, not an API anyone
-            // configures on purpose. Redirects stay followed here; the client itself
-            // refuses any hop onto the metadata service (HttpClientModule).
-            UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-        }
+        // Off by default to preserve calls to internal/private APIs. The decision
+        // itself is checkOutboundTarget, which the deploy-time check shares.
+        checkOutboundTarget(targetUri, boundedResolver());
 
         // Locale.ROOT is defensive rather than a live fix: no current Method
         // constant contains an 'i', so no locale changes the result today. It would
@@ -2246,6 +2252,129 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "conversation input to loopback or private addresses, so it is refused. Write the host literally (or as a "
                 + "${vars:...} reference), or set eddi.security.ssrf-protection.enabled=true and list internal hosts in "
                 + "eddi.security.ssrf-protection.allowed-hosts.");
+    }
+
+    /**
+     * The SSRF decision for one target, and the only definition of it: applied to
+     * the fully resolved URL of every request ({@code buildRequest}) and to the
+     * literal targets of a configuration at deploy
+     * ({@link #rejectRefusedLiteralTarget}), so the two cannot drift.
+     * <p>
+     * With protection on, a host on the operator's allow-list skips the address
+     * check (it is an internal API the operator named on purpose) but never the
+     * metadata check; any other host must resolve, and to public addresses only.
+     * There is deliberately <b>no exception for EDDI's own address</b>, unlike
+     * {@code OutboundTargetPolicy}: an httpcall to EDDI itself (the Platform
+     * Operator's self calls, for one) must be on the allow-list.
+     * <p>
+     * With protection off, private and loopback targets stay reachable (configured
+     * internal APIs), but never the cloud instance-metadata service: that is a
+     * credential endpoint, not an API anyone configures on purpose. Redirects stay
+     * followed then; the client itself refuses any hop onto the metadata service
+     * ({@code HttpClientModule}).
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    void checkOutboundTarget(URI targetUri, UrlValidationUtils.HostResolver resolver) {
+        String target = targetUri.toString();
+        if (ssrfProtectionEnabled) {
+            if (isAllowListed(targetUri)) {
+                UrlValidationUtils.validateUrlSyntax(target);
+                UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+            } else {
+                UrlValidationUtils.validateUrl(target, resolver);
+            }
+        } else {
+            UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+        }
+    }
+
+    @Override
+    public void rejectRefusedLiteralTarget(String targetDestination) {
+        rejectRefusedLiteralTarget(targetDestination, boundedResolver());
+    }
+
+    /**
+     * {@link #rejectRefusedLiteralTarget(String)} with an injectable resolver.
+     * <p>
+     * Only the scheme and authority are judged — the part
+     * {@link #checkOutboundTarget} decides on — so a templated path does not get in
+     * the way. A host that is a template, or a {@code ${vars:...}} /
+     * {@code ${vault:...}} reference, is skipped: its value is only known per call,
+     * where the same check runs on it ({@link #rejectTemplatedAuthority} covers the
+     * template case at deploy).
+     * <p>
+     * <b>A host that does not resolve is not refused here.</b> The execution path
+     * refuses it with protection on, and still will; but a failed lookup at deploy
+     * is as likely a transient DNS problem (a resolver not yet up when agents are
+     * auto-deployed at startup) as a wrong name, and failing the deployment for it
+     * would take down an agent that would have worked a minute later. A name that
+     * does not resolve cannot be reached either, so deferring exposes nothing; it
+     * is logged instead.
+     */
+    void rejectRefusedLiteralTarget(String targetDestination, UrlValidationUtils.HostResolver resolver) {
+        if (targetDestination == null) {
+            return;
+        }
+        String target = targetDestination.trim();
+        int end = authorityEnd(target);
+        if (end < 0) {
+            return;
+        }
+        String origin = target.substring(0, end);
+        if (origin.indexOf('{') >= 0) {
+            return;
+        }
+        URI originUri;
+        try {
+            originUri = new URI(origin);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("The httpcall target '" + LogSanitizer.sanitize(origin) + "' is not a valid URL: " + e.getMessage(),
+                    e);
+        }
+        // Metadata first, on its own: it is refused whatever the flag and the
+        // allow-list say, so the advice below would be wrong for it.
+        UrlValidationUtils.rejectCloudMetadataTarget(origin, resolver);
+        var lookup = new FailureRecordingResolver(resolver);
+        try {
+            checkOutboundTarget(originUri, lookup);
+        } catch (IllegalArgumentException e) {
+            if (!ssrfProtectionEnabled) {
+                throw e;
+            }
+            String host = originUri.getHost() != null ? originUri.getHost().toLowerCase(Locale.ROOT) : origin;
+            if (lookup.failed) {
+                LOGGER.warnf("httpcall target host '%s' does not resolve at deploy; with eddi.security.ssrf-protection.enabled=true "
+                        + "each call to it is refused until it does.", LogSanitizer.sanitize(host));
+                return;
+            }
+            String entry = originUri.getPort() >= 0 ? host + ":" + originUri.getPort() : host;
+            throw new IllegalArgumentException("The httpcall target host '" + LogSanitizer.sanitize(host)
+                    + "' is refused by the SSRF check (eddi.security.ssrf-protection.enabled=true): " + e.getMessage()
+                    + ". If it is an internal API you mean to call, add '" + LogSanitizer.sanitize(entry)
+                    + "' to eddi.security.ssrf-protection.allowed-hosts; otherwise use a public address.", e);
+        }
+    }
+
+    /** Remembers whether a lookup failed, so a DNS failure can be told apart. */
+    private static final class FailureRecordingResolver implements UrlValidationUtils.HostResolver {
+        private final UrlValidationUtils.HostResolver delegate;
+        private boolean failed;
+
+        FailureRecordingResolver(UrlValidationUtils.HostResolver delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public InetAddress[] resolveAll(String host) throws UnknownHostException {
+            try {
+                return delegate.resolveAll(host);
+            } catch (UnknownHostException e) {
+                failed = true;
+                throw e;
+            }
+        }
     }
 
     /**

@@ -574,7 +574,30 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > skips the private-address check but never the cloud-metadata check, and
 > redirects stay off. A templated host can then only resolve to a listed host or
 > a public one. The allow-list applies to httpCalls; MCP servers and A2A peers
-> are validated as before.
+> are validated as before. httpCalls have **no self exception**: an httpCall to
+> EDDI's own address (`127.0.0.1:7070`, or whatever `eddi.self.base-url` names —
+> the Platform Operator's tools, for one) must be on this list unless that
+> address resolves publicly.
+>
+> **A literal target the check refuses fails at deploy.** With protection on, an
+> httpCall whose `targetServerUrl`, or an absolute `request.path`, names a host
+> the execution-time check would refuse (loopback, private, `localhost`,
+> `*.internal`, not on the allow-list) fails to deploy with a message naming the
+> host and the allow-list entry that admits it, rather than deploying and failing
+> the first conversation. A cloud-metadata target fails to deploy whatever the
+> flag. Deploy and execution share one decision
+> (`ApiCallExecutor.checkOutboundTarget`). A templated or `${vars:…}` host is
+> left to the check at execution, and so is a host that does not resolve at
+> deploy — a failed lookup then is as likely a transient DNS problem as a wrong
+> name, so it is logged, not fatal; each call to it is refused until it resolves.
+>
+> **Lookups are bounded.** The DNS lookup behind this check (deploy and every
+> call) gives up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`)
+> and counts as "does not resolve", so a slow or black-holed name server cannot
+> hold a deploying or conversation thread for the OS resolver's default. It fails
+> closed: with protection on the call is refused. Lookups share a small bounded
+> pool (`BoundedHostResolver`); when it is full of stuck lookups, further ones are
+> refused at once.
 >
 > **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
 > WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
