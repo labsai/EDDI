@@ -184,7 +184,17 @@
       "errDisabled": "यह एजेंट संस्करण रेटिंग नहीं माँगता।",
       "errOwner": "केवल वही व्यक्ति इसे रेट कर सकता है जिसने यह बातचीत की।",
       "errGeneric": "रेटिंग सहेजी नहीं जा सकी।"
-    }
+    },
+    "stop": "रोकें",
+    "stopWithKey": "रोकें (Esc)",
+    "editLast": "संपादित करें",
+    "editLastHint": "संपादित करके फिर से भेजें (↑)",
+    "regenerate": "फिर से बनाएँ",
+    "regenerateHint": "नया जवाब माँगें",
+    "attachUploadingPercent": "अपलोड हो रहा है… {{percent}}%",
+    "attachProgress": "{{name}} का अपलोड",
+    "attachRetry": "फिर से कोशिश करें",
+    "attachHint": "फ़ाइलें जोड़ें — या उन्हें यहाँ पेस्ट करें या छोड़ें"
   },
   "editor": {
     "deployFailed": "परिनियोजन विफल",

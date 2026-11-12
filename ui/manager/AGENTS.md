@@ -225,6 +225,17 @@ without streaming (`agentStreaming` in the chat store). The Manager still never 
 HTML. Workforce's sidebar, Home and its use of the chat are described in
 [`ui/workforce/AGENTS.md`](../workforce/AGENTS.md).
 
+Phase 7 (Tier 1) added, in both apps: **Stop** in place of Send while a turn runs, and **Esc**
+(`chatConversation.stop()`; the controller re-reads afterwards and writes a notice when the turn
+ran on — `chat-notice`); a **Reconnecting** line while a dropped stream's turn is followed
+(`reconnecting` in the chat store); **Edit** on the last message (undo, then its text back in the
+composer; **↑** in an empty composer) and **Regenerate** on the last reply (rerun), only when
+`conversationControls` allow undo (and redo), with the **`renderTurnNotice`** prop as the seam
+for "this turn ran tools whose effects stay" (B6); the **`ReplyAnnouncer`** (the transcript `log`
+is `aria-live="off"`; completed replies are announced once); attachment chips with per-file
+progress (files from 256 KB, XMLHttpRequest) and **Try again**; `ChatMessage` gained an
+`actions` slot and renders `kind: "notice"` as a system line.
+
 ### Key Patterns
 
 #### 1. Editor Registry (Single Source of Truth)

@@ -186,7 +186,17 @@
       "errDisabled": "Esta versão do agente não pede avaliações.",
       "errOwner": "Somente a pessoa que teve esta conversa pode avaliá-la.",
       "errGeneric": "Não foi possível salvar a avaliação."
-    }
+    },
+    "stop": "Parar",
+    "stopWithKey": "Parar (Esc)",
+    "editLast": "Editar",
+    "editLastHint": "Editar e enviar de novo (↑)",
+    "regenerate": "Gerar novamente",
+    "regenerateHint": "Pedir uma nova resposta",
+    "attachUploadingPercent": "Enviando… {{percent}}%",
+    "attachProgress": "Envio de {{name}}",
+    "attachRetry": "Tentar de novo",
+    "attachHint": "Anexar arquivos — ou cole ou solte aqui"
   },
   "editor": {
     "deployFailed": "Falha na implantação",

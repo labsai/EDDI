@@ -107,6 +107,14 @@ Under the widget's original policy, `img-src 'self' data: blob:`, the browser re
 
 What the widget shows for an agent — display name, avatar, accent colour, conversation starters — and which controls it offers (undo, redo, attachments, rating, quick replies, streaming, HTML in replies) are set on the agent, in `appearance` and `conversationControls` ([agent-config-authoring.md](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)). `GET /agents/{agentId}/profile` serves both, for the deployed version, to anyone who may use the agent, so an embedding needs no extra parameters for them. The URL colour parameters and `/branding/brand.css` keep working as before; they style the deployment, `appearance` styles one agent.
 
+## 5. What the widget does during a reply
+
+Nothing here needs configuring; it is listed so an embedder knows what users see.
+
+- **Stop** (the square button, or **Esc** inside the widget) aborts the stream and calls `POST /agents/{conversationId}/cancel`. That stops a running turn only on the node running it ([HITL](hitl.md)), so the widget reads the conversation again shortly after: when the turn ran on, a line in the conversation says so and shows the reply in full.
+- When the stream drops mid-reply, the widget says it is reconnecting and re-reads the conversation for about half a minute; a turn that finished on the server meanwhile is shown in place of the partial reply.
+- Code blocks name their language, and a block marked `mermaid` is drawn as a diagram by Mermaid (`securityLevel: "strict"`). Mermaid, like KaTeX and highlight.js, is a separate chunk under `/scripts/js/`, loaded only when a reply needs it: the widget's first load is unchanged. The paused-turn and rating cards load the same way, the first time they are shown. All of them are same-origin scripts, so `script-src 'self'` covers them.
+
 ## Upgrading: HTML in replies is off by default
 
 `conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until 6.7.0 the widget rendered HTML for every agent; the Manager never did.

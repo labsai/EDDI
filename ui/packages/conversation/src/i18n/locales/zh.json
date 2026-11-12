@@ -5,6 +5,7 @@
   "conversation.indicator.escalating": "正在进一步查看…",
   "conversation.indicator.thinking": "思考中…",
   "conversation.indicator.guardrail": "正在检查回复…",
+  "conversation.indicator.reconnecting": "连接已断开，正在重新连接…",
   "conversation.message.noResponse": "无回复",
   "conversation.speaker.you": "你说：",
   "conversation.speaker.agent": "{{name}} 说：",
@@ -114,5 +115,9 @@
   "conversation.guardrail.actionBlock": "已拦截",
   "conversation.guardrail.actionRedact": "已脱敏",
   "conversation.guardrail.actionReprompt": "已重新询问模型",
-  "conversation.guardrail.actionWarn": "已标记"
+  "conversation.guardrail.actionWarn": "已标记",
+  "conversation.stop.finished": "停止得太晚了：回复已在服务器上完成，并且有效。以下是完整回复。",
+  "conversation.stop.stillRunning": "停止未能作用于这一轮：它仍在另一台服务器上运行，其执行的操作依然有效。重新打开对话后即可看到它的回复。",
+  "conversation.stop.unreachable": "停止请求未能到达服务器。这一轮可能仍在运行；请重新打开对话查看结果。",
+  "conversation.diagram.label": "图表"
 }

@@ -192,7 +192,17 @@
       "errDisabled": "إصدار الوكيل هذا لا يطلب تقييمات.",
       "errOwner": "لا يمكن تقييم هذه المحادثة إلا من الشخص الذي أجراها.",
       "errGeneric": "تعذّر حفظ التقييم."
-    }
+    },
+    "stop": "إيقاف",
+    "stopWithKey": "إيقاف (Esc)",
+    "editLast": "تعديل",
+    "editLastHint": "تعديل وإرسال مرة أخرى (↑)",
+    "regenerate": "إعادة التوليد",
+    "regenerateHint": "طلب رد جديد",
+    "attachUploadingPercent": "جارٍ الرفع… {{percent}}٪",
+    "attachProgress": "رفع {{name}}",
+    "attachRetry": "حاول مرة أخرى",
+    "attachHint": "إرفاق ملفات — أو الصقها أو أفلتها هنا"
   },
   "editor": {
     "deployFailed": "فشل النشر",

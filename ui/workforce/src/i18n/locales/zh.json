@@ -464,7 +464,14 @@
       "fromDashboard": "从仪表盘",
       "newBoard": "组建任务组",
       "showHelp": "显示键盘快捷键",
-      "title": "键盘快捷键"
+      "title": "键盘快捷键",
+      "quickSwitcher": "前往对话或智能体",
+      "newChat": "新对话",
+      "send": "发送消息",
+      "shiftEnter": "Shift+Enter 换行",
+      "editLast": "编辑你的上一条消息",
+      "inEmptyComposer": "在空的消息框中",
+      "stop": "停止正在生成的回复"
     },
     "sidebar": {
       "boards": "看板导航"
@@ -561,6 +568,14 @@
       "send": "发送",
       "starters": "建议",
       "recent": "最近"
+    },
+    "switcher": {
+      "newChat": "新对话",
+      "chatWith": "与此智能体对话",
+      "title": "前往对话或智能体",
+      "search": "搜索对话和智能体",
+      "results": "结果",
+      "noResults": "没有匹配项"
     }
   },
   "analyticsPage": {

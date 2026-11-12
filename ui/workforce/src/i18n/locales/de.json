@@ -464,7 +464,14 @@
       "fromDashboard": "Vom Dashboard",
       "newBoard": "Task Force zusammenstellen",
       "showHelp": "Tastenkürzel anzeigen",
-      "title": "Tastenkürzel"
+      "title": "Tastenkürzel",
+      "quickSwitcher": "Zu einer Unterhaltung oder einem Agenten wechseln",
+      "newChat": "Neuer Chat",
+      "send": "Nachricht senden",
+      "shiftEnter": "Umschalt+Enter für eine neue Zeile",
+      "editLast": "Letzte Nachricht bearbeiten",
+      "inEmptyComposer": "In einem leeren Eingabefeld",
+      "stop": "Die entstehende Antwort anhalten"
     },
     "sidebar": {
       "boards": "Board-Navigation"
@@ -561,6 +568,14 @@
       "send": "Senden",
       "starters": "Vorschläge",
       "recent": "Zuletzt"
+    },
+    "switcher": {
+      "newChat": "Neuer Chat",
+      "chatWith": "Mit diesem Agenten chatten",
+      "title": "Zu einer Unterhaltung oder einem Agenten wechseln",
+      "search": "Unterhaltungen und Agenten durchsuchen",
+      "results": "Ergebnisse",
+      "noResults": "Keine Treffer"
     }
   },
   "analyticsPage": {

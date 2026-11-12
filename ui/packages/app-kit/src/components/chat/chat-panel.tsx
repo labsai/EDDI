@@ -1,6 +1,6 @@
 import { ReviewNotice } from "./review-notice";
 import { useAgentReviewProfile } from "../../hooks/use-agent-review-profile";
-import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { Environment } from "../../lib/constants";
@@ -8,6 +8,7 @@ import { preferredChatEnvironment } from "../../lib/deployment-environments";
 import { toast } from "sonner";
 import { getErrorMessage } from "../../lib/api-client";
 import {
+  chatConversation,
   useChatStore,
   useDeployedAgents,
   useStartConversation,
@@ -32,6 +33,7 @@ import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "../../hooks/use-chat-ratings";
 import { lastStepIndex, ratableSteps } from "@eddi/core";
+import { ReplyAnnouncer, type AnnouncedMessage } from "@eddi/conversation";
 import { ChatActivity } from "./chat-activity";
 import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
@@ -71,6 +73,9 @@ import {
   Wrench,
   ListOrdered,
   Star,
+  Square,
+  WifiOff,
+  Pencil,
 } from "lucide-react";
 
 export interface ChatPanelProps {
@@ -89,7 +94,24 @@ export interface ChatPanelProps {
   initialMessage?: InitialChatMessage | null;
   /** Called once the initial message has been taken, so the host can drop it. */
   onInitialMessageConsumed?: () => void;
+  /**
+   * A notice beside "Edit" and "Regenerate" on the last turn — the seam for
+   * "this turn ran tools whose effects stay" once the stream reports which
+   * tools a turn ran (plan B6). Undo and rerun take back the reply, never what
+   * a tool did. Nothing is shown when it returns null or is not passed.
+   */
+  renderTurnNotice?: (context: TurnNoticeContext) => ReactNode;
 }
+
+/** What the last turn's Edit / Regenerate notice is about. */
+export interface TurnNoticeContext {
+  action: "edit" | "regenerate";
+  /** The step being taken back or rerun, when the transcript knows it. */
+  stepIndex: number | null;
+}
+
+/** What the secret bubble shows: never offered for editing. */
+const MASKED_BUBBLE = "●●●●●●●●";
 
 /** The query parameters as one comparable value. */
 function paramKey(agentId: string | null, conversationId: string | null): string {
@@ -101,6 +123,7 @@ export function ChatPanel({
   urlSync = false,
   initialMessage = null,
   onInitialMessageConsumed,
+  renderTurnNotice,
 }: ChatPanelProps = {}) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -115,6 +138,14 @@ export function ChatPanel({
   const agentListboxId = useId();
 
   const [contextOpen, setContextOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  /** Put the caret back in the composer: after a send, a new chat, Stop. */
+  const focusComposer = useCallback(() => {
+    requestAnimationFrame(() => {
+      rootRef.current?.querySelector<HTMLElement>('[data-testid="chat-input"]')?.focus();
+    });
+  }, []);
 
   // Store state
   const messages = useChatStore((s) => s.messages);
@@ -123,6 +154,9 @@ export function ChatPanel({
   const conversationId = useChatStore((s) => s.conversationId);
   const isProcessing = useChatStore((s) => s.isProcessing);
   const isThinking = useChatStore((s) => s.isThinking);
+  // Undo, redo and rerun raise isProcessing too; only a turn being answered can be stopped.
+  const historyBusy = useChatStore((s) => s.historyBusy);
+  const reconnecting = useChatStore((s) => s.reconnecting);
   const isPaused = useChatStore((s) => s.isPaused);
   const pauseReason = useChatStore((s) => s.pauseReason);
   const pausedAt = useChatStore((s) => s.pausedAt);
@@ -413,9 +447,9 @@ export function ChatPanel({
     useChatStore.getState().clearMessages();
     startConversation.mutate(
       { agentId: selectedAgentId, environment: chatEnvironment },
-      { onError: (err) => toast.error(getErrorMessage(err)) },
+      { onSuccess: focusComposer, onError: (err) => toast.error(getErrorMessage(err)) },
     );
-  }, [selectedAgentId, startConversation, chatEnvironment]);
+  }, [selectedAgentId, startConversation, chatEnvironment, focusComposer]);
 
   // ── Attachment upload (shared staging hook — also used by the operator) ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -427,6 +461,7 @@ export function ChatPanel({
     handleFileInput,
     removeAttachment,
     discardAll,
+    retryAttachment,
     takeForSend,
   } = useAttachmentStaging(conversationId);
 
@@ -514,6 +549,91 @@ export function ChatPanel({
   const lastMessage = messages[messages.length - 1];
   const showRerun = lastMessage?.role === "agent" && lastMessage.isError === true;
 
+  // ── Stop ──
+  // Aborts the stream and asks the server to cancel the turn; the controller
+  // then checks that it took, and says so when it did not (a cluster can run
+  // the turn on another pod — docs/hitl.md).
+  const canStop = Boolean(conversationId) && isProcessing && !historyBusy && !conversationBusy;
+  const handleStop = useCallback(() => {
+    void chatConversation.stop();
+    focusComposer();
+  }, [focusComposer]);
+
+  // Esc stops a running turn: from anywhere in the panel, or from the page
+  // itself when nothing else has focus. An open dialog or menu keeps its Esc.
+  useEffect(() => {
+    if (!canStop) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || isImeComposing(e)) return;
+      const target = e.target as Node | null;
+      const inPanel = !!target && !!rootRef.current?.contains(target);
+      if (!inPanel && target !== document.body) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"]')) return;
+      e.preventDefault();
+      handleStop();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canStop, handleStop]);
+
+  /** "Support Bot said:" — what the screen reader hears before a reply. */
+  const speaker = useCallback(
+    () =>
+      t("conversation.speaker.agent", "{{name}} said:", {
+        name: selectedAgentName?.trim() || t("conversation.speaker.agentDefault", "Assistant"),
+      }),
+    [t, selectedAgentName],
+  );
+
+  // ── Edit the last message, regenerate the last reply (T1.6) ──
+  // Edit is undo + say: the last step is taken back and its text put into the
+  // composer to be changed and sent again. Regenerate reruns the last step.
+  // Both only where the agent allows undo/redo (conversationControls, B4).
+  // Neither takes back what a tool did — see `renderTurnNotice`.
+  const [draft, setDraft] = useState<{ text: string; nonce: number } | null>(null);
+  const lastTurn = useMemo(() => {
+    let user = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "user") {
+        user = i;
+        break;
+      }
+    }
+    let reply = -1;
+    for (let i = messages.length - 1; i > user; i--) {
+      const m = messages[i]!;
+      if (m.role === "agent" && m.kind !== "notice" && !m.isError && m.content) {
+        reply = i;
+        break;
+      }
+    }
+    return { user, reply };
+  }, [messages]);
+  const lastUser = lastTurn.user >= 0 ? messages[lastTurn.user] : undefined;
+  const turnIdle = Boolean(conversationId) && !isProcessing && !conversationBusy && !isPaused && !isLoadingConversation && !reviewPending;
+  const canEditLast =
+    controls.undo &&
+    turnIdle &&
+    undoAvailable &&
+    !!lastUser &&
+    !!lastUser.content.trim() &&
+    lastUser.content !== MASKED_BUBBLE &&
+    // Its files are not re-sent by an edit; say nothing that would lose them.
+    !lastUser.attachments?.length;
+  const canRegenerate = controls.undo && controls.redo && turnIdle && lastTurn.reply >= 0;
+
+  const handleEditLast = useCallback(() => {
+    if (!canEditLast || !lastUser) return;
+    const text = lastUser.content;
+    undoConversation.mutate(undefined, {
+      onSuccess: (moved) => {
+        if (moved === false) return;
+        setDraft({ text, nonce: Date.now() });
+      },
+      onError: (err) => toast.error(getErrorMessage(err)),
+    });
+  }, [canEditLast, lastUser, undoConversation]);
+
   const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
     // A rerun replaces the last reply, so its thumb no longer applies (locally;
@@ -529,7 +649,7 @@ export function ChatPanel({
   }, [rerunConversation, t, messages, clearRatedStep]);
 
   return (
-    <div className={cn(
+    <div ref={rootRef} className={cn(
       "flex h-full min-w-0 overflow-hidden bg-background",
       !embedded && "rounded-xl border border-border shadow-sm"
     )}>
@@ -694,7 +814,7 @@ export function ChatPanel({
                       <div className="flex-1 min-w-0 text-start">
                         <p className="truncate font-medium">{agent.name}</p>
                         {agent.description && (
-                          <p className="line-clamp-2 text-xs text-muted-foreground/80 leading-snug">
+                          <p className="line-clamp-2 text-xs text-muted-foreground leading-snug">
                             {agent.description}
                           </p>
                         )}
@@ -810,10 +930,13 @@ export function ChatPanel({
           <button
             onClick={() => setContextOpen((p) => !p)}
             className={cn(
-              "flex w-full items-center justify-center py-0.5 text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/30 transition-colors",
+              "flex w-full items-center justify-center py-0.5 text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors",
               contextOpen && "border-b border-border/30",
             )}
-            title={contextOpen ? "Hide conversation info" : "Show conversation info"}
+            // Two keys, not a ternary default: the toggled state has its own words.
+            title={contextOpen ? t("chat.context.hide", "Hide conversation info") : t("chat.context.show", "Show conversation info")}
+            aria-label={contextOpen ? t("chat.context.hide", "Hide conversation info") : t("chat.context.show", "Show conversation info")}
+            aria-expanded={contextOpen}
             data-testid="context-toggle"
           >
             {contextOpen ? (
@@ -835,13 +958,16 @@ export function ChatPanel({
         <div className="relative flex-1 min-h-0">
         <div
           ref={scrollContainerRef}
-          className="h-full overflow-y-auto"
+          // A stable gutter: the scrollbar appearing as the transcript grows
+          // must not reflow every line of it.
+          className="h-full overflow-y-auto [scrollbar-gutter:stable]"
           onScroll={handleScroll}
-          // The transcript is a log: new agent messages are announced as they
-          // arrive instead of being silent to a screen reader.
+          // The transcript is a log, but not a live one: a streamed reply would
+          // be read token by token. The announcer below says each reply once,
+          // when it is complete.
           role="log"
-          aria-live="polite"
-          aria-relevant="additions"
+          aria-live="off"
+          aria-busy={isProcessing}
           aria-label={t("chat.transcript", "Conversation")}
         >
           {!selectedAgentId ? (
@@ -892,6 +1018,10 @@ export function ChatPanel({
             <div className={embedded ? "py-2" : "py-4"}>
               {messages.map((msg, i) => {
                 const ratingStep = ratings.profile?.messageRating ? (ratableByPosition[i] ?? null) : null;
+                const editHere = i === lastTurn.user && canEditLast;
+                const regenerateHere = i === lastTurn.reply && canRegenerate;
+                const action: TurnNoticeContext["action"] | null = editHere ? "edit" : regenerateHere ? "regenerate" : null;
+                const notice = action ? renderTurnNotice?.({ action, stepIndex: lastStepIndex(messages) }) : null;
                 return (
                   <ChatMessage
                     key={msg.id}
@@ -900,6 +1030,27 @@ export function ChatPanel({
                     rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
                     ratingProfile={ratings.profile}
                     onRateStep={ratings.rateReply}
+                    actions={
+                      action ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={editHere ? handleEditLast : handleRerun}
+                            className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                            title={editHere ? t("chat.editLastHint", "Edit and send again (↑)") : t("chat.regenerateHint", "Ask for a new reply")}
+                            data-testid={editHere ? "edit-last" : "regenerate-last"}
+                          >
+                            {editHere ? <Pencil className="h-3 w-3" aria-hidden="true" /> : <RefreshCw className="h-3 w-3" aria-hidden="true" />}
+                            <span>{editHere ? t("chat.editLast", "Edit") : t("chat.regenerate", "Regenerate")}</span>
+                          </button>
+                          {notice ? (
+                            <span className="text-[10px] text-warn-600 dark:text-warn-400" data-testid="turn-notice">
+                              {notice}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : undefined
+                    }
                   />
                 );
               })}
@@ -932,6 +1083,19 @@ export function ChatPanel({
                 ))}
               <GuardrailActivity messages={messages} isProcessing={isProcessing} />
 
+              {/* The stream dropped mid-reply; the turn is being followed on
+                  the server until it settles (the controller's reconnect). */}
+              {reconnecting && (
+                <div
+                  className="flex items-center gap-2 px-4 py-2 text-xs text-warn-600 dark:text-warn-400"
+                  role="status"
+                  data-testid="chat-reconnecting"
+                >
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{t("conversation.indicator.reconnecting", "Connection lost. Reconnecting…")}</span>
+                </div>
+              )}
+
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && !stepMovePending && (
                 <div className="flex justify-center py-2">
@@ -952,12 +1116,15 @@ export function ChatPanel({
           )}
           </div>
 
+          <ReplyAnnouncer messages={messages as AnnouncedMessage[]} speaker={speaker} className="sr-only" />
+
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
             <button
               onClick={() => scrollToBottom("smooth")}
               className="absolute bottom-4 inset-x-0 mx-auto z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
               title={t("chat.scrollToBottom", "Scroll to bottom")}
+              aria-label={t("chat.scrollToBottom", "Scroll to bottom")}
               data-testid="scroll-to-bottom"
             >
               <ArrowDown className="h-4 w-4" />
@@ -1030,6 +1197,7 @@ export function ChatPanel({
             onSend={handleSend}
             disabled={!conversationId || isPaused || isLoadingConversation || conversationBusy || reviewPending}
             isProcessing={isProcessing}
+            onStop={canStop ? handleStop : undefined}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
             fileInputRef={fileInputRef}
@@ -1040,10 +1208,13 @@ export function ChatPanel({
             hasConversation={!!conversationId}
             pendingAttachments={pendingAttachments}
             onRemoveAttachment={removeAttachment}
+            onRetryAttachment={retryAttachment}
             hasReadyAttachment={hasReadyAttachment}
             // Disabled while either move (or a rerun) is pending: the flags
             // only change after the re-read, so a double click would otherwise
             // undo a second turn.
+            onEditLast={canEditLast ? handleEditLast : undefined}
+            draft={draft}
             onUndo={controls.undo && conversationId && undoAvailable && !isProcessing && !conversationBusy
               ? () => undoConversation.mutate(undefined, { onError: (err) => toast.error(getErrorMessage(err)) })
               : undefined}
@@ -1065,6 +1236,7 @@ function ChatInputWithSecretToggle({
   onSend,
   disabled = false,
   isProcessing = false,
+  onStop,
   isSecretMode,
   onToggleSecret,
   fileInputRef,
@@ -1074,9 +1246,12 @@ function ChatInputWithSecretToggle({
   hasConversation = false,
   pendingAttachments = [],
   onRemoveAttachment,
+  onRetryAttachment,
   hasReadyAttachment = false,
   onUndo,
   onRedo,
+  onEditLast,
+  draft = null,
   embedded = false,
   allowAttachments = true,
 }: {
@@ -1084,6 +1259,8 @@ function ChatInputWithSecretToggle({
   onSend: (message: string, isSecret?: boolean) => boolean;
   disabled?: boolean;
   isProcessing?: boolean;
+  /** Set while a turn runs that can be stopped: the send button becomes Stop. */
+  onStop?: () => void;
   isSecretMode: boolean;
   onToggleSecret: () => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -1094,9 +1271,14 @@ function ChatInputWithSecretToggle({
   hasConversation?: boolean;
   pendingAttachments?: PendingAttachment[];
   onRemoveAttachment?: (id: string) => void;
+  onRetryAttachment?: (id: string) => void;
   hasReadyAttachment?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  /** Set when the last message may be edited: ↑ in an empty composer does it. */
+  onEditLast?: () => void;
+  /** Text to put into the composer (an edited message coming back), once per nonce. */
+  draft?: { text: string; nonce: number } | null;
   embedded?: boolean;
   /** False when the agent switched attachments off (`conversationControls.attachments`). */
   allowAttachments?: boolean;
@@ -1118,6 +1300,9 @@ function ChatInputWithSecretToggle({
     }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
+      // A click on Send moved focus to the button; the next message starts
+      // in the composer. (A touch keyboard stays as the person left it.)
+      if (!window.matchMedia?.("(pointer: coarse)").matches) textareaRef.current.focus();
     }
   }, [value, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
 
@@ -1128,6 +1313,22 @@ function ChatInputWithSecretToggle({
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   }, []);
+
+  // An edited message comes back into the composer, caret at its end.
+  const draftNonce = draft?.nonce;
+  useEffect(() => {
+    if (!draft) return;
+    setValue(draft.text);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      handleInput();
+      el.focus();
+      el.setSelectionRange(draft.text.length, draft.text.length);
+    });
+    // Once per nonce: the same text sent twice still comes back twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftNonce]);
 
   const canSend =
     (value.trim().length > 0 || hasReadyAttachment) &&
@@ -1156,6 +1357,7 @@ function ChatInputWithSecretToggle({
               key={att.id}
               att={att}
               onRemove={() => onRemoveAttachment?.(att.id)}
+              onRetry={onRetryAttachment ? () => onRetryAttachment(att.id) : undefined}
             />
           ))}
         </div>
@@ -1176,7 +1378,8 @@ function ChatInputWithSecretToggle({
             // must not carry a file).
             isSecretMode && "cursor-not-allowed opacity-40"
           )}
-          title={t("chat.attach", "Attach file")}
+          title={t("chat.attachHint", "Attach files — or paste or drop them here")}
+          aria-label={t("chat.attach", "Attach file")}
           data-testid="chat-attach-btn"
         >
           {isUploading ? (
@@ -1287,6 +1490,19 @@ function ChatInputWithSecretToggle({
               if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                 e.preventDefault();
                 handleSend();
+              } else if (
+                e.key === "ArrowUp" &&
+                !value &&
+                onEditLast &&
+                !e.shiftKey &&
+                !e.altKey &&
+                !e.ctrlKey &&
+                !e.metaKey &&
+                !isImeComposing(e)
+              ) {
+                // ↑ in an empty composer edits the last message, as in most chats.
+                e.preventDefault();
+                onEditLast();
               }
             }}
             onPaste={(e) => {
@@ -1310,6 +1526,19 @@ function ChatInputWithSecretToggle({
           />
         )}
 
+        {onStop ? (
+          /* While the agent answers, the send button's place is Stop's (Esc too). */
+          <button
+            type="button"
+            onClick={onStop}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-foreground transition-colors hover:bg-muted"
+            title={t("chat.stopWithKey", "Stop (Esc)")}
+            aria-label={t("chat.stop", "Stop")}
+            data-testid="chat-stop"
+          >
+            <Square className="h-4 w-4 fill-current" aria-hidden="true" />
+          </button>
+        ) : (
         <button
           onClick={handleSend}
           disabled={!canSend}
@@ -1328,6 +1557,7 @@ function ChatInputWithSecretToggle({
             <Send className="h-5 w-5" />
           )}
         </button>
+        )}
       </div>
       {/* Secret mode is a single-line password field — a newline hint there
           would promise something the input cannot do. */}
@@ -1391,7 +1621,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
   return (
     <div
-      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground/70"
+      className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground"
       data-testid="thinking-indicator"
     >
       {/* Pulsing dots */}
@@ -1412,7 +1642,7 @@ function InlineThinkingIndicator({ events }: { events: PipelineEvent[] }) {
 
       {/* Tool names — inline, comma-separated */}
       {activeToolNames.length > 0 && (
-        <span className="flex items-center gap-1 text-muted-foreground/50">
+        <span className="flex items-center gap-1 text-muted-foreground">
           <Wrench className="h-2.5 w-2.5 shrink-0" />
           <span className="truncate max-w-[200px]">
             {activeToolNames.join(", ")}

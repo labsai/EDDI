@@ -139,6 +139,63 @@ async function toAttachmentError(response: Response): Promise<AttachmentError> {
   return new AttachmentError(message, response.status, code);
 }
 
+/** Code of the {@link AttachmentError} an upload rejects with when its signal aborted it. */
+export const UPLOAD_CANCELLED = "UPLOAD_CANCELLED";
+
+function cancelledError(): AttachmentError {
+  return new AttachmentError("Upload cancelled", 0, UPLOAD_CANCELLED);
+}
+
+/**
+ * From this size up a file reports its upload progress. A smaller one is up
+ * before a bar could say anything; its chip only says "Uploading…".
+ */
+export const PROGRESS_MIN_BYTES = 256 * 1024;
+
+/** {@link uploadAttachment} through XMLHttpRequest, reporting bytes sent. */
+function uploadWithProgress(
+  url: string,
+  formData: FormData,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<AttachmentResult> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelledError());
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.open("POST", url);
+    for (const [name, value] of Object.entries(api.getAuthHeader() as Record<string, string>)) {
+      xhr.setRequestHeader(name, value);
+    }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onerror = () => reject(new AttachmentError("Network error: unable to reach server", 0));
+    xhr.onabort = () => reject(cancelledError());
+    xhr.onload = () => {
+      // The same reading of the answer as the fetch path.
+      const response = new Response(xhr.status === 204 ? null : xhr.responseText, {
+        status: xhr.status,
+        statusText: xhr.statusText,
+        headers: { "Content-Type": xhr.getResponseHeader("Content-Type") ?? "application/json" },
+      });
+      if (!response.ok) {
+        void toAttachmentError(response).then(reject, reject);
+        return;
+      }
+      onProgress(1);
+      response
+        .json()
+        .then((result: AttachmentResult & { filename?: string }) => resolve({ ...result, fileName: normalizeFileName(result) }))
+        .catch(() => reject(new AttachmentError("Unreadable upload response", xhr.status)));
+    };
+    xhr.send(formData);
+  });
+}
+
 // ==================== API functions ====================
 
 /**
@@ -154,6 +211,15 @@ async function toAttachmentError(response: Response): Promise<AttachmentError> {
 export async function uploadAttachment(
   conversationId: string,
   file: File,
+  /**
+   * Upload progress as a fraction from 0 to 1, for a file of at least
+   * {@link PROGRESS_MIN_BYTES}. Such a file goes up through XMLHttpRequest, the
+   * one browser API that reports bytes sent; a smaller one, or a call without
+   * this, through fetch as before.
+   */
+  onProgress?: (fraction: number) => void,
+  /** Aborts the request; the promise then rejects with code {@link UPLOAD_CANCELLED}. */
+  signal?: AbortSignal,
 ): Promise<AttachmentResult> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
     throw new AttachmentError(
@@ -166,6 +232,10 @@ export async function uploadAttachment(
   const formData = new FormData();
   formData.append("file", file);
 
+  if (onProgress && file.size >= PROGRESS_MIN_BYTES && typeof XMLHttpRequest !== "undefined") {
+    return uploadWithProgress(`${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`, formData, onProgress, signal);
+  }
+
   let response: Response;
   try {
     response = await fetch(
@@ -174,9 +244,11 @@ export async function uploadAttachment(
         method: "POST",
         headers: api.getAuthHeader(),
         body: formData,
+        signal,
       },
     );
   } catch (networkError) {
+    if (signal?.aborted) throw cancelledError();
     throw new AttachmentError(
       networkError instanceof Error
         ? `Network error: ${networkError.message}`

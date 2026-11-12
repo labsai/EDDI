@@ -57,6 +57,8 @@ import {
 import {
   AgentConversation,
   initialConversationState,
+  RECONNECT_DELAYS_MS,
+  STOP_VERIFY_DELAYS_MS,
   type AgentConversationState,
   type AgentTransport,
   type ConversationMessage,
@@ -134,6 +136,7 @@ const CONTROLLER_FIELDS_RESET: Pick<
   | "isEscalating"
   | "activeTool"
   | "historyBusy"
+  | "reconnecting"
   | "pendingAttachments"
   | "approvalStatus"
   | "restoreDraft"
@@ -145,6 +148,7 @@ const CONTROLLER_FIELDS_RESET: Pick<
   isEscalating: false,
   activeTool: null,
   historyBusy: false,
+  reconnecting: false,
   pendingAttachments: [],
   approvalStatus: null,
   restoreDraft: null,
@@ -219,6 +223,8 @@ interface ChatState {
   /** The tool the agent is running right now, from the live `tool_call` event. */
   activeTool: string | null;
   historyBusy: boolean;
+  /** A dropped stream's turn is being followed until it settles (`reconnectDelaysMs`). */
+  reconnecting: boolean;
   /** The controller's own attachment staging; the Manager's composers keep theirs. */
   pendingAttachments: AttachmentResult[];
   approvalStatus: ApprovalStatus | null;
@@ -677,6 +683,7 @@ function controllerView(s: ChatState): AgentConversationState {
     isEscalating: s.isEscalating,
     activeTool: s.activeTool,
     historyBusy: s.historyBusy,
+    reconnecting: s.reconnecting,
     undoAvailable: s.undoAvailable,
     redoAvailable: s.redoAvailable,
     activeInputField: s.activeInputField,
@@ -867,6 +874,12 @@ export const chatConversation = new AgentConversation({
   store: chatConversationStore,
   generation: () => useChatStore.getState().conversationEpoch,
   detachedGraceMs: DETACHED_STREAM_GRACE_MS,
+  // A stream that drops mid-reply is followed until its turn settles on the
+  // server (the "Reconnecting…" line) instead of being called lost at once.
+  reconnectDelaysMs: RECONNECT_DELAYS_MS,
+  // Stop asks the server to cancel, then checks it took: in a cluster the turn
+  // may run on on another pod (docs/hitl.md), and the user is told so.
+  stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
   // Undo/redo come from the `done` payload (onTurnSnapshot), as they always did.
   refreshAfterStream: false,
   attachmentDisplay: "chips",

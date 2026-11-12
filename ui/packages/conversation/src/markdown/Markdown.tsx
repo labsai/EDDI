@@ -15,13 +15,26 @@
      otherwise shows it as text (`escapeRawHtml`).
    - Math (`$$…$$` only; single dollars are prices) through KaTeX with
      `trust: false`, and fenced code through highlight.js — each its own chunk,
-     loaded the first time a reply needs it.
+     loaded the first time a reply needs it. A fenced block names its language.
+   - A ```mermaid block is drawn as a diagram by Mermaid with
+     `securityLevel: "strict"`, in its own chunk loaded the first time a reply
+     holds one (never in any first load); until then, and when the source does
+     not parse, it stays the code block it is.
    - Links open in a new tab, except same-page anchors (GFM footnotes); wide
      tables scroll inside the reply; a fenced block has its own copy button.
    ────────────────────────────────────────────── */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
-import { Check, Copy, X } from "lucide-react";
+import {
+  isValidElement,
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useMemo,
+  useRef,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import { remarkGfmParse as remarkGfm } from "./remark-gfm-parse";
 import rehypeSanitize from "rehype-sanitize";
@@ -30,73 +43,57 @@ import { useConversationText } from "../react/hooks";
 
 type PluggableList = NonNullable<Options["rehypePlugins"]>;
 
-/** Write text to the clipboard; false when the browser refuses (insecure frame, no permission). */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
+import { CopyButton } from "./CopyButton";
+
+export { CopyButton };
+
+/** The language a fenced block names (`language-ts` on its `<code>`), if any. */
+export function codeLanguage(children: ReactNode): string | null {
+  if (!isValidElement<{ className?: unknown }>(children)) return null;
+  const className = children.props.className;
+  if (typeof className !== "string") return null;
+  const match = /(?:^|\s)language-([\w+#.-]+)/.exec(className);
+  return match ? match[1]!.toLowerCase() : null;
 }
 
-/** A copy button that confirms for a moment, visually and to screen readers. */
-export function CopyButton({
-  getText,
-  label,
-  className,
-}: {
-  getText: () => string;
-  label: string;
-  className: string;
-}) {
-  const t = useConversationText();
-  // Last outcome, shown for a moment: a refused copy must not look like a
-  // button that did nothing.
-  const [status, setStatus] = useState<"idle" | "done" | "failed">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-  const onClick = useCallback(async () => {
-    const ok = await copyText(getText());
-    setStatus(ok ? "done" : "failed");
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setStatus("idle"), 1500);
-  }, [getText]);
-  const shown =
-    status === "done" ? t("conversation.copy.done") : status === "failed" ? t("conversation.copy.failed") : label;
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onClick}
-      aria-label={shown}
-      title={shown}
-      data-copy-status={status}
-      data-testid="copy-button"
-    >
-      {status === "done" ? <Check size="1em" /> : status === "failed" ? <X size="1em" /> : <Copy size="1em" />}
-    </button>
-  );
+/** The text of a rendered node, highlight spans and all. */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return textOf(node.props.children);
+  return "";
 }
 
-/** A fenced code block with its own copy button. */
+/** The diagram, and Mermaid behind it: loaded the first time a reply holds one. */
+const MermaidDiagram = lazy(() => import("./MermaidDiagram").then((m) => ({ default: m.MermaidDiagram })));
+
+/** A fenced code block with its language and its own copy button. */
 function CodeBlock({ node: _node, children, ...props }: ComponentPropsWithoutRef<"pre"> & { node?: unknown }) {
   const t = useConversationText();
   const preRef = useRef<HTMLPreElement>(null);
   const getText = useCallback(() => preRef.current?.textContent ?? "", []);
-  return (
+  const language = codeLanguage(children);
+  const block = (
     <div className="code-block">
+      {language && (
+        <span className="code-block__lang" data-testid="code-language">
+          {language}
+        </span>
+      )}
       <pre {...props} ref={preRef}>
         {children}
       </pre>
       <CopyButton getText={getText} label={t("conversation.copy.code")} className="code-block__copy" />
     </div>
   );
+  if (language === "mermaid") {
+    return (
+      <Suspense fallback={block}>
+        <MermaidDiagram source={textOf(children)} fallback={block} />
+      </Suspense>
+    );
+  }
+  return block;
 }
 
 /**

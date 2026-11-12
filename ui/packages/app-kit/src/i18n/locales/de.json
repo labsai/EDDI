@@ -184,7 +184,17 @@
       "errDisabled": "Diese Agentenversion fragt nicht nach Bewertungen.",
       "errOwner": "Nur die Person, die diese Unterhaltung geführt hat, kann sie bewerten.",
       "errGeneric": "Die Bewertung konnte nicht gespeichert werden."
-    }
+    },
+    "stop": "Anhalten",
+    "stopWithKey": "Anhalten (Esc)",
+    "editLast": "Bearbeiten",
+    "editLastHint": "Bearbeiten und erneut senden (↑)",
+    "regenerate": "Neu erzeugen",
+    "regenerateHint": "Um eine neue Antwort bitten",
+    "attachUploadingPercent": "Wird hochgeladen… {{percent}} %",
+    "attachProgress": "Hochladen von {{name}}",
+    "attachRetry": "Erneut versuchen",
+    "attachHint": "Dateien anhängen – oder hier einfügen bzw. ablegen"
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

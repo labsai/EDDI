@@ -70,6 +70,24 @@ export interface AgentConversationOptions {
   environment?: string;
   /** A rerun replaced this step's reply: a rating given to the old one no longer applies. */
   onStepRerun?: (stepIndex: number) => void;
+  /**
+   * After Stop, when to re-read the conversation to learn whether the turn
+   * really stopped (milliseconds after the cancel, one read each). `/cancel`
+   * stops a running turn only on the pod running it (docs/hitl.md); in a
+   * cluster the turn can run on, and its reply and tool effects still count.
+   * When a read shows the turn kept going, a notice says so and the reply is
+   * shown. Off by default; the apps pass `STOP_VERIFY_DELAYS_MS`.
+   */
+  stopVerifyDelaysMs?: readonly number[];
+  /**
+   * When a streamed turn's connection drops after part of the reply arrived,
+   * re-read the conversation at these delays (milliseconds, one read each)
+   * until the turn settles on the server, showing `reconnecting` meanwhile;
+   * the settled reply then replaces the partial one, as a `done` would. Off
+   * (the default) or after the last delay, the turn ends as a dropped
+   * connection, as before.
+   */
+  reconnectDelaysMs?: readonly number[];
 
   /* ─── Host hooks (phase 3c): how a host with its own store and its own copy
      drives the same turn loop. Every one is optional; without them the
@@ -251,6 +269,26 @@ function streamingPlaceholder(): ConversationMessage {
   return { id: uid("agent"), role: "agent", content: "", timestamp: Date.now(), isStreaming: true };
 }
 
+/** The `stopVerifyDelaysMs` the apps pass: one read soon after Stop, one a little later. */
+export const STOP_VERIFY_DELAYS_MS: readonly number[] = [1500, 5000];
+
+/** The `reconnectDelaysMs` the apps pass: about half a minute of re-reads. */
+export const RECONNECT_DELAYS_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** States a stopped turn may be in: it did stop, or the conversation ended. */
+const STOPPED_STATES: ReadonlySet<string> = new Set(["EXECUTION_INTERRUPTED", "ENDED"]);
+
+/** An error's HTTP status: @eddi/core's ApiError, or a host client's error that carries one. */
+function statusOf(err: unknown): number | null {
+  if (err instanceof ApiError) return err.status;
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : null;
+}
+
 function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === "AbortError";
 }
@@ -303,6 +341,8 @@ export class AgentConversation {
    * slot let a late-failing turn withdraw a newer, unrelated message.
    */
   private readonly pendingTurns = new Map<string, PendingTurn>();
+  /** Turns sent so far: a check that outlives its turn (after Stop) ends when the next one starts. */
+  private turnsSent = 0;
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
@@ -860,6 +900,7 @@ export class AgentConversation {
     const sendGen = this.currentGeneration;
     const conversationId = this.state.conversationId;
     const answeredField = this.state.activeInputField;
+    this.turnsSent += 1;
 
     // Attachments staged in the composer travel with THIS turn as attachment_N
     // context entries — the only path the backend reads. A secret turn never
@@ -1151,6 +1192,14 @@ export class AgentConversation {
     // reset the UI, and the abort must not be reported as a failure.
     if (transport.mode !== "local" && stopped()) return { outcome: "sent" };
 
+    // The connection dropped after the turn was accepted and part of the reply
+    // arrived: the turn may well still be running on the server. Follow it
+    // before calling it lost.
+    if (status === null && turn.tokenCount > 0 && conversationId && this.options.reconnectDelaysMs?.length) {
+      if (await this.followDroppedTurn(conversationId, sendGen, turn, stopped)) return { outcome: "sent" };
+      if (!this.isCurrent(sendGen) || stopped()) return { outcome: "sent" };
+    }
+
     dispatch({ type: "SET_PROCESSING", value: false });
     dispatch({ type: "SET_THINKING", value: false });
     // This path never reaches FINISH_STREAMING, so clear these here too.
@@ -1260,6 +1309,41 @@ export class AgentConversation {
       }
     }
     return result;
+  }
+
+  /**
+   * Re-read a turn whose stream dropped until it settles on the server, then
+   * apply it as its `done` would have been. Returns true when it was applied
+   * (or the turn was taken over meanwhile — Stop, a new conversation), false
+   * when it never settled within `reconnectDelaysMs`.
+   */
+  private async followDroppedTurn(
+    conversationId: string,
+    sendGen: number,
+    turn: TurnContext,
+    stopped: () => boolean,
+  ): Promise<boolean> {
+    const taken = () => !this.isCurrent(sendGen) || stopped();
+    this.dispatch({ type: "SET_RECONNECTING", value: true });
+    try {
+      for (const delay of this.options.reconnectDelaysMs ?? []) {
+        await sleep(delay);
+        if (taken()) return true;
+        let snapshot: Partial<ConversationSnapshot> | undefined;
+        try {
+          snapshot = await this.transport.read(conversationId, true);
+        } catch {
+          continue; // still offline: try again at the next delay
+        }
+        if (taken()) return true;
+        if (!snapshot?.conversationState || snapshot.conversationState === "IN_PROGRESS") continue;
+        this.applyDone(snapshot as DoneSnapshot, turn);
+        return true;
+      }
+      return false;
+    } finally {
+      if (this.isCurrent(sendGen)) this.dispatch({ type: "SET_RECONNECTING", value: false });
+    }
   }
 
   /* ─── Undo, redo, retry ─────────────────────── */
@@ -1417,14 +1501,66 @@ export class AgentConversation {
     const conversationId = this.state.conversationId;
     if (!conversationId || this.transport.mode === "local") return;
     const gen = this.currentGeneration;
+    // The reply bubble Stop left on screen: replaced if the turn ran on.
+    const last = this.state.messages[this.state.messages.length - 1];
+    const partialId = last?.role === "agent" && last.kind !== "notice" ? last.id : null;
+    let finished = false;
     try {
       await this.transport.cancel(conversationId);
       // New Conversation while the cancel was in flight: the fresh one is not interrupted.
       if (!this.isCurrent(gen)) return;
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
     } catch (err) {
-      // 409 = nothing to cancel; the turn finished as we clicked.
-      if (!(err instanceof ApiError && err.status === 409)) console.error("Stop failed:", err);
+      if (!this.isCurrent(gen)) return;
+      if (statusOf(err) === 409) {
+        // Nothing to cancel: the turn had already finished on the server.
+        finished = true;
+      } else {
+        console.error("Stop failed:", err);
+        dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.unreachable")) });
+        return;
+      }
+    }
+    await this.verifyStop(conversationId, gen, finished, partialId);
+  }
+
+  /**
+   * Whether Stop took. A `200` from `/cancel` only says the request was
+   * accepted: on another pod of a cluster the turn can run on and persist its
+   * reply after the cancel marked it interrupted (docs/hitl.md). So read the
+   * conversation again a little later; a turn that kept going is said so, and
+   * its reply shown. A turn sent meanwhile, or a new conversation, ends the check.
+   */
+  private async verifyStop(conversationId: string, gen: number, finished: boolean, partialId: string | null): Promise<void> {
+    const delays = this.options.stopVerifyDelaysMs ?? [];
+    const turns = this.turnsSent;
+    const moved = () => !this.isCurrent(gen) || this.turnsSent !== turns;
+    for (const delay of finished ? delays.slice(0, 1) : delays) {
+      await sleep(delay);
+      if (moved()) return;
+      let snapshot: Partial<ConversationSnapshot> | undefined;
+      try {
+        snapshot = await this.transport.read(conversationId, true);
+      } catch {
+        continue;
+      }
+      if (moved()) return;
+      const state = snapshot?.conversationState;
+      // Interrupted as asked: keep watching until the last read, since a
+      // turn on another pod can still land its reply over the mark.
+      if (!state || STOPPED_STATES.has(state)) continue;
+      this.dispatch({ type: "SET_CONVERSATION_STATE", state, endReason: snapshot?.endReason ?? null });
+      if (state === "IN_PROGRESS") {
+        this.dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.stillRunning")) });
+        return;
+      }
+      // It finished on the server: its reply replaces the part Stop left.
+      if (partialId) {
+        this.dispatch({ type: "REPLACE_MESSAGES", messages: this.state.messages.filter((m) => m.id !== partialId) });
+      }
+      this.dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.finished")) });
+      this.applySnapshot(snapshot ?? {}, { dedupe: true });
+      return;
     }
   }
 

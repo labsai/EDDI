@@ -1,5 +1,5 @@
-import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowUp, MessageSquare, Users } from "lucide-react";
 import { Button } from "@eddi/ui";
@@ -18,6 +18,7 @@ import {
 } from "@eddi/app-kit/lib/api/catalog";
 import { HOME_RECENT_COUNT, sessionLabel } from "@/lib/workforce-sessions";
 import { workforceChatStart } from "@eddi/app-kit/lib/workforce-chat-start";
+import { isNewChatState } from "@/lib/workforce-keyboard";
 
 /**
  * Workforce Home (T1.4): a composer first, the agent's starters, the recent
@@ -43,6 +44,9 @@ export function HomeComposer() {
   const { sessions } = useWorkforceSessions();
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const location = useLocation();
 
   const appearanceById = useMemo(
     () => new Map<string, CatalogAgent>((catalog ?? []).map((a) => [a.agentId, a])),
@@ -90,6 +94,14 @@ export function HomeComposer() {
     }
   };
 
+  // A new chat (⌘⇧O, the quick switcher's "New chat") lands here: the composer
+  // takes the caret once it is there (it waits for the agents), once per visit.
+  const newChat = isNewChatState(location.state);
+  const hasAgents = agents.length > 0;
+  useEffect(() => {
+    if (newChat && hasAgents) inputRef.current?.focus();
+  }, [newChat, hasAgents, location.key]);
+
   if (agents.length === 0) return null;
 
   return (
@@ -101,6 +113,7 @@ export function HomeComposer() {
         <ReviewNotice agentId={agentId} />
         <div className="p-3">
         <textarea
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}

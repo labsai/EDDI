@@ -122,6 +122,24 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
 - **The chat** is the shared `ChatPanel` with `urlSync`: `?agentId=…&conversationId=…` stays
   in the address bar so a reload or a second tab returns to the conversation.
 
+### Tier 1 (phase 7)
+
+- **Keyboard.** `components/workforce/quick-switcher.tsx` (mounted by the layout) owns ⌘K /
+  Ctrl+K — the quick switcher over the sidebar's sessions, the agents and "New chat", a lazy
+  `quick-switcher-dialog.tsx` — and ⌘⇧O / Ctrl+Shift+O, which goes Home with
+  `NEW_CHAT_STATE` (`lib/workforce-keyboard.ts`) so `HomeComposer` focuses its box. Esc
+  (stop), ↑ (edit the last message) and Enter live in the shared `ChatPanel`. The shortcuts
+  dialog (`?`) lists all of them; a new shortcut goes there too.
+- **Installable, no service worker.** The shells link `/workforce/manifest.webmanifest`,
+  which EDDI renders in the brand (`RestWorkforceResource#manifest`, `WorkforceManifest`;
+  the dev server answers with the default brand's, `vite.config.ts`). There is deliberately
+  no service worker: browsers install without one, and nothing signed-in may be served from
+  a cache. Do not add one without that review.
+- **Mobile.** The shells set `viewport-fit=cover, interactive-widget=resizes-content`; the
+  layout pads by the safe-area insets (topbar, bottom tabs, sides) and takes its height from
+  `--wf-viewport-height` (`hooks/use-visual-viewport-height.ts`, set only while an iOS
+  keyboard shrinks the visual viewport), else `100dvh`. Use those, not `h-screen`.
+
 ### i18n
 
 Workforce's own strings (`Workforce.*`, `analyticsPage.*`, …) are in `src/i18n/locales/`,

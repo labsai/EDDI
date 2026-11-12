@@ -186,7 +186,17 @@
       "errDisabled": "Cette version de l'agent ne demande pas d'évaluation.",
       "errOwner": "Seule la personne qui a eu cette conversation peut l'évaluer.",
       "errGeneric": "La note n'a pas pu être enregistrée."
-    }
+    },
+    "stop": "Arrêter",
+    "stopWithKey": "Arrêter (Échap)",
+    "editLast": "Modifier",
+    "editLastHint": "Modifier et renvoyer (↑)",
+    "regenerate": "Régénérer",
+    "regenerateHint": "Demander une nouvelle réponse",
+    "attachUploadingPercent": "Envoi… {{percent}} %",
+    "attachProgress": "Envoi de {{name}}",
+    "attachRetry": "Réessayer",
+    "attachHint": "Joindre des fichiers — ou les coller ou les déposer ici"
   },
   "editor": {
     "deployFailed": "Échec du déploiement",

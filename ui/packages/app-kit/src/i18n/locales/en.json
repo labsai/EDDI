@@ -184,7 +184,17 @@
       "errDisabled": "This agent version does not ask for ratings.",
       "errOwner": "Only the person who had this conversation can rate it.",
       "errGeneric": "The rating could not be saved."
-    }
+    },
+    "stop": "Stop",
+    "stopWithKey": "Stop (Esc)",
+    "editLast": "Edit",
+    "editLastHint": "Edit and send again (↑)",
+    "regenerate": "Regenerate",
+    "regenerateHint": "Ask for a new reply",
+    "attachUploadingPercent": "Uploading… {{percent}}%",
+    "attachProgress": "Upload of {{name}}",
+    "attachRetry": "Try again",
+    "attachHint": "Attach files — or paste or drop them here"
   },
   "commandPalette": {
     "openChat": "Open Chat"
