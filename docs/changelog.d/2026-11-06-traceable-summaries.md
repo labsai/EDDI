@@ -81,3 +81,14 @@ the rolling summary's check to every consolidation group. See
   methods. The REST boundary (`UserMemoryWriteRules.withDefaults`) clears it, so a client echoing a consolidated
   entry's ids onto an edited value does not keep them. MCP and every other writer build their entries without sources.
   `DatastoreParityTest` pins both halves on MongoDB and PostgreSQL.
+
+### Review follow-up (2026-11-12)
+
+- **Citation failures no longer log content.** The WARN lines for a failed citation check (conversation summary and
+  Dream), a failed retry and an unparseable or unserialisable Dream answer now carry ids, counts, the policy and the
+  exception class only. The problem list, which quotes the summary text and memory keys, and the parser's message,
+  which quotes the model's answer, moved to a DEBUG line (sanitised, capped).
+- **`conversationRecall` and out-of-range citations.** A cited turn past the summarized turns used to be clamped onto
+  the last summarized turn, so `[turn 40]` returned turn 4 as if it were the source. A citation wholly outside the
+  summarized turns, or a bracket that is not a list of turn numbers, now names no turn: the tool says so and logs one
+  DEBUG line. A range that only partly overlaps is still cut at the last summarized turn.

@@ -2027,7 +2027,7 @@ default is `keep`, and why a steady `fallback` rate is worth an alert.
 The summary stays a derived view: the check reads conversation memory and never changes it, and a
 failing summary only ever replaces the previous summary property or leaves it alone. To read what a
 citation points at, the model passes it to `conversationRecall` as it stands — `[turns 4-7, 9]`
-returns turns 4 to 7 and 9 (each once, clamped to the summarized turns, at most `maxRecallTurns`).
+returns turns 4 to 7 and 9 (each once, at most `maxRecallTurns`). A range that runs past the summarized turns is cut at the last one; a citation wholly outside them, or a bracket that is not a list of turn numbers (`[turn -1]`, `[turn abc]`), names no turn and returns a note saying so — it is never attributed to another turn.
 
 ### In-Turn Tool Context Budget
 

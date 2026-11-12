@@ -12,6 +12,7 @@ import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.function.UnaryOperator;
@@ -123,9 +124,16 @@ public class ConversationRecallTool {
 
         // A citation copied from the summary — "[turns 4-7, 9]" — names every turn it
         // means, so all of its ranges are returned, not just the first.
-        List<SummaryCitations.Range> cited = SummaryCitations.citations(query, null);
+        List<String> malformed = new ArrayList<>();
+        List<SummaryCitations.Range> cited = SummaryCitations.citations(query, malformed);
         if (!cited.isEmpty()) {
             return recallCited(cited);
+        }
+        if (!malformed.isEmpty()) {
+            // A bracketed citation that names no turn ("[turn -1]", "[turn abc]") is no
+            // source — not a free-text query to fall back on, which would pick a turn.
+            LOGGER.debugf("[RECALL] Malformed citation ignored (%d); summarized turns 0-%d", malformed.size(), summaryThroughStep - 1);
+            return "None of the cited turns is among the summarized turns 0-" + (summaryThroughStep - 1) + ".";
         }
 
         // Try to parse a turn range from the query
@@ -184,14 +192,22 @@ public class ConversationRecallTool {
 
     /**
      * The turns of every cited range, in order and each once, clamped to the
-     * summarized turns like a plain range and capped at {@code maxRecallTurns}.
+     * summarized turns like a plain range (a range wholly past them names no turn
+     * and is ignored, never clamped onto the last one) and capped at
+     * {@code maxRecallTurns}.
      */
     private String recallCited(List<SummaryCitations.Range> cited) {
         int last = summaryThroughStep - 1;
         TreeSet<Integer> turns = new TreeSet<>();
         int skipped = 0;
         for (SummaryCitations.Range range : cited) {
-            int from = Math.min(range.from(), last);
+            if (range.from() > last) {
+                // Not a summarized turn: no such source. Clamping it would hand back the
+                // last summarized turn under a citation that does not name it.
+                LOGGER.debugf("[RECALL] Cited turns %s are beyond the summarized turns 0-%d; ignored", range, last);
+                continue;
+            }
+            int from = range.from();
             int to = Math.min(range.to(), last);
             for (int i = from; i <= to; i++) {
                 if (turns.contains(i)) {
@@ -205,6 +221,9 @@ public class ConversationRecallTool {
             }
         }
 
+        if (turns.isEmpty()) {
+            return "None of the cited turns is among the summarized turns 0-" + last + ".";
+        }
         var sb = new StringBuilder();
         sb.append("**Recalled conversation turns ").append(describe(turns)).append(":**\n\n");
         for (int i : turns) {

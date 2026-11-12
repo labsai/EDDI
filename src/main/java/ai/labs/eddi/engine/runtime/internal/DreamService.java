@@ -733,8 +733,12 @@ public class DreamService {
                     var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(),
                             SummaryCitations.OnValidationFailure.fallback_to_previous);
                     LOGGER.warnf("[DREAM] Consolidation of group '%s' for user='%s' failed the citation check (%d problem(s)); "
-                            + "onValidationFailure=%s:\n%s", LogSanitizer.sanitize(group.getKey()), LogSanitizer.sanitize(userId),
-                            check.problems().size(), policy, check.describe());
+                            + "onValidationFailure=%s", LogSanitizer.sanitize(group.getKey()), LogSanitizer.sanitize(userId),
+                            check.problems().size(), policy);
+                    // The problems quote the model's text and the user's memory keys: content,
+                    // so DEBUG only, sanitised and capped.
+                    LOGGER.debugf("[DREAM] Citation problems for group '%s': %s", LogSanitizer.sanitize(group.getKey()),
+                            LogSanitizer.sanitize(check.describe()));
                     outcome = policy == SummaryCitations.OnValidationFailure.keep ? SummaryCitations.OUTCOME_KEPT : SummaryCitations.OUTCOME_FALLBACK;
                     // A retry is a consolidation call like any other: bounded by the same
                     // three ceilings, and its cost counts toward maxCostPerRun.
@@ -757,8 +761,8 @@ public class DreamService {
                             // The first call of this group succeeded, so this is no configuration
                             // fault to abort the phase over: the group is skipped, as on any failure.
                             summarizationFailedCounter.increment();
-                            LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed: %s. Original entries are preserved.",
-                                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getMessage());
+                            LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed (%s). Original entries are preserved.",
+                                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getClass().getSimpleName());
                         }
                     }
                 }
@@ -1441,7 +1445,10 @@ public class DreamService {
             }
             return result;
         } catch (Exception e) {
-            LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response: %s", e.getMessage());
+            // The parser's message quotes the model's answer, i.e. user content: DEBUG
+            // only.
+            LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Parse failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
             return List.of();
         }
     }
@@ -1734,7 +1741,8 @@ public class DreamService {
         try {
             return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(list);
         } catch (Exception e) {
-            LOGGER.warnf("[DREAM] Failed to serialize entries to JSON: %s", e.getMessage());
+            LOGGER.warnf("[DREAM] Failed to serialize entries to JSON (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Serialization failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
             var sb = new StringBuilder("[");
             for (int i = 0; i < entries.size(); i++) {
                 var entry = entries.get(i);
@@ -1841,5 +1849,10 @@ public class DreamService {
         public boolean isSuccess() {
             return error == null;
         }
+    }
+
+    /** At most 300 characters of a diagnostic message, null-safe. */
+    private static String cap(String message) {
+        return message != null && message.length() > 300 ? message.substring(0, 300) + "…" : message;
     }
 }

@@ -301,8 +301,11 @@ public class ConversationSummarizer {
             } else {
                 var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(), SummaryCitations.OnValidationFailure.keep);
                 LOGGER.warnf("[SUMMARY] Rolling summary for conversation='%s' (turns %d-%d) failed the citation check (%d problem(s)); "
-                        + "onValidationFailure=%s:\n%s", sanitize(memory.getConversationId()), alreadySummarized, summarizeThroughStep - 1,
-                        check.problems().size(), policy, check.describe());
+                        + "onValidationFailure=%s", sanitize(memory.getConversationId()), alreadySummarized, summarizeThroughStep - 1,
+                        check.problems().size(), policy);
+                // The problems quote the summary text: content, so DEBUG only.
+                LOGGER.debugf("[SUMMARY] Citation problems for conversation='%s': %s", sanitize(memory.getConversationId()),
+                        sanitize(check.describe()));
                 summary = switch (policy) {
                     case keep -> {
                         SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_KEPT);
@@ -381,7 +384,9 @@ public class ConversationSummarizer {
         var check = SummaryCitations.checkConversationSummary(second.summary(), fromStep, toStep, stepTexts, previousSummary);
         if (!check.valid()) {
             LOGGER.warnf("[SUMMARY] Citation retry for conversation='%s' failed the check again (%d problem(s)); keeping the previous "
-                    + "summary:\n%s", sanitize(memory.getConversationId()), check.problems().size(), check.describe());
+                    + "summary.", sanitize(memory.getConversationId()), check.problems().size());
+            LOGGER.debugf("[SUMMARY] Citation retry problems for conversation='%s': %s", sanitize(memory.getConversationId()),
+                    sanitize(check.describe()));
             return null;
         }
         SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_RETRIED);
