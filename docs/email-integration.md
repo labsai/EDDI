@@ -91,8 +91,22 @@ connection. `headerName` is required by the connection model but not used by a m
 }
 ```
 
-Gmail and Google Workspace are not supported yet: IMAP with XOAUTH2 there needs a per-user grant, which a polling job
-cannot hold without the run-as-principal mechanism the plan schedules for later.
+#### Gmail and Google Workspace
+
+**Not supported as an inbound channel today.** Gmail's IMAP takes OAuth through SASL `XOAUTH2`, and the token for a
+mailbox comes from an authorization-code grant: a person consents on Google's screen. EDDI files that grant `PER_USER`
+only — an `OAUTH2_AUTHORIZATION_CODE` connection must be bound `PER_USER`, the model refuses any other binding at save
+time — and a poll runs as no verified user, so it has no principal to look the grant up under. The integration is
+therefore refused at save: `platformConfig.connection` fails the check above with "is bound PER_USER, but a mailbox
+poll runs as no verified user".
+
+An **app password** over `BASIC`, with `imaps://imap.gmail.com` in the connection's allowlist (and
+`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not blocked by any code path — but it is **untested** with
+Gmail, and Google Workspace administrators commonly disable app passwords and IMAP access, so do not plan on it.
+
+What is planned: an admin-linked `SERVICE` grant (an administrator consents once for the integration's mailbox) and
+Workspace **domain-wide delegation**. Until then, Gmail and Drive work as **conversation tools** on each signed-in
+user's own account — see [Google Workspace](google-workspace.md).
 
 ### 2. The integration
 
