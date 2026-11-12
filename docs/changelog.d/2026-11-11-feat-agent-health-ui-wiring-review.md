@@ -66,6 +66,9 @@ The third round of review findings on PR #1390, each checked against the code an
   Apdex threshold is checked as the parameter `measureLabel` passes to the translation.
 - **Contract note §14** says when the later-phase controls appear (mock worker active in a development build) and that
   against a real backend they are hidden, so those calls are never made.
+- **The profile editor waits for its refetch** (`profile-dialog.tsx`): a reopened dialog no longer starts its draft from
+  the cached profile while the fresh one is on its way, so Save cannot overwrite a profile someone else saved in between.
+  Test: "a reopened editor starts from the profile the server has now, not a cached one".
 
 ### Design decisions
 

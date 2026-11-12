@@ -244,9 +244,11 @@ export function ProfileDialog({
   const profile = useHealthProfile(agentId, open);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">
-      {profile.isLoading && <Skeleton className="h-40 w-full" />}
-      {profile.isError && <p className="text-sm text-destructive" role="alert">{getErrorMessage(profile.error)}</p>}
-      {profile.data && <ProfileForm agentId={agentId} initial={profile.data} info={info} onDone={onClose} />}
+      {/* The draft starts from the profile as the server has it now: a reopened dialog
+          waits for its refetch, so a save cannot overwrite a newer profile with a cached one. */}
+      {profile.isFetching && <Skeleton className="h-40 w-full" />}
+      {profile.isError && !profile.isFetching && <p className="text-sm text-destructive" role="alert">{getErrorMessage(profile.error)}</p>}
+      {profile.data && !profile.isFetching && <ProfileForm agentId={agentId} initial={profile.data} info={info} onDone={onClose} />}
     </AccessibleDialog>
   );
 }

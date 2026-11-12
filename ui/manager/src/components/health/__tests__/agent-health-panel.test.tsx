@@ -543,6 +543,29 @@ describe("health profile editor", () => {
     expect(puts).toBe(0);
   });
 
+  it("a reopened editor starts from the profile the server has now, not a cached one", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
+    // Someone else saved meanwhile.
+    server.use(
+      http.get("*/agents/:agentId/health/profile", ({ params }) =>
+        HttpResponse.json({
+          agentId: String(params.agentId),
+          stored: true,
+          preset: "support",
+          critical: ["agentFailureRate", "resolutionRate"],
+          thresholds: { resolutionRate: { green: 0.7, red: 0.4 }, agentFailureRate: { green: 0.01, red: 0.03 } },
+          budgets: { costPerResolvedUsd: 7 },
+          slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
+          overrides: [],
+        })),
+    );
+    await openProfile();
+    expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("7");
+  });
+
   it("offers thresholds and critical flags for measures that are not on screen", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
