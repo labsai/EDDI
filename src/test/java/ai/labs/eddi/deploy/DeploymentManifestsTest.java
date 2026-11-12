@@ -5212,6 +5212,13 @@ class DeploymentManifestsTest {
         if (Files.exists(keyFile)) {
             key = Files.readString(keyFile, StandardCharsets.UTF_8).strip().replaceFirst("^eddi\\.vault\\.master-key=", "");
         }
+        // A run that created the Secret must have handed the stub a readable key file:
+        // a
+        // stub that lost the path would make every "output does not contain the key"
+        // assertion pass vacuously.
+        if (calls.stream().anyMatch(call -> call.startsWith("create secret generic eddi-secrets")) && key.length() < 16) {
+            throw new AssertionError("the kubectl stub did not capture the generated key (path lost?). " + calls + "\n" + output);
+        }
         return new GeneratorRun(process.exitValue(), output, calls, key);
     }
 
@@ -5236,10 +5243,18 @@ class DeploymentManifestsTest {
         if (batch) {
             Files.writeString(directory.resolve("kubectl.cmd"), """
                     @echo off
+                    setlocal EnableDelayedExpansion
                     >>"%KUBECTL_LOG%" echo %*
                     echo %*| "%SystemRoot%\\System32\\find.exe" "create secret generic eddi-secrets" >nul
-                    if not errorlevel 1 for %%A in (%*) do set "LASTARG=%%~A"
-                    if defined LASTARG copy /y "%LASTARG%" "%KUBECTL_LOG%.key" >nul
+                    if not errorlevel 1 (
+                      rem take everything after "application-secrets.properties=" from the WHOLE
+                      rem argument list: a path with spaces must survive (for %%A would split it)
+                      set ALL=%*
+                      set "REST=!ALL:*application-secrets.properties=!"
+                      set "KEYPATH=!REST:~1!"
+                      set "KEYPATH=!KEYPATH:"=!"
+                      copy /y "!KEYPATH!" "%KUBECTL_LOG%.key" >nul
+                    )
                     echo %*| "%SystemRoot%\\System32\\find.exe" "get secret eddi-secrets" >nul
                     if errorlevel 1 goto ok
                     if "%KUBECTL_STUB_MODE%"=="exists" goto exists

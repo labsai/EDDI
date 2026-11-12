@@ -84,6 +84,24 @@ public nginx site is enabled only after the Keycloak client update returned 204 
 the setup stops with 443 closed and says how to retry), health probes have `--max-time`,
 and the HTTPS banner shows tunnel commands for a VM whose HTTPS is not up.
 
+Second review round: every file `eddi update` fetches is required. If a compose file or a
+monitoring asset cannot be downloaded the update is refused with nothing replaced and
+nothing recorded (before, the old file was kept while the new version and ref were
+written, starting the new image on an old compose file); `install.ps1` and the generated
+`eddi-fetch.ps1` follow the same rule. The refusal hint uses `--eddi-version=<tag>`,
+`eddi.cmd` trims a trailing space from `EDDI_BRANCH`, and the docs give a cmd and a
+PowerShell form scoped to one run. The Windows secret helper prints a PowerShell backup
+command. The GCP HTTPS-failure banner no longer promises a tunnelled login (the public
+issuer and redirects make it impossible) and gives the log, certbot, re-run and health
+steps instead. The batch kubectl stub keeps spaces in the key path, and a run that
+created the Secret without a captured key now fails the test.
+
+Third round: the generated `eddi-fetch.ps1` keeps each replaced file aside as
+`<name>.eddi-old` and restores every file already replaced if a later move fails, so the
+Windows update is all-or-nothing; the GCP wait loops cap each probe and each sleep to the
+time left in their 120 s / 900 s budgets; the Windows `EDDI_BRANCH` examples (docs and the
+text `eddi.cmd` prints) use `set "EDDI_BRANCH=main"` and show how to clear the variable.
+
 ### Not changed
 
 `io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform

@@ -308,8 +308,8 @@ Write-Information -MessageData "" -InformationAction Continue
 if (-not $ShowKey) {
     Write-Information -MessageData "  Vault master key: NOT printed (pass -ShowKey to print it, e.g. at a terminal that keeps no log)." -InformationAction Continue
     Write-Information -MessageData "  It is stored in Secret eddi-secrets in namespace $Namespace, key application-secrets.properties." -InformationAction Continue
-    Write-Information -MessageData "  Back it up from a terminal:" -InformationAction Continue
-    Write-Information -MessageData "    kubectl get secret eddi-secrets -n $Namespace -o jsonpath='{.data.application-secrets\.properties}' | base64 -d" -InformationAction Continue
+    Write-Information -MessageData "  Back it up from a terminal (PowerShell; base64 -d does not exist on Windows):" -InformationAction Continue
+    Write-Information -MessageData "    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((kubectl get secret eddi-secrets -n $Namespace -o jsonpath='{.data.application-secrets\.properties}')))" -InformationAction Continue
     Write-Information -MessageData "  If lost, encrypted secrets (API keys) are UNRECOVERABLE." -InformationAction Continue
 }
 else {

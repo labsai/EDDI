@@ -1121,8 +1121,11 @@ update with nothing changed, and an install pinned to a release (a version tag, 
 `latest` resolved to one) **refuses** to fall back to `main` when the lookup of the newest
 release fails — retry, name a version, or choose `main` on purpose by setting
 `EDDI_BRANCH` to `main` for that one run: `EDDI_BRANCH=main eddi update` (bash),
-`set EDDI_BRANCH=main & eddi update` (Windows cmd; `eddi.cmd` reads the variable) or
-`$env:EDDI_BRANCH = 'main'; eddi update` (PowerShell). The GCP provisioner
+`set "EDDI_BRANCH=main" & eddi update & set "EDDI_BRANCH="` (Windows cmd; the quotes stop
+a trailing space being stored in the value, `eddi.cmd` trims one anyway, and the last
+command clears the variable, which otherwise stays set for that cmd session) or `& { $env:EDDI_BRANCH = 'main'; try { eddi update } finally { Remove-Item Env:EDDI_BRANCH } }`
+(PowerShell; restores the unset state). A required file that cannot be downloaded also
+refuses the update: nothing is replaced, and the recorded version and ref stay as they were. The GCP provisioner
 (`gcp/provision-vm.sh`) defaults `--eddi-branch` to `--eddi-version`'s tag or the
 newest stable release instead of `main`, falling back to `main` with a warning when the
 lookup fails; on the VM it downloads `install.sh` to a file and, for a release tag, compares

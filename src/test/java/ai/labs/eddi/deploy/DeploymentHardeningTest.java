@@ -121,6 +121,8 @@ class DeploymentHardeningTest {
             int guard = ps.indexOf("if (-not $ShowKey) {");
             assertTrue(guard > 0, "the PowerShell twin needs the same opt-in");
             assertTrue(ps.lastIndexOf("$VaultKey\"") > guard, "the key may only be written in the opt-in branch");
+            assertTrue(ps.contains("[Convert]::FromBase64String"), "base64 -d does not exist on a Windows host");
+            assertFalse(ps.substring(guard, guard + 1200).contains("| base64 -d"));
         }
     }
 
@@ -206,6 +208,31 @@ class DeploymentHardeningTest {
         }
 
         @Test
+        @DisplayName("a file that cannot be downloaded refuses the whole update on both platforms")
+        void everyUpdateFileIsRequired() throws IOException {
+            String sh = read("install.sh");
+            String update = between(sh, "    # Same checks as a fresh install:", "Pulling images...");
+            assertFalse(update.contains("keeping existing file"), "keeping an old file while recording the new version");
+            assertTrue(update.contains("could not be downloaded from ${EDDI_BRANCH}. Nothing was changed"));
+            assertTrue(sh.contains("eddi update --eddi-version=<version>"), "the hint must use the flag the parser reads");
+            assertFalse(sh.contains("eddi update <version>"));
+            String ps = read("install.ps1");
+            String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
+            assertFalse(helper.contains("keeping the existing file"));
+            assertTrue(helper.contains("$missing += $rel"));
+            // Rollback: originals are set aside and restored when a later move fails
+            // (text-level
+            // here; the behaviour was also run by hand against a locked file).
+            assertTrue(helper.contains(".eddi-old") && helper.contains("Move-Item -LiteralPath $m[1] -Destination $m[0] -Force"),
+                    "a failure after the first move must restore what was already replaced");
+            assertTrue(helper.indexOf("[Array]::Reverse($moved)") > helper.indexOf("Move-Item -LiteralPath $s[0] -Destination $s[1] -Force"));
+            assertTrue(ps.contains("set \"EDDI_BRANCH=main\" ^& eddi update"), "the printed cmd form must be quoted");
+            assertFalse(ps.contains("run: set EDDI_BRANCH=main"));
+            assertTrue(read("docs/security.md").contains("set \"EDDI_BRANCH=main\" & eddi update & set \"EDDI_BRANCH=\""));
+            assertTrue(ps.contains(":trim_branch"), "a trailing space from `set X=main & eddi update` must not be rejected");
+        }
+
+        @Test
         @DisplayName("a signed release is refused, not used unverified, when no SHA-256 utility exists")
         void missingHashUtilityFailsClosedForSignedReleases() throws IOException {
             String sh = read("install.sh");
@@ -242,7 +269,7 @@ class DeploymentHardeningTest {
             assertFalse(cmd.substring(0, cmd.indexOf("eddi-fetch.ps1\" -Ref")).contains("echo EDDI_BRANCH=!EDDI_BRANCH!"),
                     ".eddi-config must not be rewritten before the fetch");
             assertTrue(cmd.contains("if defined PINNED ("), "a release-pinned install must not fall back to main");
-            assertTrue(cmd.indexOf("if defined PINNED (") < cmd.indexOf("set \"EDDI_BRANCH=main\""));
+            assertTrue(cmd.indexOf("if defined PINNED (") < cmd.indexOf("set \"EDDI_BRANCH=main\"\n"));
 
             // The helper embeds the installer's own verification, so the two cannot drift.
             assertTrue(ps.contains("'Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum'"));
@@ -360,6 +387,8 @@ class DeploymentHardeningTest {
                 }
             }
             assertFalse(sh.contains("elapsed=$((elapsed + 10))"), "a slow probe would stretch the budget");
+            assertTrue(sh.contains("--max-time \"$probe\""), "each probe is capped to the time left");
+            assertFalse(between(sh, "wait_for_eddi() {", "# ── Success banner").contains("sleep 10"), "an uncapped sleep can run past the budget");
             assertTrue(sh.contains("elapsed=$((SECONDS - started))"));
         }
 
@@ -368,6 +397,8 @@ class DeploymentHardeningTest {
         void httpsBannerHasRecoveryGuidance() throws IOException {
             String sh = read("gcp/provision-vm.sh");
             assertTrue(sh.contains("If the HTTPS URLs do not answer"));
+            assertTrue(sh.contains("A browser sign-in through an SSH tunnel does NOT work here"));
+            assertTrue(sh.contains("sudo certbot certificates") && sh.contains("google_metadata_script_runner startup"));
         }
 
         @Test

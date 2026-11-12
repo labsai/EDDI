@@ -108,7 +108,9 @@ The helper scripts do not print the generated vault master key unless asked
 (`--show-key` / `-ShowKey`): whether output is "redirected" cannot be told reliably
 (`tee`, `script`, `*>`, transcripts, CI ptys), so by default the key stays in the Secret
 and the scripts name it instead. Read it back from a terminal with
-`kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data.application-secrets\.properties}' | base64 -d`.
+`kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data.application-secrets\.properties}' | base64 -d`
+(bash), or in PowerShell
+`[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((kubectl get secret eddi-secrets -n eddi -o jsonpath='{.data.application-secrets\.properties}')))`.
 
 PowerShell — **PowerShell 7 (`pwsh`)**, not the Windows PowerShell 5.1 that
 `powershell.exe` starts. The script declares `#Requires -Version 7` and refuses
