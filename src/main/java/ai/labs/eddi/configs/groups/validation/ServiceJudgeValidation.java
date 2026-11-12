@@ -106,19 +106,22 @@ public final class ServiceJudgeValidation {
     }
 
     /**
-     * Plaintext credentials in a model-parameter map that a save must refuse — for
-     * {@code lessonConfig.consolidation.parameters}, which took literals before
-     * this rule existed. A literal identical to the one {@code stored} holds under
-     * the same key is carried over, not new, and is let through: refusing it would
-     * make every stored group that has one unsavable. Only an administrator can
-     * send such a value back (anyone else reads the marker in its place, which
-     * {@code RedactionMarkerGuard} refuses). The value is never part of a message.
+     * What a save must refuse in a model-parameter map — for
+     * {@code lessonConfig.consolidation.parameters}, which took any value before
+     * these rules existed: a plaintext credential, and a {@code ${connection:...}}
+     * reference, which the model registry refuses for model parameters at call time
+     * (the judge's rule, {@link #parameterProblems}). A value identical to the one
+     * {@code stored} holds under the same key is carried over, not new, and is let
+     * through: refusing it would make every stored group that has one unsavable.
+     * Only an administrator can send a literal back unchanged (anyone else reads
+     * the marker in its place, which {@code RedactionMarkerGuard} refuses). The
+     * value is never part of a message.
      *
      * @param stored
      *            the same map in the version being replaced, or an empty map for a
      *            create
      */
-    public static List<String> newPlaintextCredentialProblems(String path, Map<String, String> parameters, Map<String, String> stored) {
+    public static List<String> newModelParameterProblems(String path, Map<String, String> parameters, Map<String, String> stored) {
         List<String> problems = new ArrayList<>();
         if (parameters == null || parameters.isEmpty()) {
             return problems;
@@ -130,6 +133,12 @@ public final class ServiceJudgeValidation {
                 problems.add(plaintextProblem(path, key));
             }
         }
+        parameters.forEach((key, value) -> {
+            if (value != null && value.contains(CONNECTION_REFERENCE) && !value.equals(before.get(key))) {
+                problems.add(path + "." + key + " uses a ${connection:...} reference, which model parameters do not accept — "
+                        + "use ${vault:...} or ${vars:...}");
+            }
+        });
         return problems;
     }
 

@@ -157,17 +157,19 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     }
 
     /**
-     * A NEW plaintext credential in {@code lessonConfig.consolidation.parameters}
-     * is refused, as a SERVICE judge's is: a group config must not become a
-     * plaintext key store, and editors read a redacted copy of it. A literal the
-     * version being replaced already holds under the same key is carried over and
-     * kept, so a group stored before this rule still saves. The stored version is
-     * read only when there is a literal to judge; one that cannot be read counts as
-     * holding none (fail closed).
+     * A NEW plaintext credential or {@code ${connection:...}} reference in
+     * {@code lessonConfig.consolidation.parameters} is refused, as a SERVICE
+     * judge's is: a group config must not become a plaintext key store, editors
+     * read a redacted copy of it, and the model registry refuses connection
+     * references for model parameters. A value the version being replaced already
+     * holds under the same key is carried over and kept, so a group stored before
+     * this rule still saves. The stored version is read only when there is
+     * something to judge; one that cannot be read counts as holding none (fail
+     * closed).
      */
     void validateConsolidationCredentials(String id, Integer version, AgentGroupConfiguration config) {
         Map<String, String> parameters = consolidationParameters(config);
-        if (parameters.isEmpty() || ServiceJudgeValidation.newPlaintextCredentialProblems("", parameters, Map.of()).isEmpty()) {
+        if (parameters.isEmpty() || ServiceJudgeValidation.newModelParameterProblems("", parameters, Map.of()).isEmpty()) {
             return;
         }
         Map<String, String> stored = Map.of();
@@ -179,7 +181,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                         version, LogSanitizer.sanitize(e.getMessage()));
             }
         }
-        List<String> problems = ServiceJudgeValidation.newPlaintextCredentialProblems("lessonConfig.consolidation.parameters", parameters,
+        List<String> problems = ServiceJudgeValidation.newModelParameterProblems("lessonConfig.consolidation.parameters", parameters,
                 stored);
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));

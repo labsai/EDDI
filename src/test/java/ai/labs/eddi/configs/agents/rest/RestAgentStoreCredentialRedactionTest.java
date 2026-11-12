@@ -107,6 +107,26 @@ class RestAgentStoreCredentialRedactionTest {
     }
 
     @Test
+    @DisplayName("accessKey and subscriptionKey in dream parameters are redacted for an editor; elsewhere *Key keeps its meaning")
+    void keyNamedDreamParametersAreRedacted() throws Exception {
+        AgentConfiguration withKeys = mapper.readValue("""
+                {"workflows":[],"userMemoryConfig":{"dream":{"parameters":
+                  {"accessKey":"AKIALITERALACCESSKEY","subscriptionKey":"plainsub","modelName":"m"}}},
+                 "channels":[{"type":"eddi://ai.labs.channel.slack","config":{"channelKey":"C0123"}}]}
+                """, AgentConfiguration.class);
+        when(agentStore.read(ID, 1)).thenReturn(withKeys);
+        when(accessGuard.isAdmin()).thenReturn(false);
+
+        AgentConfiguration read = rest.readAgent(ID, 1);
+        var parameters = read.getUserMemoryConfig().getDream().getParameters();
+        assertEquals(ConfigSecretRedactor.REDACTED, parameters.get("accessKey"));
+        assertEquals(ConfigSecretRedactor.REDACTED, parameters.get("subscriptionKey"));
+        assertEquals("m", parameters.get("modelName"));
+        // Not a model-parameter map: the stricter rule does not reach it.
+        assertEquals("C0123", read.getChannels().get(0).getConfig().get("channelKey"));
+    }
+
+    @Test
     @DisplayName("an administrator reads the agent as stored")
     void adminReadsStored() throws Exception {
         AgentConfiguration read = read(true);

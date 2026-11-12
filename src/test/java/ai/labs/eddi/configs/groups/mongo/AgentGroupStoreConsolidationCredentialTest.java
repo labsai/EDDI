@@ -76,6 +76,18 @@ class AgentGroupStoreConsolidationCredentialTest {
     }
 
     @Test
+    @DisplayName("a new ${connection:...} reference is refused, as for a SERVICE judge; a stored one is carried over")
+    void connectionReferenceRefused() throws Exception {
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> store.validateConsolidationCredentials(null, null, withParameters(Map.of("apiKey", "${connection:crm}"))));
+        assertTrue(e.getMessage().contains("lessonConfig.consolidation.parameters.apiKey") && e.getMessage().contains("connection"),
+                e.getMessage());
+
+        doReturn(withParameters(Map.of("apiKey", "${connection:crm}"))).when(store).read(ID, 1);
+        assertDoesNotThrow(() -> store.validateConsolidationCredentials(ID, 1, withParameters(Map.of("apiKey", "${connection:crm}"))));
+    }
+
+    @Test
     @DisplayName("a literal the stored version already holds under the same key is carried over on update")
     void carriedOverLiteralAccepted() throws Exception {
         doReturn(withParameters(Map.of("apiKey", LITERAL))).when(store).read(ID, 1);

@@ -75,6 +75,23 @@ class RestAgentGroupStoreCredentialRedactionTest {
     }
 
     @Test
+    @DisplayName("accessKey and subscriptionKey in consolidation parameters are redacted for an editor, as the save rule treats them")
+    void keyNamedParametersAreRedacted() throws Exception {
+        var config = new AgentGroupConfiguration();
+        config.setName("team");
+        config.setLessonConfig(new LessonConfig(null, null, null, new LessonConsolidationConfig("bedrock", "m",
+                Map.of("accessKey", "AKIALITERALACCESSKEY", "subscriptionKey", "plainsub", "promptCacheKey", "${vault:k}"), null, null, null,
+                null, null, null, null)));
+        when(groupStore.read(ID, 1)).thenReturn(config);
+        when(accessGuard.isAdmin()).thenReturn(false);
+
+        var parameters = rest.readGroup(ID, 1).getLessonConfig().consolidation().parameters();
+        assertEquals(ConfigSecretRedactor.REDACTED, parameters.get("accessKey"));
+        assertEquals(ConfigSecretRedactor.REDACTED, parameters.get("subscriptionKey"));
+        assertEquals("${vault:k}", parameters.get("promptCacheKey"));
+    }
+
+    @Test
     @DisplayName("an administrator reads the group as stored")
     void adminReadsStored() throws Exception {
         assertEquals(LITERAL, read(true).getLessonConfig().consolidation().parameters().get("apiKey"));

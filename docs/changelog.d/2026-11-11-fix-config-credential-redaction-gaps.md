@@ -59,9 +59,27 @@ left alone.
 **3. The export scrubber's name rules were narrower than the read redactor's (medium).**
 `SecretScrubber.isSecretFieldName` now also answers true for `ConfigSecretRedactor.isCredentialName`
 and, inside a `queryParams` map, `isCredentialQueryName`, so `parameters.nonAzureApiKey =
-"my-litellm-master-key"` is no longer redacted on GET and exported in clear. A parity test walks
-the redactor's name sets. The `scrubJson` failure mode and the bearer rule (open PR #1338) were not
-touched.
+"my-litellm-master-key"`, which GET already hid but the export carried in clear, is now redacted
+from the export too. A parity test walks the redactor's name sets. The `scrubJson` failure mode
+and the bearer rule (open PR #1338) were not touched.
+
+**Second review round.**
+- The upgrade's destination check skipped any "target-bound" source string (one merely
+  *containing* `${vault:`), even where the target had no value to replace it with, so a new
+  `baseUrl: "https://attacker.example/v1?ref=${vault:k}"` was kept and the target's key restored
+  beside it. A source string now counts as unchanged only where the target holds a string that
+  merge actually puts in its place.
+- In the model-parameter maps held to the save-time `*Key` rule
+  (`userMemoryConfig.dream.parameters`, `lessonConfig.consolidation.parameters`, SERVICE-judge
+  `parameters`), the read redaction and the export now hide `accessKey`, `subscriptionKey` and
+  any other `*Key` literal too (`ConfigSecretRedactor.KEY_NAMED_CREDENTIAL_PATHS`); elsewhere such
+  names keep their meaning (`promptCacheKey`).
+- The export judged only string entries of an embedded header or query map by name; a numeric
+  `"sig": 12345678` now is redacted as the read path does.
+- A new `${connection:...}` reference in consolidation parameters is refused at save, as for a
+  SERVICE judge.
+- The patch destination check compares each ancestor's direct fields instead of converting the
+  whole document per restored credential.
 
 ### Design decisions
 

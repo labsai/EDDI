@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -87,6 +89,41 @@ class SecretScrubberRedactorParityTest {
             }
         }
         assertTrue(leaked.isEmpty(), "exported in clear: " + leaked);
+    }
+
+    @Test
+    @DisplayName("a numeric credential in an embedded query or header map is hidden by both the read and the export")
+    void numericEntriesOfEmbeddedMaps() throws Exception {
+        String config = """
+                {"parameters":{"customQueryParams":"{\\"sig\\":12345678,\\"page\\":2}",
+                  "customHeaders":"{\\"X-Api-Key\\":87654321,\\"X-Retries\\":3}"}}""";
+
+        JsonNode exported = mapper.readTree(scrubber.scrubJson(config)).at("/parameters");
+        JsonNode read = mapper.readTree(ConfigSecretRedactor.redactJson(config, Set.of())).at("/parameters");
+
+        for (JsonNode parameters : List.of(exported, read)) {
+            String query = parameters.get("customQueryParams").asText();
+            String headers = parameters.get("customHeaders").asText();
+            assertFalse(query.contains("12345678"), query);
+            assertFalse(headers.contains("87654321"), headers);
+            assertTrue(query.contains("\"page\":2"), query);
+            assertTrue(headers.contains("\"X-Retries\":3"), headers);
+        }
+    }
+
+    @Test
+    @DisplayName("a *Key literal in a key-named model-parameter map is hidden by both; an LLM task's promptCacheKey by neither")
+    void keyNamedParameterMaps() throws Exception {
+        String config = """
+                {"userMemoryConfig":{"dream":{"parameters":{"accessKey":"plain-access","subscriptionKey":"plainsub"}}},
+                 "lessonConfig":{"consolidation":{"parameters":{"accessKey":"plain-access"}}},
+                 "tasks":[{"parameters":{"promptCacheKey":"tenant-a"}}]}""";
+
+        for (String json : List.of(scrubber.scrubJson(config), ConfigSecretRedactor.redactJson(config, Set.of()))) {
+            JsonNode tree = mapper.readTree(json);
+            assertFalse(json.contains("plain-access") || json.contains("plainsub"), json);
+            assertEquals("tenant-a", tree.at("/tasks/0/parameters/promptCacheKey").asText(), json);
+        }
     }
 
     @Test
