@@ -47,6 +47,9 @@ export function QuotasPage() {
   // Fields whose text is not a number yet (a lone "-", "1e"). Saving is blocked
   // while any is set: Number("-") is NaN, which the PUT would send as null.
   const [invalidFields, setInvalidFields] = useState<ReadonlySet<keyof TenantQuota>>(new Set());
+  // Counts edits, so a save can tell whether the form moved on while it was in
+  // flight: the fields stay editable, and an edit made then is not saved yet.
+  const editCount = useRef(0);
 
   // Closing the tab or navigating away with edits would silently discard them —
   // the page already shows an "Unsaved changes" pill, so it must also guard.
@@ -64,6 +67,7 @@ export function QuotasPage() {
 
   const handleChange = useCallback(
     (field: keyof TenantQuota, value: number | boolean) => {
+      editCount.current++;
       setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
       setDirty(true);
     },
@@ -81,7 +85,10 @@ export function QuotasPage() {
         return next;
       });
       if (value !== null) handleChange(field, value);
-      else setDirty(true);
+      else {
+        editCount.current++;
+        setDirty(true);
+      }
     },
     [handleChange],
   );
@@ -89,13 +96,19 @@ export function QuotasPage() {
 
   const handleSave = useCallback(() => {
     if (!form || hasInvalidField) return;
+    const sentAt = editCount.current;
     updateMutation.mutate(
       { tenantId: DEFAULT_TENANT, quota: form },
       {
         onSuccess: (data) => {
-          setForm(data);
-          setDirty(false);
-          setInvalidFields(new Set());
+          // Take the server's copy only if nothing was edited since sending.
+          // Otherwise the form holds an edit the server has not seen: replacing
+          // it would lose that edit, and clearing `dirty` would drop the guard.
+          if (editCount.current === sentAt) {
+            setForm(data);
+            setDirty(false);
+            setInvalidFields(new Set());
+          }
           toast.success(t("quotas.saveSuccess", "Quota saved"));
         },
         onError: (err) => toast.error(getErrorMessage(err)),

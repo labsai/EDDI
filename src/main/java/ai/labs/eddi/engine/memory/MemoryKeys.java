@@ -100,6 +100,18 @@ public final class MemoryKeys {
     /** Action strings emitted by behavior rules. Read by most downstream tasks. */
     public static final MemoryKey<List<String>> ACTIONS = MemoryKey.ofPublic("actions");
 
+    // ---- HITL ----
+
+    /**
+     * The plan hash a HITL resume was admitted against ({@code HitlPlanHash}).
+     * Written by {@code Conversation#resume}; read by {@code LifecycleManager} into
+     * the audit entries of the tasks the resume runs. A colon key: not visible to
+     * templates.
+     *
+     * @since 6.8.0
+     */
+    public static final MemoryKey<String> HITL_PLAN_HASH = MemoryKey.of("hitl:plan_hash");
+
     // ---- Langchain ----
 
     /** LLM response text. Written by LlmTask. */

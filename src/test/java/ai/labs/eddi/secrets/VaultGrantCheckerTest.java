@@ -27,6 +27,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.utils.LogCaptureSupport.CapturedRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -39,6 +40,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -514,6 +516,24 @@ class VaultGrantCheckerTest {
         }
 
         /**
+         * Let through, but not silently: the resolver checks no grants, so a deploy
+         * during a store outage is the one moment a restricted secret goes unchecked,
+         * and the operator has to be able to see that it happened.
+         */
+        @Test
+        @DisplayName("unreadable metadata is logged at WARN, naming the agent and the reference")
+        void unreadableMetadataIsLoggedAtWarn() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
+            var agent = agentReferencingTheVault();
+
+            List<CapturedRecord> logs = captureRecordsOf(VaultGrantChecker.class,
+                    () -> checker.findUngrantedReferences(agent, "some-other-agent"));
+
+            assertTrue(logs.stream().anyMatch(r -> r.isWarning() && r.message().contains("some-other-agent") && r.message().contains(VAULT_REF)),
+                    "a grant check skipped over a provider error has to be visible: " + logs);
+        }
+
+        /**
          * Deploying before the secret exists is a supported flow — agent sync promotes
          * a workflow to an instance that does not hold the source's secret, then
          * deploys it. The grant the secret is later created with is checked at creation
@@ -523,8 +543,12 @@ class VaultGrantCheckerTest {
         @DisplayName("a secret that does not exist is not a violation — its grant is checked when it is created")
         void absentSecretIsNotAViolation() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("Secret not found"));
+            var agent = agentReferencingTheVault();
 
-            assertTrue(checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent").isEmpty());
+            List<CapturedRecord> logs = captureRecordsOf(VaultGrantChecker.class,
+                    () -> assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty()));
+
+            assertTrue(logs.stream().noneMatch(CapturedRecord::isWarning), "a supported flow is not a warning: " + logs);
         }
 
         @Test

@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext.Item;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -54,7 +55,7 @@ class RestGroupConversationApprovalContextTest {
         var guard = new HitlAccessGuard(identity, ownershipValidator, mock(IConversationDescriptorStore.class), mock(IConversationService.class),
                 groupService);
         rest = new RestGroupConversation(groupService, mock(IJsonSerialization.class), identity, ownershipValidator, guard,
-                mock(ResourceAccessGuard.class));
+                mock(ResourceAccessGuard.class), new CallerIdentityContext(null, null));
     }
 
     private void as(String userId, boolean admin, boolean approver) {
