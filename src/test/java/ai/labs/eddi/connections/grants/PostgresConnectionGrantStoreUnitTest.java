@@ -27,6 +27,8 @@ import java.util.AbstractList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,7 +40,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -186,11 +190,19 @@ class PostgresConnectionGrantStoreUnitTest {
         when(resultSet.getString("status")).thenReturn("EXPIRED");
         when(resultSet.getString("refresh_in_progress")).thenReturn(CLAIMANT);
         when(resultSet.getLong("version")).thenReturn(11L);
-        when(resultSet.getTimestamp("expires_at")).thenReturn(Timestamp.from(EXPIRES_AT));
-        when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.from(CREATED_AT));
-        when(resultSet.getTimestamp("updated_at")).thenReturn(Timestamp.from(UPDATED_AT));
-        when(resultSet.getTimestamp("last_refresh_at")).thenReturn(Timestamp.from(LAST_REFRESH_AT));
+        when(resultSet.getTimestamp(eq("expires_at"), any(Calendar.class))).thenReturn(Timestamp.from(EXPIRES_AT));
+        when(resultSet.getTimestamp(eq("created_at"), any(Calendar.class))).thenReturn(Timestamp.from(CREATED_AT));
+        when(resultSet.getTimestamp(eq("updated_at"), any(Calendar.class))).thenReturn(Timestamp.from(UPDATED_AT));
+        when(resultSet.getTimestamp(eq("last_refresh_at"), any(Calendar.class))).thenReturn(Timestamp.from(LAST_REFRESH_AT));
         when(resultSet.getTimestamp(eq("refresh_lease_expires_at"), any(Calendar.class))).thenReturn(Timestamp.from(LEASE_EXPIRES_AT));
+    }
+
+    /**
+     * A {@link Calendar} argument in UTC — the zone every timestamp column is
+     * written and read in.
+     */
+    private static Calendar utc() {
+        return argThat(calendar -> calendar != null && "UTC".equals(calendar.getTimeZone().getID()));
     }
 
     private void stubTwoRows() throws SQLException {
@@ -388,10 +400,10 @@ class PostgresConnectionGrantStoreUnitTest {
         verify(preparedStatement).setString(6, "cipher-refresh");
         verify(preparedStatement).setString(7, "iv-refresh");
         verify(preparedStatement).setString(8, "dek-7");
-        verify(preparedStatement).setTimestamp(9, Timestamp.from(EXPIRES_AT));
+        verify(preparedStatement).setTimestamp(eq(9), eq(Timestamp.from(EXPIRES_AT)), utc());
         verify(preparedStatement).setString(10, "[\"read\",\"write\"]");
         verify(preparedStatement).setString(11, "EXPIRED");
-        verify(preparedStatement).setTimestamp(12, Timestamp.from(LAST_REFRESH_AT));
+        verify(preparedStatement).setTimestamp(eq(12), eq(Timestamp.from(LAST_REFRESH_AT)), utc());
         verify(preparedStatement).executeUpdate();
         assertTrue(capturedSql().contains("ON CONFLICT (tenant_id, connection_name, principal) DO UPDATE SET"),
                 "without the conflict clause a reconnect inserts a duplicate grant instead of replacing the old tokens");
@@ -418,9 +430,9 @@ class PostgresConnectionGrantStoreUnitTest {
 
         store.upsert(grant);
 
-        verify(preparedStatement).setTimestamp(9, null);
+        verify(preparedStatement).setTimestamp(eq(9), isNull(), utc());
         verify(preparedStatement).setString(10, null);
-        verify(preparedStatement).setTimestamp(12, null);
+        verify(preparedStatement).setTimestamp(eq(12), isNull(), utc());
     }
 
     @Test
@@ -479,7 +491,8 @@ class PostgresConnectionGrantStoreUnitTest {
                 "the expiry is written as database-now plus the bound duration: " + sql);
         assertTrue(sql.contains("refresh_lease_expires_at < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')"),
                 "and compared with database-now, in the same kind of timestamp: " + sql);
-        verify(preparedStatement, never()).setTimestamp(anyInt(), any(Timestamp.class));
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any());
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any(), any());
     }
 
     @Test
@@ -515,16 +528,44 @@ class PostgresConnectionGrantStoreUnitTest {
     }
 
     @Test
-    @DisplayName("find reads the lease expiry back as the UTC wall clock claimRefresh wrote it in")
-    void findReadsTheLeaseExpiryAsUtc() throws Exception {
+    @DisplayName("find reads every timestamp back as the UTC wall clock it was written in")
+    void findReadsEveryTimestampAsUtc() throws Exception {
         stubFullRow();
 
         store.find(TENANT, CONNECTION, PRINCIPAL);
 
-        var calendar = ArgumentCaptor.forClass(Calendar.class);
-        verify(resultSet).getTimestamp(eq("refresh_lease_expires_at"), calendar.capture());
-        assertEquals("UTC", calendar.getValue().getTimeZone().getID(),
-                "read in this JVM's zone, the expiry would be off by the zone's offset on any replica not running in UTC");
+        // Read in this JVM's zone, each would be off by the zone's offset on any
+        // replica not running in UTC — an access token refreshed hours early, or a
+        // dead one served as live.
+        for (String column : List.of("expires_at", "created_at", "updated_at", "last_refresh_at", "refresh_lease_expires_at")) {
+            verify(resultSet).getTimestamp(eq(column), utc());
+        }
+        verify(resultSet, never()).getTimestamp(anyString());
+    }
+
+    @Test
+    @DisplayName("every write binds its timestamps, and stamps the database clock, as a UTC wall clock")
+    void everyWriteStampsAUtcWallClock() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        store.upsert(grant());
+        store.completeRefresh(grant(), 7L);
+        store.claimRefresh(TENANT, CONNECTION, PRINCIPAL, CLAIMANT, LEASE);
+
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any());
+        // CURRENT_TIMESTAMP is a TIMESTAMPTZ; stored into a TIMESTAMP column it is cast
+        // through the session's zone, which the driver takes from the JVM's.
+        ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(ddl.capture());
+        ArgumentCaptor<String> dml = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(3)).prepareStatement(dml.capture());
+        Pattern sessionZoneClock = Pattern.compile("CURRENT_TIMESTAMP(?! AT TIME ZONE 'UTC')");
+        for (String sql : Stream.concat(ddl.getAllValues().stream(), dml.getAllValues().stream()).toList()) {
+            assertFalse(sessionZoneClock.matcher(sql).find(), "a database-clock stamp in the session's zone: " + sql);
+        }
+        assertTrue(dml.getAllValues().getFirst().contains("created_at"),
+                "the insert names created_at, so the column default — which an existing table keeps — never stamps it: "
+                        + dml.getAllValues().getFirst());
     }
 
     @Test
@@ -555,7 +596,7 @@ class PostgresConnectionGrantStoreUnitTest {
         verify(preparedStatement).setString(3, "cipher-refresh");
         verify(preparedStatement).setString(4, "iv-refresh");
         verify(preparedStatement).setString(5, "dek-7");
-        verify(preparedStatement).setTimestamp(6, Timestamp.from(EXPIRES_AT));
+        verify(preparedStatement).setTimestamp(eq(6), eq(Timestamp.from(EXPIRES_AT)), utc());
         verify(preparedStatement).setString(7, "[\"read\",\"write\"]");
         verify(preparedStatement).setString(8, "ACTIVE");
         verify(preparedStatement).setString(9, TENANT);

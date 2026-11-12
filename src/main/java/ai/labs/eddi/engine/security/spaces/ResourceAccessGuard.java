@@ -463,11 +463,6 @@ public class ResourceAccessGuard {
         return caller.subjects().stream().filter(subject -> !personal.contains(subject)).toList();
     }
 
-    /** Whether the current caller is an administrator. */
-    public boolean callerIsAdmin() {
-        return ownershipValidator.isAdmin(identity);
-    }
-
     /**
      * What to do when a resource has no descriptor at all.
      *

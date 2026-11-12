@@ -617,7 +617,7 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 | Key | Required | Description |
 |-----|----------|-------------|
 | `channelType` | ✅ | Must be `"slack"` |
-| `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
+| `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`). One integration per channel across the deployment: a second one is refused with 400, and a save whose check cannot read the stored integrations is refused with 503 — retry it |
 | `platformConfig.botToken` | ✅ | Bot User OAuth Token. Use vault reference. |
 | `platformConfig.signingSecret` | ✅ | Slack Signing Secret. Use vault reference. |
 | `platformConfig.teamId` | ❌ (recommended) | Slack workspace id (`T…`). The only source of the workspace in user ids; events claiming another workspace are rejected. Without it, users get team-less ids — see [Slack User Identity](#slack-user-identity). |

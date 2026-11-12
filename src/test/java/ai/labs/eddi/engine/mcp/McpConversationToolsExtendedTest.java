@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -655,7 +654,7 @@ class McpConversationToolsExtendedTest {
     @Test
     void chatManaged_emptyDeployments_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+                .thenReturn(null);
 
         var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("support");
@@ -671,7 +670,7 @@ class McpConversationToolsExtendedTest {
     @Test
     void chatManaged_nullTrigger_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+                .thenReturn(null);
 
         when(agentTriggerStore.readAgentTrigger("support")).thenReturn(null);
 

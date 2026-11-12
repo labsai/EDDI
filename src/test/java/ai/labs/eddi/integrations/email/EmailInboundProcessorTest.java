@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
@@ -35,6 +36,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
+import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -86,6 +88,8 @@ class EmailInboundProcessorTest {
     FakeUserConversations userConversations;
     IAttachmentStore attachmentStore;
     EmailOwnerNotifier ownerNotifier;
+    Instance<AuditLedgerService> audits;
+    GdprPseudonymizer pseudonymizer;
     EmailInboundProcessor processor;
     List<ConversationResponseHandler> handlers;
     List<InputData> inputs;
@@ -126,9 +130,12 @@ class EmailInboundProcessorTest {
         when(attachments.isResolvable()).thenReturn(true);
         when(attachments.get()).thenReturn(attachmentStore);
         ownerNotifier = mock(EmailOwnerNotifier.class);
+        audits = mock(Instance.class);
+        pseudonymizer = mock(GdprPseudonymizer.class);
         processor = new EmailInboundProcessor(ledger, stateStore, new MimeMessageParser(new HtmlToMarkdownConverter()), authenticator, conversations,
                 groups, userConversations, new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), attachments,
-                ownerNotifier, new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
+                ownerNotifier, mock(EmailReplySender.class), audits, pseudonymizer, new SimpleMeterRegistry(), Duration.ofMinutes(30),
+                Duration.ofDays(30));
     }
 
     static ChannelIntegrationConfiguration integration(Map<String, String> extra, ChannelTarget... targets) {
@@ -450,15 +457,13 @@ class EmailInboundProcessorTest {
         }
 
         @Test
-        @DisplayName("a refusal is audited by reason category, with the sender only as domain and hash")
-        @SuppressWarnings("unchecked")
+        @DisplayName("a refusal is audited by reason category, with the sender only as domain and keyed pseudonym")
         void refusalAudited() {
             AuditLedgerService audit = mock(AuditLedgerService.class);
             when(audit.isEnabled()).thenReturn(true);
-            Instance<AuditLedgerService> instance = mock(Instance.class);
-            when(instance.isResolvable()).thenReturn(true);
-            when(instance.get()).thenReturn(audit);
-            processor.auditLedger = instance;
+            when(audits.isResolvable()).thenReturn(true);
+            when(audits.get()).thenReturn(audit);
+            when(pseudonymizer.pseudonymFor("alice@supplier.com")).thenReturn("gdpr-erased:k1:alice");
 
             processor.process(context(Map.of("senderAllowlist", "*@other.com")), EmailTestMail.mail().polled(1), Instant.now());
 
@@ -467,6 +472,8 @@ class EmailInboundProcessorTest {
             assertEquals("email.inbound", entry.getValue().taskId());
             assertEquals("blocked", entry.getValue().output().get("reason"));
             assertEquals("supplier.com", entry.getValue().output().get("senderDomain"));
+            assertEquals("gdpr-erased:k1:alice", entry.getValue().output().get("senderPseudonym"), "the keyed pseudonym HITL notifications use");
+            assertFalse(entry.getValue().output().containsKey("senderHash"), "no unkeyed hash a list of candidate addresses could confirm");
             assertFalse(entry.getValue().output().toString().contains("alice@"), "no address in the write-once audit ledger");
         }
 
