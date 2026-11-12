@@ -118,6 +118,32 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
     }
 
     /**
+     * Tells the caller that an unverified directory address was skipped — without
+     * the address, which the response must not carry. Many identity providers never
+     * set {@code email_verified}, so for a genuine user this is the case where
+     * their ledger and suppression rows are still there after the erasure; left to
+     * the audit ledger alone it was a silent gap.
+     */
+    @Override
+    public List<String> notices(String userId, Operation operation) {
+        if (!resolve(userId).unverifiedDirectoryEmailSkipped()) {
+            return List.of();
+        }
+        String verb = operation == Operation.EXPORT ? "exported" : "erased";
+        String request = operation == Operation.EXPORT ? "export" : "erasure";
+        return List.of(UNVERIFIED_DIRECTORY_EMAIL + ": the user directory records an e-mail address for this user that the identity "
+                + "provider has not marked verified, so the email ledger and suppression rows under that address were not " + verb
+                + ". Confirm out of band that the address belongs to this person, then run the " + request
+                + " again with the address as the user id.");
+    }
+
+    /**
+     * Leading code of the unverified-address notice, stable for clients to match
+     * on.
+     */
+    public static final String UNVERIFIED_DIRECTORY_EMAIL = "unverifiedDirectoryEmail";
+
+    /**
      * The addresses of {@code userId}, each with its source:
      * {@value #SOURCE_USER_ID} (the id the operator named is itself an address),
      * {@value #SOURCE_EMAIL_IDENTITY} (an email channel identity, which an

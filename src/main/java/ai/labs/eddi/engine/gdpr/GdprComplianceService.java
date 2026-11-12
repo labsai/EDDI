@@ -961,6 +961,7 @@ public class GdprComplianceService {
         // snapshots until a retry).
         Map<String, Long> additionalDeleted = new LinkedHashMap<>();
         Map<String, Object> participantBases = new LinkedHashMap<>();
+        List<String> notices = new ArrayList<>();
         List<String> participantsFailed = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
             if (participant.order() >= IGdprParticipant.LAST && !participantsFailed.isEmpty()) {
@@ -970,6 +971,7 @@ public class GdprComplianceService {
             }
             // Read before the erase: the basis may come from a record the erase removes.
             collectAuditBasis(participant, userId, participantBases, pseudonym);
+            collectNotices(participant, userId, IGdprParticipant.Operation.ERASURE, notices, pseudonym);
             try {
                 long removed = participant.erase(userId);
                 additionalDeleted.put(participant.name(), removed);
@@ -987,7 +989,7 @@ public class GdprComplianceService {
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
                 schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted,
-                auditRedacted);
+                auditRedacted, notices);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -1024,6 +1026,9 @@ public class GdprComplianceService {
         auditDetails.put("auditRedacted", auditRedacted);
         additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
         auditDetails.putAll(participantBases);
+        if (!notices.isEmpty()) {
+            auditDetails.put("notices", List.copyOf(notices));
+        }
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
@@ -1044,6 +1049,25 @@ public class GdprComplianceService {
             }
         } catch (Exception e) {
             LOGGER.warnf("[GDPR] Could not record the basis of %s [%s]: %s", participant.name(), pseudonym, e.getMessage());
+        }
+    }
+
+    /**
+     * Adds {@code participant}'s {@link IGdprParticipant#notices} to
+     * {@code notices}, each prefixed with the participant's name. A failure is
+     * logged and adds nothing.
+     */
+    private static void collectNotices(IGdprParticipant participant, String userId, IGdprParticipant.Operation operation, List<String> notices,
+                                       String pseudonym) {
+        try {
+            List<String> found = participant.notices(userId, operation);
+            if (found != null) {
+                for (String notice : found) {
+                    notices.add(participant.name() + ": " + notice);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[GDPR] Could not read the notices of %s [%s]: %s", participant.name(), pseudonym, e.getMessage());
         }
     }
 
@@ -1130,6 +1154,28 @@ public class GdprComplianceService {
         String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting data export [%s]", pseudonym);
 
+        // An export that read personal data leaves a ledger entry whatever happens
+        // after the first read: an exception escaping the assembly (a participant
+        // listing that throws, an Error) used to skip the entry, because it was
+        // written at the end. It records what was gathered up to that point, the
+        // participants' bases included, and whether the bundle was handed out.
+        Map<String, Object> exportDetails = new LinkedHashMap<>();
+        boolean assembled = false;
+        try {
+            UserDataExport export = assembleExport(userId, pseudonym, exportDetails);
+            assembled = true;
+            return export;
+        } finally {
+            exportDetails.put("outcome", assembled ? "completed" : "aborted");
+            submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
+        }
+    }
+
+    /**
+     * The body of {@link #exportUserData}; fills {@code exportDetails} for the
+     * compliance entry the caller writes.
+     */
+    private UserDataExport assembleExport(String userId, String pseudonym, Map<String, Object> exportDetails) {
         // 1. User memories
         var memories = new ArrayList<UserMemoryEntry>();
         try {
@@ -1327,12 +1373,11 @@ public class GdprComplianceService {
                 failedConversationIds.size(), managedConversations.size(), auditExportEntries.size(),
                 attachmentEntries.size());
 
-        // Write compliance event to immutable audit ledger.
+        // The compliance event for the immutable audit ledger (written by the caller).
         // conversationsFailed is part of the record because the ledger entry is the
         // evidence that this export happened: an entry saying 998 of 1,000 were
         // exported with nothing to explain the two is a discrepancy nobody can
         // account for after the fact.
-        var exportDetails = new LinkedHashMap<String, Object>();
         exportDetails.put("memoriesExported", memories.size());
         exportDetails.put("conversationsExported", conversations.size());
         exportDetails.put("totalConversations", totalConversations);
@@ -1349,9 +1394,12 @@ public class GdprComplianceService {
         exportDetails.put("failedCategories", List.copyOf(failedCategories));
 
         Map<String, Object> additionalData = new LinkedHashMap<>();
-        Map<String, Object> participantBases = new LinkedHashMap<>();
+        List<String> notices = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
-            collectAuditBasis(participant, userId, participantBases, pseudonym);
+            // Straight into the details: an export aborted further on still records
+            // the bases gathered up to then.
+            collectAuditBasis(participant, userId, exportDetails, pseudonym);
+            collectNotices(participant, userId, IGdprParticipant.Operation.EXPORT, notices, pseudonym);
             try {
                 Object held = participant.export(userId);
                 if (held != null) {
@@ -1365,14 +1413,15 @@ public class GdprComplianceService {
                 additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
             }
         }
-        exportDetails.putAll(participantBases);
-        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
+        if (!notices.isEmpty()) {
+            exportDetails.put("notices", List.copyOf(notices));
+        }
 
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
                 totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData,
                 groupConversationEntries, groupConversationsTruncated, sharedArtifactEntries, sharedArtifactsTruncated,
-                failedCategories);
+                failedCategories, notices);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===

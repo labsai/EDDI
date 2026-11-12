@@ -94,6 +94,23 @@ class EmailLedgerGdprParticipantTest {
     }
 
     @Test
+    @DisplayName("the skip is told to the caller with the remedy, never with the address")
+    void unverifiedDirectoryEmailIsAnnounced() {
+        when(directory.find("mallory")).thenReturn(Optional.of(new DirectoryUser("mallory", "sub-2", "mallory", "carol@example.com", false,
+                "Mallory", List.of(), Instant.now(), Instant.now())));
+        when(directory.find("carol")).thenReturn(Optional.of(new DirectoryUser("carol", "sub-1", "carol", "carol@example.com", true, "Carol",
+                List.of(), Instant.now(), Instant.now())));
+
+        List<String> erasure = participant.notices("mallory", IGdprParticipant.Operation.ERASURE);
+        assertEquals(1, erasure.size());
+        assertTrue(erasure.getFirst().startsWith(EmailLedgerGdprParticipant.UNVERIFIED_DIRECTORY_EMAIL));
+        assertTrue(erasure.getFirst().contains("not erased") && erasure.getFirst().contains("with the address as the user id"));
+        assertFalse(erasure.getFirst().contains("carol@example.com"), "the response must not carry the address");
+        assertTrue(participant.notices("mallory", IGdprParticipant.Operation.EXPORT).getFirst().contains("not exported"));
+        assertTrue(participant.notices("carol", IGdprParticipant.Operation.ERASURE).isEmpty());
+    }
+
+    @Test
     @DisplayName("the audit basis names where each address came from, never the address")
     void auditBasisNamesSources() throws Exception {
         when(directory.find("carol")).thenReturn(Optional.of(new DirectoryUser("carol", "sub-1", "carol", "carol@example.com", true, "Carol",

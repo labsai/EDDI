@@ -66,7 +66,8 @@ public class McpGdprTools {
             + "Returns status='completed' only when every step succeeded; "
             + "status='partially_completed' with a non-empty 'failedSteps' means "
             + "some of the user's data still exists and the erasure must NOT be "
-            + "reported to the data subject as fulfilled.")
+            + "reported to the data subject as fulfilled. A non-empty 'notices' names data "
+            + "a step deliberately did not erase and the remedy; act on it before reporting.")
     public String deleteUserData(
                                  @ToolArg(description = "User ID to erase (required)") String userId,
                                  @ToolArg(description = "Must be 'CONFIRM' to proceed") String confirmation) {
@@ -113,6 +114,9 @@ public class McpGdprTools {
             map.put("connectionGrantsDeleted", result.connectionGrantsDeleted());
             map.put("autoVaultedSecretsDeleted", result.autoVaultedSecretsDeleted());
             map.put("additionalDeleted", result.additionalDeleted());
+            // Same field as the REST body: data a step deliberately left (an unverified
+            // e-mail address) and what the operator does about it.
+            map.put("notices", result.notices());
             map.put("completedAt", result.completedAt().toString());
             if (!result.complete()) {
                 LOGGER.warnf("MCP delete_user_data: erasure cascade incomplete — failed steps: %s",
@@ -136,7 +140,8 @@ public class McpGdprTools {
             + "with 'totalConversations' saying how many the user has, and "
             + "'failedConversationIds' names conversations that could not be loaded at all; "
             + "'groupConversationsTruncated', 'sharedArtifactsTruncated' and 'failedCategories' "
-            + "do the same for the group sections.")
+            + "do the same for the group sections. A non-empty 'notices' names data a "
+            + "section deliberately did not export and the remedy.")
     public String exportUserData(
                                  @ToolArg(description = "User ID to export (required)") String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
@@ -182,6 +187,7 @@ public class McpGdprTools {
             map.put("sharedArtifacts", export.sharedArtifacts());
             map.put("sharedArtifactsTruncated", export.sharedArtifactsTruncated());
             map.put("failedCategories", export.failedCategories());
+            map.put("notices", export.notices());
             return jsonSerialization.serialize(map);
         } catch (Exception e) {
             LOGGER.errorf(e, "MCP export_user_data failed");

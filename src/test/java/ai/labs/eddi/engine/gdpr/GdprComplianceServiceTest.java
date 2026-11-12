@@ -2113,6 +2113,63 @@ class GdprComplianceServiceTest {
         }
 
         @Test
+        @DisplayName("a participant's notice reaches the caller of erasure and export, prefixed with its name, without failing a step")
+        void noticesReachTheCaller() throws Exception {
+            var ledger = participant("emailLedger", 0, null);
+            when(ledger.notices("alice", IGdprParticipant.Operation.ERASURE)).thenReturn(List.of("skipped: not erased"));
+            when(ledger.notices("alice", IGdprParticipant.Operation.EXPORT)).thenReturn(List.of("skipped: not exported"));
+            var broken = participant("userDirectory", 0, null);
+            when(broken.notices(anyString(), any())).thenThrow(new IllegalStateException("down"));
+            register(ledger, broken);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+            UserDataExport export = service.exportUserData("alice");
+
+            assertEquals(List.of("emailLedger: skipped: not erased"), result.notices());
+            assertTrue(result.complete(), "a notice is not a failed step: " + result.failedSteps());
+            assertEquals(List.of("emailLedger: skipped: not exported"), export.notices());
+            ArgumentCaptor<AuditEntry> entries = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditLedgerService, atLeast(2)).submit(entries.capture());
+            assertTrue(entries.getAllValues().stream().anyMatch(e -> List.of("emailLedger: skipped: not erased").equals(e.output().get("notices"))));
+        }
+
+        @Test
+        @DisplayName("an export whose assembly aborts still leaves a ledger entry, with what was gathered and the outcome")
+        void abortedExportStillLeavesALedgerEntry() throws Exception {
+            var ledger = participant("emailLedger", 0, null);
+            when(ledger.auditBasis("alice")).thenReturn(Map.of("emailAddresses", 1));
+            var exploding = participant("userDirectory", 0, null);
+            // An Error is not caught by the per-participant handler: it aborts the export.
+            when(exploding.export("alice")).thenThrow(new AssertionError("boom"));
+            register(ledger, exploding);
+
+            assertThrows(AssertionError.class, () -> service.exportUserData("alice"));
+
+            ArgumentCaptor<AuditEntry> entries = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditLedgerService).submit(entries.capture());
+            Map<String, Object> output = entries.getValue().output();
+            assertEquals("GDPR_EXPORT", entries.getValue().input().get("eventType"));
+            assertEquals("aborted", output.get("outcome"));
+            assertEquals(Map.of("emailAddresses", 1), output.get("emailLedgerBasis"), "the bases gathered so far are kept");
+            assertTrue(output.containsKey("memoriesExported"));
+        }
+
+        @Test
+        @DisplayName("a participant that fails its export is named in the bundle and the ledger entry says completed")
+        void failingParticipantExportIsRecorded() throws Exception {
+            var broken = participant("userDirectory", 0, null);
+            when(broken.export("alice")).thenThrow(new IllegalStateException("down"));
+            register(broken);
+
+            UserDataExport export = service.exportUserData("alice");
+
+            assertEquals(UserDataExport.EXPORT_FAILED, export.additionalData().get("userDirectory"));
+            ArgumentCaptor<AuditEntry> entries = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditLedgerService).submit(entries.capture());
+            assertEquals("completed", entries.getValue().output().get("outcome"));
+        }
+
+        @Test
         @DisplayName("export carries each participant's section, keyed by its name")
         void exportCarriesSections() throws Exception {
             register(participant("userDirectory", 0, Map.of("email", "alice@example.com")), participant("nothingHeld", 0, null));

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -63,6 +64,24 @@ public interface IGdprParticipant {
      */
     default Map<String, Object> auditBasis(String userId) throws Exception {
         return Map.of();
+    }
+
+    /** The request a notice is about. */
+    enum Operation {
+        ERASURE, EXPORT
+    }
+
+    /**
+     * What the caller of an erasure or export must know although no step failed —
+     * data this participant deliberately did not reach, and what to do about it.
+     * Returned to the caller in {@code notices} (prefixed with {@link #name()}) and
+     * recorded in the compliance entry. Like {@link #auditBasis}, no identifiers:
+     * the response must not carry personal data the request did not ask for. Called
+     * before {@link #erase} / {@link #export}; a failure is logged and adds
+     * nothing. Empty by default.
+     */
+    default List<String> notices(String userId, Operation operation) throws Exception {
+        return List.of();
     }
 
     /** {@link #order()} of a participant others may still need to read. */

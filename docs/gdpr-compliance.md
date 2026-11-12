@@ -39,6 +39,7 @@ the cascade actually finished:
   "autoVaultedSecretsDeleted": 0,
   "additionalDeleted": {},
   "failedSteps": [],
+  "notices": [],
   "complete": true,
   "completedAt": "2026-04-02T15:30:00Z"
 }
@@ -66,6 +67,26 @@ the cascade actually finished:
 > see: the id resolution the per-conversation sweeps depend on failed, so those
 > sweeps ran over nothing and their zero counts mean "not attempted", not
 > "nothing to do".
+
+> **Read `notices` too.** A notice is data a step deliberately did not reach,
+> with the remedy; it is not a failure, so it changes neither `complete` nor the
+> status code. Each starts with the participant's name and a stable code. The one
+> EDDI emits today is `emailLedger: unverifiedDirectoryEmail: …` — the user
+> directory records an e-mail address for the user that the identity provider has
+> not marked verified, so the email ledger and suppression rows under it were not
+> erased (see step 15 for why). Many identity providers never set
+> `email_verified`, so for a genuine user this is common. The notice deliberately
+> does not repeat the address. The procedure:
+>
+> 1. Look the address up in the user directory, or ask the data subject.
+> 2. Confirm out of band that the address is theirs — for example a reply from that
+>    mailbox to a message you sent it.
+> 3. Run the erasure again with the **address** as the user id:
+>    `DELETE /admin/gdpr/{address}`. That also erases what the email channel stored
+>    under that address (step 15, email identities).
+>
+> Exports carry the same field, and the same procedure applies with
+> `GET /admin/gdpr/{address}/export`.
 
 **Via MCP:** Use the `delete_user_data` tool with `confirmation="CONFIRM"`. It
 reports the same outcome: `status` is `"completed"` only when every step
@@ -184,9 +205,8 @@ principal, not a user: erasing or exporting it is refused with 400.
     **An unverified directory email is not used.** Its address is whatever the account
     holder typed into their identity-provider profile, so matching on it let one
     user's erasure delete — and their export disclose — the ledger and suppression
-    rows of somebody else's address. Such an address is skipped, and the compliance
-    entry of the erasure or export says so (below); handle that address as its own
-    request, naming it as the user id. The `email:<integrationId>:<address>`
+    rows of somebody else's address. Such an address is skipped; the response says so
+    in `notices` (see the procedure above) and the compliance entry records it (below). The `email:<integrationId>:<address>`
     identities need no such check: an email integration mints one only for a sender
     whose mail passed DKIM-aligned authentication, and the address expansion runs
     only for an id the operator named.
@@ -196,7 +216,11 @@ principal, not a user: erasing or exporting it is refused with 400.
     `userId`, `emailIdentity`, `directoryVerified`) and whether an unverified
     directory email was skipped (`unverifiedDirectoryEmailSkipped`) — never the
     addresses themselves. The field is absent when nothing was matched by address,
-    and entries written by earlier releases do not have it
+    and entries written by earlier releases do not have it. Both entries also carry
+    `notices` when there were any, and the `GDPR_EXPORT` entry an `outcome`:
+    `completed` when the bundle was handed out, `aborted` when assembling it failed
+    after it had started reading — the entry is written either way, with what was
+    gathered up to that point
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
@@ -328,8 +352,9 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - Message processing (`say`) is blocked → returns **403 Forbidden**
 - Scheduled [Dream](user-memory.md#dream-consolidation) cycles for the user are
   skipped: no prune, no consolidation, no LLM call over their memories. The fire
-  completes, so the schedule resumes once the restriction is lifted; a restriction
-  status that cannot be read fails the fire, which is retried
+  completes, so the schedule resumes once the restriction is lifted. A restriction
+  status that cannot be read skips the cycle too (nothing is processed); it is not
+  a failed fire, so a store outage cannot dead-letter the schedule
 - Existing data is preserved (not deleted)
 - Restriction status is stored as a user memory entry under the reserved key
   `_gdpr_processing_restricted` (category `gdpr`). Keys starting with `_gdpr_` are
