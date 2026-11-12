@@ -960,6 +960,7 @@ public class GdprComplianceService {
         // the re-run nothing to find those rows by (the same reason step 4c keeps the
         // snapshots until a retry).
         Map<String, Long> additionalDeleted = new LinkedHashMap<>();
+        Map<String, Object> participantBases = new LinkedHashMap<>();
         List<String> participantsFailed = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
             if (participant.order() >= IGdprParticipant.LAST && !participantsFailed.isEmpty()) {
@@ -967,6 +968,8 @@ public class GdprComplianceService {
                         new IllegalStateException("kept until " + participantsFailed + " are erased; retry the erasure"), pseudonym);
                 continue;
             }
+            // Read before the erase: the basis may come from a record the erase removes.
+            collectAuditBasis(participant, userId, participantBases, pseudonym);
             try {
                 long removed = participant.erase(userId);
                 additionalDeleted.put(participant.name(), removed);
@@ -1020,11 +1023,28 @@ public class GdprComplianceService {
         auditDetails.put("auditPseudonymized", auditPseudonymized);
         auditDetails.put("auditRedacted", auditRedacted);
         additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
+        auditDetails.putAll(participantBases);
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /**
+     * Adds {@code participant}'s {@link IGdprParticipant#auditBasis} under
+     * {@code <name>Basis} when it has one. Optional detail of the compliance entry:
+     * a failure is logged and leaves it out, it never fails the step.
+     */
+    private static void collectAuditBasis(IGdprParticipant participant, String userId, Map<String, Object> bases, String pseudonym) {
+        try {
+            Map<String, Object> basis = participant.auditBasis(userId);
+            if (basis != null && !basis.isEmpty()) {
+                bases.put(participant.name() + "Basis", basis);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[GDPR] Could not record the basis of %s [%s]: %s", participant.name(), pseudonym, e.getMessage());
+        }
     }
 
     private List<IGdprParticipant> participants() {
@@ -1220,7 +1240,8 @@ public class GdprComplianceService {
             groupConversationsTruncated = page.truncated();
             for (GroupConversation gc : page.owned()) {
                 groupConversationEntries.add(new UserDataExport.GroupConversationExportEntry(gc.getId(), gc.getGroupId(),
-                        gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(), gc.getTranscript(),
+                        gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(),
+                        ThirdPartyIdentifiers.transcriptFor(gc, userId),
                         gc.getCreated(), gc.getLastModified()));
                 blobOwnerIds.add(gc.getId());
                 if (gc.getMemberConversationIds() != null) {
@@ -1326,10 +1347,11 @@ public class GdprComplianceService {
         exportDetails.put("sharedArtifactsExported", sharedArtifactEntries.size());
         exportDetails.put("sharedArtifactsTruncated", sharedArtifactsTruncated);
         exportDetails.put("failedCategories", List.copyOf(failedCategories));
-        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
 
         Map<String, Object> additionalData = new LinkedHashMap<>();
+        Map<String, Object> participantBases = new LinkedHashMap<>();
         for (IGdprParticipant participant : participants()) {
+            collectAuditBasis(participant, userId, participantBases, pseudonym);
             try {
                 Object held = participant.export(userId);
                 if (held != null) {
@@ -1343,6 +1365,8 @@ public class GdprComplianceService {
                 additionalData.put(participant.name(), UserDataExport.EXPORT_FAILED);
             }
         }
+        exportDetails.putAll(participantBases);
+        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
 
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,

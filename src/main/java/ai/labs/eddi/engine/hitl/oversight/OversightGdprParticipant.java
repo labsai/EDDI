@@ -18,6 +18,8 @@ import jakarta.inject.Inject;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 
+import static ai.labs.eddi.engine.gdpr.ThirdPartyIdentifiers.keepOwn;
+
 /**
  * GDPR erasure and export of the oversight stores.
  * <ul>
@@ -76,11 +78,19 @@ public class OversightGdprParticipant implements IGdprParticipant {
     @Override
     public Object export(String userId) {
         var export = new LinkedHashMap<String, Object>();
-        var samples = sampleStore.readByUser(userId, MAX_EXPORTED_ROWS);
+        // A row reached by the subject's id can name someone else: the reviewer of a
+        // sample of their conversation, the approver of a pause in it, or — for a
+        // decision the subject made — the owner of the conversation it was made in.
+        // Those identifiers are masked (Art. 15(4)); the subject's own are kept.
+        var samples = sampleStore.readByUser(userId, MAX_EXPORTED_ROWS).stream()
+                .map(s -> s.withColumns(keepOwn(s.userId(), userId), keepOwn(s.reviewedBy(), userId), s.status(), s.version()))
+                .toList();
         if (!samples.isEmpty()) {
             export.put("auditSamples", samples);
         }
-        var decisions = decisionStore.readByUser(userId, MAX_EXPORTED_ROWS);
+        var decisions = decisionStore.readByUser(userId, MAX_EXPORTED_ROWS).stream()
+                .map(d -> d.withPersonalFields(keepOwn(d.userId(), userId), keepOwn(d.decidedBy(), userId)))
+                .toList();
         if (!decisions.isEmpty()) {
             export.put("approvalDecisions", decisions);
         }

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import java.util.Map;
+
 /**
  * A store of personal data that joins GDPR erasure and export without
  * {@link GdprComplianceService} having to know about it.
@@ -49,6 +51,18 @@ public interface IGdprParticipant {
      */
     default int order() {
         return 0;
+    }
+
+    /**
+     * What this participant matched {@code userId} by, for the compliance entry of
+     * the erasure or export ({@code <name>Basis}) — so the ledger shows the basis
+     * on which records were reached when it is not the id itself (an email address,
+     * say). Sources and counts only, never identifiers: the ledger names the person
+     * by pseudonym. Empty (the default) adds nothing. Called before {@link #erase};
+     * a failure is logged and leaves the basis out.
+     */
+    default Map<String, Object> auditBasis(String userId) throws Exception {
+        return Map.of();
     }
 
     /** {@link #order()} of a participant others may still need to read. */

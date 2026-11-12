@@ -2086,6 +2086,33 @@ class GdprComplianceServiceTest {
         }
 
         @Test
+        @DisplayName("the compliance entries of erasure and export carry each participant's basis, read before it erases")
+        void complianceEntriesCarryTheParticipantsBasis() throws Exception {
+            var ledger = participant("emailLedger", 1, null);
+            Map<String, Object> basis = Map.of("emailAddresses", 0, "unverifiedDirectoryEmailSkipped", true);
+            when(ledger.auditBasis("alice")).thenReturn(basis);
+            var broken = participant("userDirectory", 0, null);
+            when(broken.auditBasis("alice")).thenThrow(new IllegalStateException("down"));
+            register(ledger, broken);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+            service.exportUserData("alice");
+
+            var order = inOrder(ledger);
+            order.verify(ledger).auditBasis("alice");
+            order.verify(ledger).erase("alice");
+            assertTrue(result.complete(), "a basis that cannot be read never fails the step: " + result.failedSteps());
+            ArgumentCaptor<AuditEntry> entries = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(auditLedgerService, atLeast(2)).submit(entries.capture());
+            for (String event : List.of("GDPR_ERASURE", "GDPR_EXPORT")) {
+                AuditEntry entry = entries.getAllValues().stream().filter(e -> e.input() != null && event.equals(e.input().get("eventType")))
+                        .findFirst().orElseThrow(() -> new AssertionError("no " + event + " entry"));
+                assertEquals(basis, entry.output().get("emailLedgerBasis"), event);
+                assertFalse(entry.output().containsKey("userDirectoryBasis"), event);
+            }
+        }
+
+        @Test
         @DisplayName("export carries each participant's section, keyed by its name")
         void exportCarriesSections() throws Exception {
             register(participant("userDirectory", 0, Map.of("email", "alice@example.com")), participant("nothingHeld", 0, null));

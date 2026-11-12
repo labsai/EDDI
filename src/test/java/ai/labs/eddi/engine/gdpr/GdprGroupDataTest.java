@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.gdpr;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedArtifact;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -28,6 +30,7 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -221,6 +224,26 @@ class GdprGroupDataTest {
         assertFalse(export.groupConversationsTruncated());
         assertFalse(export.sharedArtifactsTruncated());
         assertEquals(List.of("schedules", "journalEntries"), export.omittedCategories());
+    }
+
+    @Test
+    void export_masksTheOtherHumanMembersOfTheUsersDiscussions() throws Exception {
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        var gc = discussion("gc-1");
+        gc.getTranscript().add(new TranscriptEntry("agent-1", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
+                null));
+        gc.getTranscript().add(new TranscriptEntry("bob@example.com", "Bob", "his input", 0, "p", TranscriptEntryType.HUMAN_INPUT,
+                Instant.EPOCH, null, null));
+        gc.getTranscript().add(new TranscriptEntry(USER_ID, "Alice", "her input", 0, "p", TranscriptEntryType.HUMAN_INPUT, Instant.EPOCH, null,
+                null));
+        groupConversations(gc);
+
+        var transcript = service.exportUserData(USER_ID).groupConversations().getFirst().transcript();
+
+        assertEquals("agent-1", transcript.get(0).speakerAgentId());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(1).speakerAgentId());
+        assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, transcript.get(1).speakerDisplayName());
+        assertEquals(USER_ID, transcript.get(2).speakerAgentId());
     }
 
     @Test

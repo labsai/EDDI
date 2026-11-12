@@ -78,6 +78,40 @@ class EmailLedgerGdprParticipantTest {
     }
 
     @Test
+    @DisplayName("an unverified directory email is not taken as the principal's: another person's rows are neither exported nor erased")
+    void unverifiedDirectoryEmailIsSkipped() throws Exception {
+        // mallory typed carol's address into an IdP profile that does not verify it
+        when(directory.find("mallory")).thenReturn(Optional.of(new DirectoryUser("mallory", "sub-2", "mallory", "carol@example.com", false,
+                "Mallory", List.of(), Instant.now(), Instant.now())));
+
+        assertNull(participant.export("mallory"));
+        assertEquals(0, participant.erase("mallory"));
+        assertEquals(2, ledger.findByRecipient("carol@example.com").size(), "carol's rows stay");
+
+        Map<String, Object> basis = participant.auditBasis("mallory");
+        assertEquals(0, basis.get("emailAddresses"));
+        assertEquals(true, basis.get("unverifiedDirectoryEmailSkipped"));
+    }
+
+    @Test
+    @DisplayName("the audit basis names where each address came from, never the address")
+    void auditBasisNamesSources() throws Exception {
+        when(directory.find("carol")).thenReturn(Optional.of(new DirectoryUser("carol", "sub-1", "carol", "carol@example.com", true, "Carol",
+                List.of(), Instant.now(), Instant.now())));
+
+        Map<String, Object> basis = participant.auditBasis("carol");
+        assertEquals(1, basis.get("emailAddresses"));
+        assertEquals(List.of("directoryVerified"), basis.get("emailAddressSources"));
+        assertEquals(false, basis.get("unverifiedDirectoryEmailSkipped"));
+        assertFalse(basis.toString().contains("carol@example.com"));
+
+        when(directory.find("email:int-1:carol@example.com")).thenReturn(Optional.empty());
+        assertEquals(List.of("emailIdentity"), participant.auditBasis("email:int-1:carol@example.com").get("emailAddressSources"));
+        when(directory.find("nobody")).thenReturn(Optional.empty());
+        assertTrue(participant.auditBasis("nobody").isEmpty());
+    }
+
+    @Test
     @DisplayName("a user id that is itself an address reaches its rows without a directory entry")
     void addressUserId() {
         when(directory.find("carol@example.com")).thenReturn(Optional.empty());

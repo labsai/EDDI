@@ -31,10 +31,11 @@ import java.util.Set;
  * The addresses taken to be the person's are the user id itself when it is an
  * address, the address of an email channel identity
  * ({@code email:<integrationId>:<address>}), and the email the user directory
- * recorded for that principal — which is why the directory participant runs
- * after this one ({@link IGdprParticipant#LAST}). A row whose recipient is an
- * address that belongs to nobody in the directory (a shared mailbox an agent
- * designer typed) is not personal data of this user and is left to retention
+ * recorded for that principal when the identity provider marked it verified —
+ * which is why the directory participant runs after this one
+ * ({@link IGdprParticipant#LAST}). A row whose recipient is an address that
+ * belongs to nobody in the directory (a shared mailbox an agent designer typed)
+ * is not personal data of this user and is left to retention
  * ({@code eddi.email.ledger-retention}).
  * <p>
  * The export lists what a row says about the person — when, which message, its
@@ -95,19 +96,79 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
 
     /** The normalised addresses that identify {@code userId}. */
     Set<String> addressesOf(String userId) {
-        Set<String> addresses = new LinkedHashSet<>();
-        if (userId == null || userId.isBlank()) {
-            return addresses;
+        return resolve(userId).addresses().keySet();
+    }
+
+    /**
+     * Where each address of {@code userId} came from, for the compliance record —
+     * the sources and counts only, never the addresses, which the ledger must not
+     * hold for an erased person.
+     */
+    @Override
+    public Map<String, Object> auditBasis(String userId) {
+        Resolution resolution = resolve(userId);
+        if (resolution.addresses().isEmpty() && !resolution.unverifiedDirectoryEmailSkipped()) {
+            return Map.of();
         }
-        AddressNormalizer.tryNormalize(userId).ifPresent(addresses::add);
+        Map<String, Object> basis = new LinkedHashMap<>();
+        basis.put("emailAddresses", resolution.addresses().size());
+        basis.put("emailAddressSources", List.copyOf(new LinkedHashSet<>(resolution.addresses().values())));
+        basis.put("unverifiedDirectoryEmailSkipped", resolution.unverifiedDirectoryEmailSkipped());
+        return basis;
+    }
+
+    /**
+     * The addresses of {@code userId}, each with its source:
+     * {@value #SOURCE_USER_ID} (the id the operator named is itself an address),
+     * {@value #SOURCE_EMAIL_IDENTITY} (an email channel identity, which an
+     * integration mints only for a DKIM-aligned sender) or
+     * {@value #SOURCE_DIRECTORY_VERIFIED}.
+     * <p>
+     * The directory's address counts only when the identity provider said it was
+     * verified ({@code email_verified}). An unverified claim is whatever the
+     * account holder typed into their profile, so honouring it let one user's
+     * erasure delete, and their export disclose, the ledger and suppression rows of
+     * an address that belongs to someone else. Such an address is skipped (fail
+     * closed) and the skip is reported, so the operator can handle that address as
+     * its own request.
+     */
+    Resolution resolve(String userId) {
+        Map<String, String> addresses = new LinkedHashMap<>();
+        if (userId == null || userId.isBlank()) {
+            return new Resolution(addresses, false);
+        }
+        AddressNormalizer.tryNormalize(userId).ifPresent(address -> addresses.putIfAbsent(address, SOURCE_USER_ID));
         // An email channel identity (email:<integrationId>:<address>) names its
         // address.
-        EmailUserIdentity.addressOf(userId).flatMap(AddressNormalizer::tryNormalize).ifPresent(addresses::add);
+        EmailUserIdentity.addressOf(userId).flatMap(AddressNormalizer::tryNormalize)
+                .ifPresent(address -> addresses.putIfAbsent(address, SOURCE_EMAIL_IDENTITY));
+        boolean unverifiedSkipped = false;
         if (directory != null && directory.isResolvable()) {
             Optional<DirectoryUser> entry = directory.get().find(userId);
-            entry.map(DirectoryUser::email).flatMap(AddressNormalizer::tryNormalize).ifPresent(addresses::add);
+            Optional<String> recorded = entry.map(DirectoryUser::email).flatMap(AddressNormalizer::tryNormalize);
+            if (recorded.isPresent()) {
+                if (entry.get().emailVerified()) {
+                    addresses.putIfAbsent(recorded.get(), SOURCE_DIRECTORY_VERIFIED);
+                } else {
+                    unverifiedSkipped = !addresses.containsKey(recorded.get());
+                }
+            }
         }
-        return addresses;
+        return new Resolution(addresses, unverifiedSkipped);
+    }
+
+    static final String SOURCE_USER_ID = "userId";
+    static final String SOURCE_EMAIL_IDENTITY = "emailIdentity";
+    static final String SOURCE_DIRECTORY_VERIFIED = "directoryVerified";
+
+    /**
+     * @param addresses
+     *            normalised address to its source, in resolution order
+     * @param unverifiedDirectoryEmailSkipped
+     *            the directory recorded an address not otherwise named, and it was
+     *            not verified
+     */
+    record Resolution(Map<String, String> addresses, boolean unverifiedDirectoryEmailSkipped) {
     }
 
     @Override
