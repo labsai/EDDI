@@ -199,7 +199,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     private AgentGroupConfiguration readQuietly(String id, Integer version) {
         try {
-            return groupStore.read(id, version);
+            return groupStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
         } catch (Exception e) {
             return null;
         }

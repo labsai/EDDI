@@ -318,7 +318,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     private AgentConfiguration readQuietly(String id, Integer version) {
         try {
-            return agentStore.read(id, version);
+            return agentStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
         } catch (Exception e) {
             return null;
         }

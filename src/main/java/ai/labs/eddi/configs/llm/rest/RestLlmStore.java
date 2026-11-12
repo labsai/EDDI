@@ -236,7 +236,7 @@ public class RestLlmStore implements IRestLlmStore {
             return null;
         }
         try {
-            return httpCallsStore.read(id, version);
+            return httpCallsStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
         } catch (Exception e) {
             return null;
         }

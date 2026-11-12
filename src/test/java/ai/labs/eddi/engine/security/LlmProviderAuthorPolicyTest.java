@@ -264,4 +264,57 @@ class LlmProviderAuthorPolicyTest {
             assertDoesNotThrow(() -> editorWithBase(null).requireMayAuthor(stored, stored, "langchain"));
         }
     }
+
+    @Nested
+    @DisplayName("review round: task identity, cascade inheritance, restorability")
+    class ReviewRound {
+
+        private String twoTasks(String firstLog, String secondLog) {
+            return "{\"tasks\":[{\"id\":\"a\",\"type\":\"openai\",\"parameters\":{\"logRequests\":\"" + firstLog + "\"}},"
+                    + "{\"id\":\"b\",\"type\":\"openai\",\"parameters\":{\"logRequests\":\"" + secondLog + "\"}}]}";
+        }
+
+        @Test
+        @DisplayName("a logging approval cannot be moved from one task to another")
+        void loggingBoundToItsTask() {
+            String stored = twoTasks("true", "false");
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(twoTasks("false", "true"), stored, "langchain"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(twoTasks("true", "false"), stored, "langchain"));
+        }
+
+        private String bedrockWithStep(String stepParameters) {
+            return "{\"tasks\":[{\"id\":\"t\",\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"m1\"},"
+                    + "\"modelCascade\":{\"steps\":[{\"parameters\":{" + stepParameters + "}}]}}]}";
+        }
+
+        @Test
+        @DisplayName("an untyped cascade step under a Bedrock task cannot re-point its model")
+        void untypedStepInheritsRestrictedProvider() {
+            String stored = bedrockWithStep("");
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(bedrockWithStep("\"modelId\":\"m2\""), stored, "langchain"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(bedrockWithStep("\"temperature\":\"0.2\""), stored, "langchain"));
+        }
+
+        private String openAiWithBedrockStep(String taskModel) {
+            return "{\"tasks\":[{\"id\":\"t\",\"type\":\"openai\",\"parameters\":{\"modelName\":\"" + taskModel + "\"},"
+                    + "\"modelCascade\":{\"steps\":[{\"type\":\"bedrock\",\"parameters\":{\"region\":\"eu-west-1\"}}]}}]}";
+        }
+
+        @Test
+        @DisplayName("a Bedrock step cannot be re-pointed through the model name it inherits from its task")
+        void restrictedStepInheritsTaskParameters() {
+            String stored = openAiWithBedrockStep("m1");
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(openAiWithBedrockStep("m2"), stored, "langchain"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(openAiWithBedrockStep("m1"), stored, "langchain"));
+        }
+
+        @Test
+        @DisplayName("writing an administrator's Bedrock config back over an editor's replacement is refused — so a merge checks it first")
+        void restoreOverRemovalRefused() {
+            String adminBedrock = task("bedrock", "\"modelId\":\"m1\"");
+            String editorReplacement = task("openai", "\"modelName\":\"gpt\"");
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(editorReplacement, adminBedrock, "langchain"));
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(adminBedrock, editorReplacement, "existing (restorable)"));
+        }
+    }
 }

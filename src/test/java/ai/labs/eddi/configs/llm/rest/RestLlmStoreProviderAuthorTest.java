@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.llm.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -84,5 +86,23 @@ class RestLlmStoreProviderAuthorTest {
         var unchanged = bedrock("m1", "hi");
 
         assertThrows(ForbiddenException.class, () -> rest.updateLlm("abc", 1, unchanged));
+    }
+
+    @Test
+    @DisplayName("version 0 (the current version) still carries an unchanged administrator setting over")
+    void versionZeroCarriesOver() throws Exception {
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(llmStore.getCurrentResourceId("abc")).thenReturn(current);
+        when(llmStore.read("abc", 1)).thenReturn(bedrock("m1", "hi"));
+        var unchanged = bedrock("m1", "edited prompt");
+
+        try {
+            rest.updateLlm("abc", 0, unchanged);
+        } catch (ForbiddenException e) {
+            fail("an unchanged administrator setting must carry over on version 0: " + e.getMessage());
+        } catch (RuntimeException afterTheCheck) {
+            // the mocked store beyond the policy check is not under test
+        }
     }
 }

@@ -1541,6 +1541,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // of leaving a rollback that cannot run.
                 callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
             }
+            if (llmProviderAuthorPolicy != null) {
+                // Same reasoning for restricted LLM settings: an editor may replace an
+                // administrator's Bedrock config (removing it is allowed), but writing it
+                // back over the import's version is a restricted setting the import's
+                // version does not carry. Refuse before the first write, while nothing
+                // needs rolling back.
+                llmProviderAuthorPolicy.requireMayAuthor(previous, document, "existing (restorable) " + localId);
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",

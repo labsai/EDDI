@@ -211,8 +211,12 @@ public class LlmProviderAuthorPolicy {
             return;
         }
         if (node.isArray()) {
+            int index = 0;
             for (JsonNode element : node) {
-                walk(element, path, facts);
+                // An element keeps its identity in the path — its "id" where it has one
+                // (an LLM task), its position otherwise — so a setting approved on one
+                // task cannot be moved to another.
+                walk(element, path + "[" + elementKey(element, index++) + "]", facts);
             }
             return;
         }
@@ -220,11 +224,65 @@ public class LlmProviderAuthorPolicy {
             return;
         }
         inspect(node, path, facts);
+        inspectCascadeSteps(node, path, facts);
         Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
         while (fields.hasNext()) {
             var field = fields.next();
             walk(field.getValue(), path + "/" + field.getKey(), facts);
         }
+    }
+
+    private static String elementKey(JsonNode element, int index) {
+        JsonNode id = element != null && element.isObject() ? element.get("id") : null;
+        return id != null && id.isTextual() && !id.asText().isBlank() ? "id=" + id.asText().trim() : String.valueOf(index);
+    }
+
+    /**
+     * A cascade step runs on its own {@code type}, or on the task's when it names
+     * none, with the task's parameters overlaid by its own
+     * ({@code CascadingModelExecutor.resolveStepModel}). Judged on that effective
+     * provider and those effective parameters: otherwise an untyped step under a
+     * Bedrock task could re-point its model, or a Bedrock step could inherit a
+     * changed model name from its task, unseen.
+     */
+    private void inspectCascadeSteps(JsonNode task, String path, Facts facts) {
+        JsonNode cascade = task.get("modelCascade");
+        JsonNode steps = cascade != null && cascade.isObject() ? cascade.get("steps") : null;
+        if (steps == null || !steps.isArray()) {
+            return;
+        }
+        JsonNode taskType = task.get("type");
+        String taskProvider = taskType != null && taskType.isTextual() ? taskType.asText().trim().toLowerCase(Locale.ROOT) : null;
+        Map<String, String> taskSettings = settingsOf(task);
+        for (JsonNode step : steps) {
+            if (step == null || !step.isObject()) {
+                continue;
+            }
+            JsonNode stepType = step.get("type");
+            String provider = stepType != null && stepType.isTextual() && !stepType.asText().isBlank()
+                    ? stepType.asText().trim().toLowerCase(Locale.ROOT)
+                    : taskProvider;
+            if (provider == null || !restrictedProviders.contains(provider)) {
+                continue;
+            }
+            Map<String, String> effective = new TreeMap<>(taskSettings);
+            JsonNode parameters = step.get("parameters");
+            if (parameters != null && parameters.isObject()) {
+                scalars(parameters, effective);
+            }
+            facts.privileged.add("provider|" + provider + "|" + pointing(effective));
+        }
+    }
+
+    private static Map<String, String> pointing(Map<String, String> settings) {
+        Map<String, String> pointing = new TreeMap<>();
+        settings.forEach((key, value) -> {
+            String lower = key.toLowerCase(Locale.ROOT);
+            if (POINTING_HINTS.stream().anyMatch(lower::contains)) {
+                pointing.put(key, value);
+            }
+        });
+        return pointing;
     }
 
     /**
