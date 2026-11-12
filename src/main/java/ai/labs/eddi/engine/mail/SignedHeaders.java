@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mail;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -32,18 +33,32 @@ import java.util.Set;
  *            the {@code To} mailboxes of the signed instances only
  * @param cc
  *            the {@code Cc} mailboxes of the signed instances only
- * @param signatureDigest
- *            the aligned signature's {@link DkimResult#signatureDigest()}, or
- *            null
+ * @param signatureDigests
+ *            the {@link DkimResult#signatureDigest()} of every verifying
+ *            signature of a domain aligned with {@code From}, sorted: the
+ *            replay key of the mail. All of them, not the first in header order
+ *            — a holder could reorder the signature fields or drop one and
+ *            present a key never seen
  */
-public record SignedHeaders(boolean restricted, Set<String> covered, List<MailAddress> to, List<MailAddress> cc, String signatureDigest) {
+public record SignedHeaders(boolean restricted, Set<String> covered, List<MailAddress> to, List<MailAddress> cc, List<String> signatureDigests) {
 
-    private static final SignedHeaders UNRESTRICTED = new SignedHeaders(false, Set.of(), List.of(), List.of(), null);
+    private static final SignedHeaders UNRESTRICTED = new SignedHeaders(false, Set.of(), List.of(), List.of(), List.of());
 
     public SignedHeaders {
+        signatureDigests = signatureDigests == null ? List.of() : signatureDigests.stream().filter(Objects::nonNull).distinct().sorted().toList();
         covered = covered == null ? Set.of() : Set.copyOf(covered);
         to = to == null ? List.of() : List.copyOf(to);
         cc = cc == null ? List.of() : List.copyOf(cc);
+    }
+
+    /** With a single replay key (or none). */
+    public SignedHeaders(boolean restricted, Set<String> covered, List<MailAddress> to, List<MailAddress> cc, String signatureDigest) {
+        this(restricted, covered, to, cc, signatureDigest == null ? List.of() : List.of(signatureDigest));
+    }
+
+    /** The first replay key in sorted order, or null when there is none. */
+    public String signatureDigest() {
+        return signatureDigests.isEmpty() ? null : signatureDigests.get(0);
     }
 
     /** Nothing restricted: every header is read as the message has it. */

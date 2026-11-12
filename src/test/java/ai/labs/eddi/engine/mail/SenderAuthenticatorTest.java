@@ -676,6 +676,27 @@ class SenderAuthenticatorTest {
         }
 
         @Test
+        @DisplayName("with two aligned signatures, reordering them gives the same replay keys, and dropping one keeps a known key")
+        void replayKeysIndependentOfSignatureOrder() {
+            FakeDns dns = keys().txt("sel2._domainkey.example.com", rsa2048().record());
+            String text = text(sign(sign(standardMessage(), new Options().headers("from", "to", "subject", "date")),
+                    new Options().selector("sel2").headers("from", "to", "subject", "date")));
+            int second = text.indexOf("DKIM-Signature:", 1);
+            int body = text.indexOf("From:");
+            String swapped = text.substring(second, body) + text.substring(0, second) + text.substring(body);
+            String onlyFirst = text.substring(second);
+
+            MailAuthentication original = authenticate(dns, bytes(text));
+            MailAuthentication reordered = authenticate(dns, bytes(swapped));
+            MailAuthentication dropped = authenticate(dns, bytes(onlyFirst));
+
+            assertEquals(Verdict.ALIGNED_PASS, reordered.verdict(), reordered.reason());
+            assertEquals(2, original.signedHeaders().signatureDigests().size());
+            assertEquals(original.signedHeaders().signatureDigests(), reordered.signedHeaders().signatureDigests());
+            assertTrue(original.signedHeaders().signatureDigests().containsAll(dropped.signedHeaders().signatureDigests()));
+        }
+
+        @Test
         @DisplayName("a signed Date far in the future (no t=) is not an aligned pass; a little ahead is")
         void futureSignedDate() {
             byte[] future = sign(message("From: Alice <alice@example.com>", "To: bob@example.org", "Subject: x",

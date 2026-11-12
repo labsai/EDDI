@@ -344,7 +344,7 @@ public class EmailInboundProcessor {
             // a Message-ID, whose absence the signature need not cover). A copy would
             // get a row of its own and run again as its author, so the signature
             // itself is the key too.
-            Disposition replayed = claimSignature(ctx, row, authentication.signedHeaders().signatureDigest(), sender, now);
+            Disposition replayed = claimSignatures(ctx, row, authentication.signedHeaders().signatureDigests(), sender, now);
             if (replayed != null) {
                 return replayed;
             }
@@ -1000,20 +1000,41 @@ public class EmailInboundProcessor {
     }
 
     /**
-     * Records that the signature {@code digest} has run here, keyed by the
-     * signature rather than the (unsigned) Message-ID: a marker row, terminal
-     * ({@code REFUSED}, so it never counts as a turn), naming the mail's own row. A
-     * second mail carrying the same signature is a replay and is refused; the same
-     * mail processed again (a deferral, a retry) finds its own marker and goes on.
+     * Records that the mail's aligned signatures have run here, keyed by the
+     * signatures rather than the (unsigned) Message-ID: one marker row per
+     * signature, terminal ({@code REFUSED}, so it never counts as a turn), naming
+     * the mail's own row. A mail carrying any signature another row already holds
+     * is a replay and is refused — whatever order its signature fields are in, and
+     * with some of them dropped; the same mail processed again (a deferral, a
+     * retry) finds its own markers and goes on. All are checked before any is
+     * written, so a replay leaves no marker behind.
      *
      * @return null to go on, else what to do with the mail
      */
-    private Disposition claimSignature(IntegrationContext ctx, LedgerEntry row, String digest, String sender, Instant now) {
-        if (digest == null) {
+    private Disposition claimSignatures(IntegrationContext ctx, LedgerEntry row, List<String> digests, String sender, Instant now) {
+        if (digests == null || digests.isEmpty()) {
             // No signature to key on: the replay cannot be told apart, so the mail is
             // not run as its author.
             return refuse(ctx, row, "unauthenticated:unsigned_message_id", EmailMetrics.UNAUTHENTICATED, now);
         }
+        String owner = SIGNATURE_OWNER_PREFIX + row.id();
+        for (String digest : digests) {
+            Optional<LedgerEntry> held = ledger.findByMessage(ctx.integrationId(), Direction.IN, signatureKey(digest));
+            if (held.isPresent() && !owner.equals(held.get().sourceRef())) {
+                return refuse(ctx, row, "duplicate:replayed_signature", EmailMetrics.DUPLICATE, now);
+            }
+        }
+        for (String digest : digests) {
+            Disposition claimed = claimSignature(ctx, row, digest, sender, now);
+            if (claimed != null) {
+                return claimed;
+            }
+        }
+        return null;
+    }
+
+    /** One signature's marker; see {@link #claimSignatures}. */
+    private Disposition claimSignature(IntegrationContext ctx, LedgerEntry row, String digest, String sender, Instant now) {
         String key = signatureKey(digest);
         String owner = SIGNATURE_OWNER_PREFIX + row.id();
         LedgerEntry marker = new LedgerEntry(UUID.randomUUID().toString(), ctx.integrationId(), Kind.TRIGGER, Direction.IN, key, null, owner,

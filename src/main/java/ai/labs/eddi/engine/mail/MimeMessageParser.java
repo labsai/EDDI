@@ -824,6 +824,12 @@ public class MimeMessageParser {
      * in a part's raw content, stopping once {@code stopAfter} is reached. A bare
      * CR starts a line as LF does, because the mail library's line reader treats it
      * so.
+     * <p>
+     * A line counts only when it is a delimiter as RFC 2046 and the library read
+     * it: {@code --boundary}, optionally {@code --} (the closing one), then only
+     * spaces and tabs up to the line end. {@code --b-extra} or {@code --b10} for
+     * boundary {@code b} is body text, not a delimiter. A small state machine after
+     * each match, no backtracking.
      */
     static int countDelimiters(InputStream in, String boundary, int stopAfter) throws IOException {
         byte[] pattern = ("\n--" + boundary).getBytes(StandardCharsets.ISO_8859_1);
@@ -832,18 +838,30 @@ public class MimeMessageParser {
         // Start as if a newline preceded the content, so a delimiter on the first
         // line counts.
         int matched = 1;
-        // A full match only counts when the line ends there (or "--" closes it):
-        // "--b1" is a prefix of "--b10", which is a different boundary.
-        boolean pending = false;
+        int state = DELIMITER_NONE;
         byte[] buffer = new byte[8192];
         int read;
         while ((read = in.read(buffer)) > 0) {
             for (int i = 0; i < read; i++) {
                 byte b = buffer[i];
-                if (pending) {
-                    pending = false;
-                    if ((b == '\r' || b == '\n' || b == ' ' || b == '\t' || b == '-') && ++count >= stopAfter) {
-                        return count;
+                if (state != DELIMITER_NONE) {
+                    boolean lineEnd = b == '\r' || b == '\n';
+                    boolean blank = b == ' ' || b == '\t';
+                    if (lineEnd) {
+                        boolean counts = state != DELIMITER_DASH;
+                        state = DELIMITER_NONE;
+                        if (counts && ++count >= stopAfter) {
+                            return count;
+                        }
+                    } else if (blank && state != DELIMITER_DASH) {
+                        state = DELIMITER_TRAILING;
+                    } else if (b == '-' && state == DELIMITER_AFTER) {
+                        state = DELIMITER_DASH;
+                    } else if (b == '-' && state == DELIMITER_DASH) {
+                        state = DELIMITER_CLOSING;
+                    } else {
+                        // Anything else on the line: a near-match, not a delimiter.
+                        state = DELIMITER_NONE;
                     }
                 }
                 byte c = b == '\r' ? (byte) '\n' : b;
@@ -854,13 +872,25 @@ public class MimeMessageParser {
                     matched++;
                 }
                 if (matched == pattern.length) {
-                    pending = true;
+                    state = DELIMITER_AFTER;
                     matched = failure[matched - 1];
                 }
             }
         }
-        return pending ? count + 1 : count;
+        // A delimiter on the last line, without a line end, still counts.
+        return state != DELIMITER_NONE && state != DELIMITER_DASH ? count + 1 : count;
     }
+
+    /** {@link #countDelimiters} states, after {@code --boundary} has matched. */
+    private static final int DELIMITER_NONE = 0;
+    /** Right after the boundary. */
+    private static final int DELIMITER_AFTER = 1;
+    /** One {@code -} after it: needs a second to be the closing delimiter. */
+    private static final int DELIMITER_DASH = 2;
+    /** {@code --boundary--}: only blanks may follow. */
+    private static final int DELIMITER_CLOSING = 3;
+    /** Trailing blanks: only more blanks or the line end may follow. */
+    private static final int DELIMITER_TRAILING = 4;
 
     private static int[] failureFunction(byte[] pattern) {
         int[] failure = new int[pattern.length];

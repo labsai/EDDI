@@ -665,6 +665,29 @@ class MimeMessageParserTest {
         }
 
         @Test
+        @DisplayName("near-matches of the boundary are body text, with LF or bare CR line ends; real and closing delimiters count")
+        void delimiterNearMatches() throws Exception {
+            byte[] lf = "--b\n".concat("--b-extra\n".repeat(50)).concat("--b10\n--b -x\n--b---\n--b\n--b--\n").getBytes(StandardCharsets.ISO_8859_1);
+            byte[] cr = "--b\r".concat("--b-extra\r".repeat(50)).concat("--b  \r--b-- \r").getBytes(StandardCharsets.ISO_8859_1);
+
+            assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(lf), "b", 1000));
+            assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(cr), "b", 1000));
+            assertEquals(1, MimeMessageParser.countDelimiters(new ByteArrayInputStream("--b--".getBytes(StandardCharsets.ISO_8859_1)), "b", 9),
+                    "a closing delimiter on the last line, without a line end");
+
+            // A one-part multipart full of near-matches is not refused as a part bomb.
+            StringBuilder body = new StringBuilder("--b\nContent-Type: text/plain\n\nhello\n");
+            for (int i = 0; i < 5000; i++) {
+                body.append("--b-extra\n");
+            }
+            body.append("--b--\n");
+            InboundMail mail = parser()
+                    .parse(message("From: a@example.com\nMessage-ID: <nm@example.com>\nContent-Type: multipart/mixed; boundary=b\n\n"
+                            + body), MailLimits.defaults(), true);
+            assertTrue(mail.text().startsWith("hello"), mail.text().substring(0, 20));
+        }
+
+        @Test
         @DisplayName("bare-CR delimiters declaring thousands of parts are refused within a time budget")
         void bareCrPartBomb() {
             String body = "--b\r\r".repeat(200_000) + "--b--\r\n";

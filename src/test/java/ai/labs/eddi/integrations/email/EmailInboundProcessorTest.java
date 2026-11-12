@@ -396,6 +396,22 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("a replay that drops one of two aligned signatures is still refused")
+        void replayDroppingASignature() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("from", "subject", "date"), List.of(), List.of(), List.of("k2", "k1")));
+            processor.process(context(Map.of()), EmailTestMail.mail().polled(1), Instant.now());
+
+            verdict = passCovering("k2", "from", "subject", "date");
+            EmailTestMail replay = EmailTestMail.mail().messageId("<other@attacker.example>");
+            processor.process(context(Map.of()), replay.polled(2), Instant.now());
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+            assertTrue(ledger.findByMessage(INTEGRATION, Direction.IN, EmailInboundProcessor.signatureKey("k1")).isPresent());
+        }
+
+        @Test
         @DisplayName("the same mail processed again after a deferral finds its own signature marker and runs")
         void ownMarkerAfterDeferral() throws Exception {
             verdict = passCovering("d2", "from", "subject", "date");

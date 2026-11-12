@@ -298,13 +298,17 @@ public class SenderAuthenticator {
         String fromDomain = parsed.from().domain();
         DmarcAlignment.Policy policy = dmarc.policy(fromDomain, budget);
         String refusal = null;
+        // Every verifying aligned signature is a replay key of this mail, so the key
+        // does not depend on which of them comes first or on whether one was dropped.
+        List<String> alignedDigests = passing.stream().filter(p -> dmarc.aligned(p.domain(), fromDomain, policy.mode()))
+                .map(DkimResult::signatureDigest).toList();
         for (DkimResult pass : passing) {
             if (dmarc.aligned(pass.domain(), fromDomain, policy.mode())) {
                 String why = policyRefusal(pass, verification, evaluatedAt);
                 if (why == null) {
                     return new MailAuthentication(Verdict.ALIGNED_PASS, pass.domain(),
                             "a signature of the From domain verifies (" + mode(policy) + " alignment)", false, results,
-                            signedHeaders(pass, verification, parsed));
+                            signedHeaders(pass, verification, parsed, alignedDigests));
                 }
                 if (refusal == null) {
                     refusal = why;
@@ -463,7 +467,7 @@ public class SenderAuthenticator {
     }
 
     /** What {@code pass} vouches for, for {@link InboundMail#signedView()}. */
-    static SignedHeaders signedHeaders(DkimResult pass, DkimVerifier.Verification verification, InboundMail parsed) {
+    static SignedHeaders signedHeaders(DkimResult pass, DkimVerifier.Verification verification, InboundMail parsed, List<String> replayKeys) {
         Set<String> covered = new HashSet<>();
         for (String name : DkimVerifier.REPORTED_HEADERS) {
             if (covers(pass, verification, name)) {
@@ -472,7 +476,7 @@ public class SenderAuthenticator {
         }
         List<MailAddress> to = covered.contains("to") ? parsed.to() : signedAddresses(pass, verification, "to");
         List<MailAddress> cc = covered.contains("cc") ? parsed.cc() : signedAddresses(pass, verification, "cc");
-        return new SignedHeaders(true, covered, to, cc, pass.signatureDigest());
+        return new SignedHeaders(true, covered, to, cc, replayKeys);
     }
 
     /**
@@ -532,7 +536,7 @@ public class SenderAuthenticator {
             // trusted beyond the From.
             return new MailAuthentication(Verdict.ALIGNED_PASS, domain,
                     "the local check could not run; " + provider + " reports a passing signature of the From domain", false, local,
-                    new SignedHeaders(true, Set.of(), List.of(), List.of(), null));
+                    new SignedHeaders(true, Set.of(), List.of(), List.of(), List.of()));
         }
         return new MailAuthentication(Verdict.PASS_UNALIGNED, domain,
                 "the local check could not run; " + provider + " reports a passing signature that does not align with From",
