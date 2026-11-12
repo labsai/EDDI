@@ -8,11 +8,17 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedArtifact;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -160,6 +166,15 @@ public class GdprComplianceService {
      */
     @Inject
     GdprPseudonymizer pseudonymizer;
+
+    /**
+     * Group configurations, read by the export to tell a discussion's human members
+     * from its agents (their ids are masked in the subject's bundle). Field-injected
+     * and lazy; null in tests built with {@code new}, which fall back to the
+     * transcript heuristics of {@link ThirdPartyIdentifiers}.
+     */
+    @Inject
+    Instance<IAgentGroupStore> agentGroupStore;
 
     private String pseudonymFor(String userId) {
         return pseudonymizer != null ? pseudonymizer.pseudonymFor(userId) : AuditHmac.pseudonymFor(userId);
@@ -1053,6 +1068,37 @@ public class GdprComplianceService {
     }
 
     /**
+     * The ids the current configuration of group {@code groupId} declares as
+     * {@code HUMAN} members; empty when there is no group store, no such group any
+     * more, or it cannot be read — the export then masks by the transcript
+     * heuristics alone, never fails for it.
+     */
+    Set<String> configuredHumanMembers(String groupId) {
+        if (groupId == null || agentGroupStore == null || !agentGroupStore.isResolvable()) {
+            return Set.of();
+        }
+        try {
+            IAgentGroupStore store = agentGroupStore.get();
+            IResourceStore.IResourceId current = store.getCurrentResourceId(groupId);
+            AgentGroupConfiguration config = current == null ? null : store.read(groupId, current.getVersion());
+            if (config == null || config.getMembers() == null) {
+                return Set.of();
+            }
+            Set<String> humans = new HashSet<>();
+            for (GroupMember member : config.getMembers()) {
+                if (member != null && member.memberType() == MemberType.HUMAN && member.agentId() != null) {
+                    humans.add(member.agentId());
+                }
+            }
+            return humans;
+        } catch (Exception e) {
+            LOGGER.debugf("[GDPR] Group configuration %s not readable for the export; masking by the transcript alone: %s",
+                    LogSanitizer.sanitize(groupId), e.getMessage());
+            return Set.of();
+        }
+    }
+
+    /**
      * Adds {@code participant}'s {@link IGdprParticipant#notices} to
      * {@code notices}, each prefixed with the participant's name. A failure is
      * logged and adds nothing.
@@ -1281,13 +1327,16 @@ public class GdprComplianceService {
         var groupConversationEntries = new ArrayList<UserDataExport.GroupConversationExportEntry>();
         boolean groupConversationsTruncated = false;
         Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
+        // One configuration read per group, however many of its discussions the user started.
+        Map<String, Set<String>> configuredHumans = new HashMap<>();
         try {
             GroupConversationsPage page = groupConversationsOf(userId, GROUP_CONVERSATION_EXPORT_LIMIT);
             groupConversationsTruncated = page.truncated();
             for (GroupConversation gc : page.owned()) {
                 groupConversationEntries.add(new UserDataExport.GroupConversationExportEntry(gc.getId(), gc.getGroupId(),
                         gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(),
-                        ThirdPartyIdentifiers.transcriptFor(gc, userId),
+                        ThirdPartyIdentifiers.transcriptFor(gc, userId,
+                                configuredHumans.computeIfAbsent(gc.getGroupId(), this::configuredHumanMembers)),
                         gc.getCreated(), gc.getLastModified()));
                 blobOwnerIds.add(gc.getId());
                 if (gc.getMemberConversationIds() != null) {

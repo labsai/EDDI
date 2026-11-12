@@ -64,6 +64,18 @@ public final class ThirdPartyIdentifiers {
      * agent id).
      */
     public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId) {
+        return transcriptFor(discussion, subjectId, Set.of());
+    }
+
+    /**
+     * As {@link #transcriptFor(GroupConversation, String)}, with the ids the
+     * group's configuration declares as {@code HUMAN} members — the authoritative
+     * source, which also covers a human who only ever skipped, never spoke and has
+     * no address for an id. The transcript heuristics still apply on top of it,
+     * for members a configuration that changed since (or was deleted) no longer
+     * lists.
+     */
+    public static List<TranscriptEntry> transcriptFor(GroupConversation discussion, String subjectId, Set<String> configuredHumans) {
         List<TranscriptEntry> stored = discussion.getTranscript();
         if (stored == null || stored.isEmpty()) {
             return stored;
@@ -74,6 +86,9 @@ public final class ThirdPartyIdentifiers {
             transcript = new ArrayList<>(stored);
         }
         Set<String> humans = new HashSet<>();
+        if (configuredHumans != null) {
+            humans.addAll(configuredHumans);
+        }
         for (TranscriptEntry entry : transcript) {
             if (entry != null && entry.type() == TranscriptEntryType.HUMAN_INPUT && entry.speakerAgentId() != null) {
                 humans.add(entry.speakerAgentId());
