@@ -78,6 +78,8 @@ class ReservedPrincipalsTest {
             Map.entry("sample:", "sampled-audit daily cap counter name (SampledAuditRecorder)"),
             Map.entry("suspended:", "gate refusal reason string (SuspendedGate.REASON_PREFIX)"),
             Map.entry("pool:", "tool quota counter name (ToolQuotaRules)"),
+            Map.entry("status:", "ingestion status cache key (RagIngestionService)"),
+            Map.entry("warning:", "ingestion warning cache key (RagIngestionService)"),
             Map.entry("rule:", "derived HITL approval category of a rule pause (ApprovalCategories)"),
             Map.entry("hitl:", "transcript speaker id of a reviewer's SYNTHESIS edit (GroupReviewEditor)"),
             Map.entry("v2:", "ciphertext/HMAC format version"),
