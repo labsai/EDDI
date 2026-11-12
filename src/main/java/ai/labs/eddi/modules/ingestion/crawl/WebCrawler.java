@@ -285,7 +285,10 @@ public class WebCrawler {
                 request.limits().requestTimeout(),
                 conditional.etag(),
                 conditional.lastModified(),
-                request.limits().maxBytesPerPage());
+                request.limits().maxBytesPerPage(),
+                // Each redirect hop is held to the scope before it is requested: the scope
+                // check of the final URL below only discards the page, after the fetch.
+                hop -> isInScope(CrawlUrls.canonicalize(hop), seedHost, request, excludes));
 
         FetchedPage page;
         try {

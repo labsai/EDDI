@@ -814,7 +814,10 @@ public class HtmlToMarkdownConverter {
         if (hasSafeScheme(trimmed)) {
             resolved = trimmed;
         } else if (baseUrl == null) {
-            return null;
+            // No base (an uploaded file): a relative link stays relative, as the
+            // extractor promises — but only a real relative reference, never prose
+            // or a javascript:/data: URL hidden in the attribute.
+            return isSafeRelativeReference(trimmed) ? trimmed : null;
         } else {
             try {
                 resolved = new URI(baseUrl).resolve(trimmed).toString();
@@ -823,6 +826,27 @@ public class HtmlToMarkdownConverter {
             }
         }
         return hasSafeScheme(resolved) && resolved.length() <= MAX_DESTINATION_LENGTH ? resolved : null;
+    }
+
+    /**
+     * A relative reference kept as written when there is no base to resolve it
+     * against: it parses as a URI with no scheme and no authority (so neither
+     * {@code javascript:} nor {@code //host}), holds no whitespace — attribute
+     * prose has spaces, a path does not — and no {@code <}, {@code >} or backslash.
+     */
+    static boolean isSafeRelativeReference(String reference) {
+        for (int i = 0; i < reference.length(); i++) {
+            char c = reference.charAt(i);
+            if (Character.isWhitespace(c) || Character.isISOControl(c) || c == '<' || c == '>' || c == '\\') {
+                return false;
+            }
+        }
+        try {
+            URI uri = new URI(reference);
+            return uri.getScheme() == null && uri.getRawAuthority() == null;
+        } catch (URISyntaxException e) {
+            return false;
+        }
     }
 
     private static boolean hasSafeScheme(String url) {

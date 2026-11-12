@@ -234,6 +234,12 @@ public final class CrawlUrls {
             int parameters = segment.indexOf(';');
             String name = parameters >= 0 ? segment.substring(0, parameters) : segment;
             boolean last = i == segments.length - 1;
+            if (segment.isEmpty() && !last) {
+                // Adjacent slashes are one, as nginx and Apache merge them by default:
+                // kept, an empty segment absorbed the next "..", so /docs//%2e%2e/private
+                // read as /docs/private while the server served /private.
+                continue;
+            }
             if (".".equals(name)) {
                 if (last) {
                     kept.addLast("");

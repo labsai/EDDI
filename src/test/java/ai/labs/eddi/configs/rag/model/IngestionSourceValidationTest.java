@@ -161,10 +161,19 @@ class IngestionSourceValidationTest {
         source.setSettings(atCeiling);
         assertDoesNotThrow(source::validate);
 
-        // A document stored before the ceiling existed is clamped, not trusted.
+        // A document stored before the ceiling existed is clamped, not trusted - and
+        // still runs: the run path validates it as stored, so the clamp is reached.
         var stored = new IngestionSettings();
         stored.setMaxBytesPerPage(Long.MAX_VALUE);
         assertEquals(IngestionSettings.MAX_BYTES_PER_PAGE_CEILING, stored.maxBytesPerPageOrDefault());
+        var storedSource = web("https://docs.example.com/");
+        storedSource.setSettings(stored);
+        assertDoesNotThrow(storedSource::validateStored, "a stored source above the ceiling keeps running, clamped");
+        assertThrows(IllegalArgumentException.class, storedSource::validate, "saving it again is new input and is refused");
+        var nonPositive = new IngestionSettings();
+        nonPositive.setMaxBytesPerPage(0L);
+        storedSource.setSettings(nonPositive);
+        assertThrows(IllegalArgumentException.class, storedSource::validateStored, "a non-positive cap is refused either way");
         assertEquals(CrawlRequest.Limits.MAX_BYTES_PER_PAGE,
                 new CrawlRequest.Limits(1, 1, Long.MAX_VALUE, 1, null, null).maxBytesPerPage());
     }

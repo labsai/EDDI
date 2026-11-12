@@ -201,6 +201,10 @@ class CrawlUrlsTest {
             assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/%2E./users/evil"));
             assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/..;/users/evil"));
             assertEquals("/docs/a", CrawlUrls.path("https://example.com/docs/%2e/a"));
+            // an empty segment does not absorb the "..": the server merges the slashes
+            assertEquals("/private/x", CrawlUrls.path("https://example.com/docs//%2e%2e/private/x"));
+            assertEquals("/private/x", CrawlUrls.pathAndQuery("https://example.com/docs//%2e%2e/private/x"));
+            assertEquals("/docs/a/", CrawlUrls.path("https://example.com/docs//a/"));
             assertEquals("/", CrawlUrls.path("https://example.com/%2e%2e/%2e%2e/"));
             assertEquals("/café/", CrawlUrls.path("https://example.com/caf%C3%A9/"), "other encodings still decode");
             assertEquals("/users/evil?x=1", CrawlUrls.pathAndQuery("https://example.com/docs/%2e%2e/users/evil?x=1"));

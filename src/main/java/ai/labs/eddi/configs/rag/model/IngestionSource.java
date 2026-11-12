@@ -81,7 +81,26 @@ public class IngestionSource {
      */
     private String cron;
 
+    /**
+     * Validates a source as new input: a save, an import. {@code maxBytesPerPage}
+     * above {@link IngestionSettings#MAX_BYTES_PER_PAGE_CEILING} is refused here.
+     */
     public void validate() {
+        validate(true);
+    }
+
+    /**
+     * Validates a source already stored, before it runs: the same checks, except
+     * that a {@code maxBytesPerPage} saved above the ceiling before it existed is
+     * not an error — it is clamped where it is read
+     * ({@code maxBytesPerPageOrDefault}, {@code CrawlRequest.Limits}), so the
+     * source keeps crawling within the limit.
+     */
+    public void validateStored() {
+        validate(false);
+    }
+
+    private void validate(boolean newInput) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Ingestion source needs a name");
         }
@@ -100,7 +119,7 @@ public class IngestionSource {
                     "Unsupported ingestion source type '" + type + "' on source '" + name
                             + "'. Supported: " + TYPE_WEB + ", " + TYPE_UPLOAD);
         }
-        settings().validate(name);
+        settings().validate(name, newInput);
     }
 
     /**
@@ -539,6 +558,10 @@ public class IngestionSource {
         private Integer timeBudgetMinutes = 10;
 
         void validate(String sourceName) {
+            validate(sourceName, true);
+        }
+
+        void validate(String sourceName, boolean newInput) {
             if (maxContentLength != null && maxContentLength <= 0) {
                 throw new IllegalArgumentException(
                         "maxContentLength of ingestion source '" + sourceName + "' must be positive");
@@ -567,7 +590,9 @@ public class IngestionSource {
             }
             // Each page is buffered whole in memory up to this cap, so an unbounded value
             // let one source pin the heap with a single large response.
-            UploadSource.requirePositiveAtMost(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING, "maxBytesPerPage", sourceName);
+            if (newInput) {
+                UploadSource.requirePositiveAtMost(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING, "maxBytesPerPage", sourceName);
+            }
         }
 
         /**

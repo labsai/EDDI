@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
 import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -58,6 +59,18 @@ public class SafeHttpPageFetcher implements PageFetcher {
                 .ssrf(SsrfPolicy.STRICT)
                 .header(HEADER_USER_AGENT, command.userAgent())
                 .header(HEADER_ACCEPT, ACCEPT_HTML);
+        if (command.redirectAllowed() != null) {
+            // A hop validator replaces the policy's own check of a redirect hop, so it
+            // runs the strict SSRF check itself and then the crawl's scope: the hop is
+            // refused before it is requested, not discarded after.
+            var allowed = command.redirectAllowed();
+            builder.hopValidator(hop -> {
+                UrlValidationUtils.validateUrl(hop);
+                if (!allowed.test(hop)) {
+                    throw new IllegalArgumentException("Redirect leaves the crawl's scope");
+                }
+            });
+        }
         if (command.timeout() != null && !command.timeout().isZero() && !command.timeout().isNegative()) {
             builder.timeout(command.timeout());
         }

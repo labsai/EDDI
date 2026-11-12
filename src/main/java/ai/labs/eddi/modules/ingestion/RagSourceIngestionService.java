@@ -609,7 +609,7 @@ public class RagSourceIngestionService {
             return IngestionReport.skipped(source.effectiveId(), "Source is disabled");
         }
         try {
-            source.validate();
+            source.validateStored();
         } catch (IllegalArgumentException e) {
             return IngestionReport.failed(null, source.effectiveId(), e.getMessage());
         }

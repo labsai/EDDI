@@ -371,4 +371,32 @@ class SafeHttpPageFetcherTest {
     private static FetchedPage page(String contentType) {
         return new FetchedPage(200, "https://example.com/a", contentType, null, new byte[0], null, null, false);
     }
+
+    @Test
+    @DisplayName("a redirect out of the crawl's scope is refused before it is requested")
+    void redirectOutOfScopeIsNotRequested() {
+        // An in-scope page answering 302 to another port of the same host: the scope
+        // check of the final URL would discard the page, but only after the request.
+        respond(302, Map.of("Location", List.of("https://93.184.215.14:8443/admin")), new byte[0]);
+        respond(200, Map.of("Content-Type", List.of("text/html")), "<p>admin</p>".getBytes(StandardCharsets.UTF_8));
+        var scoped = new FetchCommand(URL, "EDDI-Crawler/1.0", Duration.ofSeconds(5), null, null, 1024,
+                hop -> hop.startsWith("https://93.184.215.14/"));
+
+        assertThrows(Exception.class, () -> fetcher.fetch(scoped));
+        assertEquals(1, engine.hops.size(), "the out-of-scope hop must not be sent");
+    }
+
+    @Test
+    @DisplayName("an in-scope redirect is still followed")
+    void redirectInScopeIsFollowed() throws Exception {
+        respond(301, Map.of("Location", List.of("https://93.184.215.14/b")), new byte[0]);
+        respond(200, Map.of("Content-Type", List.of("text/html")), "<p>b</p>".getBytes(StandardCharsets.UTF_8));
+        var scoped = new FetchCommand(URL, "EDDI-Crawler/1.0", Duration.ofSeconds(5), null, null, 1024,
+                hop -> hop.startsWith("https://93.184.215.14/"));
+
+        FetchedPage page = fetcher.fetch(scoped);
+
+        assertEquals(200, page.statusCode());
+        assertEquals(2, engine.hops.size());
+    }
 }
