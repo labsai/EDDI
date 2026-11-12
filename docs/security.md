@@ -1108,11 +1108,25 @@ the ref is a release tag the installers check every downloaded file against it a
 one whose hash differs. A ref without the asset (`main`, a branch, a release published
 before it existed) still installs, with a warning that only TLS vouches for the files; an
 unlisted file is warned about, not refused. The installers do not verify themselves —
-fetch `install.sh` from a release tag rather than `main` for a pinned install. The CLI's
-`eddi update` re-downloads compose files without this check. The GCP provisioner
-(`gcp/provision-vm.sh`) now defaults `--eddi-branch` to `--eddi-version`'s tag or the
+fetch `install.sh` from a release tag rather than `main` for a pinned install; the release
+job lists `install.sh` in the `SHA256SUMS` too, so `shasum -a 256 install.sh` can be compared
+with it. `eddi update` runs the same verification: the bash CLI carries its own copy of the
+functions and the Windows `eddi.cmd` hands the download to the generated `eddi-fetch.ps1`,
+which embeds the installer's functions. Every compose file and monitoring asset is fetched
+and checked before any is moved into place, a mismatch or an unverifiable list stops the
+update with nothing changed, and an install pinned to a release (a version tag, or
+`latest` resolved to one) **refuses** to fall back to `main` when the lookup of the newest
+release fails — retry, name a version, or choose `main` on purpose with
+`EDDI_BRANCH=main eddi update`. The GCP provisioner
+(`gcp/provision-vm.sh`) defaults `--eddi-branch` to `--eddi-version`'s tag or the
 newest stable release instead of `main`, falling back to `main` with a warning when the
-lookup fails.
+lookup fails; on the VM it downloads `install.sh` to a file and, for a release tag, compares
+it with that release's `SHA256SUMS` before running it as root. It also validates
+`--eddi-version` and `--eddi-branch` with the installer's own patterns, creates the VM with
+no service account and no scopes (nothing on it calls a Google API), and with `--https` opens
+no direct EDDI port, binds EDDI to the VM's loopback so nginx on 443 is the only way in, and
+replaces the loopback redirect URIs and the `+` web origin of the `eddi-frontend` client with
+the public origin instead of adding to them.
 
 The checksum list is signed too. A `SHA256SUMS` on its own proves only that the files
 match whatever list the release carries; whoever could replace one release asset could

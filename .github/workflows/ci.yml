@@ -2903,13 +2903,15 @@ jobs:
           persist-credentials: false  # this job's token can write releases; nothing below needs git auth
 
       # install.sh and install.ps1 fetch these files from raw.githubusercontent.com
+      # (gcp/provision-vm.sh fetches install.sh itself and checks it here too)
       # at the release tag and refuse one whose hash differs from this list, so a
       # tag moved after the release (or a tampered file) is not installed.
       - name: Hash the files the installers download
         run: |
-          git ls-files -z -- 'docker-compose*.yml' 'keycloak/eddi-realm.json' 'keycloak/themes/eddi' 'docs/monitoring' \
+          git ls-files -z -- 'docker-compose*.yml' 'keycloak/eddi-realm.json' 'keycloak/themes/eddi' 'docs/monitoring' 'install.sh' \
             | sort -z | xargs -0 sha256sum > SHA256SUMS
           grep -Eq ' [ *]docker-compose\.yml$' SHA256SUMS
+          grep -Eq ' [ *]install\.sh$' SHA256SUMS
           grep -Eq ' [ *]keycloak/eddi-realm\.json$' SHA256SUMS
           cat SHA256SUMS
 
