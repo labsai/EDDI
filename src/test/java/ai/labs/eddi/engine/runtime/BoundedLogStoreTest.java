@@ -12,9 +12,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -91,6 +93,44 @@ class BoundedLogStoreTest {
             verify(databaseLogs).addLogsBatch(captor.capture());
             List<LogEntry> flushed = captor.getValue();
             assertEquals(List.of("gdpr-erased:k1:abc", "bob"), flushed.stream().map(LogEntry::userId).toList());
+        }
+
+        @Test
+        void theStoreKeepsOnlyTheHashOfAnErasedUser_neverTheRawId() {
+            store.markUserErased("alice@example.com", "gdpr-erased:k1:abc");
+
+            assertEquals(Set.of(KvKeys.sha256("alice@example.com")), store.markKeys());
+        }
+
+        @Test
+        void anExpiredMarkIsPrunedByTheNextPublish_notOnlyByTheNextErasure() {
+            Instant until = Instant.now().plusMillis(200);
+            store.markUserErasedUntil("alice", "gdpr-erased:k1:abc", until);
+            assertEquals(1, store.markKeys().size());
+            while (!Instant.now().isAfter(until)) {
+                Thread.onSpinWait();
+            }
+
+            store.publish(entryOf("bob", "INFO"));
+
+            assertTrue(store.markKeys().isEmpty());
+        }
+
+        @Test
+        void anEntryQueuedBeforeTheErasureLeavesWithThePseudonymEvenAfterTheMarkExpired() {
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.publish(entryOf("alice", "WARN"));
+            dbStore.markUserErased("alice", "gdpr-erased:k1:abc");
+            // a flush stuck for longer than the mark lives
+            dbStore.dropMarksForTesting();
+
+            dbStore.flushToDb();
+
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            ArgumentCaptor<List<LogEntry>> captor = (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
+            verify(databaseLogs).addLogsBatch(captor.capture());
+            assertEquals(List.of("gdpr-erased:k1:abc"), captor.getValue().stream().map(LogEntry::userId).toList());
+            assertEquals(0, dbStore.getDbQueueSize(), "the rewrite kept the queue count right: the one entry left");
         }
 
         @Test

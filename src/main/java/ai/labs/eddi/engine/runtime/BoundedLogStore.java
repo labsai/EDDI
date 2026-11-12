@@ -282,13 +282,25 @@ public class BoundedLogStore {
      */
     static final String REMOTE_ERASURE_MARKER = "gdpr-erased";
 
-    /** Raw user id erased on this node → its pseudonym and until when. */
-    private final Map<String, Erasure> erasedUsers = new ConcurrentHashMap<>();
-
-    /** {@code KvKeys.sha256(userId)} of a user erased on another node. */
+    /**
+     * {@code KvKeys.sha256(userId)} of a recently erased user → what replaces the id
+     * and until when. One map for erasures on this node and on others, keyed by the
+     * hash either way, so the store never holds an erased user's raw id — not even
+     * for the hour the mark lives, nor after it expired and before it is pruned.
+     */
     private final Map<String, Erasure> erasedUserHashes = new ConcurrentHashMap<>();
 
+    /**
+     * When the earliest mark in {@link #erasedUserHashes} expires; {@code null}
+     * while there is none. Lets {@link #publish} prune expired marks with one
+     * comparison instead of a scan.
+     */
+    private volatile Instant nextMarkExpiry;
+
     private record Erasure(String replacement, Instant until) {
+        boolean local() {
+            return !REMOTE_ERASURE_MARKER.equals(replacement);
+        }
     }
 
     /**
@@ -308,8 +320,7 @@ public class BoundedLogStore {
         if (userId == null || pseudonym == null) {
             return 0;
         }
-        erasedUsers.put(userId, new Erasure(pseudonym, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
-        return rewriteBuffer();
+        return mark(KvKeys.sha256(userId), new Erasure(pseudonym, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
     }
 
     /**
@@ -321,25 +332,32 @@ public class BoundedLogStore {
         if (userIdHash == null || userIdHash.isBlank()) {
             return 0;
         }
-        erasedUserHashes.put(userIdHash, new Erasure(REMOTE_ERASURE_MARKER, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
-        return rewriteBuffer();
+        // A local mark for the same user (this node erased them too) keeps its keyed
+        // pseudonym; only the lifetime is extended.
+        Erasure remote = new Erasure(REMOTE_ERASURE_MARKER, Instant.now().plus(ERASED_USER_REWRITE_WINDOW));
+        return mark(userIdHash, remote);
     }
 
     /**
-     * Returns once a database flush that is running has finished. A batch drained
-     * before the mark went up still carries the raw id; the erasure pseudonymises
-     * the persisted logs after this step, so that batch must be in the store by
-     * then. Every flush that starts later scrubs its entries itself.
+     * Sets the mark, then rewrites what is already held: the ring buffer and the
+     * entries waiting for the database writer.
+     * <p>
+     * Synchronized on the store — the monitor {@link #flushToDb} holds — so a flush
+     * that drained entries before the mark is finished (and in the database, ahead
+     * of the erasure's own sweep of the persisted logs) before the queue is
+     * rewritten, and no flush runs while it is. Under the write lock as well, so no
+     * publisher adds meanwhile. {@code flushToDb} never takes the write lock and
+     * {@code publish} never takes the monitor, so the two cannot deadlock.
+     * <p>
+     * The queue is rewritten here rather than only scrubbed on its way out: an entry
+     * that waited in it longer than the mark lives (a database call hanging for
+     * longer than {@link #ERASED_USER_REWRITE_WINDOW}) would otherwise leave with the
+     * raw id after the mark expired.
      */
-    synchronized void awaitInFlightFlush() {
-        // intentionally empty: acquiring the monitor is the wait
-    }
-
-    private int rewriteBuffer() {
-        awaitInFlightFlush();
-        Instant now = Instant.now();
-        erasedUsers.values().removeIf(erasure -> erasure.until().isBefore(now));
-        erasedUserHashes.values().removeIf(erasure -> erasure.until().isBefore(now));
+    private synchronized int mark(String hash, Erasure erasure) {
+        erasedUserHashes.merge(hash, erasure,
+                (existing, added) -> existing.local() && !added.local() ? new Erasure(existing.replacement(), added.until()) : added);
+        pruneExpiredMarks(Instant.now());
         int rewritten = 0;
         lock.writeLock().lock();
         try {
@@ -355,6 +373,14 @@ public class BoundedLogStore {
                 buffer.clear();
                 buffer.addAll(kept);
             }
+            // Same order, same count: dbQueued stays right.
+            for (int i = dbQueue.size(); i > 0; i--) {
+                LogEntry queued = dbQueue.poll();
+                if (queued == null) {
+                    break;
+                }
+                dbQueue.offer(scrub(queued));
+            }
         } finally {
             lock.writeLock().unlock();
         }
@@ -362,18 +388,40 @@ public class BoundedLogStore {
     }
 
     /**
+     * Drops the marks that expired and recomputes {@link #nextMarkExpiry}. Cheap
+     * enough for {@link #publish} to call whenever the earliest mark is due.
+     */
+    private void pruneExpiredMarks(Instant now) {
+        erasedUserHashes.values().removeIf(erasure -> erasure.until().isBefore(now));
+        nextMarkExpiry = erasedUserHashes.values().stream().map(Erasure::until).min(Instant::compareTo).orElse(null);
+    }
+
+    /** Test hook: the keys of the erasure marks held. */
+    Set<String> markKeys() {
+        return Set.copyOf(erasedUserHashes.keySet());
+    }
+
+    /** Test hook: as if every mark had expired and been pruned. */
+    void dropMarksForTesting() {
+        erasedUserHashes.clear();
+        nextMarkExpiry = null;
+    }
+
+    /** Test hook: a local mark with an explicit expiry. */
+    int markUserErasedUntil(String userId, String pseudonym, Instant until) {
+        return mark(KvKeys.sha256(userId), new Erasure(pseudonym, until));
+    }
+
+    /**
      * The entry with an erased user's id replaced, or the same instance when it
-     * names no erased user. Queued entries pass through here on their way to the
-     * database, so the queue needs no rewrite of its own.
+     * names no erased user. Hashes nothing while no mark is held, so the hot path
+     * of {@link #publish} costs one emptiness check.
      */
     LogEntry scrub(LogEntry entry) {
-        if (entry == null || entry.userId() == null || erasedUsers.isEmpty() && erasedUserHashes.isEmpty()) {
+        if (entry == null || entry.userId() == null || erasedUserHashes.isEmpty()) {
             return entry;
         }
-        Erasure erasure = erasedUsers.get(entry.userId());
-        if (erasure == null && !erasedUserHashes.isEmpty()) {
-            erasure = erasedUserHashes.get(KvKeys.sha256(entry.userId()));
-        }
+        Erasure erasure = erasedUserHashes.get(KvKeys.sha256(entry.userId()));
         if (erasure == null || erasure.until().isBefore(Instant.now())) {
             return entry;
         }
@@ -389,15 +437,23 @@ public class BoundedLogStore {
         // and the DB queue. An erasure puts its mark into the map first and only then
         // takes this lock to rewrite the buffer, so for any entry published at the same
         // moment one of two orders holds: this critical section ran first — the raw
-        // entry is in the buffer when the rewrite reads it, and in the DB queue, which
-        // every flush starting after the mark scrubs on the way out (the mark waits for
-        // a flush already running) — or it ran after, and scrub() sees the mark.
+        // entry is in the buffer and the DB queue when the rewrite reads them — or it
+        // ran after, and scrub() sees the mark.
         // Scrubbing before taking the lock left a gap between the two in which a raw
         // entry could land after the rewrite. scrub() hashes nothing while no erasure
         // is recent, so the critical section stays as cheap as the plain add.
         LogEntry published;
         lock.writeLock().lock();
         try {
+            Instant due = nextMarkExpiry;
+            if (due != null) {
+                // Only while a mark is held: expired marks go on the first publish
+                // after they expire, not at the next erasure.
+                Instant now = Instant.now();
+                if (due.isBefore(now)) {
+                    pruneExpiredMarks(now);
+                }
+            }
             published = scrub(entry);
             if (buffer.size() >= bufferSize) {
                 buffer.pollFirst(); // evict oldest
@@ -482,7 +538,7 @@ public class BoundedLogStore {
     /**
      * Flush pending log entries to the database in a single batch.
      * <p>
-     * Synchronized so {@link #awaitInFlightFlush} can wait for a batch that was
+     * Synchronized so an erasure mark ({@link #markUserErased}) can wait for a batch that was
      * drained before an erasure marked its user and may still be committing.
      */
     synchronized void flushToDb() {
