@@ -33,10 +33,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -253,16 +255,31 @@ public class TeamCadenceService {
                 }
             }
 
-            // 2. Pull: top-N executable backlog tasks, highest priority first.
-            List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
-                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
-                    .limit(cadence.maxBacklogTasksPerRun())
-                    .toList();
+            // 2. Pull: top-N executable backlog tasks, highest priority first. A task
+            // another team's agent handed off waits while a member that requires peer
+            // verification could not take its text as that agent's: the member would
+            // fail it unasked on every run, and the question would quote it to them.
+            Map<String, Boolean> trusted = new HashMap<>();
+            List<TaskItem> pulled = new ArrayList<>();
+            List<TaskItem> held = new ArrayList<>();
+            for (TaskItem task : workspace.getBacklog().findExecutableTasks().stream()
+                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed()).toList()) {
+                if (pulled.size() == cadence.maxBacklogTasksPerRun()) {
+                    break;
+                }
+                if (task.createdByAgentId() == null
+                        || trusted.computeIfAbsent(task.createdByAgentId(), agent -> trustsHandoffsOf(groupId, cadenceId, agent))) {
+                    pulled.add(task);
+                } else {
+                    held.add(task);
+                }
+            }
             if (pulled.isEmpty()) {
                 cadenceRunsSkipped.increment();
-                LOGGER.infof("Cadence %s for group %s: no executable backlog tasks — skipping this fire",
-                        LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId));
-                return CadenceResult.skipped(groupId, cadenceId, "No executable backlog tasks");
+                String reason = held.isEmpty() ? "No executable backlog tasks" : heldHandoffsReason(held);
+                LOGGER.infof("Cadence %s for group %s skips this fire: %s", LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId),
+                        LogSanitizer.sanitize(reason));
+                return CadenceResult.skipped(groupId, cadenceId, reason);
             }
 
             // 3. Prepare — the conversation is created so the claim can carry the
@@ -490,9 +507,13 @@ public class TeamCadenceService {
                             memberStats(workspace, outcome.assignedAgentId()).getTasksVerified() + 1);
                 }
             } else {
-                String feedback = outcome != null && outcome.verificationNote() != null
-                        ? outcome.verificationNote()
-                        : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
+                // The next run shows this description as configured task text, so it carries
+                // the feedback as the group's records count it: text that does not verify
+                // for a member that requires peer verification is withheld, not laundered.
+                TaskItem recorded = outcome != null ? groupConversationService.recordedTask(gc, outcome) : null;
+                String feedback = recorded != null && recorded.verificationNote() != null
+                        ? recorded.verificationNote()
+                        : (recorded != null && recorded.result() != null ? recorded.result() : "not completed this run");
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
@@ -605,14 +626,48 @@ public class TeamCadenceService {
     /**
      * Pulled backlog items as a runtime task plan. Dependencies are dropped on
      * purpose: {@code findExecutableTasks} already guaranteed every pulled task's
-     * dependencies are met, and backlog ids mean nothing inside the discussion.
+     * dependencies are met, and backlog ids mean nothing inside the discussion. The
+     * agent that filed an item (a handoff) stays its creator, so the run shows it
+     * to a member that requires peer verification as it shows a task filed with the
+     * task tool, not as configured text.
      */
     private static List<TaskDefinition> toTaskDefinitions(List<TaskItem> pulled) {
         List<TaskDefinition> defs = new ArrayList<>(pulled.size());
         for (TaskItem task : pulled) {
-            defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority()));
+            defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority(), null, task.createdByAgentId()));
         }
         return defs;
+    }
+
+    /**
+     * Whether group {@code groupId}'s records take the backlog tasks agent
+     * {@code agentId} handed off as that agent's, so this fire may pull them. A
+     * task held back stays {@code PENDING} on the backlog, so each fire that leaves
+     * one logs it; a fire it leaves with nothing to run also gives the reason in
+     * the fire history ({@link #heldHandoffsReason}).
+     */
+    private boolean trustsHandoffsOf(String groupId, String cadenceId, String agentId) {
+        boolean trusted = groupConversationService.recordsTrustAgentText(groupId, agentId);
+        if (!trusted) {
+            LOGGER.infof("Cadence %s for group %s leaves the backlog tasks agent '%s' handed off waiting: a reader of the group "
+                    + "requires peer verification (or the group could not be read) and that agent does not sign verifiably",
+                    LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), LogSanitizer.sanitize(agentId));
+        }
+        return trusted;
+    }
+
+    /**
+     * Why a fire left with only held handoffs runs nothing. The tasks are
+     * {@code PENDING} with their dependencies met, so the backlog shows them as
+     * work to do; the fire history is where this says otherwise, and how to free
+     * them. It names the agents, never the tasks' text, which is theirs and
+     * unverified.
+     */
+    private static String heldHandoffsReason(List<TaskItem> held) {
+        String agents = held.stream().map(TaskItem::createdByAgentId).distinct().collect(Collectors.joining(", "));
+        return held.size() + " handed-off backlog task(s) wait unpulled: a reader of this team requires peer verification (or the team "
+                + "could not be read) and the agent(s) that filed them (" + agents + ") do not sign verifiably. Give the agent a signing key "
+                + "again (or turn its signing back on), or delete the task and file it again.";
     }
 
     /**

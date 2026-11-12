@@ -50,7 +50,10 @@ unsigned transcript entry while the configuration said the agent signed.
   `eddi.audit.agent-signing-enabled` (provisioning writes versioned keys only, so audit entries still
   carry no agent signature) and the `eddi.a2a.signing.nonce.*` rows (they govern group-transcript
   entries; A2A requests are not signed). `AgentConfiguration` and `IRestAgentStore` Javadoc no longer
-  say identities are generated on creation or that no endpoint can regenerate a key.
+  say identities are generated on creation or that no endpoint can regenerate a key. (Superseded for
+  the nonce rows by the entry "peer verification is fail-closed and binds the conversation, position
+  and key version", 2026-11-08: the signer no longer registers nonces, so those two properties do
+  nothing.)
 
 ### Design decisions
 
@@ -59,8 +62,9 @@ unsigned transcript entry while the configuration said the agent signed.
 - No MCP tool: the plan called it optional, and an MCP tool would widen who can mint keys beyond the
   REST role gate this PR pins.
 - Validity windows and verification outcomes are untouched here: enforcing `validUntilMs`, a
-  fail-closed verdict per entry and binding the conversation into the signed bytes are S2; audit
-  signatures (still on the unversioned key) are S3.
+  fail-closed verdict per entry and binding the conversation into the signed bytes are the entry
+  "peer verification is fail-closed and binds the conversation, position and key version"
+  (2026-11-08); audit signatures (still on the unversioned key) are left to a later change.
 
 ### Tests
 

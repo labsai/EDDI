@@ -222,6 +222,21 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * Whether the agent requires peer verification
+     * ({@code security.requirePeerVerification}): it is then shown no memory
+     * another agent wrote, which no signature covers. Transient, carried from the
+     * agent for every turn.
+     */
+    default boolean isPeerVerificationRequired() {
+        return false;
+    }
+
+    /** Set whether the agent of this turn requires peer verification. */
+    default void setPeerVerificationRequired(boolean peerVerificationRequired) {
+        // no-op by default
+    }
+
+    /**
      * Set the user memory configuration. Called from {@code Conversation.init()}
      * when the agent has user memory enabled.
      */

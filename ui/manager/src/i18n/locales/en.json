@@ -432,7 +432,7 @@
     "publicKeys": "Public Keys",
     "recallOrder": "Recall Order",
     "requirePeer": "Require peer verification",
-    "requirePeerDesc": "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it",
+    "requirePeerDesc": "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it. In a group, once any member, the moderator or the facilitator requires verification, votes, negotiation tables and lessons count only signed entries for everyone, so every agent that writes there should sign. A verifying agent gets no artifact tools. In every conversation, 1:1 chats included, it is shown no group- or global-visible memory about the user that another agent wrote",
     "securityFlags": "Signing & Verification",
     "securityIdentity": "Security & Identity",
     "sessionManagement": "Session Management",

@@ -383,7 +383,7 @@ public class DreamService {
 
             // 3. Summarize interactions (LLM-driven consolidation)
             if (dreamConfig.isSummarizeInteractions()) {
-                var outcome = summarizeInteractions(userId, currentEntries, dreamConfig, conflicts);
+                var outcome = summarizeInteractions(userId, agentId, currentEntries, dreamConfig, conflicts);
                 summarized = outcome.entriesReduced();
                 estimatedCost = outcome.estimatedCostUsd();
                 summarizationError = outcome.error();
@@ -535,7 +535,7 @@ public class DreamService {
      * {@link #isTransientLlmFailure}</li>
      * </ul>
      */
-    private SummarizationOutcome summarizeInteractions(String userId,
+    private SummarizationOutcome summarizeInteractions(String userId, String agentId,
                                                        List<UserMemoryEntry> entries,
                                                        AgentConfiguration.DreamConfig config, AtomicInteger conflicts) {
         int totalConsolidated = 0;
@@ -687,9 +687,24 @@ public class DreamService {
                     .map(UserMemoryEntry::sourceAgentId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
+            // A merge of several agents' entries is the housekeeping agent's own model
+            // text. Credited to the first original, it read as the user's (no owner) or
+            // as that agent's, and a reader that requires peer verification loaded the
+            // other agents' unsigned facts with it.
             String sourceAgent = distinctAgents.size() == 1
                     ? distinctAgents.iterator().next()
-                    : groupEntries.getFirst().sourceAgentId();
+                    : distinctAgents.isEmpty() ? null : agentId;
+            // Who wrote the merged text goes by who wrote the originals' values, not by
+            // who owns them: a user's global key an agent overwrote keeps the user as
+            // owner, and a merge of it written as no agent's passed that agent's text to
+            // every verifying reader as the user's.
+            Set<String> distinctWriters = groupEntries.stream()
+                    .map(UserMemoryEntry::lastWriterAgentId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toSet());
+            String writer = distinctWriters.size() == 1
+                    ? distinctWriters.iterator().next()
+                    : distinctWriters.isEmpty() ? null : agentId;
             // Defence in depth: should a future grouping change ever hand us a
             // self-scoped group spanning several agents, skip it rather than
             // widen it — a privacy boundary must fail closed.
@@ -776,7 +791,7 @@ public class DreamService {
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
-                            earliestCreated, Instant.now());
+                            earliestCreated, Instant.now(), writer);
                     // An entry that reuses an original is meant to overwrite it. Any other
                     // entry must be new: the collision check above ran before this write,
                     // so a memory a conversation, REST or MCP created with this key in the

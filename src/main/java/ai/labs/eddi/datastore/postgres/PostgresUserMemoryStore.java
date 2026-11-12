@@ -70,6 +70,26 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             )
             """;
 
+    /**
+     * The agent whose write produced the stored value, {@code ''} for a write no
+     * agent made (the user's, an admin's). Set on every write, unlike
+     * {@code source_agent_id}, which a global row keeps from its insert. NULL on a
+     * row stored before the column existed, which then reads back with its owner as
+     * writer.
+     */
+    private static final String ADD_LAST_WRITER_COLUMN = "ALTER TABLE usermemories ADD COLUMN IF NOT EXISTS last_writer_agent_id VARCHAR(255)";
+
+    /** What {@code last_writer_agent_id} holds for a write no agent made. */
+    private static final String NO_AGENT_WRITER = "";
+
+    /**
+     * The rows whose value the bound agent or no agent wrote: the SQL form of
+     * {@code !UserMemoryEntry.writtenByAgentOtherThan(agentId)}. Binds the agent id
+     * twice.
+     */
+    static final String WRITTEN_BY_THIS_OR_NO_AGENT = "(last_writer_agent_id = ? OR last_writer_agent_id = ''"
+            + " OR (last_writer_agent_id IS NULL AND (source_agent_id = ? OR source_agent_id IS NULL OR source_agent_id = '')))";
+
     private static final String CREATE_INDEXES = """
             CREATE INDEX IF NOT EXISTS idx_um_user_vis_agent_key
                 ON usermemories (user_id, visibility, source_agent_id, key);
@@ -110,13 +130,14 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      */
     private static final String UPSERT_GLOBAL_IF_OWNED = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, 'global', ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, last_writer_agent_id)
+            VALUES (?, ?, ?::jsonb, ?, 'global', ?, ?::jsonb, ?, ?, ?)
             ON CONFLICT (user_id, key) WHERE visibility = 'global'
             DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                 group_ids = EXCLUDED.group_ids,
                 source_conversation_id = EXCLUDED.source_conversation_id,
-                conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                conflicted = EXCLUDED.conflicted, last_writer_agent_id = EXCLUDED.last_writer_agent_id,
+                updated_at = CURRENT_TIMESTAMP
             WHERE usermemories.source_agent_id = EXCLUDED.source_agent_id
             RETURNING id
             """;
@@ -137,6 +158,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(ADD_LAST_WRITER_COLUMN);
             for (String sql : CREATE_INDEXES.split(";")) {
                 sql = sql.trim();
                 if (!sql.isEmpty()) {
@@ -184,10 +206,10 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
         // Upsert each key-value pair as a global entry
         String sql = """
-                INSERT INTO usermemories (user_id, key, value, category, visibility)
-                VALUES (?, ?, ?::jsonb, 'property', 'global')
+                INSERT INTO usermemories (user_id, key, value, category, visibility, last_writer_agent_id)
+                VALUES (?, ?, ?::jsonb, 'property', 'global', '')
                 ON CONFLICT (user_id, key) WHERE visibility = 'global'
-                DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                DO UPDATE SET value = EXCLUDED.value, last_writer_agent_id = '', updated_at = CURRENT_TIMESTAMP
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (Map.Entry<String, Object> entry : properties.entrySet()) {
@@ -237,8 +259,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     private static final String INSERT_IF_ABSENT_GLOBAL = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, last_writer_agent_id)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?)
             ON CONFLICT (user_id, key) WHERE visibility = 'global'
             DO NOTHING
             RETURNING id
@@ -246,8 +268,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     private static final String INSERT_IF_ABSENT_SCOPED = """
             INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                group_ids, source_conversation_id, conflicted)
-            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                group_ids, source_conversation_id, conflicted, last_writer_agent_id)
+            VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?)
             ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
             DO NOTHING
             RETURNING id
@@ -273,6 +295,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
+            ps.setString(10, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getString("id") : null;
             }
@@ -294,6 +317,9 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(6, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(7, entry.sourceConversationId());
             ps.setBoolean(8, entry.conflicted());
+            // The writer the entry names, as MongoUserMemoryStore records it: not always
+            // the owner.
+            ps.setString(9, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
@@ -341,25 +367,27 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             // source_agent_id is part of the identity and updating it is correct.
             upsertSql = """
                     INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                        group_ids, source_conversation_id, conflicted)
-                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                        group_ids, source_conversation_id, conflicted, last_writer_agent_id)
+                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?)
                     ON CONFLICT (user_id, key) WHERE visibility = 'global'
                     DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                         group_ids = EXCLUDED.group_ids,
                         source_conversation_id = EXCLUDED.source_conversation_id,
-                        conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                        conflicted = EXCLUDED.conflicted, last_writer_agent_id = EXCLUDED.last_writer_agent_id,
+                        updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                     """;
         } else {
             upsertSql = """
                     INSERT INTO usermemories (user_id, key, value, category, visibility, source_agent_id,
-                        group_ids, source_conversation_id, conflicted)
-                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?)
+                        group_ids, source_conversation_id, conflicted, last_writer_agent_id)
+                    VALUES (?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?, ?, ?)
                     ON CONFLICT (user_id, key, source_agent_id) WHERE visibility != 'global'
                     DO UPDATE SET value = EXCLUDED.value, category = EXCLUDED.category,
                         visibility = EXCLUDED.visibility, group_ids = EXCLUDED.group_ids,
                         source_conversation_id = EXCLUDED.source_conversation_id,
-                        conflicted = EXCLUDED.conflicted, updated_at = CURRENT_TIMESTAMP
+                        conflicted = EXCLUDED.conflicted, last_writer_agent_id = EXCLUDED.last_writer_agent_id,
+                        updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                     """;
         }
@@ -374,6 +402,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
+            ps.setString(10, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString("id");
@@ -420,7 +449,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         IUserMemoryStore.rejectReservedKey(entry.key());
         ensureSchema();
         String sql = "UPDATE usermemories SET value = ?::jsonb, category = ?, visibility = ?, group_ids = ?::jsonb,"
-                + " source_conversation_id = ?, conflicted = ?, updated_at = CURRENT_TIMESTAMP"
+                + " source_conversation_id = ?, conflicted = ?, last_writer_agent_id = ?, updated_at = CURRENT_TIMESTAMP"
                 + " WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, MAPPER.writeValueAsString(entry.value()));
@@ -429,8 +458,9 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             ps.setString(4, MAPPER.writeValueAsString(entry.groupIds()));
             ps.setString(5, entry.sourceConversationId());
             ps.setBoolean(6, entry.conflicted());
-            ps.setString(7, entryId);
-            ps.setTimestamp(8, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
+            ps.setString(7, writerOf(entry));
+            ps.setString(8, entryId);
+            ps.setTimestamp(9, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);
             return ps.executeUpdate() == 1;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to conditionally replace memory entry", e);
@@ -459,18 +489,31 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public List<UserMemoryEntry> getVisibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries)
             throws IResourceStore.ResourceStoreException {
+        return visibleEntries(userId, agentId, groupIds, recallOrder, maxEntries, false);
+    }
+
+    @Override
+    public List<UserMemoryEntry> getVisibleEntriesForVerifyingReader(String userId, String agentId, List<String> groupIds, String recallOrder,
+                                                                     int maxEntries)
+            throws IResourceStore.ResourceStoreException {
+        return visibleEntries(userId, agentId, groupIds, recallOrder, maxEntries, true);
+    }
+
+    private List<UserMemoryEntry> visibleEntries(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries,
+                                                 boolean verifyingReader)
+            throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String visibilityQuery = buildVisibilityQuery(groupIds);
+        String visibilityQuery = buildVisibilityQuery(groupIds, verifyingReader);
 
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             if (!RECALL_ORDER_MOST_ACCESSED.equals(recallOrder)) {
                 List<UserMemoryEntry> entries = new ArrayList<>();
-                collectInto(conn, new LinkedHashSet<>(), entries, visibilityQuery, userId, agentId, groupIds, ORDER_BY_RECENCY,
+                collectInto(conn, new LinkedHashSet<>(), entries, visibilityQuery, userId, agentId, groupIds, verifyingReader, ORDER_BY_RECENCY,
                         maxEntries > 0 ? maxEntries : -1);
                 return entries;
             }
 
-            return mostAccessedWithRecencyReservation(conn, visibilityQuery, userId, agentId, groupIds, maxEntries);
+            return mostAccessedWithRecencyReservation(conn, visibilityQuery, userId, agentId, groupIds, verifyingReader, maxEntries);
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to get visible entries", e);
         }
@@ -489,8 +532,15 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      * (see {@code collectInto}): userId, agentId, then — only when groups are
      * supplied — the group ids (user scope), the derived team owner ids, and the
      * group ids again (team overlap).
+     * <p>
+     * For a reader that requires peer verification ({@code verifyingReader}) the
+     * user's scope keeps only the rows whose value this agent or no agent wrote
+     * ({@link #WRITTEN_BY_THIS_OR_NO_AGENT}, bound with the agent id twice after
+     * the user scope's group ids), in the query, so the {@code LIMIT} counts only
+     * rows the reader is shown. The team scope is left as it is: a team's lessons
+     * are the engine's.
      */
-    static String buildVisibilityQuery(List<String> groupIds) {
+    static String buildVisibilityQuery(List<String> groupIds, boolean verifyingReader) {
         StringBuilder sql = new StringBuilder(VISIBILITY_SELECT);
         boolean hasGroups = groupIds != null && !groupIds.isEmpty();
         if (hasGroups) {
@@ -500,7 +550,11 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             appendPlaceholders(sql, groupIds.size());
             sql.append("])");
         }
-        sql.append("))");
+        sql.append(")");
+        if (verifyingReader) {
+            sql.append(" AND ").append(WRITTEN_BY_THIS_OR_NO_AGENT);
+        }
+        sql.append(")");
         if (hasGroups) {
             // I8: team-owned lessons. Owner ids are DERIVED from the supplied
             // group ids at bind time, never caller-supplied strings.
@@ -533,14 +587,16 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      * {@code MongoUserMemoryStore.mostAccessedWithRecencyReservation}.
      */
     private List<UserMemoryEntry> mostAccessedWithRecencyReservation(Connection conn, String visibilityQuery, String userId, String agentId,
-                                                                     List<String> groupIds, int maxEntries)
+                                                                     List<String> groupIds, boolean verifyingReader, int maxEntries)
             throws SQLException {
         var window = RecallWindow.forMaxEntries(maxEntries);
 
         Set<String> recalled = new LinkedHashSet<>();
         List<UserMemoryEntry> ordered = new ArrayList<>();
-        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, ORDER_BY_ACCESS_COUNT, window.accessSlots());
-        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, ORDER_BY_RECENCY, window.recencySlots());
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, verifyingReader, ORDER_BY_ACCESS_COUNT,
+                window.accessSlots());
+        collectInto(conn, recalled, ordered, visibilityQuery, userId, agentId, groupIds, verifyingReader, ORDER_BY_RECENCY,
+                window.recencySlots());
         incrementAccessCounts(conn, recalled);
 
         return ordered;
@@ -574,7 +630,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
      *            entirely — a zero-slot budget means there is no work to do.
      */
     private void collectInto(Connection conn, Set<String> seen, List<UserMemoryEntry> ordered, String visibilityQuery, String userId,
-                             String agentId, List<String> groupIds, String orderBy, int limit)
+                             String agentId, List<String> groupIds, boolean verifyingReader, String orderBy, int limit)
             throws SQLException {
         if (limit == 0) {
             return;
@@ -584,13 +640,20 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             int paramIndex = 1;
             ps.setString(paramIndex++, userId);
             ps.setString(paramIndex++, agentId);
-            if (groupIds != null && !groupIds.isEmpty()) {
-                // Bind order must mirror buildVisibilityQuery exactly: the user
-                // scope's group overlap, then the derived team owners (I8), then
-                // the team scope's group overlap.
+            boolean hasGroups = groupIds != null && !groupIds.isEmpty();
+            // Bind order must mirror buildVisibilityQuery exactly: the user scope's
+            // group overlap, the writer clause of a verifying reader, then the
+            // derived team owners (I8) and the team scope's group overlap.
+            if (hasGroups) {
                 for (String gid : groupIds) {
                     ps.setString(paramIndex++, gid);
                 }
+            }
+            if (verifyingReader) {
+                ps.setString(paramIndex++, agentId);
+                ps.setString(paramIndex++, agentId);
+            }
+            if (hasGroups) {
                 for (String gid : groupIds) {
                     ps.setString(paramIndex++, IUserMemoryStore.TEAM_OWNER_PREFIX + gid);
                 }
@@ -826,8 +889,31 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         Timestamp createdTs = rs.getTimestamp("created_at");
         Timestamp updatedTs = rs.getTimestamp("updated_at");
 
+        String owner = rs.getString("source_agent_id");
         return new UserMemoryEntry(rs.getString("id"), rs.getString("user_id"), rs.getString("key"), value, rs.getString("category"), vis,
-                rs.getString("source_agent_id"), groupIds, rs.getString("source_conversation_id"), rs.getBoolean("conflicted"),
-                rs.getInt("access_count"), createdTs != null ? createdTs.toInstant() : null, updatedTs != null ? updatedTs.toInstant() : null);
+                owner, groupIds, rs.getString("source_conversation_id"), rs.getBoolean("conflicted"), rs.getInt("access_count"),
+                createdTs != null ? createdTs.toInstant() : null, updatedTs != null ? updatedTs.toInstant() : null,
+                lastWriterOf(rs.getString("last_writer_agent_id"), owner));
+    }
+
+    /**
+     * What {@code last_writer_agent_id} stores for {@code entry}'s write: the
+     * writer it names, which is not always its owner — a rewrite of another agent's
+     * global row, a Dream merge of the user's keys.
+     */
+    private static String writerOf(UserMemoryEntry entry) {
+        return entry.lastWriterAgentId() != null && !entry.lastWriterAgentId().isBlank() ? entry.lastWriterAgentId() : NO_AGENT_WRITER;
+    }
+
+    /**
+     * The entry's {@link UserMemoryEntry#lastWriterAgentId} from the stored column:
+     * {@code null} for {@link #NO_AGENT_WRITER}, the owner when the column is NULL
+     * (a row stored before writers were recorded).
+     */
+    private static String lastWriterOf(String stored, String owner) {
+        if (stored == null) {
+            return owner;
+        }
+        return stored.isEmpty() ? null : stored;
     }
 }

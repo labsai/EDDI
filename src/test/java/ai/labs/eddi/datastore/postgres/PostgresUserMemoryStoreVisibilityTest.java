@@ -23,7 +23,7 @@ class PostgresUserMemoryStoreVisibilityTest {
     @Test
     @DisplayName("no groups: no team branch, balanced parentheses")
     void noGroups_userScopeOnly() {
-        String sql = PostgresUserMemoryStore.buildVisibilityQuery(List.of());
+        String sql = PostgresUserMemoryStore.buildVisibilityQuery(List.of(), false);
 
         assertFalse(sql.contains("user_id IN"), sql);
         assertEquals(0, sql.chars().map(c -> c == '(' ? 1 : c == ')' ? -1 : 0).sum(), "unbalanced parens: " + sql);
@@ -32,7 +32,7 @@ class PostgresUserMemoryStoreVisibilityTest {
     @Test
     @DisplayName("with groups: the team branch binds one owner and one overlap placeholder per group")
     void withGroups_additiveTeamBranch() {
-        String sql = PostgresUserMemoryStore.buildVisibilityQuery(List.of("g1", "g2"));
+        String sql = PostgresUserMemoryStore.buildVisibilityQuery(List.of("g1", "g2"), false);
 
         assertTrue(sql.contains("user_id IN (?,?)"), sql);
         // user scope overlap + team scope overlap = two ??| ARRAY[?,?] blocks.
@@ -43,5 +43,18 @@ class PostgresUserMemoryStoreVisibilityTest {
         // characters that are NOT bind placeholders — subtract them.
         assertEquals(8, sql.chars().filter(c -> c == '?').count() - 2L * (sql.split("\\?\\?\\|", -1).length - 1),
                 "bind placeholder count must match collectInto's bind order: " + sql);
+    }
+
+    @Test
+    @DisplayName("a verifying reader: the writer clause sits in the user scope and binds the agent id twice")
+    void verifyingReader_writerClauseInTheUserScope() {
+        String sql = PostgresUserMemoryStore.buildVisibilityQuery(List.of("g1"), true);
+
+        int writerClause = sql.indexOf(PostgresUserMemoryStore.WRITTEN_BY_THIS_OR_NO_AGENT);
+        assertTrue(writerClause > 0, sql);
+        assertTrue(writerClause < sql.indexOf("user_id IN"), "the team's lessons are not filtered: " + sql);
+        assertEquals(0, sql.chars().map(c -> c == '(' ? 1 : c == ')' ? -1 : 0).sum(), "unbalanced parens: " + sql);
+        // userId + agentId + 1 gid + 2 writer binds + 1 owner + 1 gid = 7.
+        assertEquals(7, sql.chars().filter(c -> c == '?').count() - 2L * (sql.split("\\?\\?\\|", -1).length - 1), sql);
     }
 }

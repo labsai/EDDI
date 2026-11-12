@@ -1569,6 +1569,30 @@ class ConversationServiceTest {
         verify(userMemoryStore).deleteEntry("id-diet");
     }
 
+    /**
+     * A global row keeps the agent that created it as its owner, but the value an
+     * undo or redo puts back is the one this conversation held: written as the
+     * owner's, a verifying owner took another agent's unsigned text as its own.
+     */
+    @Test
+    void undoAndRedo_ofAGlobalRowAnotherAgentOwns_recordThisConversationsAgentAsTheWriter() throws Exception {
+        var undone = memoryWithLongTermChange("city", "Paris", "Berlin");
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("city", "Berlin", "agent-2")));
+        conversationService.syncLongTermChanges(undone, undone.getCurrentStep(), true);
+
+        var redone = memoryWithLongTermChange("city", "Paris", "Berlin");
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(storedEntry("city", "Paris", "agent-2")));
+        conversationService.syncLongTermChanges(redone, redone.getCurrentStep(), false);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore, times(2)).upsert(written.capture());
+        assertEquals(List.of("Paris", "Berlin"), written.getAllValues().stream().map(UserMemoryEntry::value).toList());
+        for (UserMemoryEntry entry : written.getAllValues()) {
+            assertEquals("agent-2", entry.sourceAgentId(), "the owner is kept");
+            assertEquals("agent-1", entry.lastWriterAgentId(), "this conversation's agent wrote the value");
+        }
+    }
+
     @Test
     void redo_reappliesTheLongTermValue() throws Exception {
         var memory = memoryWithLongTermChange("color", "teal", "red");

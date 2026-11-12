@@ -89,6 +89,20 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
+    @DisplayName("the deployed agent carries whether it requires peer verification")
+    void carriesThePeerVerificationRequirement() throws Exception {
+        var config = configuration(false, null);
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setRequirePeerVerification(true);
+        config.setSecurity(security);
+        when(agentStoreService.getAgentConfiguration("agent-1", 9)).thenReturn(config);
+        when(agentStoreService.getAgentConfiguration("agent-1", 10)).thenReturn(configuration(false, null));
+
+        assertTrue(library.getAgent("agent-1", 9).isPeerVerificationRequired());
+        assertFalse(library.getAgent("agent-1", 10).isPeerVerificationRequired());
+    }
+
+    @Test
     @DisplayName("a version without a generation deploys without one")
     void legacyVersionHasNoGeneration() throws Exception {
         when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));

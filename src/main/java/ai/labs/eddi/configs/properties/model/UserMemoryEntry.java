@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.properties.model;
 
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 
 import java.time.Instant;
@@ -20,12 +21,47 @@ import java.util.List;
  * <li>{@code self/group}: {@code (userId, key, sourceAgentId)}</li>
  * <li>{@code global}: {@code (userId, key)}</li>
  * </ul>
+ * <p>
+ * {@code sourceAgentId} is the entry's owner: the agent that created it. A
+ * global entry is shared, and a later write by another agent replaces its value
+ * but keeps the owner, so who wrote the value it holds is
+ * {@code lastWriterAgentId}: the agent whose write produced it, {@code null}
+ * when the user or an admin wrote it. The stores record the writer an entry
+ * names, so a write on behalf of an agent other than the owner names both. An
+ * entry stored before writers were recorded reads back with its owner as
+ * writer.
  *
  * @author ginccc
  * @since 6.0.0
  */
 public record UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
-        List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
+        List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt,
+        String lastWriterAgentId) {
+
+    /**
+     * An entry about to be written, or one read back whose writer is its owner:
+     * {@code sourceAgentId} wrote the value.
+     */
+    public UserMemoryEntry(String id, String userId, String key, Object value, String category, Visibility visibility, String sourceAgentId,
+            List<String> groupIds, String sourceConversationId, boolean conflicted, int accessCount, Instant createdAt, Instant updatedAt) {
+        this(id, userId, key, value, category, visibility, sourceAgentId, groupIds, sourceConversationId, conflicted, accessCount, createdAt,
+                updatedAt, sourceAgentId);
+    }
+
+    /**
+     * Whether an agent other than {@code agentId} wrote the value this entry holds
+     * ({@link #lastWriterAgentId}). One the user or an admin wrote names no agent,
+     * and a team's lessons ({@link IUserMemoryStore#TEAM_OWNER_PREFIX}) are the
+     * engine's, distilled from the team's records under its records rule. A reader
+     * that requires peer verification is shown no entry another agent wrote: no
+     * signature covers it.
+     */
+    public boolean writtenByAgentOtherThan(String agentId) {
+        if (userId != null && userId.startsWith(IUserMemoryStore.TEAM_OWNER_PREFIX)) {
+            return false;
+        }
+        return lastWriterAgentId != null && !lastWriterAgentId.isBlank() && !lastWriterAgentId.equals(agentId);
+    }
 
     /** Accepted memory categories. Unknown values default to {@code "fact"}. */
     public static final List<String> DEFAULT_CATEGORIES = List.of("preference", "fact", "context");

@@ -140,6 +140,19 @@ class PostgresUserMemoryStoreUnitTest {
     }
 
     @Test
+    void upsertIfOwnedBy_recordsTheEntrysWriterLikeTheMongoStore() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        var noAgentWriter = new UserMemoryEntry(null, "user-1", "lang", "v", "fact", Visibility.global, "agent-1", List.of(), "conv-1", false,
+                0, null, null, null);
+
+        assertTrue(sut.upsertIfOwnedBy(noAgentWriter, "agent-1"));
+
+        // the owner is still agent-1, but the write is recorded as no agent's
+        verify(preparedStatement).setString(5, "agent-1");
+        verify(preparedStatement).setString(9, "");
+    }
+
+    @Test
     void upsertIfOwnedBy_noReturnedRowMeansRefused() throws Exception {
         // ON CONFLICT ... DO UPDATE ... WHERE false returns no row: another agent owns
         // it
@@ -996,7 +1009,8 @@ class PostgresUserMemoryStoreUnitTest {
         String update = sql.getAllValues().getLast();
         assertTrue(update.startsWith("UPDATE usermemories SET value = ?::jsonb"), update);
         assertTrue(update.endsWith("WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?"), update);
-        verify(preparedStatement).setString(7, "id-1");
-        verify(preparedStatement).setTimestamp(8, Timestamp.from(readAt));
+        verify(preparedStatement).setString(7, "agent-1");
+        verify(preparedStatement).setString(8, "id-1");
+        verify(preparedStatement).setTimestamp(9, Timestamp.from(readAt));
     }
 }

@@ -60,7 +60,32 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class LiveDiscussionRegistry {
 
-    private final ConcurrentHashMap<String, GroupConversation> live = new ConcurrentHashMap<>();
+    /**
+     * One entry per running discussion: its live instance and the guard it reads
+     * its transcript through, kept together so a single lookup sees both or
+     * neither. Two maps let a reader that found the discussion find no guard once a
+     * cleanup removed it in between, and an absent guard reads as "show
+     * everything".
+     */
+    private final ConcurrentHashMap<String, Registration> live = new ConcurrentHashMap<>();
+
+    /**
+     * A running discussion as one lookup sees it.
+     *
+     * @param groupConversation
+     *            the instance the loop is running with
+     * @param signingGuard
+     *            the guard it reads its transcript through, or {@code null} when it
+     *            was registered without one (then nothing is filtered, as for the
+     *            loop itself)
+     */
+    public record Registration(GroupConversation groupConversation, GroupSigningGuard signingGuard) {
+
+        /** {@link #signingGuard}, empty when there is none. */
+        public Optional<GroupSigningGuard> guard() {
+            return Optional.ofNullable(signingGuard);
+        }
+    }
 
     /**
      * Registers the live instance a discussion loop is about to run with. Called
@@ -71,7 +96,16 @@ public class LiveDiscussionRegistry {
      * freshly-loaded {@code GroupConversation}, never the stale pre-pause one).
      */
     public void register(GroupConversation gc) {
-        live.put(gc.getId(), gc);
+        register(gc, null);
+    }
+
+    /**
+     * As {@link #register(GroupConversation)}, with the guard the loop reads the
+     * transcript through, so a member's tool shows that member what the engine's
+     * own prompts would (see {@link #signingGuard}).
+     */
+    public void register(GroupConversation gc, GroupSigningGuard signingGuard) {
+        live.put(gc.getId(), new Registration(gc, signingGuard));
     }
 
     /**
@@ -82,6 +116,41 @@ public class LiveDiscussionRegistry {
      */
     public void unregister(String groupConversationId) {
         live.remove(groupConversationId);
+    }
+
+    /**
+     * The guard a running discussion reads its transcript through, or empty when it
+     * is not running or was registered without one (then nothing is filtered, as
+     * for the loop itself). A caller that also needs the discussion takes both from
+     * one {@link #registrationForMember} or {@link #registration} instead: two
+     * lookups can straddle an {@link #unregister} and see the discussion but no
+     * guard.
+     */
+    public Optional<GroupSigningGuard> signingGuard(String groupConversationId) {
+        return registration(groupConversationId).flatMap(Registration::guard);
+    }
+
+    /**
+     * The running discussion and its guard, read together; empty when it is not
+     * running. Like {@link #get}, never an authorization.
+     */
+    public Optional<Registration> registration(String groupConversationId) {
+        return groupConversationId == null ? Optional.empty() : Optional.ofNullable(live.get(groupConversationId));
+    }
+
+    /**
+     * As {@link #getForMember}, with the guard of the same registration, so a tool
+     * provider gating on the member's verification requirement reads the guard that
+     * belongs to the discussion it found.
+     */
+    public Optional<Registration> registrationForMember(String groupConversationId, String conversationId) {
+        if (conversationId == null) {
+            return Optional.empty();
+        }
+        return registration(groupConversationId).filter(registration -> {
+            var gc = registration.groupConversation();
+            return gc.getMemberConversationIds() != null && gc.getMemberConversationIds().containsValue(conversationId);
+        });
     }
 
     /**
@@ -108,12 +177,7 @@ public class LiveDiscussionRegistry {
      *            the caller's own conversation, from conversation memory
      */
     public Optional<GroupConversation> getForMember(String groupConversationId, String conversationId) {
-        if (groupConversationId == null || conversationId == null) {
-            return Optional.empty();
-        }
-        return get(groupConversationId)
-                .filter(gc -> gc.getMemberConversationIds() != null
-                        && gc.getMemberConversationIds().containsValue(conversationId));
+        return registrationForMember(groupConversationId, conversationId).map(Registration::groupConversation);
     }
 
     /**
@@ -139,6 +203,6 @@ public class LiveDiscussionRegistry {
      * membership.
      */
     public Optional<GroupConversation> get(String groupConversationId) {
-        return Optional.ofNullable(live.get(groupConversationId));
+        return registration(groupConversationId).map(Registration::groupConversation);
     }
 }

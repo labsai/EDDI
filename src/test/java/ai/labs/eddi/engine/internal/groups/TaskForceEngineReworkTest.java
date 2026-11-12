@@ -83,6 +83,9 @@ class TaskForceEngineReworkTest {
         var templatingEngine = mock(ITemplatingEngine.class);
         when(templatingEngine.processTemplate(anyString(), any(), any())).thenAnswer(inv -> inv.getArgument(0));
         memberTurnExecutor = mock(MemberTurnExecutor.class);
+        // The verification summary is signed for the verifier; signing is the guard's
+        // business.
+        when(memberTurnExecutor.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         when(memberTurnExecutor.executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any())).thenAnswer(inv -> {
             GroupMember member = inv.getArgument(0);
             verifierCalls++;
@@ -208,6 +211,11 @@ class TaskForceEngineReworkTest {
             assertEquals(1, gc.getTaskList().reworkCount(task(gc).id()));
             assertEquals(1.0, meter(TaskForceEngine.METER_TASK_REWORKS));
             assertTrue(gc.getTranscript().stream().anyMatch(e -> e.content() != null && e.content().startsWith("Returned for rework (1/1)")));
+            // The engine's note is shown to every verifying member as the engine's own,
+            // so it must not quote the verifier: its feedback reaches the member through
+            // the task, where the records can trace it to the verifier's entry.
+            assertTrue(gc.getTranscript().stream().filter(e -> "system".equals(e.speakerAgentId()))
+                    .noneMatch(e -> e.content() != null && e.content().contains("missing sources")), "an engine note quotes the verifier");
         }
 
         @Test

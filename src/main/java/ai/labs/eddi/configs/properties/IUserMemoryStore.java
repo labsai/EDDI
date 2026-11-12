@@ -331,6 +331,18 @@ public interface IUserMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * {@link #getVisibleEntries} for an agent that requires peer verification:
+     * without the user's entries whose value another agent wrote
+     * ({@link UserMemoryEntry#writtenByAgentOtherThan}), since no signature covers
+     * them. The team's lessons are kept. The entries are left out in the query,
+     * before {@code maxEntries} is applied, so other agents' entries do not take
+     * the places of the ones the reader is shown.
+     */
+    List<UserMemoryEntry> getVisibleEntriesForVerifyingReader(String userId, String agentId, List<String> groupIds, String recallOrder,
+                                                              int maxEntries)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
      * Owner prefix for TEAM-OWNED memory (I8): a group's retro lessons are stored
      * under the synthetic user {@code "group:"+groupId} so they belong to the team,
      * not to whichever human happened to run the discussion — and survive that

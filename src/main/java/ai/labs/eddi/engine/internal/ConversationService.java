@@ -2643,10 +2643,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     List<String> groups = visibility == Visibility.group ? groupIds : List.of();
                     boolean sameIdentity = (visibility == Visibility.global) == (current.visibility() == Visibility.global);
                     if (sameIdentity) {
+                        // The row keeps its owner, but the value is the one this
+                        // conversation held, so its agent is the writer — on a global
+                        // row the owner may be another agent.
                         Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
                         userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), visibility,
                                 current.sourceAgentId(), groups, conversationId, false, current.accessCount(), current.createdAt(),
-                                current.updatedAt()));
+                                current.updatedAt(), agentId));
                     } else if (sameKey.stream().noneMatch(e -> (e.visibility() == Visibility.global) == (visibility == Visibility.global))) {
                         // The entry moves between the shared global row and this agent's
                         // row, which are different documents.

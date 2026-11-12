@@ -101,9 +101,10 @@ class GroupConversationServiceLiveDiscussionTest {
         service.executeDiscussion(gc, config, List.of(), "Q?", null, 0);
 
         InOrder order = inOrder(registry);
-        order.verify(registry).register(gc);
+        order.verify(registry).register(same(gc), notNull());
         order.verify(registry).unregister("gc-1");
         assertTrue(registry.get("gc-1").isEmpty(), "must not remain registered once the leg has finished");
+        assertTrue(registry.signingGuard("gc-1").isEmpty(), "nor its signing guard");
     }
 
     @Test
@@ -118,7 +119,7 @@ class GroupConversationServiceLiveDiscussionTest {
         assertThrows(IGroupConversationService.GroupExecutionException.class,
                 () -> service.executeDiscussion(gc, config, List.of(), "Q?", null, 0));
 
-        verify(registry).register(gc);
+        verify(registry).register(same(gc), notNull());
         verify(registry).unregister("gc-2");
         assertTrue(registry.get("gc-2").isEmpty());
     }

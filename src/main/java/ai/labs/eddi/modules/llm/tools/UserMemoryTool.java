@@ -64,6 +64,7 @@ public class UserMemoryTool {
     private final AgentConfiguration.UserMemoryConfig config;
     private final AgentConfiguration.Guardrails guardrails;
     private final BooleanSupplier turnDiscarded;
+    private final boolean peerVerification;
     private int writesThisTurn = 0;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
@@ -81,6 +82,17 @@ public class UserMemoryTool {
      */
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, false);
+    }
+
+    /**
+     * @param peerVerification
+     *            whether the agent requires peer verification: it then reads no
+     *            memory another agent wrote, which no signature covers
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, boolean peerVerification) {
+        this.peerVerification = peerVerification;
         this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
         this.userId = userId;
@@ -281,7 +293,11 @@ public class UserMemoryTool {
             + "Returns a formatted list of remembered facts, preferences, and context.")
     public String recallMemories() {
         try {
-            List<UserMemoryEntry> entries = store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries());
+            // An agent that requires peer verification is shown no memory another agent
+            // wrote; the store leaves those out before the recall limit.
+            List<UserMemoryEntry> entries = peerVerification
+                    ? store.getVisibleEntriesForVerifyingReader(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries())
+                    : store.getVisibleEntries(userId, agentId, groupIds, config.getRecallOrder(), config.getMaxRecallEntries());
 
             if (entries.isEmpty()) {
                 return "No memories found for this user.";
@@ -479,6 +495,14 @@ public class UserMemoryTool {
     }
 
     /**
+     * An agent that requires peer verification reads only its own memories and the
+     * ones no agent wrote (the user's, an admin's).
+     */
+    private boolean readableUnderPeerVerification(UserMemoryEntry entry) {
+        return !peerVerification || !entry.writtenByAgentOtherThan(agentId);
+    }
+
+    /**
      * Whether this agent may see the given entry. Mirrors the store-side recall
      * scoping ({@code self(agentId) OR group(groupIds) OR global}) and additionally
      * always admits entries this agent itself created.
@@ -490,7 +514,7 @@ public class UserMemoryTool {
      * agent A's {@code visibility:self} memories about a shared user.
      */
     private boolean isVisibleToThisAgent(UserMemoryEntry entry) {
-        if (entry == null) {
+        if (entry == null || !readableUnderPeerVerification(entry)) {
             return false;
         }
         if (agentId != null && agentId.equals(entry.sourceAgentId())) {

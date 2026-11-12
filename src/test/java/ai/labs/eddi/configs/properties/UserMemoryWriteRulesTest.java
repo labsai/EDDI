@@ -68,4 +68,21 @@ class UserMemoryWriteRulesTest {
     void categoryDefault() {
         assertEquals("fact", UserMemoryWriteRules.withDefaults(entry("k", "v", null, Visibility.global, null, List.of())).category());
     }
+
+    /**
+     * The stores record the writer an entry names. A REST body binds through the
+     * record's canonical constructor, so one that leaves the field out names no
+     * writer at all and would be stored as written by no agent, which a reader that
+     * requires peer verification trusts.
+     */
+    @Test
+    @DisplayName("a body that names no writer is recorded as its agent's, one that names a writer keeps it")
+    void writerDefault() {
+        var unnamed = new UserMemoryEntry(null, "user-1", "k", "v", "fact", Visibility.global, "agent-1", List.of(), null, false, 0, null, null,
+                null);
+        assertEquals("agent-1", UserMemoryWriteRules.withDefaults(unnamed).lastWriterAgentId());
+        var named = new UserMemoryEntry(null, "user-1", "k", "v", "fact", Visibility.global, "agent-1", List.of(), null, false, 0, null, null,
+                "agent-2");
+        assertEquals("agent-2", UserMemoryWriteRules.withDefaults(named).lastWriterAgentId());
+    }
 }

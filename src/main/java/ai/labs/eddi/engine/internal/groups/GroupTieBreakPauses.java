@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.configs.groups.model.HumanTieBreakConfig.OnTieBreakTimeout;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
@@ -40,6 +41,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.UnaryOperator;
 
 /**
  * The pause half of {@code tiePolicy: HUMAN_DECIDES}: commits the
@@ -152,19 +154,23 @@ public class GroupTieBreakPauses {
      * {@code HUMAN_DECIDES} is dropped with a FACILITATION note: the boundary can
      * pause only once, and the decider is about to be asked anyway. The same
      * precedence the phase approval gate already takes over an escalation. Any
-     * other deferred action is returned unchanged.
+     * other deferred action is returned unchanged. The note keeps the facilitator's
+     * own question, so it is the facilitator's entry, passed through {@code sign}:
+     * recorded as the engine's, it would pass the facilitator's text to a verifying
+     * member as engine text.
      */
     public static FacilitatorEngine.FacilitatorAction yieldEscalation(GroupConversation gc, HumanTieBreakEngine.PendingTieBreak tieBreak,
                                                                       FacilitatorEngine.FacilitatorAction deferred, int phaseIdx,
-                                                                      DiscussionPhase phase) {
+                                                                      DiscussionPhase phase, String facilitatorAgentId,
+                                                                      UnaryOperator<TranscriptEntry> sign) {
         if (tieBreak == null || deferred == null || deferred.kind() != FacilitatorEngine.FacilitatorAction.Kind.ESCALATE) {
             return deferred;
         }
         var escalation = deferred.escalation();
-        gc.getTranscript().add(new TranscriptEntry(null, "Facilitator",
+        gc.getTranscript().add(sign.apply(new TranscriptEntry(facilitatorAgentId, AgentGroupStore.FACILITATOR_SPEAKER_NAME,
                 "Facilitator escalation to " + escalation.principalId() + " suppressed — the vote tied and "
                         + tieBreak.deciderDisplayName() + " is deciding it. The facilitator's question: " + escalation.question(),
-                phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null));
+                phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null)));
         return null;
     }
 
@@ -194,7 +200,8 @@ public class GroupTieBreakPauses {
                     "Content exceeds the maximum length of " + GroupHitlCoordinator.MAX_HUMAN_INPUT_LENGTH + " characters");
         }
         var context = loadContext(gc, pending);
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, context.phase(), pending.phaseIdx(), transcriptFrom(pending));
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, context.phase(), pending.phaseIdx(), transcriptFrom(pending),
+                phaseExecutionEngine.recordsOf(gc, context.config()));
         DecisionRecord decision = HumanTieBreakEngine.decisionFor(chosen, pending.displayName(), rebuilt.quorumReached(), rebuilt,
                 gc.getDecision(), context.phase().name(), rationale);
         String note = "Tie broken by " + pending.displayName() + ": \"" + chosen + "\""
@@ -402,7 +409,8 @@ public class GroupTieBreakPauses {
                         base.maxTurns(), ceiling, base.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
         var turnCounter = new AtomicInteger(Math.max(gc.getPausedTurnCount(), 0));
-        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending));
+        var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending),
+                phaseExecutionEngine.recordsOf(gc, config));
         DecisionRecord moderatorDecision = phaseExecutionEngine.resolveTieByModerator(gc, config, phase, protocol, phaseIdx, rebuilt,
                 listener, turnCounter, maxTurns);
         if (moderatorDecision != null && moderatorDecision.type() == GroupConversation.DecisionType.VOTE) {

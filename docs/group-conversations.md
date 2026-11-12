@@ -183,7 +183,11 @@ tools.
 Both caps are enforced independently: `maxPerTurn` bounds a runaway single turn,
 `maxAgentAddedTasksPerDiscussion` bounds slow drift across a long discussion. The
 discussion cap counts only agent-filed tasks, so a large planned backlog does not
-exhaust it. A rejected call does not consume the per-turn budget.
+exhaust it. It counts what members file with the task tool in this discussion,
+not tasks the run starts with, so a standing team's backlog task another team's
+agent handed off does not count although the run keeps that agent as its creator
+(see [Signed contributions](#signed-contributions)). A rejected call does not
+consume the per-turn budget.
 
 **No claim or complete tools.** The wave loop owns every task-state transition;
 a second writer racing it would corrupt the state machine that decides what runs
@@ -682,7 +686,10 @@ should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
-artifact — FINAL artifacts accept no further updates. Artifacts are deleted
+artifact — FINAL artifacts accept no further updates. Artifacts are not signed,
+so a member with `security.requirePeerVerification` (or whose setting cannot be
+read) is not given the artifact tools: they would hand it any member's text as
+stored ([Signed contributions](#signed-contributions)). Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
 
@@ -954,7 +961,9 @@ same wave once its dependency completes, and is verified with it.
   `requiresApproval`), `maxReworks` is not applied (a warning is logged): the human's decision on each task is
   the check, and `onTaskRejection: RETRY` is how a person asks for another attempt.
 - **Records.** Every return is a `VERIFICATION` transcript entry, *"Returned for rework (1/2): <subject> —
-  <feedback>"*, and is counted by `eddi_group_task_reworks_total`. The per-task counts are stored with the
+  the verifier's feedback is on the task"*, and is counted by `eddi_group_task_reworks_total`. The note does not
+  quote the feedback: it is the engine's, and every member is shown it, including one that requires peer
+  verification of a verifier whose entry does not verify. The per-task counts are stored with the
   discussion (`taskList.reworkCounts`), so the bound holds across a pause.
 - **Feedback is model text.** The verifier's feedback reaches the member as part of its input, as every group
   member already reads its peers' contributions. It is never template source.
@@ -1139,6 +1148,15 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+**Dynamic agents cannot sign.** `create_sub_agent` creates an agent with no
+identity, and a new agent cannot be created with `signInterAgentMessages` on.
+In a group where any member, the moderator or the facilitator requires peer
+verification, a created agent's contributions are therefore withheld from the
+verifying readers as `UNSIGNED`, and its ballots, proposals, lessons and task
+results count for nothing in the group's records ([Signed contributions](#signed-contributions)).
+In such a group, leave `dynamicAgents.allowCreation` off and recruit existing
+agents that have keys instead.
 
 **What the tools may touch.**
 
@@ -1416,16 +1434,101 @@ each of its turns:
   as `[withheld: this message could not be verified, because ...]` in its
   phase prompt and its `groupTranscript` context, named by the speaker's agent
   id and with no phase name, since the stored display name and phase name are
-  unverified text too. This is the only place an entry is refused, and it is
-  not a blanket fail-closed: a member without the setting (the default) is
-  shown the stored transcript with nothing checked and nothing logged, entries
-  no agent wrote are shown to a verifying member too (labelled, below), and
-  the engine's other prompts and a follow-up still quote the stored
-  transcript (see [Not yet supported](#not-yet-supported)). So every agent
+  unverified text too; the engine's other prompts for it read the transcript
+  the same way (next item). It is not a blanket fail-closed: a member without
+  the setting (the default) is shown the stored transcript with nothing
+  checked and nothing logged, entries no agent wrote are shown to a verifying
+  member too, unauthenticated (labelled, below), and the texts that still
+  reach it without a signature of their own are listed under
+  [Not yet supported](#not-yet-supported). So every agent
   that writes to the
   discussion should sign: each member, and the moderator or synthesizer too
   when it is not a member, or its synthesis is withheld from verifying
   members.
+- **Every prompt, not only phase turns.** The prompts the engine writes for a
+  role turn read the transcript the same way, as the agent taking the turn may
+  see it: the convergence judge (the moderator; the `SERVICE` judge is no agent
+  and reads the round as the engine's own records count it, below), a
+  dissenter, the facilitator's briefing, a
+  follow-up's `groupTranscript`, and a nested group's question, which is
+  filtered when any agent of the nested group verifies (a member, its
+  moderator or its facilitator, or one of a group nested in it), since that
+  prompt becomes the question each of them works from; a nested group that
+  cannot be read counts as verifying. A
+  dissenter that verifies is not asked to react to a synthesis that does not
+  verify for it.
+- **Task forces.** The task records are agent text too: a verifying executor,
+  verifier or bidder is shown a task's result only when a verified entry of
+  the assignee holds exactly that text (an unsigned result, or one edited in
+  the store, reads `[withheld: this text could not be verified]`). Its own
+  results are checked the same way when it signs; one that does not sign is
+  shown its own results as its entries hold them. A result an approver edited when approving it is the
+  reviewer's text, not the agent's, and is shown, as a reviewer's synthesis
+  edit is. A task's subject and description are withheld when they come
+  from a plan that does not verify, or from another member's task tool while
+  that member does not sign verifiably (it has no key, signing is off, or its
+  key is revoked or outside its window). The engine records a tool-filed task
+  under the member whose turn filed it, so a signing member's task is shown
+  as its text and done by a verifying assignee. A standing team's backlog task
+  another team's agent handed off (a `handoff_to_team` call with `AUTO`
+  intake) is that agent's text the same way: the cadence keeps the agent as
+  the run's task's creator, so it is shown, and done, only while that agent
+  signs verifiably. A team with such a member therefore never runs one it
+  could not verify: an `AUTO` handoff from an agent that does not sign
+  verifiably goes to the intake inbox for a person to accept, and a backlog
+  task whose agent stops signing waits on the backlog, not pulled, so no
+  member fails it, is charged for it or is quoted it. Such a task stays
+  `PENDING`; a cadence fire that it leaves with nothing to run records why
+  in the schedule's fire history, naming the agents. To free it, give the
+  agent a signing key again (or turn its signing back on), or delete the
+  task and file it again. Configured tasks and
+  the user's own are shown, and so is a handoff a person accepted from the
+  intake inbox. A store edit to a task's subject or description is not
+  detected, here or for configured tasks. A verification note is withheld
+  when it comes from a verifier entry that does not verify. A verifying member
+  whose own task's text does not verify is not asked to do it: the task fails
+  with "Its task text could not be verified". That uses no turn and is no
+  failure of the member, so under `onAgentFailure: ABORT` the discussion goes
+  on. A verifying verifier judges only
+  the tasks whose text and result it may see: the others stay `COMPLETED`,
+  unverified, with a note giving their count, and with none left it gets no
+  turn, so a verdict that cannot be parsed never auto-verifies work it was not
+  shown. A bidder is announced, and can win, only the tasks whose text it may
+  see, and `listGroupTasks` lists each subject as the calling member may see it.
+- **The engine's own records.** Once any member, the moderator or the
+  facilitator (an enabled one: a facilitator that is switched off reads
+  nothing and counts for nothing) requires verification, what the engine
+  records for everyone
+  counts only entries that verify for all of them: the `SERVICE` convergence
+  judge's input, the negotiation table (proposals and concessions), the vote (its options and ballots: a synthesis
+  that does not verify offers no options, so the vote does not run, and an
+  unsigned ballot is not counted, also when a `HUMAN_DECIDES` tie is resumed
+  by the person or, on timeout, by the moderator), an arbitration verdict, the lessons a
+  retrospective stores in team memory, and the feedback a standing team's
+  cadence carries into a backlog task's description, which the next run shows
+  as configured task text. A facilitator's `CALL_VOTE` options are its own
+  text, so in such a group the move is refused unless the facilitator signs
+  verifiably.
+- **User memories.** A group- or global-visible user memory whose value
+  another agent wrote carries no signature, so an agent that requires
+  verification neither loads it as a `{properties.key}` at conversation start
+  nor gets it from the memory tool's recall or search, in any conversation.
+  What counts is who last wrote the value, since a global entry keeps its
+  creator as owner when another agent writes it; the store leaves these
+  entries out before the recall limit, so its own memories, the ones the user
+  or an admin wrote and the team's lessons are all shown. A `longTerm`
+  property it sets for a global key is written as any agent's is, replacing
+  such a value, and makes it the value's writer, so it is shown the value
+  again (see [User Memory](user-memory.md)). (The flag is read from the
+  deployed agent version.)
+- **Entries the engine writes for an agent are signed for it.** A follow-up
+  answer, the readable summary of a task-force verification, the
+  facilitator's notes (an escalation dropped for an approval gate or a
+  tie-break included) and a recruitment note are signed with the agent's key
+  when it signs, so a verifying member sees them, and are named by the agent:
+  each carries the agent's own text, which recorded as the engine's would pass
+  for engine text. A task-failure note is the engine's own and is
+  recorded as such, with the member as its target.
 - A record with no content (a skipped turn, an error, a pass) is written by
   the engine unsigned, so nothing vouches for its text either. A verifying
   member's `groupTranscript` keeps it in place with its speaker id, type,
@@ -1438,6 +1541,11 @@ each of its turns:
   failure, or an answer from before signing was switched on), as it already is
   for every verifying peer. A verifying member that does not sign has nothing
   to check its own entries against: it is shown them as stored, unchecked.
+  They are still unsigned for the engine's records, so once anyone verifies,
+  its proposals, ballots and (as moderator) synthesis do not count there: a
+  verifying moderator that does not sign leaves a vote on its synthesis without
+  options.
+  An agent that verifies should sign too.
 - A revoked key vouches for nothing, whenever an entry claims to have been
   signed. A key's `validFromMs`/`validUntilMs` window is checked against the
   time the signer wrote into the entry, so it limits honest use but does not
@@ -1454,10 +1562,10 @@ each of its turns:
   by that id followed by `(not an agent, unverified)`, since no agent store
   vouches for the id any more. Other ids that name no agent (a human member,
   a nested group, a reviewer) are shown labelled as below. So revoking a compromised agent's key and then deleting the agent
-  keeps its entries withheld. The one deleted agent this does not recognise is
-  a facilitator that was never a member: its turns run under a conversation
-  of their own and its notes are unsigned, so after the delete they are shown
-  labelled as a non-agent's.
+  keeps its entries withheld. A facilitator's notes are recognised by their
+  type, since only the facilitator, or a member recruiting someone, records a
+  `FACILITATION` note under an agent id: a facilitator that is not a member
+  runs its turns under a conversation of their own.
 - Entries no agent wrote are not signed: the user's question and follow-ups, a
   human member's turn, a reviewer's edit, the engine's own notes and a nested
   group's answer. They are not authenticated: whoever can write the
@@ -1483,9 +1591,9 @@ each of its turns:
 - The stored window summary is free text no signature covers, so a verifying
   member never gets it: in a windowed discussion it is shown the truncation
   marker instead.
-- A ballot lists the options the tally counts, taken from the stored
-  transcript, even when the synthesis they come from is withheld from the
-  voter.
+- A ballot lists the options in the latest synthesis as the voter sees it, so
+  a verifying voter is offered none from a synthesis that does not verify for
+  it.
 - If a member's configuration cannot be read, the setting this node last read
   for it applies; if it never read one, the member's turn is recorded
   `SKIPPED`.
@@ -1511,7 +1619,7 @@ Known bounds, so they are not discovered at runtime:
 | **Nested pauses** | A sub-group that pauses for approval or a human turn is cancelled and its member turn recorded `SKIPPED`. Nested HITL is not supported. |
 | **Groups over the OpenAI-compatible API** | `/v1` exposes deployed *agents* as models. A group is not addressable there; use the REST or MCP surfaces. |
 | **Groups over A2A** | An A2A peer can invoke an agent, not a group. |
-| **Peer verification of engine-written prompts** | `requirePeerVerification` filters a member's phase prompt and `groupTranscript` context. The prompts the engine writes itself for role turns (convergence judge, facilitator briefing, vote tie-break, dissent round, task-force plan, execute, verify and bid) quote the round just run, task records or a short excerpt directly and are not filtered. Agent follow-up answers, facilitator interventions and the reformatted task-force verification entry are recorded unsigned, so a verifying member sees them withheld. A follow-up (`followup_with_member` or its REST endpoint) passes the asked member the stored transcript unfiltered as its `groupTranscript` context, even when that member requires peer verification. |
+| **Peer verification: what is not signed** | Every prompt a verifying member receives is filtered (see [Signed contributions](#signed-contributions)), but some texts reach it without a signature of their own. The engine's notes are shown to it as the engine's, unauthenticated: a rework or task-failure note names a task's subject only as the group's records count it (`[withheld: this text could not be verified]` once a reader verifies and the subject comes from a plan or task tool that does not verify for every reader), and a verifying facilitator's briefing leaves out the convergence check's reason, which is the judge's reply; the note that a human-assigned task is not reworked still quotes its subject as stored. A task a member files with its task tools, or another team's agent hands off, is not signed: its text is that agent's as the engine recorded it, shown when that agent signs verifiably. A handoff an `onDecision` rule files renders the source team's decision record and names no agent, and one a person accepted from the intake inbox is the reviewer's to vouch for: both reach the run as configured task text. The cadence question quotes the pulled tasks under the user's name, marked as handed off where they were; a handed-off one a verifying member could not take as its agent's is not pulled (it goes to the intake inbox when filed, and waits on the backlog if its agent stops signing). So a team whose members require verification should accept handoffs with `REVIEW` intake, where a person approves the text first. Shared artifacts are not signed, so a member that requires verification gets no artifact tools. Lessons are read back as stored: a team's own lessons stored while none of its readers required verification, the lessons other teams share with it (quoted in its RETRO prompt), and the lessons the team scorecard tool returns for the team and the teams it oversees, which were checked only against the storing team's records rule; reading another team's lessons trusts that team's verification setting. A nested group's answer is shown relabelled, not verified. An agent `create_sub_agent` creates has no signing key and cannot be given one while it runs, so with any verifying reader its contributions are withheld as `UNSIGNED` and count for nothing in the group's records (see [Dynamic Agents](#dynamic-agents)). |
 | **Cross-node tool availability** | The task, artifact and recruit tools resolve the running discussion from an in-process registry. Member turns always run in the same JVM as their orchestrator, so this holds — but a discussion is only "live" on the node running it. |
 
 ## Configuration

@@ -76,6 +76,8 @@ class FacilitatorEngineTest {
     @BeforeEach
     void setUp() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
+        // The facilitator's notes are signed for it; signing is the guard's business.
+        when(memberTurnExecutor.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         deploymentStore = mock(IDeploymentStore.class);
         auditLedgerService = mock(AuditLedgerService.class);
         meterRegistry = new SimpleMeterRegistry();

@@ -236,4 +236,47 @@ class UserMemoryEntryTest {
         assertTrue(UserMemoryEntry.DEFAULT_CATEGORIES.contains("context"));
         assertEquals(3, UserMemoryEntry.DEFAULT_CATEGORIES.size());
     }
+
+    // --- who wrote the value: what a reader that requires peer verification goes
+    // by
+
+    /**
+     * A global entry keeps its owner when another agent writes it, so the owner
+     * says nothing about who wrote the value: the last writer does.
+     */
+    @Test
+    void writtenByAgentOtherThan_goesByTheLastWriterNotTheOwner() {
+        var overwrittenByAnother = memory("u1", null, "agent-a");
+        var overwrittenByTheReader = memory("u1", "agent-a", "agent-v");
+        var overwrittenByTheUser = memory("u1", "agent-a", null);
+
+        assertTrue(overwrittenByAnother.writtenByAgentOtherThan("agent-v"), "the user's key, another agent's value");
+        assertFalse(overwrittenByTheReader.writtenByAgentOtherThan("agent-v"), "another agent's key, the reader's value");
+        assertFalse(overwrittenByTheUser.writtenByAgentOtherThan("agent-v"), "a value no agent wrote");
+    }
+
+    /**
+     * An entry about to be written, or one stored before writers were recorded, was
+     * written by its owner.
+     */
+    @Test
+    void theOwnerWritesAnEntryThatNamesNoOtherWriter() {
+        var written = new UserMemoryEntry(null, "u1", "k", "v", "fact", Visibility.global, "agent-a", List.of(), null, false, 0, null, null);
+
+        assertEquals("agent-a", written.lastWriterAgentId());
+        assertTrue(written.writtenByAgentOtherThan("agent-v"));
+    }
+
+    /**
+     * A team's lessons are stored under its reserved owner by the engine, from the
+     * team's records as its records rule counts them, not by any agent.
+     */
+    @Test
+    void aTeamsLessonIsWrittenByNoAgent() {
+        assertFalse(memory("group:g1", "retro", "retro").writtenByAgentOtherThan("agent-v"));
+    }
+
+    private static UserMemoryEntry memory(String userId, String owner, String lastWriter) {
+        return new UserMemoryEntry("id", userId, "k", "v", "fact", Visibility.global, owner, List.of(), null, false, 0, null, null, lastWriter);
+    }
 }

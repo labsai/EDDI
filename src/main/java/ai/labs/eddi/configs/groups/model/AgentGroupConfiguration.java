@@ -1670,6 +1670,12 @@ public class AgentGroupConfiguration {
      *            subjects of tasks that must complete first
      * @param priority
      *            0 = highest
+     * @param createdByAgentId
+     *            the agent whose text the task is, for a standing team's backlog
+     *            task an agent filed (a handoff), or {@code null}. Set by the
+     *            engine, never part of a stored configuration: the run's task
+     *            records it as its creator, so a member that requires peer
+     *            verification is shown it only while that agent signs verifiably
      */
     public record TaskDefinition(
             String subject,
@@ -1677,7 +1683,8 @@ public class AgentGroupConfiguration {
             String assignToRole,
             List<String> dependsOn,
             int priority,
-            AssignmentMode assignmentMode) {
+            AssignmentMode assignmentMode,
+            @JsonIgnore String createdByAgentId) {
 
         public TaskDefinition(String subject, String description) {
             this(subject, description, "ALL", List.of(), 0);
@@ -1686,6 +1693,12 @@ public class AgentGroupConfiguration {
         /** Backward-compatible constructor without {@code assignmentMode} (I18). */
         public TaskDefinition(String subject, String description, String assignToRole, List<String> dependsOn, int priority) {
             this(subject, description, assignToRole, dependsOn, priority, null);
+        }
+
+        /** A task of the configuration: no agent wrote it. */
+        public TaskDefinition(String subject, String description, String assignToRole, List<String> dependsOn, int priority,
+                AssignmentMode assignmentMode) {
+            this(subject, description, assignToRole, dependsOn, priority, assignmentMode, null);
         }
 
         public TaskDefinition {

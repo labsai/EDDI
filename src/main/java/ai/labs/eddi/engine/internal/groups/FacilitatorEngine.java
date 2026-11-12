@@ -24,6 +24,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -119,6 +120,7 @@ public class FacilitatorEngine {
      * applies (M-A1). {@code null} skips it.
      */
     private final BiPredicate<String, String> useCheck;
+    private GroupSigningGuard signingGuard;
 
     public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry) {
@@ -190,6 +192,14 @@ public class FacilitatorEngine {
      */
     public record CheckpointContext(int phaseIdx, int repeat, boolean repeatCheckpoint, boolean moreRepeatsScheduled,
             boolean phaseEndedBySignal, boolean escalationResumeTargetExists) {
+    }
+
+    /**
+     * Wires the guard the facilitator's briefing reads the transcript through.
+     * Without it the briefing quotes the transcript as stored.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     /**
@@ -277,7 +287,7 @@ public class FacilitatorEngine {
         return switch (move) {
             case END_PHASE -> executeEndPhase(gc, fc, phase, ctx, parsed);
             case EXTEND_PHASE -> executeExtendPhase(gc, fc, phase, ctx, parsed);
-            case CALL_VOTE -> executeCallVote(gc, fc, phase, ctx, parsed);
+            case CALL_VOTE -> executeCallVote(gc, config, fc, phase, ctx, parsed);
             case RECRUIT -> executeRecruit(gc, config, fc, phase, ctx, parsed);
             case ESCALATE_HUMAN -> executeEscalate(gc, fc, phase, ctx, parsed);
             case CONTINUE -> FacilitatorAction.none(); // unreachable — handled above
@@ -316,8 +326,8 @@ public class FacilitatorEngine {
         return new FacilitatorAction(FacilitatorAction.Kind.EXTEND_PHASE, null, null);
     }
 
-    private FacilitatorAction executeCallVote(GroupConversation gc, FacilitatorConfig fc, DiscussionPhase phase,
-                                              CheckpointContext ctx, ParsedMove parsed) {
+    private FacilitatorAction executeCallVote(GroupConversation gc, AgentGroupConfiguration config, FacilitatorConfig fc,
+                                              DiscussionPhase phase, CheckpointContext ctx, ParsedMove parsed) {
         // Review findings: same no-overrule rule as END_PHASE/EXTEND_PHASE — a
         // phase that already ended by convergence or unanimous agreement is a
         // deterministic exit the facilitator must not append a vote to. And a
@@ -333,6 +343,15 @@ public class FacilitatorEngine {
         if (gc.getDecision() != null) {
             recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
                     "the discussion already carries a decision record — a facilitator vote would overwrite it");
+            return FacilitatorAction.none();
+        }
+        // The options are the facilitator's own text: every voter is asked to choose
+        // among them and the decision is recorded from them. Once a reader requires
+        // peer verification they are offered only while the facilitator signs
+        // verifiably, as a task an agent filed is shown (TaskRecordView).
+        if (!GroupSigningGuard.recordView(signingGuard, gc, GroupSigningGuard.readersOf(config, gc)).vouchesFor(fc.agentId())) {
+            recordRejection(gc, fc, phase, ctx, parsed.move().name(), parsed.reason(),
+                    "a member requires peer verification and the facilitator does not sign verifiably, so its vote options cannot be offered");
             return FacilitatorAction.none();
         }
         List<String> options = new ArrayList<>();
@@ -510,8 +529,10 @@ public class FacilitatorEngine {
         gc.setFacilitatorMoveCount(gc.getFacilitatorMoveCount() + 1);
         String content = "Facilitator " + summary
                 + (parsed.reason() != null && !parsed.reason().isBlank() ? " — " + parsed.reason().trim() : "");
-        gc.getTranscript().add(new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(), phase.name(),
-                TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId));
+        // Signed for the facilitator: the move and its reason are its own.
+        gc.getTranscript()
+                .add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME, content, ctx.phaseIdx(),
+                        phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, targetAgentId)));
         meterRegistry.counter("eddi_group_facilitator_moves_total",
                 "move", parsed.move().name(), "outcome", "executed").increment();
         auditMove(gc, parsed, ctx, "EXECUTED", null);
@@ -528,8 +549,9 @@ public class FacilitatorEngine {
                                  CheckpointContext ctx, String attemptedMove, String reason, String why) {
         String content = "Facilitator attempted " + attemptedMove + " — rejected: " + why
                 + (reason != null && !reason.isBlank() ? ". Facilitator's reason: " + reason.trim() : "");
-        gc.getTranscript().add(new TranscriptEntry(fc.agentId(), "Facilitator", content, ctx.phaseIdx(), phase.name(),
-                TranscriptEntryType.FACILITATION, Instant.now(), null, null));
+        gc.getTranscript()
+                .add(memberTurnExecutor.sign(gc, new TranscriptEntry(fc.agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME, content, ctx.phaseIdx(),
+                        phase.name(), TranscriptEntryType.FACILITATION, Instant.now(), null, null)));
         // Review finding: the raw LLM-authored move string as a metric tag value
         // is unbounded label cardinality — every hallucinated name became a new
         // Prometheus time series for the JVM's lifetime. The tag is bounded to
@@ -681,28 +703,34 @@ public class FacilitatorEngine {
             }
         }
 
-        Map<TranscriptEntryType, Long> phaseCounts;
+        // The transcript as the facilitator may see it: the excerpt is the latest
+        // contribution it can take as written, never an unverified one.
+        var view = GroupSigningGuard.viewOf(signingGuard, fc.agentId(), gc);
+        List<TranscriptEntry> transcript = view.transcript();
+        Map<TranscriptEntryType, Long> phaseCounts = transcript.stream()
+                .filter(e -> e.phaseIndex() == ctx.phaseIdx())
+                .collect(Collectors.groupingBy(TranscriptEntry::type, LinkedHashMap::new, Collectors.counting()));
+        // A convergence note is recorded under the engine's name, but its text is the
+        // judge's reply, which no signature covers and which the judge wrote from what
+        // it, not this facilitator, was shown. So, like the window summary, a
+        // verifying facilitator is not quoted it.
+        boolean quotesConvergence = !view.verifying();
         String latestConvergence = null;
         String latestExcerpt = null;
-        synchronized (gc.getTranscript()) {
-            phaseCounts = gc.getTranscript().stream()
-                    .filter(e -> e.phaseIndex() == ctx.phaseIdx())
-                    .collect(Collectors.groupingBy(TranscriptEntry::type, LinkedHashMap::new, Collectors.counting()));
-            for (int i = gc.getTranscript().size() - 1; i >= 0; i--) {
-                TranscriptEntry entry = gc.getTranscript().get(i);
-                if (latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
-                        && entry.content() != null) {
-                    latestConvergence = truncate(entry.content(), 200);
-                }
-                if (latestExcerpt == null && entry.content() != null
-                        && (entry.type() == TranscriptEntryType.SYNTHESIS
-                                || entry.type() == TranscriptEntryType.OPINION
-                                || entry.type() == TranscriptEntryType.REVISION)) {
-                    latestExcerpt = truncate(entry.content(), BRIEFING_EXCERPT_LENGTH);
-                }
-                if (latestConvergence != null && latestExcerpt != null) {
-                    break;
-                }
+        for (int i = transcript.size() - 1; i >= 0; i--) {
+            TranscriptEntry entry = transcript.get(i);
+            if (quotesConvergence && latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
+                    && entry.content() != null) {
+                latestConvergence = truncate(entry.content(), 200);
+            }
+            if (latestExcerpt == null && entry.content() != null && !GroupSigningGuard.isWithheld(entry)
+                    && (entry.type() == TranscriptEntryType.SYNTHESIS
+                            || entry.type() == TranscriptEntryType.OPINION
+                            || entry.type() == TranscriptEntryType.REVISION)) {
+                latestExcerpt = truncate(entry.content(), BRIEFING_EXCERPT_LENGTH);
+            }
+            if ((latestConvergence != null || !quotesConvergence) && latestExcerpt != null) {
+                break;
             }
         }
         if (!phaseCounts.isEmpty()) {

@@ -198,9 +198,13 @@ public class RecruitAgentTool {
                 recruiterAgentId != null ? recruiterAgentId : "A member", wanted,
                 resolvedRole != null ? resolvedRole : "a member",
                 reason != null && !reason.isBlank() ? reason.trim() : "no reason given");
-        gc.getTranscript().add(new TranscriptEntry(
-                recruiterAgentId, "System", note, gc.getCurrentPhaseIndex(), gc.getCurrentPhaseName(),
-                TranscriptEntryType.FACILITATION, Instant.now(), null, wanted));
+        // The note carries the recruiter's own reason, so it is the recruiter's entry:
+        // named by it and signed for it like its turns. Named "System", a verifying
+        // member would read the recruiter's text as the engine's.
+        var noteEntry = new TranscriptEntry(recruiterAgentId,
+                recruiterAgentId != null ? gc.getMemberDisplayNames().getOrDefault(recruiterAgentId, recruiterAgentId) : "System", note,
+                gc.getCurrentPhaseIndex(), gc.getCurrentPhaseName(), TranscriptEntryType.FACILITATION, Instant.now(), null, wanted);
+        gc.getTranscript().add(registry.signingGuard(groupConversationId).map(guard -> guard.sign(gc, noteEntry)).orElse(noteEntry));
 
         LOGGER.infof("Agent '%s' recruited '%s' into group conversation %s", recruiterAgentId, wanted, groupConversationId);
         return "Recruited '%s'%s. They join from the next round.".formatted(wanted,

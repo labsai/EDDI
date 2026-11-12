@@ -109,6 +109,14 @@ class RetroEngineTest {
             return maxEntries > 0 && visible.size() > maxEntries ? visible.subList(0, maxEntries) : visible;
         }
 
+        @Override
+        public List<UserMemoryEntry> getVisibleEntriesForVerifyingReader(String userId, String agentId, List<String> groupIds,
+                                                                         String recallOrder, int maxEntries) {
+            List<UserMemoryEntry> readable = getVisibleEntries(userId, agentId, groupIds, recallOrder, -1).stream()
+                    .filter(e -> !e.writtenByAgentOtherThan(agentId)).toList();
+            return maxEntries > 0 && readable.size() > maxEntries ? readable.subList(0, maxEntries) : readable;
+        }
+
         // Unused surface.
         @Override
         public Properties readProperties(String userId) {

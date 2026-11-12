@@ -92,7 +92,10 @@ never enforced.
 - **Summary and ballots.** The stored window summary is free text no signature covers, so a
   verifying member gets the truncation marker instead. A ballot lists the options the tally counts,
   resolved from the stored transcript: a verifying voter from whom the synthesis was withheld got
-  no options, could not cast a parseable ballot, and counted against quorum.
+  no options, could not cast a parseable ballot, and counted against quorum. (Superseded by the
+  entry "every prompt a verifying member receives is built from its verified view": a ballot now
+  lists the options as the voter sees them, and a vote on a synthesis that does not verify does
+  not run.)
 - **Unreadable receiver.** If a member's configuration cannot be read, the setting this node last
   read for it applies; if it never read one, the member's turn is recorded `SKIPPED` instead of
   running on a transcript filtered for a setting nobody knows. Before, every member, verifying or
@@ -139,7 +142,8 @@ The prompts the engine writes itself for role turns (convergence judge, facilita
 tie-break, dissent round, task-force plan, execute, verify and bid) quote the round just run, task
 records or a short excerpt directly. Agent follow-up answers, facilitator interventions and the
 reformatted task-force verification entry are recorded unsigned, so a verifying member sees them
-withheld.
+withheld. The entry "every prompt a verifying member receives is built from its verified view"
+filters those prompts and signs those entries for their agent.
 
 A follow-up (`followUpWithMember`) is not filtered either: the member it asks gets the stored
 transcript unfiltered in its `groupTranscript` context, even when it requires peer verification, so

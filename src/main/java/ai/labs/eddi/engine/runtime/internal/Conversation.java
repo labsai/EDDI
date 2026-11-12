@@ -385,7 +385,13 @@ public class Conversation implements IConversation {
             String recallOrder = config.getRecallOrder();
             int maxEntries = config.getMaxRecallEntries();
 
-            List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
+            // A member that requires peer verification is shown no agent text that no
+            // signature covers: a group- or global-visible memory whose value another
+            // agent wrote is such text. The store leaves those out before the limit.
+            List<UserMemoryEntry> visible = memory.isPeerVerificationRequired()
+                    ? store.getVisibleEntriesForVerifyingReader(userId, agentId, groupIds, recallOrder, maxEntries)
+                    : store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries);
+            List<UserMemoryEntry> entries = mostSpecificPerKey(visible);
 
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);
@@ -941,6 +947,10 @@ public class Conversation implements IConversation {
                     LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
                             + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
                 }
+                // Written also by an agent that requires peer verification over a global
+                // value another agent last wrote, which it was not shown: the property may
+                // be a fact the user just gave it, and the write makes it the value's
+                // writer, so the agent is shown the value again.
                 UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
