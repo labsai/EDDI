@@ -185,8 +185,15 @@ public class RagIngestionService {
         } catch (Exception e) {
             // The status is returned to anyone with VIEW on the knowledge base, and the
             // message is the provider's: redacted before it is kept.
-            ingestionStatus.put(ingestionId, "failed: " + KnowledgeBaseFailureRedactor.redact(failureRedactor, ragConfig, e.getMessage()));
-            LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
+            var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, ragConfig, e);
+            ingestionStatus.put(ingestionId, "failed: " + redacted.text());
+            if (redacted.altered()) {
+                // The raw exception carries what was just removed: the log gets the
+                // redacted text and the failure's class, not the exception.
+                LOGGER.errorf("Ingestion %s failed for KB '%s' (%s): %s", ingestionId, sanitize(kbId), e.getClass().getName(), redacted.text());
+            } else {
+                LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
+            }
         }
     }
 

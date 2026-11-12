@@ -20,7 +20,7 @@ and `model` meter tag.
 - `VaultReferencePlacement` refuses a reference anywhere else, after `${vars:…}` expansion and before
   anything is resolved, naming only the key. Both registry paths and the embedding factory apply it, so no
   model — and no telemetry — ever sees such a value.
-- Save time: `VaultReferencePlacementGuard` answers 400 in `RestLlmStore` (create, update, patch, duplicate;
+- Save time (the literal text only; a `${vars:…}` that expands to a reference is caught at build time): in `RestLlmStore` (create, update, patch, duplicate;
   task, cascade step and judge parameters, a templated type judged against every provider's keys),
   `RagConfiguration.validate()` covers the RAG create and update, `RestRagStore.duplicateRag` checks it
   separately, and the direct creates of `RestImportService` and `UpgradeExecutor` apply the guard.
@@ -80,11 +80,17 @@ so the fallback stays usable.
 - `azure-openai` reports OpenAI's API as its destination whenever `nonAzureApiKey` is set (the client then
   sends there even with an `endpoint`), and a whitespace-only Vertex `apiEndpoint` falls back to the regional
   host check, as the builder treats it.
-- The chat-error scrubber records the plaintexts the build's own resolution produced, read off the resolved
-  values, instead of resolving the references a second time.
+- The chat-error scrubber captures each plaintext where `ChatModelRegistry` substitutes its reference (each
+  distinct reference resolved once, on its own), instead of resolving again or splitting the resolved text —
+  a secret containing the separator, or two adjacent references, is captured as the separate secrets it is.
+- A credential of 4 to 7 characters, too short to replace everywhere, withholds the whole message when it
+  appears in it as a token: on the chat error paths (`ResolvedCredentials`) and in the knowledge-base failure
+  status and search errors (`KnowledgeBaseFailureRedactor`, which names the failure's class; the server log then
+  gets the redacted text, not the raw exception). Identity parameters (`user`, `userName`) take no part.
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
-- `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters).
+- `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; shorter
+  ones withhold, as above).
 - The vault-tenant warning no longer logs the requested tenant value, and `ConfigReferenceGuard` trims the
   `tenantId` property as `SecretPropertyVault` does.
 - A merge import over a stored version that breaks the placement rule is refused before it writes, since the

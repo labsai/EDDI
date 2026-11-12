@@ -16,7 +16,6 @@ import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.VaultReferencePlacement;
-import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -272,68 +271,55 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Remembers the plaintext of every vault reference that the build's own
-     * resolution put into {@code resolved} — the credentials handed to the client —
-     * so the task-error and fallback paths can scrub a provider error of them by
-     * value. See {@link ResolvedCredentials}.
+     * Resolves the vault references of {@code params} and puts the plaintext of
+     * each into {@code captured}, at the point of substitution.
      * <p>
-     * Taken from the resolved values themselves, never from a second resolution: a
-     * secret rotated in between would otherwise leave the scrubber with the new
-     * plaintext while the client holds the old one. Only what replaced a reference
-     * is recorded, not the whole value, so the text around a reference (the rest of
-     * a JSON header, say) is not treated as a secret.
+     * Each distinct reference is resolved once, on its own, through
+     * {@link SecretResolver#resolveSecrets} — the resolver's own semantics (cache,
+     * reserved names, a disabled vault leaving it in place) — and the values are
+     * then assembled here. So the scrubber learns exactly the value each reference
+     * was replaced with, with no second resolution a rotation could make differ,
+     * and no guess at where one secret ends and the next begins: a value holding
+     * {@code ${vault:a}:${vault:b}} where {@code a} itself contains {@code :}, or
+     * two adjacent references, is captured as the two secrets it is.
+     *
+     * @return the parameters with every resolvable reference replaced; one that
+     *         could not be resolved stays in place, for
+     *         {@link SecretResolver#requireResolved} to refuse
      */
-    private void recordCredentials(Map<String, String> unresolved, Map<String, String> resolved) {
-        if (resolvedCredentials == null || resolved == null) {
-            return;
+    private Map<String, String> resolveCapturing(Map<String, String> params, List<String> captured) {
+        Map<String, String> plaintextOf = new HashMap<>();
+        for (String reference : VaultHostAllowlist.referencesIn(params.values())) {
+            Map<String, String> single = secretResolver.resolveSecrets(Map.of(RESOLVED_KEY, reference));
+            String plaintext = single == null ? null : single.get(RESOLVED_KEY);
+            if (plaintext != null && !plaintext.equals(reference)) {
+                plaintextOf.put(reference, plaintext);
+                captured.add(plaintext);
+            }
         }
-        List<String> plaintexts = new ArrayList<>();
-        for (var entry : unresolved.entrySet()) {
-            plaintexts.addAll(substitutedPlaintexts(entry.getValue(), resolved.get(entry.getKey())));
+        if (plaintextOf.isEmpty()) {
+            return params;
         }
-        resolvedCredentials.record(plaintexts);
+        var resolved = new HashMap<>(params);
+        resolved.replaceAll((key, value) -> value == null || !SecretReference.isVaultReference(value)
+                ? value
+                : SecretReference.scanner().replaceAll(value, match -> plaintextOf.getOrDefault(match.text(), match.text())));
+        return resolved;
     }
+
+    /** The key of the one-entry map each reference is resolved in. */
+    private static final String RESOLVED_KEY = "reference";
 
     /**
-     * The text that replaced each vault reference of {@code unresolved} in
-     * {@code resolved}, found by walking the literal text between the references.
-     * Adjacent references, with nothing between them, are taken together. A value
-     * whose text around the references changed in resolution yields nothing.
+     * Remembers the plaintexts just handed to a client, so the task-error and
+     * fallback paths can scrub a provider error of them by value. See
+     * {@link ResolvedCredentials}.
      */
-    static List<String> substitutedPlaintexts(String unresolved, String resolved) {
-        List<String> plaintexts = new ArrayList<>();
-        if (unresolved == null || resolved == null || unresolved.equals(resolved)) {
-            return plaintexts;
+    private void recordCredentials(List<String> captured) {
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(captured);
         }
-        List<ReferenceScanner.Match> references = SecretReference.scanner().findAll(unresolved);
-        if (references.isEmpty()) {
-            return plaintexts;
-        }
-        String prefix = unresolved.substring(0, references.getFirst().start());
-        if (!resolved.startsWith(prefix)) {
-            return plaintexts;
-        }
-        int position = prefix.length();
-        for (int i = 0; i < references.size(); i++) {
-            ReferenceScanner.Match reference = references.get(i);
-            boolean last = i == references.size() - 1;
-            String following = last ? unresolved.substring(reference.end()) : unresolved.substring(reference.end(), references.get(i + 1).start());
-            if (!last && following.isEmpty()) {
-                continue; // Taken together with the next reference.
-            }
-            int end = last ? resolved.length() - following.length() : resolved.indexOf(following, position);
-            if (end < position || (last && !resolved.endsWith(following))) {
-                return plaintexts;
-            }
-            String plaintext = resolved.substring(position, end);
-            if (!plaintext.equals(reference.text())) {
-                plaintexts.add(plaintext);
-            }
-            position = end + following.length();
-        }
-        return plaintexts;
     }
-
     /**
      * Cluster mode: evicts models built longer ago than
      * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
@@ -442,9 +428,9 @@ public class ChatModelRegistry {
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         requireReferencesInCredentialKeys(type, modelBuilder, resolvedParams);
         requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
-        var unresolvedParams = resolvedParams;
-        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-        recordCredentials(unresolvedParams, resolvedParams);
+        List<String> captured = new ArrayList<>();
+        resolvedParams = SecretResolver.requireResolved(resolveCapturing(resolvedParams, captured), "LLM provider '" + type + "'");
+        recordCredentials(captured);
         resolvedParams = adaptToModel(type, resolvedParams);
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
@@ -501,9 +487,9 @@ public class ChatModelRegistry {
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             requireReferencesInCredentialKeys(type, modelBuilder, resolvedParams);
             requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
-            var unresolvedParams = resolvedParams;
-            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-            recordCredentials(unresolvedParams, resolvedParams);
+            List<String> captured = new ArrayList<>();
+            resolvedParams = SecretResolver.requireResolved(resolveCapturing(resolvedParams, captured), "LLM provider '" + type + "'");
+            recordCredentials(captured);
             resolvedParams = adaptToModel(type, resolvedParams);
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);

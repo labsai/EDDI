@@ -455,8 +455,14 @@ public class RestRagIngestion implements IRestRagIngestion {
      * then credential shapes.
      */
     private Response inspectionFailed(String ragConfigId, RagConfiguration knowledgeBase, RuntimeException e) {
-        LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
-        String cause = KnowledgeBaseFailureRedactor.redact(failureRedactor, knowledgeBase, e.getMessage());
+        var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, knowledgeBase, e);
+        if (redacted.altered()) {
+            // The raw exception carries what was just removed: log the redacted text.
+            LOGGER.warnf("Inspecting knowledge base %s failed (%s): %s", sanitize(ragConfigId), e.getClass().getName(), redacted.text());
+        } else {
+            LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
+        }
+        String cause = redacted.text();
         return Response.status(Response.Status.BAD_GATEWAY)
                 .entity(Map.of("error", "The embedding model or vector store failed: " + cause))
                 .build();

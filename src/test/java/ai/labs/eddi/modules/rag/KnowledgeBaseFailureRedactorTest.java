@@ -84,6 +84,27 @@ class KnowledgeBaseFailureRedactorTest {
     }
 
     @Test
+    @DisplayName("an unlabelled short password in the failure text withholds the provider's text; without it the text is unchanged")
+    void shortPasswordWithholdsTheText() {
+        String shortPassword = "w".repeat(7);
+        var config = knowledgeBase();
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("user", "eddi", "password", shortPassword));
+        var failure = new IllegalStateException("connection rejected for " + shortPassword + " on host db");
+
+        var redacted = redactor.redactFailure(config, failure);
+
+        assertTrue(redacted.altered());
+        assertFalse(redacted.text().contains(shortPassword), redacted.text());
+        assertTrue(redacted.text().contains("IllegalStateException"), redacted.text());
+        // A failure that does not carry it is returned as it was — the user name, an
+        // identity rather than a secret, withholds nothing.
+        var unrelated = redactor.redactFailure(config, new IllegalStateException("database eddi does not exist"));
+        assertFalse(unrelated.altered());
+        assertEquals("database eddi does not exist", unrelated.text());
+    }
+
+    @Test
     @DisplayName("a message without secrets is kept")
     void plainMessageIsKept() {
         assertEquals("connection refused", redactor.redact(knowledgeBase(), "connection refused"));
