@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.model.AgentDeployment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
@@ -23,7 +24,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 
@@ -69,10 +69,8 @@ class RestAgentManagementNotReadyTest {
         trigger.setAgentDeployments(List.of(deployment));
         when(triggerStore.readAgentTrigger(INTENT)).thenReturn(trigger);
 
-        management = new RestAgentManagement(restAgentEngine, userConversationStore, triggerStore, false);
-        Field identityField = RestAgentManagement.class.getDeclaredField("identity");
-        identityField.setAccessible(true);
-        identityField.set(management, mock(SecurityIdentity.class));
+        management = new RestAgentManagement(restAgentEngine, userConversationStore, triggerStore, false, mock(SecurityIdentity.class),
+                mock(OwnershipValidator.class));
     }
 
     private void agentNotReady(int status) {

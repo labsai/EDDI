@@ -219,7 +219,8 @@ public class ClassifierGuardrail implements ContentGuardrail {
      */
     List<ChatMessage> buildMessages(String text, GuardrailContext context) {
         String screened = text != null ? text : "";
-        boolean output = context.phase() == GuardrailPhase.OUTPUT;
+        // Model-produced text — an answer or tool-call arguments — as templateData does
+        boolean output = context.phase() != GuardrailPhase.INPUT;
         String question = output ? lastUserText(context.messages()) : screened;
         String template = context.parameter(PARAM_PROMPT_TEMPLATE, null);
         if (template == null) {

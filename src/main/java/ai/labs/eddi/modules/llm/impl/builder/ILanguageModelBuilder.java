@@ -82,7 +82,8 @@ public interface ILanguageModelBuilder {
 
     /**
      * The endpoint this builder will send to when the configuration names none of
-     * the endpoint keys it reads — or {@code null} when there is no such default.
+     * the endpoint parameters it reads ({@code EndpointParameters}) — or
+     * {@code null} when there is no such default.
      * <p>
      * Every builder with a default destination names it: the vendor's fixed host
      * ({@code api.openai.com}), the host a parameter selects (an OpenAI-compatible

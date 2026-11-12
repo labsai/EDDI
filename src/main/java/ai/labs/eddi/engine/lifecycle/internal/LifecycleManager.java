@@ -64,6 +64,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_PRICING;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.HITL_PLAN_HASH;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -826,6 +827,14 @@ public class LifecycleManager implements ILifecycleManager {
         IData<String> inputData = currentStep.getLatestData("input");
         if (inputData != null && inputData.getResult() != null) {
             input.put("userInput", inputData.getResult());
+        }
+        // A task that runs because a human approved a plan records which plan: the
+        // hash the resume was admitted against (HitlPlanHash), written to the step by
+        // Conversation#resume. Every task the resume runs carries it, since all of
+        // them run under that approval.
+        IData<String> planHashData = currentStep.getLatestData(HITL_PLAN_HASH);
+        if (planHashData != null && planHashData.getResult() != null) {
+            input.put("hitlPlanHash", planHashData.getResult());
         }
 
         // Collect output data (what the task wrote)

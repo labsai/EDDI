@@ -17,6 +17,7 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.VaultReferencePlacement;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.utils.EndpointParameters;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
@@ -206,19 +207,6 @@ public class ChatModelRegistry {
     }
 
     /**
-     * The parameter keys the builders read an endpoint from. Checked before the
-     * vault references are resolved, so that a secret restricted to
-     * {@code api.openai.com} is never handed to a builder pointed elsewhere.
-     * <p>
-     * A configuration with none of these keys still has a destination: the
-     * provider's own default endpoint, which
-     * {@link ILanguageModelBuilder#defaultEndpoint} names and which is checked the
-     * same way. The editor chooses the provider {@code type}, so a vendor's fixed
-     * host is an editor-chosen destination too.
-     */
-    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint", "url", "serverUrl", "host", "apiEndpoint");
-
-    /**
      * Task parameters that never reach a builder: the prompts, and settings the
      * task itself consumes. Removed before the cache key is built, so they are
      * neither resolved nor subject to {@link VaultReferencePlacement} — a prompt
@@ -229,19 +217,27 @@ public class ChatModelRegistry {
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
-     * name a configured endpoint. Every endpoint key that is set is checked, not
-     * only the first: which key a builder reads depends on the provider, so a
-     * configuration carrying an allowed {@code baseUrl} and an attacker's
-     * {@code endpoint} must not pass on the strength of the one it does not use.
+     * name a configured endpoint. Checked before the vault references are resolved,
+     * so that a secret restricted to {@code api.openai.com} is never handed to a
+     * builder pointed elsewhere.
+     * <p>
+     * Every parameter that names an endpoint ({@link EndpointParameters}) and is
+     * set is checked, not only the one the builder reads: which key that is depends
+     * on the provider, so a configuration carrying an allowed {@code baseUrl} and
+     * an attacker's {@code endpoint} must not pass on the strength of the one it
+     * does not use. A configuration with none still has a destination: the
+     * provider's own default endpoint, which {@link ILanguageModelBuilder#defaultEndpoint}
+     * names and which is checked the same way. The editor chooses the provider
+     * {@code type}, so a vendor's fixed host is an editor-chosen destination too.
      *
      * @param params
      *            the builder parameters with global variables resolved and vault
      *            references still in place
      */
     private void requireSecretsAllowedAt(String type, ILanguageModelBuilder modelBuilder, Map<String, String> params) {
-        for (String key : ENDPOINT_KEYS) {
-            String endpoint = params.get(key);
-            if (endpoint != null && !endpoint.isBlank()) {
+        for (Map.Entry<String, String> parameter : params.entrySet()) {
+            String endpoint = parameter.getValue();
+            if (EndpointParameters.isEndpointKey(parameter.getKey()) && endpoint != null && !endpoint.isBlank()) {
                 vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
             }
         }
