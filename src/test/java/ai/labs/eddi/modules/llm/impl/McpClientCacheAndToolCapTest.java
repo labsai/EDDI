@@ -129,40 +129,28 @@ class McpClientCacheAndToolCapTest {
     class ToolCaps {
 
         @Test
-        @DisplayName("50,000 parameterless tools are cut to max-per-server")
-        void toolCountCap() {
-            var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
-            var registry = new SimpleMeterRegistry();
-            manager.meterRegistry = registry;
-            Map<ToolSpecification, ToolExecutor> tools = new LinkedHashMap<>();
-            ToolExecutor executor = (request, memoryId) -> "ok";
-            for (int i = 0; i < 50_000; i++) {
-                tools.put(ToolSpecification.builder().name("t" + i).build(), executor);
-            }
-            doReturn(resultOf(tools)).when(manager).fetchToolsFromServer(any());
-
-            var result = manager.discoverTools(List.of(config()));
-
-            assertEquals(McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER, result.toolSpecs().size());
-            assertEquals("t0", result.toolSpecs().getFirst().name(), "the first tools are the ones kept");
-            assertEquals(1.0, registry.counter("eddi.mcp.tool-schema.governed", "outcome", "dropped_tool_count_cap").count());
-        }
-
-        @Test
-        @DisplayName("the cap is configurable")
-        void toolCountCapConfigurable() {
+        @DisplayName("discovery does not cap the count: the cached list is shared by agents with different whitelists")
+        void discoveryKeepsEveryValidTool() {
             var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
             manager.maxToolsPerServer = 2;
             ToolExecutor executor = (request, memoryId) -> "ok";
             Map<ToolSpecification, ToolExecutor> tools = new LinkedHashMap<>();
-            tools.put(ToolSpecification.builder().name("a").build(), executor);
-            tools.put(ToolSpecification.builder().name("b").build(), executor);
-            tools.put(ToolSpecification.builder().name("c").build(), executor);
+            for (int i = 0; i < 300; i++) {
+                tools.put(ToolSpecification.builder().name("t" + i).build(), executor);
+            }
             doReturn(resultOf(tools)).when(manager).fetchToolsFromServer(any());
 
-            assertEquals(List.of("a", "b"), manager.discoverTools(List.of(config())).toolSpecs().stream().map(ToolSpecification::name).toList());
+            assertEquals(300, manager.discoverTools(List.of(config())).toolSpecs().size());
+            assertEquals(2, manager.toolsPerServerCap(), "the configured cap is handed to the per-agent filter");
         }
 
+        @Test
+        @DisplayName("a non-positive cap means the default")
+        void capDefault() {
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
+            manager.maxToolsPerServer = 0;
+            assertEquals(McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER, manager.toolsPerServerCap());
+        }
         @Test
         @DisplayName("a multi-megabyte or off-alphabet tool name is dropped; valid neighbours stay")
         void invalidNamesDropped() {

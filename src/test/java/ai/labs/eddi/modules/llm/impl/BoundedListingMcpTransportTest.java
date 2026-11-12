@@ -13,11 +13,13 @@ import dev.langchain4j.mcp.protocol.McpListResourcesRequest;
 import dev.langchain4j.mcp.protocol.McpListToolsRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -69,6 +71,7 @@ class BoundedListingMcpTransportTest {
     }
 
     @Test
+    @Timeout(10)
     @DisplayName("an endless cursor chain is refused at the page bound, unsent, and the owner is told")
     void endlessCursorStopsAtPageBound() {
         var sent = new AtomicInteger();
@@ -82,7 +85,7 @@ class BoundedListingMcpTransportTest {
         transport.sendRequest(list("again")).join();
         CompletableFuture<String> fourth = transport.sendRequest(list("again"));
 
-        var failure = assertThrows(ExecutionException.class, fourth::get);
+        var failure = assertThrows(ExecutionException.class, () -> fourth.get(5, TimeUnit.SECONDS));
         assertInstanceOf(BoundedListingMcpTransport.ListingLimitExceededException.class, failure.getCause());
         assertTrue(failure.getCause().getMessage().contains("more than 3 pages"), failure.getCause().getMessage());
         assertEquals(3, sent.get(), "the page past the bound must never be sent");

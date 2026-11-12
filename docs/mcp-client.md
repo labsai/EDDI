@@ -255,7 +255,8 @@ context. Four layers apply, none of which you configure to get:
    drops its tool) and per server (`eddi.mcp.tool-schema.max-bytes-per-server`,
    default 512 KB, charged with each tool's name and description as well as its
    schema, so a server of thousands of parameterless tools is not free). A server
-   contributes at most `eddi.mcp.tools.max-per-server` tools (default 128), and a
+   contributes at most `eddi.mcp.tools.max-per-server` tools to an agent (default 128,
+   counted after the agent's `toolsWhitelist`/`toolsBlacklist`), and a
    tool whose name is not 1–64 characters of `[A-Za-z0-9_.-]` is dropped. Each
    redaction, truncation or drop is counted in
    `eddi_mcp_tool_schema_governed_total` (tag `outcome`) and named in a WARN.
@@ -367,7 +368,7 @@ make every approval of a credentialed call fail its own re-check.
 | Tools vanish after a while | Circuit breaker: 3 failures in 60s opens it for a cooldown. Check the server. |
 | `Failed to connect to MCP server (…)` with no detail | Deliberate. The exception *message* routinely contains the resolved URL, and a URL with a templated credential in it is the credential. The full throwable is in the server log. |
 | Two servers, one tool missing | Name collision. First writer wins, loudly; use `toolsBlacklist` on the loser to make the choice explicit. |
-| A large server shows only its first 128 tools | `eddi.mcp.tools.max-per-server`. Raise it, or split the server. |
+| A large server shows only its first 128 tools | `eddi.mcp.tools.max-per-server`, counted after the whitelist. Name the tools the agent needs in `toolsWhitelist`, or raise the cap. |
 | `MCP tools/list stopped: the server's listing ran more than 20 pages` | The server kept returning a pagination cursor. Fix the server, or raise `eddi.mcp.list.max-pages` if it really has that many pages. |
 | A rotated key still fails | Confirm the config uses `${vault:…}` and not a literal — a literal is not invalidated because nothing knows it changed. |
 

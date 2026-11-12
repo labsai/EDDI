@@ -198,12 +198,25 @@ class McpToolsProvider implements ToolSourceProvider {
                 List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
                 List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
 
+                // eddi.mcp.tools.max-per-server, counted AFTER this agent's whitelist and
+                // blacklist: the discovered list is cached per server and shared by every
+                // agent, so capping it there would hide a whitelisted tool past position
+                // N on a large server.
+                int toolCap = mcpToolProviderManager.toolsPerServerCap() > 0
+                        ? mcpToolProviderManager.toolsPerServerCap()
+                        : McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER;
+                int keptFromServer = 0;
+                int droppedByCap = 0;
                 for (ToolSpecification spec : result.toolSpecs()) {
                     String name = spec.name();
                     if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
                         continue;
                     if (blacklist != null && blacklist.contains(name))
                         continue;
+                    if (keptFromServer >= toolCap) {
+                        droppedByCap++;
+                        continue;
+                    }
 
                     // First-write-wins WITHIN this provider, and only when the spec has
                     // an executor. Without it, two MCP servers exposing the same tool
@@ -225,12 +238,18 @@ class McpToolsProvider implements ToolSourceProvider {
                     }
                     toolSpecs.add(spec);
                     executors.put(name, executor);
+                    keptFromServer++;
                     // Pin the call: without this the approver saw a tool name and
                     // nothing else, and the pre-execution re-check had nothing to
                     // compare against.
                     resolversOut.put(name, RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), name,
                             mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
                     groupsOut.put(name, group);
+                }
+                if (droppedByCap > 0) {
+                    LOGGER.warnf("MCP server '%s' offers this agent %d tools after its whitelist/blacklist — keeping the first %d, "
+                            + "dropping %d (eddi.mcp.tools.max-per-server). Name the tools the agent needs in toolsWhitelist.",
+                            sanitize(groupId(mcpCallsConfig)), keptFromServer + droppedByCap, toolCap, droppedByCap);
                 }
 
                 // Resource bridge — explicit opt-in per config, and deliberately NOT

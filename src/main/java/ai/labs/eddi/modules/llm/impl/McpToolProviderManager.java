@@ -169,14 +169,24 @@ public class McpToolProviderManager {
     long listDeadlineMillis = 30_000L;
 
     /**
-     * Most tools one MCP server may contribute to an agent; the rest are dropped
-     * with a warning.
+     * Most tools one MCP server may contribute to an agent, counted after the
+     * agent's {@code toolsWhitelist}/{@code toolsBlacklist}; the rest are dropped
+     * with a warning. Read by {@code McpToolsProvider} through
+     * {@link #toolsPerServerCap()}.
      */
     @ConfigProperty(name = "eddi.mcp.tools.max-per-server", defaultValue = "128")
     int maxToolsPerServer = DEFAULT_MAX_TOOLS_PER_SERVER;
 
     /** Default for {@link #maxToolsPerServer}. */
-    static final int DEFAULT_MAX_TOOLS_PER_SERVER = 128;
+    public static final int DEFAULT_MAX_TOOLS_PER_SERVER = 128;
+
+    /**
+     * The per-agent, per-server tool cap ({@code eddi.mcp.tools.max-per-server}); a
+     * non-positive setting means the default.
+     */
+    public int toolsPerServerCap() {
+        return maxToolsPerServer > 0 ? maxToolsPerServer : DEFAULT_MAX_TOOLS_PER_SERVER;
+    }
 
     /** Longest tool name accepted from a remote server (OpenAI's own limit). */
     static final int MAX_TOOL_NAME_LENGTH = 64;
@@ -601,14 +611,11 @@ public class McpToolProviderManager {
                     // M7: one byte budget per server per discovery pass, so a server
                     // cannot fill the prompt with schemas tool by tool.
                     var schemaBudget = new ToolSchemaGovernor.ServerBudget(maxSchemaBytesPerServer);
-                    int toolCap = maxToolsPerServer > 0 ? maxToolsPerServer : DEFAULT_MAX_TOOLS_PER_SERVER;
+                    // No tool-count cap here: this list is cached per server and shared by
+                    // every agent naming it, each with its own toolsWhitelist. The cap is
+                    // applied per agent, after the whitelist (McpToolsProvider); what this
+                    // list may hold is bounded by eddi.mcp.list.max-items and the rules below.
                     for (var toolEntry : result.tools().entrySet()) {
-                        if (serverSpecs.size() >= toolCap) {
-                            LOGGER.warnf("MCP server '%s' advertises %d tools — keeping the first %d (eddi.mcp.tools.max-per-server)",
-                                    sanitize(serverName), result.tools().size(), toolCap);
-                            countSchema("dropped_tool_count_cap");
-                            break;
-                        }
                         // The name is remote text that becomes a function name in every
                         // LLM request: a provider rejects one outside its alphabet or
                         // over 64 characters, and a multi-megabyte one makes every request
@@ -1446,8 +1453,7 @@ public class McpToolProviderManager {
 
     /**
      * {@code eddi.mcp.tool-schema.governed}, tag {@code outcome}: redacted,
-     * truncated, dropped, dropped_server_cap, dropped_tool_count_cap,
-     * dropped_invalid_name.
+     * truncated, dropped, dropped_server_cap, dropped_invalid_name.
      */
     private void countSchema(String outcome) {
         if (meterRegistry == null) {
@@ -1701,7 +1707,7 @@ public class McpToolProviderManager {
         }
         if (callContext == null || callContext.invocationContext() == null) {
             LOGGER.debugf("MCP discovery request to '%s' carries no caller by design — sending it unauthenticated",
-                    sanitize(config.getUrl()));
+                    sanitize(UriRedactor.redactUri(config.getUrl())));
             return Map.of();
         }
         if (callerIdentityContext.current() == null) {
@@ -1710,7 +1716,7 @@ public class McpToolProviderManager {
             // nonsense and sending nothing is honest: the server refuses if it requires
             // authentication, which is a visible failure rather than the wrong
             // authority.
-            LOGGER.debugf("No caller bound for MCP tool call to '%s' — sending it unauthenticated", sanitize(config.getUrl()));
+            LOGGER.debugf("No caller bound for MCP tool call to '%s' — sending it unauthenticated", sanitize(UriRedactor.redactUri(config.getUrl())));
             return Map.of();
         }
         String resolved = callerIdentityResolver.resolveValue(configuredKey, URI.create(config.getUrl()));
