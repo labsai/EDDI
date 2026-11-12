@@ -14,6 +14,7 @@ import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -51,7 +52,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -250,6 +250,9 @@ public class EmbeddingStoreFactory {
      */
     @Inject
     ResolvedCredentials resolvedCredentials;
+
+    /** Store parameters naming who authenticates: resolved, never captured. */
+    private static final Set<String> IDENTITY_PARAMETERS = Set.of("user", "userName");
 
     @Inject
     public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -681,8 +684,8 @@ public class EmbeddingStoreFactory {
             default -> throw new IllegalArgumentException(
                     "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
-        // What the client holds, kept for by-value scrubbing for as long as it lives:
-        // a failure after a rotation echoes this value, not the new one.
+        // What the client holds, for a caller that holds it to pin to its failure
+        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
         if (resolvedCredentials != null) {
             resolvedCredentials.record(store, captured);
         }
@@ -914,12 +917,11 @@ public class EmbeddingStoreFactory {
         StoreParameters.requireCredentialsOnly(config.getStoreType(), resolved);
         String usedFor = "vector store '" + config.getStoreType() + "'";
         Set<String> references = VaultHostAllowlist.referencesIn(resolved.values());
-        Map<String, String> params = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), usedFor);
-        Set<String> credentials = new HashSet<>(StoreParameters.credentialParameters(config.getStoreType()));
-        // Who authenticates is not a secret: recorded, a short user name would withhold
-        // every chat error that mentions it.
-        credentials.removeAll(Set.of("user", "userName"));
-        captured.addAll(ResolvedCredentials.substituted(resolved, params, credentials));
+        // Each secret captured as substituted (SecretCapture). Who authenticates is
+        // not a secret: captured, a short user name would withhold every failure that
+        // mentions it.
+        Map<String, String> params = SecretResolver.requireResolved(SecretCapture.resolve(secretResolver, resolved, captured, IDENTITY_PARAMETERS),
+                usedFor);
         if (vaultHostAllowlist != null && !references.isEmpty()) {
             // After resolution, not before: a MongoDB connection string is commonly the
             // secret itself, so its hosts are only known once it is decrypted. Nothing

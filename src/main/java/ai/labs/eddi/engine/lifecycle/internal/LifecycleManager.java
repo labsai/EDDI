@@ -202,8 +202,12 @@ public class LifecycleManager implements ILifecycleManager {
         this.resolvedCredentials = resolvedCredentials;
     }
 
-    private String scrubResolvedCredentials(String text) {
-        return ResolvedCredentials.scrub(resolvedCredentials, text);
+    /**
+     * The by-value scrubber for a text describing {@code failure}: the recorded
+     * credentials, plus those the failing client pinned to it.
+     */
+    private UnaryOperator<String> scrubberFor(Throwable failure) {
+        return text -> ResolvedCredentials.scrubFailure(resolvedCredentials, failure, text);
     }
 
     public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId workflowId) {
@@ -544,7 +548,7 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Classify error for metrics, audit, and admin dashboards
                 String errorType = classifyError(e);
-                String errorSummary = summarizeForAudit(e, this::scrubResolvedCredentials);
+                String errorSummary = summarizeForAudit(e, scrubberFor(e));
                 long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
 
                 // The span carries the REDACTED summary, never the raw exception message:
@@ -1086,7 +1090,7 @@ public class LifecycleManager implements ILifecycleManager {
         // The summary the audit and digest carry, not the raw message: a provider can
         // quote the credential it rejected.
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
-                task.getId(), task.getType(), onFailureMode, summarizeForAudit(exception, this::scrubResolvedCredentials));
+                task.getId(), task.getType(), onFailureMode, summarizeForAudit(exception, scrubberFor(exception)));
 
         // 1. Mark new or overwritten IData entries as uncommitted.
         // An entry is "dirty" if its key didn't exist before OR if the
@@ -1209,7 +1213,7 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     private String reportFailureToCallerUnguarded(ConversationStep step, ILifecycleTask task, Exception exception) {
-        String summary = summarizeException(exception, this::scrubResolvedCredentials);
+        String summary = summarizeException(exception, scrubberFor(exception));
         String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
@@ -1416,7 +1420,7 @@ public class LifecycleManager implements ILifecycleManager {
      * {@link #summarizeForAudit(Throwable)} with {@code scrubber} — the by-value
      * removal of the credentials handed to model clients — applied first.
      */
-    static String summarizeForAudit(Throwable e, UnaryOperator<String> scrubber) {
+    public static String summarizeForAudit(Throwable e, UnaryOperator<String> scrubber) {
         String msg = scrubber.apply(describeFailure(e));
         // Redact before truncating — cutting first can split a secret so the
         // pattern no longer matches, leaving a fragment behind.

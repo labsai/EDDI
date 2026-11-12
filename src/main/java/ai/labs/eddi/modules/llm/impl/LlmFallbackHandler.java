@@ -27,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
@@ -84,22 +85,24 @@ final class LlmFallbackHandler {
 
     /**
      * Removes, by value, the credentials handed to model clients from the stored
-     * error message — see {@code ResolvedCredentials}. Identity when none is given.
+     * error message — see {@code ResolvedCredentials}: given the failure, so the
+     * credentials its client pinned to it are removed too. Identity when none is
+     * given.
      */
-    private final UnaryOperator<String> credentialScrubber;
+    private final Function<Throwable, UnaryOperator<String>> credentialScrubber;
 
     LlmFallbackHandler(ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, IDataFactory dataFactory,
             MeterRegistry meterRegistry) {
-        this(templatingEngine, jsonSerialization, dataFactory, meterRegistry, UnaryOperator.identity());
+        this(templatingEngine, jsonSerialization, dataFactory, meterRegistry, failure -> UnaryOperator.identity());
     }
 
     LlmFallbackHandler(ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, IDataFactory dataFactory,
-            MeterRegistry meterRegistry, UnaryOperator<String> credentialScrubber) {
+            MeterRegistry meterRegistry, Function<Throwable, UnaryOperator<String>> credentialScrubber) {
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.dataFactory = dataFactory;
         this.meterRegistry = meterRegistry;
-        this.credentialScrubber = credentialScrubber != null ? credentialScrubber : UnaryOperator.identity();
+        this.credentialScrubber = credentialScrubber != null ? credentialScrubber : failure -> UnaryOperator.identity();
     }
 
     /**
@@ -141,7 +144,7 @@ final class LlmFallbackHandler {
         storeQuickReplies(config, templateData, step, taskId);
 
         if (failure != null) {
-            Map<String, Object> described = describe(failure, credentialScrubber);
+            Map<String, Object> described = describe(failure, credentialScrubber.apply(failure));
             step.storeData(dataFactory.createData(MemoryKeys.LLM_ERROR_PREFIX + taskId, described));
             LOGGER.warnf("LLM task '%s' failed in conversation '%s' (%s: %s) — serving the configured fallback (onError=fallback)", taskId,
                     sanitizeForLog(conversationId), described.get("class"), described.get("message"));

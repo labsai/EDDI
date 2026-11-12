@@ -11,6 +11,7 @@ import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.EndpointParameters;
@@ -33,8 +34,10 @@ import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -136,6 +139,11 @@ public class EmbeddingModelFactory {
      */
     @Inject
     ResolvedCredentials resolvedCredentials;
+
+    /** See {@link #resolvedCredentials}; for a factory built with {@code new}. */
+    public void useResolvedCredentials(ResolvedCredentials resolvedCredentials) {
+        this.resolvedCredentials = resolvedCredentials;
+    }
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -241,8 +249,11 @@ public class EmbeddingModelFactory {
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
-        Map<String, String> withReferences = params;
-        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
+        // Each secret captured as substituted (SecretCapture), so a failure echoing it
+        // after a rotation is still scrubbed of exactly what this client holds.
+        List<String> captured = new ArrayList<>();
+        params = SecretResolver.requireResolved(SecretCapture.resolve(secretResolver, params, captured, Set.of()),
+                "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
             LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,
@@ -261,11 +272,10 @@ public class EmbeddingModelFactory {
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
-        // What the client now holds, kept for by-value scrubbing for as long as the
-        // client lives: a failure after a rotation echoes this value, not the new one.
+        // What the client holds, for a caller that holds it to pin to its failure
+        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
         if (resolvedCredentials != null) {
-            resolvedCredentials.record(model,
-                    ResolvedCredentials.substituted(withReferences, params, EmbeddingParameters.credentialParameters(provider)));
+            resolvedCredentials.record(model, captured);
         }
 
         if (pinsNonRetrievalTaskType(provider, params)) {

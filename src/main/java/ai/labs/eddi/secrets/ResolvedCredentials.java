@@ -5,16 +5,15 @@
 package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
-import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 
-import java.util.ArrayList;
+import java.lang.ref.Reference;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.IdentityHashMap;
 import java.util.Set;
 
 /**
@@ -47,13 +46,18 @@ import java.util.Set;
  * would hide the cause of nearly every failure. Use credentials of 8 characters
  * or more.
  * <p>
- * <b>Retention.</b> A value recorded against the client that holds it
- * ({@link #record(Object, Collection)}) is kept for exactly as long as that
- * client is reachable — while it is cached, and while any request still running
- * on it after an eviction or rotation holds it — however many other values are
- * recorded meanwhile: the holder is a weak key, compared by identity. Values
- * recorded without a holder (a build that has not produced its client yet) go
- * to a bounded set.
+ * <b>The failing client's own credentials.</b> The process-wide set is a
+ * backstop, not the guarantee: what guarantees that a failure is scrubbed of
+ * the credentials of the client that raised it is that the client pins them to
+ * the failure itself ({@link #pin}) as it propagates —
+ * {@code ChatModelRegistry} builds every chat model with its captured set, and
+ * the knowledge-base paths pin what their model and store clients hold. A
+ * scrubber handed that failure ({@link #scrubFailure(Throwable, String)}) then
+ * removes them, however long ago the client was evicted or its reference
+ * rotated: the failure is the object being scrubbed, so it is reachable for
+ * exactly as long as it is needed, and nothing depends on when the client is
+ * collected. A pinned value is specific to the failing client, so one shorter
+ * than {@link #MIN_LENGTH} withholds the text whatever its length.
  */
 @ApplicationScoped
 public class ResolvedCredentials {
@@ -64,6 +68,9 @@ public class ResolvedCredentials {
     /** The length from which a shorter value is looked for as a whole token. */
     static final int MIN_SHORT_LENGTH = 4;
 
+    /** How many exceptions of a cause chain are searched for pinned values. */
+    private static final int MAX_CAUSE_DEPTH = 16;
+
     /** What a text carrying a short credential is replaced with. */
     public static final String WITHHELD = "[the provider's message was withheld: it repeated a credential]";
 
@@ -73,36 +80,31 @@ public class ResolvedCredentials {
     private final Cache<String, Boolean> shortPlaintexts = Caffeine.newBuilder().maximumSize(MAX_VALUES).build();
 
     /**
-     * The values each live client was built with. Weak keys: an entry leaves when
-     * its client becomes unreachable, never because others were recorded.
+     * The values each client was built with, for {@link #heldBy}: read by a caller
+     * that holds the client, right after acquiring it. Weak keys, compared by
+     * identity.
      */
     private final Cache<Object, Set<String>> byHolder = Caffeine.newBuilder().weakKeys().build();
 
     /**
-     * Remembers {@code values} for as long as {@code holder} — the model or store
-     * client they were resolved into — is reachable. Without a holder, as
-     * {@link #record(Collection)}.
+     * The credentials of the client that raised each failure. Weak keys, compared
+     * by identity: an entry is read only by a scrubber that holds the failure.
+     */
+    private final Cache<Throwable, Set<String>> byFailure = Caffeine.newBuilder().weakKeys().build();
+
+    /**
+     * Remembers {@code values} as what {@code holder} — the model or store client
+     * they were resolved into — holds, for {@link #heldBy}, and in the process-wide
+     * set. Without a holder, as {@link #record(Collection)}.
      */
     public void record(Object holder, Collection<String> values) {
-        if (holder == null) {
-            record(values);
+        record(values);
+        if (holder == null || values == null) {
             return;
         }
-        if (values == null || values.isEmpty()) {
-            return;
-        }
-        Set<String> kept = new HashSet<>();
-        for (String value : values) {
-            if (value != null && value.length() >= MIN_SHORT_LENGTH) {
-                kept.add(value);
-            }
-        }
+        Set<String> kept = nonEmpty(values);
         if (!kept.isEmpty()) {
-            byHolder.asMap().merge(holder, Set.copyOf(kept), (a, b) -> {
-                Set<String> union = new HashSet<>(a);
-                union.addAll(b);
-                return Set.copyOf(union);
-            });
+            byHolder.asMap().merge(holder, kept, ResolvedCredentials::union);
         }
     }
 
@@ -124,19 +126,99 @@ public class ResolvedCredentials {
     }
 
     /**
+     * What {@code holder} was built with — every length — copied, so the caller
+     * keeps it for as long as it needs, independent of the client's lifetime. Call
+     * it while holding the client, right after acquiring it.
+     */
+    public Set<String> heldBy(Object holder) {
+        if (holder == null) {
+            return Set.of();
+        }
+        try {
+            Set<String> held = byHolder.getIfPresent(holder);
+            return held == null ? Set.of() : held;
+        } finally {
+            Reference.reachabilityFence(holder);
+        }
+    }
+
+    /** {@link #heldBy} for a caller built without this bean (unit tests). */
+    public static Set<String> heldBy(ResolvedCredentials credentials, Object holder) {
+        return credentials == null ? Set.of() : credentials.heldBy(holder);
+    }
+
+    /**
+     * Ties {@code values} — the credentials of the client that raised
+     * {@code failure} — to the failure, for every scrubber later handed it or an
+     * exception that wraps it.
+     */
+    public void pin(Throwable failure, Collection<String> values) {
+        if (failure == null || values == null) {
+            return;
+        }
+        Set<String> kept = nonEmpty(values);
+        if (!kept.isEmpty()) {
+            byFailure.asMap().merge(failure, kept, ResolvedCredentials::union);
+        }
+    }
+
+    /** {@link #pin} for a caller built without this bean (unit tests). */
+    public static void pin(ResolvedCredentials credentials, Throwable failure, Collection<String> values) {
+        if (credentials != null) {
+            credentials.pin(failure, values);
+        }
+    }
+
+    /**
+     * Everything pinned to {@code failure}, its causes (up to
+     * {@value #MAX_CAUSE_DEPTH}, cycle-safe) and their suppressed exceptions.
+     */
+    public Set<String> pinnedOn(Throwable failure) {
+        Set<String> pinned = new HashSet<>();
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH && seen.add(current); depth++) {
+            addPinned(current, pinned);
+            for (Throwable suppressed : current.getSuppressed()) {
+                addPinned(suppressed, pinned);
+            }
+            current = current.getCause();
+        }
+        return pinned;
+    }
+
+    /** {@link #pinnedOn} for a caller built without this bean (unit tests). */
+    public static Set<String> pinnedOn(ResolvedCredentials credentials, Throwable failure) {
+        return credentials == null ? Set.of() : credentials.pinnedOn(failure);
+    }
+
+    private void addPinned(Throwable failure, Set<String> pinned) {
+        Set<String> values = byFailure.getIfPresent(failure);
+        if (values != null) {
+            pinned.addAll(values);
+        }
+    }
+
+    /**
      * {@code text} with every recorded plaintext replaced — or {@link #WITHHELD}
      * when it carries a recorded short value anywhere.
      */
     public String scrub(String text) {
+        return scrubFailure(null, text);
+    }
+
+    /**
+     * {@link #scrub(String)}, plus the credentials pinned to {@code failure} — the
+     * failure {@code text} describes — of any length.
+     */
+    public String scrubFailure(Throwable failure, String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }
         Set<String> known = new HashSet<>(plaintexts.asMap().keySet());
         Set<String> knownShort = new HashSet<>(shortPlaintexts.asMap().keySet());
-        for (Set<String> held : byHolder.asMap().values()) {
-            for (String value : held) {
-                (value.length() >= MIN_LENGTH ? known : knownShort).add(value);
-            }
+        for (String value : failure == null ? Set.<String>of() : pinnedOn(failure)) {
+            (value.length() >= MIN_LENGTH ? known : knownShort).add(value);
         }
         String scrubbed = known.isEmpty() ? text : RequestRedactor.redactResolvedSecrets(text, Set.copyOf(known));
         for (String value : knownShort) {
@@ -147,28 +229,32 @@ public class ResolvedCredentials {
         return scrubbed;
     }
 
-    /**
-     * The values a resolution substituted into {@code keys}: each credential
-     * parameter that held a vault reference before and differs after — what the
-     * client built from {@code after} holds.
-     */
-    public static List<String> substituted(Map<String, String> before, Map<String, String> after, Set<String> keys) {
-        List<String> values = new ArrayList<>();
-        if (before == null || after == null || keys == null) {
-            return values;
-        }
-        for (String key : keys) {
-            String reference = before.get(key);
-            String value = after.get(key);
-            if (reference != null && value != null && SecretReference.isVaultReference(reference) && !value.equals(reference)) {
-                values.add(value);
-            }
-        }
-        return values;
-    }
-
     /** {@link #scrub} for a caller built without this bean (unit tests). */
     public static String scrub(ResolvedCredentials credentials, String text) {
         return credentials == null ? text : credentials.scrub(text);
+    }
+
+    /**
+     * {@link #scrubFailure(Throwable, String)} for a caller built without this
+     * bean.
+     */
+    public static String scrubFailure(ResolvedCredentials credentials, Throwable failure, String text) {
+        return credentials == null ? text : credentials.scrubFailure(failure, text);
+    }
+
+    private static Set<String> nonEmpty(Collection<String> values) {
+        Set<String> kept = new HashSet<>();
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) {
+                kept.add(value);
+            }
+        }
+        return Set.copyOf(kept);
+    }
+
+    private static Set<String> union(Set<String> a, Set<String> b) {
+        Set<String> union = new HashSet<>(a);
+        union.addAll(b);
+        return Set.copyOf(union);
     }
 }

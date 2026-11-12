@@ -5,11 +5,17 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,10 +26,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -162,23 +170,127 @@ class ChatErrorCredentialScrubbingTest {
     }
 
     @Test
-    @DisplayName("a value recorded against a live model is still scrubbed after 20,000 other values have been recorded")
-    void valueHeldByALiveModelOutlivesTheBoundedSet() {
+    @DisplayName("a value pinned to a failure is scrubbed from it, and from a wrapper, after 20,000 other values have been recorded")
+    void pinnedValueOutlivesTheBoundedSet() {
         var credentials = new ResolvedCredentials();
-        Object liveModel = new Object();
-        credentials.record(liveModel, List.of(GATEWAY_VALUE));
+        var failure = new IllegalStateException("401: " + GATEWAY_VALUE + " rejected");
+        credentials.pin(failure, List.of(GATEWAY_VALUE));
         List<String> churn = new ArrayList<>();
         for (int i = 0; i < 20_000; i++) {
             churn.add("churn-" + i + "-" + "c".repeat(8));
         }
         credentials.record(churn);
+        var wrapped = new RuntimeException("task failed", failure);
 
-        String scrubbed = credentials.scrub("401: " + GATEWAY_VALUE + " rejected");
-
-        assertFalse(scrubbed.contains(GATEWAY_VALUE), scrubbed);
-        assertNotNull(liveModel, "the model is still reachable, so its values are kept");
+        assertFalse(credentials.scrubFailure(failure, failure.getMessage()).contains(GATEWAY_VALUE));
+        assertFalse(credentials.scrubFailure(wrapped, failure.getMessage()).contains(GATEWAY_VALUE));
+        // A pinned value is the failing client's own: a short one withholds the text.
+        var shortFailure = new IllegalStateException("rejected abc");
+        credentials.pin(shortFailure, List.of("abc"));
+        assertEquals(ResolvedCredentials.WITHHELD, credentials.scrubFailure(shortFailure, shortFailure.getMessage()));
     }
 
+    /**
+     * A registry whose model echoes the key it was built with in every failure,
+     * sync and streaming, over a vault whose value can be rotated.
+     */
+    private ChatModelRegistry echoingRegistry(Map<String, String> vault, ResolvedCredentials credentials) {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        builders.put("openai", () -> new ILanguageModelBuilder() {
+            @Override
+            public ChatModel build(Map<String, String> parameters) {
+                String key = parameters.get("apiKey");
+                return new ChatModel() {
+                    @Override
+                    public ChatResponse doChat(ChatRequest request) {
+                        throw new IllegalStateException("gateway rejected key " + key);
+                    }
+                };
+            }
+
+            @Override
+            public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                String key = parameters.get("apiKey");
+                return new StreamingChatModel() {
+                    @Override
+                    public void doChat(ChatRequest request, StreamingChatResponseHandler handler) {
+                        handler.onError(new IllegalStateException("gateway rejected key " + key));
+                    }
+                };
+            }
+
+            @Override
+            public Set<String> secretParameters() {
+                return Set.of("apiKey");
+            }
+        });
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> {
+            Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
+            resolved.replaceAll((k, v) -> vault.getOrDefault(v, v));
+            return resolved;
+        });
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
+        registry.resolvedCredentials = credentials;
+        return registry;
+    }
+
+    private static final ChatRequest REQUEST = ChatRequest.builder().messages(UserMessage.from("hello")).build();
+
+    @Test
+    @DisplayName("a sync failure of a model evicted and rotated mid-request is scrubbed in the fallback and lifecycle outputs")
+    void evictedSyncModelFailureIsScrubbed() throws Exception {
+        var credentials = new ResolvedCredentials();
+        Map<String, String> vault = new HashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
+        var registry = echoingRegistry(vault, credentials);
+        ChatModel inFlight = registry.getOrCreate("openai", Map.of("apiKey", "${vault:gateway-key}"));
+
+        // The request is running when the key is rotated and the model evicted.
+        vault.put("${vault:gateway-key}", "rotated" + "r".repeat(12));
+        registry.invalidateForSecret(null);
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> inFlight.chat(REQUEST));
+        var wrapped = new RuntimeException("task failed", failure);
+
+        assertTrue(credentials.pinnedOn(wrapped).contains(GATEWAY_VALUE), "the failure carries the key the model was built with");
+        UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, wrapped, text);
+        String fallback = String.valueOf(LlmFallbackHandler.describe(wrapped, scrubber).get("message"));
+        String lifecycle = LifecycleManager.summarizeForAudit(wrapped, scrubber);
+        assertFalse(fallback.contains(GATEWAY_VALUE), fallback);
+        assertFalse(lifecycle.contains(GATEWAY_VALUE), lifecycle);
+        assertTrue(fallback.contains("gateway rejected key"), fallback);
+    }
+
+    @Test
+    @DisplayName("a streaming failure after a rotation is scrubbed of the key the evicted model was built with")
+    void evictedStreamingModelFailureIsScrubbed() throws Exception {
+        var credentials = new ResolvedCredentials();
+        Map<String, String> vault = new HashMap<>(Map.of("${vault:gateway-key}", GATEWAY_VALUE));
+        var registry = echoingRegistry(vault, credentials);
+        StreamingChatModel inFlight = registry.getOrCreateStreaming("openai", Map.of("apiKey", "${vault:gateway-key}"));
+
+        vault.put("${vault:gateway-key}", "rotated" + "r".repeat(12));
+        registry.invalidateForSecret(null);
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        inFlight.chat(REQUEST, new StreamingChatResponseHandler() {
+            @Override
+            public void onCompleteResponse(ChatResponse response) {
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                error.set(e);
+            }
+        });
+
+        Throwable failure = error.get();
+        assertNotNull(failure);
+        assertTrue(credentials.pinnedOn(failure).contains(GATEWAY_VALUE));
+        UnaryOperator<String> scrubber = text -> ResolvedCredentials.scrubFailure(credentials, failure, text);
+        assertFalse(String.valueOf(LlmFallbackHandler.describe(failure, scrubber).get("message")).contains(GATEWAY_VALUE));
+        assertFalse(LifecycleManager.summarizeForAudit(failure, scrubber).contains(GATEWAY_VALUE));
+    }
     @Test
     @DisplayName("the registry ties a built model's credentials to that model")
     void registryRecordsAgainstTheModel() throws Exception {

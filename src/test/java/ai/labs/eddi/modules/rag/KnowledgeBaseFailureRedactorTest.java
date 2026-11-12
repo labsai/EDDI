@@ -235,6 +235,28 @@ class KnowledgeBaseFailureRedactorTest {
     }
 
     @Test
+    @DisplayName("credentials the failing client pinned to the failure are removed; a short one withholds the text")
+    void pinnedClientCredentialsCount() {
+        var credentials = new ResolvedCredentials();
+        redactor.resolvedCredentials = credentials;
+        String held = "held-by-client-" + "h".repeat(10);
+        var failure = new IllegalStateException("rejected " + held + " on host db");
+        credentials.pin(new RuntimeException("inner"), List.of("unrelated-" + "u".repeat(10)));
+        credentials.pin(failure, List.of(held));
+
+        var redacted = redactor.redactFailure(knowledgeBase(), new RuntimeException("search failed", failure));
+
+        assertFalse(redacted.logText().contains(held), redacted.logText());
+        assertTrue(redacted.logText().contains("on host db"), redacted.logText());
+
+        var shortFailure = new IllegalStateException("rejected zz9 on host db");
+        credentials.pin(shortFailure, List.of("zz9"));
+        var withheld = redactor.redactFailure(knowledgeBase(), shortFailure);
+        assertTrue(withheld.text().contains("too short"), withheld.text());
+        assertFalse(withheld.logText().contains("zz9"), withheld.logText());
+    }
+
+    @Test
     @DisplayName("long and reference credentials only: the scrubbed provider text is returned")
     void longCredentialsKeepTheProviderText() {
         var config = knowledgeBase();

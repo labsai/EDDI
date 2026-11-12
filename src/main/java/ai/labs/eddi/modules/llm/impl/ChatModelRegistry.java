@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.VaultReferencePlacement;
@@ -269,44 +270,12 @@ public class ChatModelRegistry {
 
     /**
      * Resolves the vault references of {@code params} and puts the plaintext of
-     * each into {@code captured}, at the point of substitution.
-     * <p>
-     * Each distinct reference is resolved once, on its own, through
-     * {@link SecretResolver#resolveSecrets} — the resolver's own semantics (cache,
-     * reserved names, a disabled vault leaving it in place) — and the values are
-     * then assembled here. So the scrubber learns exactly the value each reference
-     * was replaced with, with no second resolution a rotation could make differ,
-     * and no guess at where one secret ends and the next begins: a value holding
-     * {@code ${vault:a}:${vault:b}} where {@code a} itself contains {@code :}, or
-     * two adjacent references, is captured as the two secrets it is.
-     *
-     * @return the parameters with every resolvable reference replaced; one that
-     *         could not be resolved stays in place, for
-     *         {@link SecretResolver#requireResolved} to refuse
+     * each into {@code captured}, at the point of substitution — see
+     * {@link SecretCapture}, shared with the embedding-model and store factories.
      */
     private Map<String, String> resolveCapturing(Map<String, String> params, List<String> captured) {
-        Map<String, String> plaintextOf = new HashMap<>();
-        for (String reference : VaultHostAllowlist.referencesIn(params.values())) {
-            Map<String, String> single = secretResolver.resolveSecrets(Map.of(RESOLVED_KEY, reference));
-            String plaintext = single == null ? null : single.get(RESOLVED_KEY);
-            if (plaintext != null && !plaintext.equals(reference)) {
-                plaintextOf.put(reference, plaintext);
-                captured.add(plaintext);
-            }
-        }
-        if (plaintextOf.isEmpty()) {
-            return params;
-        }
-        var resolved = new HashMap<>(params);
-        resolved.replaceAll((key, value) -> value == null || !SecretReference.isVaultReference(value)
-                ? value
-                : SecretReference.scanner().replaceAll(value, match -> plaintextOf.getOrDefault(match.text(), match.text())));
-        return resolved;
+        return SecretCapture.resolve(secretResolver, params, captured, Set.of());
     }
-
-    /** The key of the one-entry map each reference is resolved in. */
-    private static final String RESOLVED_KEY = "reference";
-
     /**
      * Remembers the plaintexts just handed to a client, so the task-error and
      * fallback paths can scrub a provider error of them by value. See
@@ -319,15 +288,23 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Ties the plaintexts to the model built with them: kept while the model is
-     * cached or still in use by a running request, whatever else is recorded
-     * meanwhile (see {@code ResolvedCredentials.record(holder, values)}).
+     * Builds the model with the plaintexts it holds: every failure it raises is
+     * pinned to them ({@code ResolvedCredentials#pin}), so the task-error digest,
+     * the fallback summary and the lifecycle error output, each handed that
+     * failure, remove them — also after this model was evicted or its reference
+     * rotated, and without depending on when the model is collected.
      */
     private void recordCredentials(Object model, List<String> captured) {
         if (resolvedCredentials != null) {
             resolvedCredentials.record(model, captured);
         }
+        if (model instanceof ObservableChatModel observable) {
+            observable.pinFailuresTo(resolvedCredentials, captured);
+        } else if (model instanceof ObservableStreamingChatModel observable) {
+            observable.pinFailuresTo(resolvedCredentials, captured);
+        }
     }
+
     /**
      * Cluster mode: evicts models built longer ago than
      * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key

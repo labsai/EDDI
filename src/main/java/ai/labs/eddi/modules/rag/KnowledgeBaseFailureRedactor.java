@@ -17,6 +17,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -117,17 +118,45 @@ public class KnowledgeBaseFailureRedactor {
      * text back. Identity parameters ({@code user}, {@code userName}) are not
      * secrets on their own and take no part in that.
      * <p>
-     * Otherwise every inspected message of the cause chain is redacted — the
-     * configuration's current secrets, then every credential a live model or store
-     * client was built with ({@link ResolvedCredentials}, which covers a client
-     * built before a rotation), then credential shapes.
+     * The credentials the failing clients were built with count as the
+     * configuration's own: those passed in, and those pinned to the failure
+     * ({@link ResolvedCredentials#pinnedOn}). A client built before a rotation
+     * holds the old value, which a resolution now cannot return — and the same
+     * withhold rule applies to it: one shorter than {@link #MIN_LITERAL_LENGTH}
+     * withholds the provider text.
+     * <p>
+     * Otherwise every inspected message of the cause chain is redacted — those
+     * secrets, then the deployment's recorded credentials, then credential shapes.
      */
     public Redacted redactFailure(RagConfiguration config, Throwable failure) {
+        return redactFailure(config, failure, Set.of());
+    }
+
+    /**
+     * {@link #redactFailure(RagConfiguration, Throwable)} with
+     * {@code clientCredentials}, what the clients the failing operation used were
+     * built with ({@link ResolvedCredentials#heldBy}), passed by the caller that
+     * held them.
+     */
+    public Redacted redactFailure(RagConfiguration config, Throwable failure, Collection<String> clientCredentials) {
         var secrets = secretsOf(config);
-        if (secrets.withholdReason() != null) {
-            return new Redacted(withheld(failure, secrets.withholdReason()), true, describeChain(failure, null));
+        Set<String> plaintexts = new HashSet<>(secrets.plaintexts());
+        String reason = secrets.withholdReason();
+        Set<String> held = new HashSet<>(ResolvedCredentials.pinnedOn(resolvedCredentials, failure));
+        if (clientCredentials != null) {
+            held.addAll(clientCredentials);
         }
-        return redactChain(failure, message -> scrub(message, secrets.plaintexts()));
+        for (String value : held) {
+            if (value.length() >= MIN_LITERAL_LENGTH) {
+                plaintexts.add(value);
+            } else if (reason == null) {
+                reason = SHORT_CREDENTIAL;
+            }
+        }
+        if (reason != null) {
+            return new Redacted(withheld(failure, reason), true, describeChain(failure, null));
+        }
+        return redactChain(failure, message -> scrub(message, plaintexts));
     }
 
     /**
@@ -135,8 +164,16 @@ public class KnowledgeBaseFailureRedactor {
      * shapes only.
      */
     public static Redacted redactFailure(KnowledgeBaseFailureRedactor redactor, RagConfiguration config, Throwable failure) {
+        return redactFailure(redactor, config, failure, Set.of());
+    }
+
+    /**
+     * {@link #redactFailure(RagConfiguration, Throwable, Collection)}, null-safe.
+     */
+    public static Redacted redactFailure(KnowledgeBaseFailureRedactor redactor, RagConfiguration config, Throwable failure,
+                                         Collection<String> clientCredentials) {
         if (redactor != null) {
-            return redactor.redactFailure(config, failure);
+            return redactor.redactFailure(config, failure, clientCredentials);
         }
         return redactChain(failure, SecretRedactionFilter::redact);
     }
@@ -221,7 +258,8 @@ public class KnowledgeBaseFailureRedactor {
     }
 
     private static final String SHORT_CREDENTIAL = "this knowledge base has a credential too short to remove from it";
-    private static final String UNRESOLVABLE_REFERENCE = "a vault reference of this knowledge base cannot be resolved now, so its secret cannot be removed from it";
+    private static final String UNRESOLVABLE_REFERENCE = "a vault reference of this knowledge base cannot be resolved now,"
+            + " so its secret cannot be removed from it";
 
     private Secrets secretsOf(RagConfiguration config) {
         Set<String> plaintexts = new HashSet<>();

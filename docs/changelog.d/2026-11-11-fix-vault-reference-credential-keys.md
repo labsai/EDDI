@@ -102,6 +102,15 @@ so the fallback stays usable.
   cached or still used by a running request, however many other values are recorded; values without a
   holder keep the bounded set. The strict-write failure log line in `LifecycleManager` now logs the same
   scrubbed summary as the audit entry instead of the raw exception message.
+- Credentials follow the failure, not the client's lifetime: `ObservableChatModel` and
+  `ObservableStreamingChatModel` pin every failure to the credentials the registry built them with
+  (`ResolvedCredentials.pin`), and the task-error digest, the audit/SSE summary, the strict-write log and
+  `llm:error:<taskId>` scrub with what is pinned to the failure they describe — so an evicted or rotated
+  model's key is still removed, with no reliance on garbage-collection timing. The knowledge-base paths
+  (ingestion, inspection, evaluation) read what their model and store clients hold right after acquiring
+  them and pass or pin it; a held credential under 8 characters withholds the provider text.
+- `SecretCapture` (shared by `ChatModelRegistry` and both embedding factories) resolves each distinct
+  reference once and captures the secret it stood for, so `prefix-${vault:key}` captures the secret itself.
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
 - `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; a shorter

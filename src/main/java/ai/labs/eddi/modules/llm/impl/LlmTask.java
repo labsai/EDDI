@@ -297,7 +297,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         this.modelOutputParser = new ModelOutputParser(jsonSerialization);
         // The scrubber reads the field when a failure is described, after injection.
         this.fallbackHandler = new LlmFallbackHandler(templatingEngine, jsonSerialization, dataFactory, meterRegistry,
-                text -> ResolvedCredentials.scrub(resolvedCredentials, text));
+                failure -> text -> ResolvedCredentials.scrubFailure(resolvedCredentials, failure, text));
         this.prePostUtils = prePostUtils;
 
         this.meterRegistry = meterRegistry;
