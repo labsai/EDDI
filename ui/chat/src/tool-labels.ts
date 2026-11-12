@@ -11,10 +11,18 @@
 /** A name with whitespace is already text (a designer label) and is left alone. */
 const IDENTIFIER = /^[\p{L}\p{N}_.:/\-$]+$/u;
 
-/** True for a tool identifier; false for display text such as a `toolDisplay` label. */
-export function isToolIdentifier(name: string | null | undefined): boolean {
-  const raw = (name ?? "").trim();
-  return !!raw && IDENTIFIER.test(raw);
+/**
+ * What the status line records for a running tool. The producer (the `tool_call`
+ * event parser) knows which it has, so the kind travels with the text instead of
+ * being guessed from its shape: a one-word designer label ("Searching") looks
+ * exactly like an identifier, and an identifier may carry characters a pattern
+ * did not anticipate.
+ */
+export interface ToolActivity {
+  /** The identifier as the model invoked it, or the designer's phrase. */
+  text: string;
+  /** True when `text` is a designer's `toolDisplay` phrase, shown as written. */
+  phrase: boolean;
 }
 
 /** A token written in capitals (`HTTP`, `URL`) stays as it is. */

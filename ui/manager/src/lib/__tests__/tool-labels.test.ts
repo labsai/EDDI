@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   humanizeToolName,
-  isToolIdentifier,
   parseToolCallEvent,
   toolArgumentFields,
-  toolCallLabel,
+  toolCallActivity,
 } from "@/lib/tool-labels";
 import { parseToolArgumentsForDisplay } from "@/lib/hitl-format-args";
 
@@ -42,31 +41,44 @@ describe("humanizeToolName", () => {
   });
 });
 
-describe("parseToolCallEvent / toolCallLabel", () => {
+describe("parseToolCallEvent / toolCallActivity", () => {
   // RestAgentEngineStreaming.ToolCallEvent: {tool, callId, displayName, display}
   it("uses the toolDisplay label and allow-listed values when the designer configured them", () => {
     const call = parseToolCallEvent(
       JSON.stringify({ tool: "createAction", callId: "call_1", displayName: "Creating an action", display: { title: "Renew the contract" } }),
     );
     expect(call).toEqual({ tool: "createAction", displayName: "Creating an action", display: { title: "Renew the contract" } });
-    expect(toolCallLabel(call!)).toBe("Creating an action: Renew the contract");
+    expect(toolCallActivity(call!)).toEqual({ text: "Creating an action: Renew the contract", phrase: true });
   });
 
   it("keeps the identifier for a plain event, for the renderer to humanise (null fields are serialised by Jackson)", () => {
     const call = parseToolCallEvent('{"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}');
-    expect(toolCallLabel(call!)).toBe("getAgentDescriptors");
-    expect(isToolIdentifier(toolCallLabel(call!))).toBe(true);
+    expect(toolCallActivity(call!)).toEqual({ text: "getAgentDescriptors", phrase: false });
   });
 
   it("accepts the pre-6.7 name-only event", () => {
-    expect(toolCallLabel(parseToolCallEvent('{"tool":"webSearch"}')!)).toBe("webSearch");
+    expect(toolCallActivity(parseToolCallEvent('{"tool":"webSearch"}')!)).toEqual({ text: "webSearch", phrase: false });
   });
 
   it("labels allow-listed values without a configured label by the humanised name", () => {
     const call = parseToolCallEvent('{"tool":"send_mail","callId":"c","display":{"to":"ops@acme.com"}}');
-    expect(toolCallLabel(call!)).toBe("Send mail: ops@acme.com");
-    expect(isToolIdentifier(toolCallLabel(call!))).toBe(false);
+    expect(toolCallActivity(call!)).toEqual({ text: "Send mail: ops@acme.com", phrase: true });
   });
+
+  it("marks a one-word designer label as a phrase, whatever its shape", () => {
+    const call = parseToolCallEvent('{"tool":"webSearch","callId":"c","displayName":"Searching"}');
+    expect(toolCallActivity(call!)).toEqual({ text: "Searching", phrase: true });
+  });
+
+  it.each(["github.search-code", "server/tool-name", "weather:forecast", "Calc2"])(
+    "keeps %s an identifier",
+    (tool) => {
+      expect(toolCallActivity(parseToolCallEvent(JSON.stringify({ tool, callId: "c" }))!)).toEqual({
+        text: tool,
+        phrase: false,
+      });
+    },
+  );
 
   it("rejects a frame without a usable tool", () => {
     expect(parseToolCallEvent("")).toBeNull();

@@ -63,7 +63,7 @@ import {
   extractOutputImages,
   findInputField,
   isTurnPaused,
-  parseToolCallName,
+  parseToolCallActivity,
   UNCONSUMED_STREAM_ERROR_CODES,
   type DoneSnapshot,
   type OutputImage,
@@ -681,7 +681,7 @@ export function ChatWidget() {
         // tool, and the silence while that tool runs is exactly the wait worth
         // explaining. The next token clears it again.
         case "tool_call": {
-          const tool = parseToolCallName(event.data);
+          const tool = parseToolCallActivity(event.data);
           if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
           return false;
         }

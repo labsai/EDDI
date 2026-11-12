@@ -509,6 +509,9 @@ describe("ChatActivity — end-user resting flat tool list", () => {
  * is the end of the turn. Without the live list the status line said
  * "Thinking…" through an entire tool-using conversation.
  */
+/** Live tool calls recorded as identifiers (no toolDisplay label). */
+const ids = (...names: string[]) => names.map((text) => ({ text, phrase: false }));
+
 describe("ChatActivity — live tool_call events", () => {
   const start = (taskType: string, index: number): PipelineEvent => ({
     type: "task_start",
@@ -523,7 +526,7 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[start("langchain", 0)]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors"]}
+        liveToolCalls={ids("readAgentDescriptors")}
       />,
     );
 
@@ -543,7 +546,7 @@ describe("ChatActivity — live tool_call events", () => {
     ];
 
     renderWithProviders(
-      <ChatActivity events={events} isLive={true} liveToolCalls={["oldTool", "newTool"]} />,
+      <ChatActivity events={events} isLive={true} liveToolCalls={ids("oldTool", "newTool")} />,
     );
 
     expect(screen.getByText(/New tool/)).toBeInTheDocument();
@@ -553,7 +556,7 @@ describe("ChatActivity — live tool_call events", () => {
   });
 
   it("renders the status line from live calls alone — before any task event arrives", () => {
-    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} />);
+    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={ids("readGroups")} />);
 
     // events=[] used to be an early-return null; the live list must count as
     // activity or the panel falls back to the bare dots indicator.
@@ -567,7 +570,7 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors", "readGroups", "readConversations"]}
+        liveToolCalls={ids("readAgentDescriptors", "readGroups", "readConversations")}
       />,
     );
 
@@ -584,7 +587,7 @@ describe("ChatActivity — live tool_call events", () => {
   });
 
   it("a pill with no calls yet is disabled — no focusable no-op, no phantom disclosure", () => {
-    renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={[]} />);
+    renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={ids()} />);
 
     const pill = screen.getByTestId("chat-activity-live-status");
     expect(pill).toBeDisabled();
@@ -604,7 +607,7 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors", "readGroups"]}
+        liveToolCalls={ids("readAgentDescriptors", "readGroups")}
         liveToolsSettled
       />,
     );
@@ -622,7 +625,7 @@ describe("ChatActivity — live tool_call events", () => {
   it("still spins the newest call while the tools are actually running", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} liveToolsSettled={false} />,
+      <ChatActivity events={[]} isLive={true} liveToolCalls={ids("readGroups")} liveToolsSettled={false} />,
     );
 
     expect(screen.getByText(/Read groups/)).toBeInTheDocument();
@@ -632,11 +635,29 @@ describe("ChatActivity — live tool_call events", () => {
 
   it("shows a designer's toolDisplay label as written, not wrapped in 'Using'", () => {
     renderWithProviders(
-      <ChatActivity events={[]} isLive={true} liveToolCalls={["Creating an action: Renew the contract"]} />,
+      <ChatActivity events={[]} isLive={true} liveToolCalls={[{ text: "Creating an action: Renew the contract", phrase: true }]} />,
     );
     const status = screen.getByTestId("chat-activity-live-status");
     expect(status).toHaveTextContent("Creating an action: Renew the contract…");
     expect(status).not.toHaveTextContent("Using");
+  });
+
+  // The kind is carried by the producer, never guessed from the string's shape.
+  it("shows a one-word designer label as written — it is not an identifier", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ChatActivity events={[]} isLive={true} liveToolCalls={[{ text: "Searching", phrase: true }]} />,
+    );
+    const status = screen.getByTestId("chat-activity-live-status");
+    expect(status).toHaveTextContent("Searching…");
+    expect(status).not.toHaveTextContent("Using");
+    await user.click(status);
+    expect(screen.getByTestId("chat-activity-live-list")).toHaveTextContent("Searching");
+  });
+
+  it("puts a prefixed MCP identifier into words even though it is not camel or snake case", () => {
+    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={ids("github.search-code")} />);
+    expect(screen.getByTestId("chat-activity-live-status")).toHaveTextContent("Using Github search code…");
   });
 });
 

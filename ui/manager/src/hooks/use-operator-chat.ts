@@ -23,7 +23,7 @@ import { PauseChangedError, type ShownPause } from "@/lib/hitl-pause-binding";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import { OPERATOR_PROBE_USER_ID, type OperatorConfig } from "@/lib/api/operator";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
-import { parseToolCallEvent, toolCallLabel } from "@/lib/tool-labels";
+import { parseToolCallEvent, toolCallActivity, type ToolActivity } from "@/lib/tool-labels";
 
 /**
  * Chat state for the Platform Operator.
@@ -57,7 +57,7 @@ export interface OperatorChatState {
    * `events`: the authoritative record (arguments, results) still arrives in
    * task_complete's toolTrace, and merging both would double-count.
    */
-  liveToolCalls: string[];
+  liveToolCalls: ToolActivity[];
   /** True once tokens resumed after the last tool_call — the tool phase is over. */
   liveToolsSettled: boolean;
   /**
@@ -1382,7 +1382,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           const call = parseToolCallEvent(event.data);
           // Malformed payload — the status line just keeps its last state.
           if (call) {
-            const label = toolCallLabel(call);
+            const label = toolCallActivity(call);
             set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, label], liveToolsSettled: false }));
           }
           continue;

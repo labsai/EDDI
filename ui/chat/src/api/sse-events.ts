@@ -6,7 +6,7 @@
 
 import type { ConversationState, ConversationOutput, InputField } from "@/types";
 import { t } from "@/i18n";
-import { humanizeToolName } from "@/tool-labels";
+import { humanizeToolName, type ToolActivity } from "@/tool-labels";
 
 /** The trimmed snapshot the `done` event carries — NOT the full snapshot. */
 export interface DoneSnapshot {
@@ -71,7 +71,7 @@ function cap(text: string, max: number): string {
  * Returns null for anything unusable, so a malformed event leaves the indicator
  * on its previous copy instead of rendering "Using undefined…".
  */
-export function parseToolCallName(data: string): string | null {
+export function parseToolCallActivity(data: string): ToolActivity | null {
   if (!data.trim()) return null;
   try {
     const parsed = JSON.parse(data);
@@ -89,9 +89,12 @@ export function parseToolCallName(data: string): string | null {
         : [];
     if (label || values.length > 0) {
       const head = label || humanizeToolName(name);
-      return cap(values.length ? `${head}: ${values.join(", ")}` : head, MAX_TOOL_LABEL_LENGTH);
+      return {
+        text: cap(values.length ? `${head}: ${values.join(", ")}` : head, MAX_TOOL_LABEL_LENGTH),
+        phrase: true,
+      };
     }
-    return cap(name, MAX_TOOL_NAME_LENGTH);
+    return { text: cap(name, MAX_TOOL_NAME_LENGTH), phrase: false };
   } catch {
     return null;
   }

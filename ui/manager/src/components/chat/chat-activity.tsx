@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { getExtensionIcon, getExtensionColor, extensionTypeForTask } from "@/lib/api/extensions";
 import { CascadeStepTrace } from "@/components/cascade-step-trace";
-import { humanizeToolName, isToolIdentifier, toolArgumentFields } from "@/lib/tool-labels";
+import { humanizeToolName, toolArgumentFields, type ToolActivity } from "@/lib/tool-labels";
 import { parseToolArgumentsForDisplay } from "@/lib/hitl-format-args";
 import { ToolArgumentFields } from "@/components/shared/tool-argument-fields";
 
@@ -135,7 +135,7 @@ interface ChatActivityProps {
    * only. The per-task toolTrace only arrives at task_complete — without this
    * the status line said "Thinking…" through an entire tool-using turn.
    */
-  liveToolCalls?: string[];
+  liveToolCalls?: ToolActivity[];
   /**
    * True once the model resumed writing after its last tool call. Without it the
    * newest call renders as running forever — there is no live per-call
@@ -204,7 +204,8 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
     if (liveToolCalls?.length) return liveToolCalls[liveToolCalls.length - 1]!;
     for (let i = events.length - 1; i >= 0; i--) {
       const calls = events[i]?.toolTrace?.filter((e) => e.type === "tool_call");
-      if (calls?.length) return calls[calls.length - 1]!.tool;
+      // A toolTrace entry names the tool as the model invoked it — an identifier.
+      if (calls?.length) return { text: calls[calls.length - 1]!.tool, phrase: false };
     }
     return null;
   }, [liveToolCalls, events]);
@@ -258,9 +259,9 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
   if (!showInternalSteps && isLive && !hasErrorTask && cascadeSteps.length === 0) {
     // Everything the turn has called so far, newest last. Live events are the
     // primary record; the trace scan covers backends without them.
-    const liveNames = liveToolCalls?.length
+    const liveNames: ToolActivity[] = liveToolCalls?.length
       ? liveToolCalls
-      : toolPairs.flatMap((p) => (p.call?.tool ? [p.call.tool] : []));
+      : toolPairs.flatMap((p) => (p.call?.tool ? [{ text: p.call.tool, phrase: false }] : []));
     const expandable = liveNames.length > 0;
     return (
       <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
@@ -289,10 +290,10 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
             <span className="font-medium text-primary">
               {currentTool && !liveToolsSettled
-                ? isToolIdentifier(currentTool)
-                  ? t("chat.activity.usingTool", "Using {{tool}}…", { tool: humanizeToolName(currentTool) })
-                  : // The designer's toolDisplay label is already a phrase ("Creating an action: …").
-                    `${currentTool}…`
+                ? currentTool.phrase
+                  ? // The designer's toolDisplay label is already a phrase ("Creating an action: …").
+                    `${currentTool.text}…`
+                  : t("chat.activity.usingTool", "Using {{tool}}…", { tool: humanizeToolName(currentTool.text) })
                 : t("chat.thinking", "Thinking...")}
             </span>
             {liveToolCallCount > 0 && (
@@ -312,15 +313,15 @@ export function ChatActivity({ events, isLive, totalSteps, showInternalSteps = f
               className="max-h-48 space-y-0.5 overflow-y-auto border-t border-primary/20 px-3 pb-2 pt-1.5"
               data-testid="chat-activity-live-list"
             >
-              {liveNames.map((name, i) => (
-                <div key={`${name}-${i}`} className="flex items-center gap-1.5 text-[11px]">
+              {liveNames.map((activity, i) => (
+                <div key={`${activity.text}-${i}`} className="flex items-center gap-1.5 text-[11px]">
                   {i === liveNames.length - 1 && !liveToolsSettled ? (
                     <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
                   ) : (
                     <Check className="h-3 w-3 shrink-0 text-emerald-500" />
                   )}
-                  <span className="min-w-0 truncate text-foreground/80" title={name}>
-                    {humanizeToolName(name) || name}
+                  <span className="min-w-0 truncate text-foreground/80" title={activity.text}>
+                    {activity.phrase ? activity.text : humanizeToolName(activity.text) || activity.text}
                   </span>
                 </div>
               ))}

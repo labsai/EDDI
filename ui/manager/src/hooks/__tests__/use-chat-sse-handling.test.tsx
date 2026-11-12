@@ -134,7 +134,10 @@ describe("use-chat handleSSEEvent — 6.7 tool_call display and tool_result", ()
     await act(async () => {
       await result.current.mutateAsync({ message: "hi" });
     });
-    expect(add.mock.calls.map((c) => c[0])).toEqual(["Creating an action: Renew the contract", "getAgentDescriptors"]);
+    expect(add.mock.calls.map((c) => c[0])).toEqual([
+      { text: "Creating an action: Renew the contract", phrase: true },
+      { text: "getAgentDescriptors", phrase: false },
+    ]);
     expect(settle).toHaveBeenCalledTimes(1);
   });
 });

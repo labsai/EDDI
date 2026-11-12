@@ -18,7 +18,11 @@ call. Amending a gated call's arguments meant retyping the whole object.
 - **Live status lines** (Manager chat page and drawer, Platform Operator, Chat UI): "Using Get agent
   descriptors…", or the designer's phrase on its own ("Creating an action: Renew the contract…").
   `tool_result` stops the spinner of the call that finished (Manager) or returns the widget to
-  "Thinking…" (Chat UI).
+  "Thinking…" (Chat UI). Whether a status line is an identifier or a designer phrase is decided where
+  the `tool_call` event is parsed and carried as `{ text, phrase }` — it is never re-derived from the
+  string's shape, so a one-word `toolDisplay` label ("Searching") is not wrapped in "Using …" and a
+  prefixed MCP name (`github.search-code`) is still put into words. An event without `displayName`
+  or `display` (pre-6.7 backend) is an identifier, as before.
 - **Approval card** (`approval-banner.tsx`, every surface that decides: conversation page, Approvals
   inbox, Platform Operator): each gated call shows its name in words with the exact identifier beside
   it, and its arguments as label/value rows by default, with JSON and Raw one click away (a generated

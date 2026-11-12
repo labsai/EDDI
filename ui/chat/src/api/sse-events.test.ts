@@ -10,7 +10,7 @@ import {
   isPausedState,
   extractOutputTexts,
   isTurnPaused,
-  parseToolCallName,
+  parseToolCallActivity,
 } from "./sse-events";
 import { humanizeToolName } from "@/tool-labels";
 
@@ -205,27 +205,27 @@ describe("isSkippedTurn — the prior-state guard applies only where it is ambig
   });
 });
 
-describe("parseToolCallName", () => {
+describe("parseToolCallActivity", () => {
   it("reads the tool name from the backend's payload", () => {
     // RestAgentEngineStreaming: {"tool":"<name>"}.
-    expect(parseToolCallName('{"tool":"calculator"}')).toBe("calculator");
+    expect(parseToolCallActivity('{"tool":"calculator"}')).toEqual({ text: "calculator", phrase: false });
   });
 
   it("returns null for anything that carries no usable name", () => {
     // Each of these would otherwise render "Using undefined…" or "Using …".
     for (const data of ["", "   ", "calculator", "null", "[]", '{"tool":""}', '{"tool":"  "}', '{"tool":42}', "{}"]) {
-      expect(parseToolCallName(data)).toBeNull();
+      expect(parseToolCallActivity(data)).toBeNull();
     }
   });
 
   it("trims surrounding whitespace", () => {
-    expect(parseToolCallName('{"tool":"  websearch \\n"}')).toBe("websearch");
+    expect(parseToolCallActivity('{"tool":"  websearch \\n"}')).toEqual({ text: "websearch", phrase: false });
   });
 
   it("caps an overlong name so it cannot stretch the indicator", () => {
-    const name = parseToolCallName(JSON.stringify({ tool: "x".repeat(200) }));
-    expect(name).toHaveLength(48);
-    expect(name!.endsWith("…")).toBe(true);
+    const name = parseToolCallActivity(JSON.stringify({ tool: "x".repeat(200) }));
+    expect(name!.text).toHaveLength(48);
+    expect(name!.text.endsWith("…")).toBe(true);
   });
 
   // EDDI 6.7 RestAgentEngineStreaming.ToolCallEvent, as Jackson writes it.
@@ -236,20 +236,36 @@ describe("parseToolCallName", () => {
       displayName: "Creating an action",
       display: { title: "Renew the contract" },
     });
-    expect(parseToolCallName(data)).toBe("Creating an action: Renew the contract");
+    expect(parseToolCallActivity(data)).toEqual({ text: "Creating an action: Renew the contract", phrase: true });
   });
 
   it("keeps the identifier when no toolDisplay is configured (null fields)", () => {
     expect(
-      parseToolCallName('{"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}'),
-    ).toBe("getAgentDescriptors");
+      parseToolCallActivity('{"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}'),
+    ).toEqual({ text: "getAgentDescriptors", phrase: false });
   });
 
   it("names allow-listed values without a label by the tool in words", () => {
-    expect(parseToolCallName('{"tool":"send_mail","callId":"c","display":{"to":"ops@acme.com"}}')).toBe(
-      "Send mail: ops@acme.com",
-    );
+    expect(parseToolCallActivity('{"tool":"send_mail","callId":"c","display":{"to":"ops@acme.com"}}')).toEqual({
+      text: "Send mail: ops@acme.com",
+      phrase: true,
+    });
   });
+
+  // The kind travels with the value; it is never re-derived from its shape.
+  it("marks a one-word designer label as a phrase, not an identifier", () => {
+    expect(parseToolCallActivity('{"tool":"webSearch","callId":"c","displayName":"Searching"}')).toEqual({
+      text: "Searching",
+      phrase: true,
+    });
+  });
+
+  it.each(["github.search-code", "server/tool-name", "weather:forecast", "Calc2"])(
+    "marks the identifier %s as an identifier",
+    (tool) => {
+      expect(parseToolCallActivity(JSON.stringify({ tool, callId: "c" }))).toEqual({ text: tool, phrase: false });
+    },
+  );
 });
 
 describe("tool names in words", () => {

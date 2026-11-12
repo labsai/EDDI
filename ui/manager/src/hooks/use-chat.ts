@@ -53,7 +53,7 @@ import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { chatKeys } from "@/lib/query-keys";
-import { parseToolCallEvent, toolCallLabel } from "@/lib/tool-labels";
+import { parseToolCallEvent, toolCallActivity } from "@/lib/tool-labels";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -1269,7 +1269,7 @@ function handleSSEEvent(
       // allow-listed values; the status line shows those, else the humanised name.
       const call = parseToolCallEvent(event.data);
       // Malformed payload — the status line just keeps saying "Thinking…".
-      if (call) debug.addToolCall(toolCallLabel(call));
+      if (call) debug.addToolCall(toolCallActivity(call));
       return false;
     }
     case "tool_result": {

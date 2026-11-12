@@ -1003,6 +1003,24 @@ describe("ChatWidget — live tool calls", () => {
     expect(document.body.textContent).not.toMatch(/createAction/);
   });
 
+  it("shows a one-word toolDisplay label as written, not as an identifier", async () => {
+    mockOpenStream([
+      'event: tool_call\ndata: {"tool":"webSearch","callId":"call_1","displayName":"Searching"}\n\n',
+    ]);
+    await sendOnOpenStream();
+
+    const indicator = await screen.findByTestId("tool-indicator");
+    expect(indicator).toHaveTextContent("Searching…");
+    expect(indicator).not.toHaveTextContent("Using");
+  });
+
+  it("puts a prefixed MCP tool name into words", async () => {
+    mockOpenStream(['event: tool_call\ndata: {"tool":"github.search-code","callId":"call_1"}\n\n']);
+    await sendOnOpenStream();
+
+    expect(await screen.findByTestId("tool-indicator")).toHaveTextContent("Using Github search code…");
+  });
+
   it("puts a generated tool's identifier into words", async () => {
     mockOpenStream([
       'event: tool_call\ndata: {"tool":"getAgentDescriptors","callId":"call_2","displayName":null,"display":null}\n\n',

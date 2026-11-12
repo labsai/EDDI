@@ -17,13 +17,19 @@
 const IDENTIFIER = /^[\p{L}\p{N}_.:/\-$]+$/u;
 
 /**
- * True for a tool identifier as the model invoked it; false for display text
- * such as a `toolDisplay` label ("Creating an action: Renew the contract"),
- * which reads as a sentence on its own and must not be wrapped in "Using …".
+ * What a live status line records for a running tool. The producer knows which
+ * kind it has, so the kind travels with the text instead of being guessed from
+ * its shape: a one-word designer label ("Searching") looks exactly like an
+ * identifier, and an identifier may carry characters a pattern did not foresee.
  */
-export function isToolIdentifier(name: string | null | undefined): boolean {
-  const raw = (name ?? "").trim();
-  return !!raw && IDENTIFIER.test(raw);
+export interface ToolActivity {
+  /** The identifier as the model invoked it, or the designer's phrase. */
+  text: string;
+  /**
+   * True when `text` is a designer's `toolDisplay` phrase ("Creating an action:
+   * Renew the contract"): shown as written, never wrapped in "Using …".
+   */
+  phrase: boolean;
 }
 
 /** A token written in capitals (`HTTP`, `URL`, `A2A`) stays as it is. */
@@ -101,13 +107,13 @@ export function parseToolCallEvent(data: string): ToolCallDisplay | null {
  * ("Creating an action: Renew the contract") when `toolDisplay` configured one,
  * otherwise the tool identifier unchanged — the renderer humanises an
  * identifier and wraps it ("Using Get agent descriptors…"), while a phrase is
- * shown as written (see `isToolIdentifier`).
+ * shown as written. `phrase` says which, so no consumer has to guess.
  */
-export function toolCallLabel(call: ToolCallDisplay): string {
+export function toolCallActivity(call: ToolCallDisplay): ToolActivity {
   const values = call.display ? Object.values(call.display) : [];
-  if (!call.displayName && values.length === 0) return call.tool;
+  if (!call.displayName && values.length === 0) return { text: call.tool, phrase: false };
   const label = call.displayName || humanizeToolName(call.tool) || call.tool;
-  return values.length ? `${label}: ${values.join(", ")}` : label;
+  return { text: values.length ? `${label}: ${values.join(", ")}` : label, phrase: true };
 }
 
 /** A field of a tool call's arguments, ready to render as a label/value row. */
