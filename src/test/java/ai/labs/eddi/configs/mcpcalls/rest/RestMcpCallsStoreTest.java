@@ -132,7 +132,7 @@ class RestMcpCallsStoreTest {
         void rejectedConfigurationIsBadRequest() {
             var refused = new McpToolProviderManager.McpServerFailure("discovery-probe", "http://169.254.169.254/",
                     McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, "URL targets a blocked address");
-            when(mcpToolProviderManager.discoverTools(any()))
+            when(mcpToolProviderManager.probeTools(any()))
                     .thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of(refused)));
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://169.254.169.254/", "http"), null);
@@ -163,18 +163,18 @@ class RestMcpCallsStoreTest {
         @Test
         @DisplayName("a literal credential in X-Mcp-Authorization still reaches the probe")
         void literalCredentialIsProbed() {
-            when(mcpToolProviderManager.discoverTools(any())).thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of()));
+            when(mcpToolProviderManager.probeTools(any())).thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of()));
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("https://mcp.example/mcp", "http"), "literal-token");
 
             assertEquals(200, response.getStatus());
-            verify(mcpToolProviderManager).discoverTools(argThat(configs -> "literal-token".equals(configs.getFirst().getApiKey())));
+            verify(mcpToolProviderManager).probeTools(argThat(configs -> "literal-token".equals(configs.getFirst().getApiKey())));
         }
 
         @Test
         @DisplayName("should return BAD_GATEWAY on connection failure")
         void connectionFailure() throws Exception {
-            when(mcpToolProviderManager.discoverTools(any()))
+            when(mcpToolProviderManager.probeTools(any()))
                     .thenThrow(new RuntimeException("Connection refused"));
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://localhost:9999", "http"), null);
             assertEquals(502, response.getStatus());

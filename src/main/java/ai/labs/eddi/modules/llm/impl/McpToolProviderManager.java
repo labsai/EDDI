@@ -19,6 +19,10 @@ import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,7 +61,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -109,10 +115,71 @@ public class McpToolProviderManager {
     private final long toolCacheTtlMillis;
 
     /**
-     * Cache of active MCP clients, keyed by server URL. Connections are reused
-     * across conversation turns to avoid reconnect overhead.
+     * Most MCP clients kept at once. Every distinct URL + credential + timeout is
+     * its own client, and {@code discover-tools} lets an editor name any URL, so an
+     * unbounded map was a slot per URL ever probed, each with its connection and
+     * cached tool list, until restart.
      */
-    private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
+    static final int MAX_CACHED_CLIENTS = 256;
+
+    /** Idle time after which a cached client is dropped and rebuilt on next use. */
+    static final Duration CLIENT_IDLE_TTL = Duration.ofMinutes(30);
+
+    /**
+     * Cache of active MCP clients, keyed by server URL, credential digest and
+     * timeout. Connections are reused across conversation turns to avoid reconnect
+     * overhead. Bounded in size and idle time; a client that leaves the cache by
+     * eviction is closed after {@link #clientCloseGraceMillis}, so a tool call
+     * already running on it is not cut off, and its discovered tools leave the tool
+     * cache with it.
+     */
+    private final Cache<String, McpClient> clientCacheStore = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHED_CLIENTS)
+            .expireAfterAccess(CLIENT_IDLE_TTL)
+            .executor(Runnable::run)
+            .<String, McpClient>removalListener((key, client, cause) -> onClientRemoved(key, client, cause))
+            .build();
+
+    /**
+     * The {@code ConcurrentMap} view of {@link #clientCacheStore}; everything reads
+     * and writes through it, so the bound, the expiry and the removal listener
+     * apply.
+     */
+    private final Map<String, McpClient> clientCache = clientCacheStore.asMap();
+
+    /**
+     * Delay before an evicted client is closed. A tool executor holds its client
+     * directly, so a client evicted mid-turn may still be serving a call; the grace
+     * outlasts one call. Explicit removals (secret rotation, {@link #closeClient},
+     * shutdown) close at once, as before.
+     */
+    @ConfigProperty(name = "eddi.mcp.client-cache.close-grace-ms", defaultValue = "120000")
+    long clientCloseGraceMillis = 120_000L;
+
+    /** Most pages one MCP listing (tools, resources, templates) may request. */
+    @ConfigProperty(name = "eddi.mcp.list.max-pages", defaultValue = "20")
+    int maxListPages = 20;
+
+    /** Most entries one MCP listing may return across all of its pages. */
+    @ConfigProperty(name = "eddi.mcp.list.max-items", defaultValue = "2000")
+    int maxListItems = 2000;
+
+    /** Longest one MCP listing may take, from its first page, in milliseconds. */
+    @ConfigProperty(name = "eddi.mcp.list.deadline-ms", defaultValue = "30000")
+    long listDeadlineMillis = 30_000L;
+
+    /**
+     * Most tools one MCP server may contribute to an agent; the rest are dropped
+     * with a warning.
+     */
+    @ConfigProperty(name = "eddi.mcp.tools.max-per-server", defaultValue = "128")
+    int maxToolsPerServer = DEFAULT_MAX_TOOLS_PER_SERVER;
+
+    /** Default for {@link #maxToolsPerServer}. */
+    static final int DEFAULT_MAX_TOOLS_PER_SERVER = 128;
+
+    /** Longest tool name accepted from a remote server (OpenAI's own limit). */
+    static final int MAX_TOOL_NAME_LENGTH = 64;
 
     /**
      * Cache of discovered tool specs/executors per server URL. Finding F12: without
@@ -256,6 +323,61 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Removal listener of the client cache. Only an eviction (size or idle) is
+     * handled here: an explicit removal is closed by the code that removed it, and
+     * a replaced client may still be in use by whoever received it. The evicted
+     * client's discovered tools go with it, because their executors are bound to
+     * it; the next turn rediscovers on a fresh client.
+     */
+    private void onClientRemoved(String key, McpClient client, RemovalCause cause) {
+        if (key == null || client == null || !cause.wasEvicted()) {
+            return;
+        }
+        toolCache.remove(key);
+        closeLater(client, key);
+    }
+
+    /**
+     * Closes a client that may still be serving a call, after
+     * {@link #clientCloseGraceMillis}; at once when the grace is zero or negative.
+     * The delayed executor shares the JDK's one delay thread rather than holding a
+     * thread per client.
+     */
+    private void closeLater(McpClient client, String key) {
+        Runnable close = () -> {
+            try {
+                client.close();
+            } catch (Exception e) {
+                LOGGER.debugf("Error closing evicted MCP client for '%s': %s", sanitize(urlOfKey(key)), sanitize(e.getMessage()));
+            }
+        };
+        if (clientCloseGraceMillis <= 0) {
+            close.run();
+        } else {
+            CompletableFuture.runAsync(close, CompletableFuture.delayedExecutor(clientCloseGraceMillis, TimeUnit.MILLISECONDS));
+        }
+    }
+
+    /** The URL part of a client cache key, for log lines. */
+    private static String urlOfKey(String key) {
+        int bar = key.indexOf('|');
+        return UriRedactor.redactUri(bar < 0 ? key : key.substring(0, bar));
+    }
+
+    /**
+     * Drops the client under {@code key} once one of its listings passed a bound,
+     * so the next turn starts on a fresh client instead of one a hostile server has
+     * already driven to its limit.
+     */
+    private void evictAfterListingLimit(String key) {
+        toolCache.remove(key);
+        McpClient client = clientCache.remove(key);
+        if (client != null) {
+            closeLater(client, key);
+        }
+    }
+
+    /**
      * A caller context for the back-compat constructor below.
      * <p>
      * Safe to share: the binding {@code CallerIdentityContext} reads lives in a
@@ -378,6 +500,24 @@ public class McpToolProviderManager {
      * @return combined tools from all reachable servers, plus per-server failures
      */
     public McpToolsResult discoverTools(List<McpServerConfig> mcpServers) {
+        return discover(mcpServers, false);
+    }
+
+    /**
+     * Discovery for a one-off probe
+     * ({@code POST /mcpcallsstore/mcpcalls/discover-tools}): the same validation
+     * and governance as {@link #discoverTools}, but on a client that is built for
+     * the call and closed after it, and without reading or writing the tool cache.
+     * <p>
+     * The probe names whatever URL its caller chooses. Caching its client let a
+     * loop over {@code https://host/mcp?n=1..N} leave N clients, connections and
+     * tool lists behind; a probe now leaves nothing.
+     */
+    public McpToolsResult probeTools(List<McpServerConfig> mcpServers) {
+        return discover(mcpServers, true);
+    }
+
+    private McpToolsResult discover(List<McpServerConfig> mcpServers, boolean probe) {
         if (mcpServers == null || mcpServers.isEmpty()) {
             return new McpToolsResult(List.of(), Map.of());
         }
@@ -440,17 +580,20 @@ public class McpToolProviderManager {
 
             // F12: serve the tool list from the TTL cache when it is still fresh —
             // a live tools/list RPC per server per turn was pure overhead.
-            CachedTools cached = toolCache.get(cacheKey(serverConfig));
+            CachedTools cached = probe ? null : toolCache.get(cacheKey(serverConfig));
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
+                // Counts as use of the client, so a server in use every turn is not
+                // idle-evicted from under its cached executors.
+                clientCache.get(cacheKey(serverConfig));
                 mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
                 continue;
             }
 
             try {
                 // Discover tools — McpToolProvider returns ToolProviderResult
-                ToolProviderResult result = fetchToolsFromServer(serverConfig);
+                ToolProviderResult result = probe ? probeToolsFromServer(serverConfig) : fetchToolsFromServer(serverConfig);
 
                 List<ToolSpecification> serverSpecs = new ArrayList<>();
                 Map<String, ToolExecutor> serverExecutors = new HashMap<>();
@@ -458,7 +601,25 @@ public class McpToolProviderManager {
                     // M7: one byte budget per server per discovery pass, so a server
                     // cannot fill the prompt with schemas tool by tool.
                     var schemaBudget = new ToolSchemaGovernor.ServerBudget(maxSchemaBytesPerServer);
+                    int toolCap = maxToolsPerServer > 0 ? maxToolsPerServer : DEFAULT_MAX_TOOLS_PER_SERVER;
                     for (var toolEntry : result.tools().entrySet()) {
+                        if (serverSpecs.size() >= toolCap) {
+                            LOGGER.warnf("MCP server '%s' advertises %d tools — keeping the first %d (eddi.mcp.tools.max-per-server)",
+                                    sanitize(serverName), result.tools().size(), toolCap);
+                            countSchema("dropped_tool_count_cap");
+                            break;
+                        }
+                        // The name is remote text that becomes a function name in every
+                        // LLM request: a provider rejects one outside its alphabet or
+                        // over 64 characters, and a multi-megabyte one makes every request
+                        // for the agent huge. Checked before anything logs it in full.
+                        String name = toolEntry.getKey() != null ? toolEntry.getKey().name() : null;
+                        if (!isValidToolName(name)) {
+                            LOGGER.warnf("MCP server '%s' advertises a tool whose name is not 1-%d characters of [A-Za-z0-9_.-] — "
+                                    + "dropping it: '%s'", sanitize(serverName), MAX_TOOL_NAME_LENGTH, abbreviatedName(name));
+                            countSchema("dropped_invalid_name");
+                            continue;
+                        }
                         // F16: the description is authored by the REMOTE server and lands
                         // verbatim in the model's tool definitions — cap and sanitize it
                         // before it becomes prompt content.
@@ -494,8 +655,10 @@ public class McpToolProviderManager {
                     LOGGER.infof("Discovered %d tools from MCP server '%s'", serverSpecs.size(), sanitize(serverName));
                 }
 
-                toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
-                        System.currentTimeMillis()));
+                if (!probe) {
+                    toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
+                            System.currentTimeMillis()));
+                }
                 mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
 
                 // Success — clear failure history for this server
@@ -582,10 +745,38 @@ public class McpToolProviderManager {
      */
     ToolProviderResult fetchToolsFromServer(McpServerConfig serverConfig) {
         McpClient client = getOrCreateClient(serverConfig);
+        return listTools(client);
+    }
 
-        // Use McpToolProvider to discover tools from this server
-        McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).build();
+    /**
+     * The probe twin of {@link #fetchToolsFromServer}: a client built for this one
+     * listing and closed after it, never cached. Same seam purpose.
+     */
+    ToolProviderResult probeToolsFromServer(McpServerConfig serverConfig) {
+        McpClient client = createClient(serverConfig, () -> {
+            // closed below in any case
+        });
+        try {
+            return listTools(client);
+        } finally {
+            try {
+                client.close();
+            } catch (Exception e) {
+                LOGGER.debugf("Error closing MCP probe client for '%s': %s", sanitize(UriRedactor.redactUri(serverConfig.getUrl())),
+                        sanitize(e.getMessage()));
+            }
+        }
+    }
 
+    /**
+     * {@code tools/list} through langchain4j's provider.
+     * {@code failIfOneServerFails} is on because there is only ever one client
+     * here: left off, a failed listing (a refused response, a listing stopped at
+     * its page bound) was logged by the provider and returned as an empty result,
+     * which discovery then cached as "this server has no tools" and never reported.
+     */
+    private static ToolProviderResult listTools(McpClient client) {
+        McpToolProvider toolProvider = McpToolProvider.builder().mcpClients(List.of(client)).failIfOneServerFails(true).build();
         return toolProvider.provideTools(null);
     }
 
@@ -938,25 +1129,48 @@ public class McpToolProviderManager {
      * closed.
      */
     McpClient getOrCreateClient(McpServerConfig config) {
-        return clientCache.computeIfAbsent(cacheKey(config), key -> {
-            String url = config.getUrl();
-            LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
-                    sanitize(config.getTransport()));
+        return clientCache.computeIfAbsent(cacheKey(config), key -> createClient(config, () -> evictAfterListingLimit(key)));
+    }
 
-            Duration timeout = Duration.ofMillis(effectiveTimeoutMs(config));
+    /**
+     * Builds one client. {@code onListingLimit} runs when a listing on it passes
+     * {@code eddi.mcp.list.*}.
+     */
+    private McpClient createClient(McpServerConfig config, Runnable onListingLimit) {
+        String url = config.getUrl();
+        LOGGER.infof("Creating MCP client for '%s' (%s transport)",
+                sanitize(config.getName() != null ? config.getName() : UriRedactor.redactUri(url)),
+                sanitize(config.getTransport()));
 
-            McpTransport transport = createTransport(config, timeout);
+        Duration timeout = Duration.ofMillis(effectiveTimeoutMs(config));
 
-            // The trace context goes into params._meta (SEP-414) through the meta
-            // supplier, which DefaultMcpClient invokes on the calling thread —
-            // where the execute_tool span is current — just before handing the
-            // message to the transport. The transport then mirrors it into the
-            // HTTP headers from the message itself (see createTransport). The
-            // supplier reads the context per request, never at build time: this
-            // client is cached and shared across conversations.
-            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
-                    .metaSupplier(traceMetaSupplier()).build();
-        });
+        // Wrapped here rather than inside createTransport, which tests read back as
+        // the concrete StreamableHttp transport.
+        McpTransport transport = new BoundedListingMcpTransport(createTransport(config, timeout), listingLimits(), onListingLimit);
+
+        // The trace context goes into params._meta (SEP-414) through the meta
+        // supplier, which DefaultMcpClient invokes on the calling thread —
+        // where the execute_tool span is current — just before handing the
+        // message to the transport. The transport then mirrors it into the
+        // HTTP headers from the message itself (see createTransport). The
+        // supplier reads the context per request, never at build time: this
+        // client is cached and shared across conversations.
+        //
+        // autoHealthCheck(false): langchain4j otherwise gives every client its own
+        // single-thread scheduler pinging the server every 30 s for as long as the
+        // client lives — one thread per URL ever named. A dead session is noticed on
+        // the next request instead, and the transport reconnects then.
+        return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
+                .metaSupplier(traceMetaSupplier()).autoHealthCheck(false).build();
+    }
+
+    /**
+     * The {@code eddi.mcp.list.*} bounds, non-positive values replaced by the
+     * defaults.
+     */
+    BoundedListingMcpTransport.Limits listingLimits() {
+        return new BoundedListingMcpTransport.Limits(maxListPages > 0 ? maxListPages : 20, maxListItems > 0 ? maxListItems : 2000,
+                Duration.ofMillis(listDeadlineMillis > 0 ? listDeadlineMillis : 30_000L));
     }
 
     /**
@@ -1169,10 +1383,14 @@ public class McpToolProviderManager {
             countSchema("dropped");
             return null;
         }
-        if (!budget.admit(result.bytes())) {
-            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: the server's tool schemas already fill %d of the %d bytes allowed per "
-                    + "server (eddi.mcp.tool-schema.max-bytes-per-server) and this one adds %d", sanitize(spec.name()), sanitize(serverName),
-                    budget.used(), budget.maxBytes(), result.bytes());
+        // The name and the (already capped) description reach the prompt too, so they
+        // are charged with the schema: charging the schema alone let a server of
+        // 50,000 parameterless tools through the per-server budget for free.
+        int charge = result.bytes() + utf8Length(spec.name()) + utf8Length(spec.description());
+        if (!budget.admit(charge)) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: the server's tool definitions already fill %d of the %d bytes allowed "
+                    + "per server (eddi.mcp.tool-schema.max-bytes-per-server) and this one adds %d", sanitize(spec.name()),
+                    sanitize(serverName), budget.used(), budget.maxBytes(), charge);
             countSchema("dropped_server_cap");
             return null;
         }
@@ -1192,9 +1410,44 @@ public class McpToolProviderManager {
         return ToolSpecification.builder().name(spec.name()).description(spec.description()).parameters(result.schema()).build();
     }
 
+    private static int utf8Length(String text) {
+        return text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /**
+     * Whether a remote tool name is 1 to {@link #MAX_TOOL_NAME_LENGTH} characters
+     * of {@code [A-Za-z0-9_.-]}. A character walk rather than a regex: the name is
+     * remote text of any length, and the length is checked first.
+     */
+    static boolean isValidToolName(String name) {
+        if (name == null || name.isEmpty() || name.length() > MAX_TOOL_NAME_LENGTH) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            boolean allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** A rejected remote name, cut short and sanitized, for one log line. */
+    static String abbreviatedName(String name) {
+        if (name == null) {
+            return "null";
+        }
+        if (name.length() <= MAX_TOOL_NAME_LENGTH) {
+            return sanitize(name);
+        }
+        return sanitize(name.substring(0, MAX_TOOL_NAME_LENGTH)) + "… (" + name.length() + " chars)";
+    }
+
     /**
      * {@code eddi.mcp.tool-schema.governed}, tag {@code outcome}: redacted,
-     * truncated, dropped, dropped_server_cap.
+     * truncated, dropped, dropped_server_cap, dropped_tool_count_cap,
+     * dropped_invalid_name.
      */
     private void countSchema(String outcome) {
         if (meterRegistry == null) {
@@ -1510,6 +1763,15 @@ public class McpToolProviderManager {
      */
     int getActiveConnectionCount() {
         return clientCache.size();
+    }
+
+    /**
+     * Test hook: run the client cache's pending maintenance (eviction is amortised
+     * onto later operations) and report the resulting entry count.
+     */
+    long cleanUpClientCache() {
+        clientCacheStore.cleanUp();
+        return clientCacheStore.estimatedSize();
     }
 
     /**

@@ -289,7 +289,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                 tempConfig.setApiKey(apiKey);
             }
 
-            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(tempConfig));
+            // probeTools, not discoverTools: the URL is the caller's choice, so the
+            // client is built for this call and closed after it rather than cached.
+            McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.probeTools(List.of(tempConfig));
 
             // A configuration the manager refused outright (blocked address, bad
             // transport, malformed URL) contributes no tools and throws nothing, so it
