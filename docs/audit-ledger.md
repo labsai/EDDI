@@ -64,6 +64,8 @@ Each audit entry captures:
 | `agentSignature` | String  | Optional per-agent signature (null when agent signing is off) |
 | `sequence`       | long    | 0-based, gap-free position within the conversation; part of the signed payload |
 
+A task that runs because a human approved a plan records which one: every task a HITL resume runs carries `input.hitlPlanHash`, the [plan hash](hitl.md#plan-binding-planhash) the resume was admitted against, and an approved tool call's `hitl_approved` trace entry carries it as `planHash`. The decision itself is the `hitl.approval` entry, whose `output` has the same `planHash` and the `planBinding` it was decided under ([HITL Review & Audit](hitl-review-and-audit.md#top-level-fields-auditentryoutput)). Together they join a decision to what it let run.
+
 HITL oversight writes `hitl.sample.review`, `autonomy.promotion`, `autonomy.revert`, `autonomy.recommendation.dismissed`, `autonomy.demotion` and `autonomy.suspension.lifted` entries (`taskType: hitl`); approval analytics reads a projection of the `hitl.approval` entries, never the ledger itself — see [HITL Oversight](hitl-oversight.md#audit-ledger-entries).
 
 ### The ledger is the only copy of the prompt and the response

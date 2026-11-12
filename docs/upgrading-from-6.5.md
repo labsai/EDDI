@@ -299,6 +299,27 @@ Applies only if you run more than one node.
   alert rule): the log shows `Created the alerts-maintenance system schedule`, and the schedule is listed
   again under Schedules.
 
+### Slack channels still declared on an agent
+
+Applies only if a deployed agent still carries the deprecated `channels` list
+([Slack integration](slack-integration.md)). The startup migration that turns those connectors into
+channel integrations runs once more on the first 6.7 start, because the configs it created before
+were never listed: Slack kept routing through the legacy connector, and the integrations did not
+appear in the Manager, the REST listing or `list_channel_integrations`. After this start each
+channel has one integration, owned like the agent it routes to by default (its visibility narrowed
+to `space` unless the agent is `private`), and Slack routes through it: the default target is the
+first agent by id (or, if that agent's connector sets a `groupId`, that group), and every other
+agent sharing the channel is reached through its trigger keyword, the slug of its name. An agent
+whose name slugs to the reserved `help` gets no trigger; give it another one. The configs the
+earlier run created stay in the database unreferenced; nothing reads them. A channel that already
+has an integration is left alone.
+
+If the default agent has no descriptor, the integration is unowned, and under the default `shared`
+legacy policy other editors can read its configuration (literal Slack credentials are redacted for
+non-admins). Set `eddi.workspaces.legacy-visibility=admin-only` to restrict it; explicit grants still
+apply. If a descriptor write or the descriptor listing fails, the migration stays incomplete and
+startup continues: check the migration log, fix the cause and restart to retry.
+
 ### New opt-in features
 
 None of these changes behaviour until configured; each has its own page.
@@ -328,3 +349,27 @@ None of these changes behaviour until configured; each has its own page.
 
 6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
 Manager and Chat UI. Nothing to do besides pulling the new image.
+
+## Changes after 6.7.0
+
+### An httpcall whose literal target is refused now fails at deploy
+
+With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an
+absolute `request.path`, names a host the SSRF check refuses (loopback such as `http://127.0.0.1:7070`, a
+private address, `localhost`, `*.internal`, `*.local`, not on `eddi.security.ssrf-protection.allowed-hosts`)
+used to save and deploy, and only failed when the first conversation reached the call. It now fails the
+deployment. Independent of the flag, a target that is a cloud instance-metadata address fails to deploy too (it
+already failed on every call).
+
+Who is affected: deployments with protection on that have agents calling internal APIs, or EDDI itself (the
+Platform Operator's tools, for one), without listing the host. What you will see: the deploy request fails
+(and an auto-deploy at startup logs the failure for that agent) with a message naming the host and the exact
+`host:port` entry to add. To keep the agent working, add that entry to
+`eddi.security.ssrf-protection.allowed-hosts`, or point the call at a public address. Templated and
+`${vars:...}` hosts, and hosts that do not resolve at deploy (logged as a WARN), are still only checked per call.
+There is no switch to restore the old deploy-then-fail behaviour.
+
+DNS lookups made by this check now give up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`) and
+count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
+refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
+See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).

@@ -21,17 +21,28 @@ import { useJsonSchema } from "@/hooks/use-json-schema";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import { useAgent } from "@/hooks/use-agents";
-import { EDITOR_MAP, EXTENSION_TO_SLUG } from "@/components/editors/editor-registry";
+import { EDITOR_MAP } from "@/components/editors/editor-registry";
+import {
+  getExtensionColor,
+  getExtensionIcon,
+  getExtensionLabel,
+  getResourceSlugForExtension,
+  getResourceSlugForStep,
+} from "@/lib/api/extensions";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/shared/error-state";
-import { AlertTriangle, SquarePen } from "lucide-react";
+import { EmptyState } from "@/components/shared/empty-state";
+import { Link } from "react-router-dom";
+import { ExternalLink, SquarePen } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // ==================== Types ====================
 
 interface WorkflowStep {
   type: string;
   extensions: Record<string, unknown>;
-  config: { uri?: string };
+  config: { uri?: string; [key: string]: unknown };
 }
 
 interface StudioEditorPanelProps {
@@ -112,8 +123,11 @@ export function StudioEditorPanel({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
-  // Parse the extension type and URI
-  const slug = EXTENSION_TO_SLUG[workflowStep.type] ?? "";
+  // The same step → editor resolution the workflow page uses: the config
+  // URI's store first, the step type as fallback. A private type table here
+  // once missed `ai.labs.httpcalls` (the canonical API-call step type) and
+  // `ai.labs.langchain`, so those steps opened no editor at all.
+  const slug = getResourceSlugForStep(workflowStep) ?? "";
   const rt: ResourceTypeConfig | undefined = getResourceType(slug);
   const uri = workflowStep.config?.uri ?? "";
 
@@ -297,27 +311,21 @@ export function StudioEditorPanel({
     [onDirtyChange, panelId],
   );
 
-  // ---- No URI / unsupported type ----
+  // ---- No stored resource behind this step ----
   if (!uri || !rt) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-        <AlertTriangle className="h-10 w-10 text-muted-foreground/30 mb-3" />
-        <p className="text-sm text-muted-foreground">
-          {!uri
-            ? t("studio.noConfig", "This pipeline stage has no configuration URI")
-            : t("studio.unsupportedType", "Editor not available for this extension type")}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground/60 font-mono">
-          {workflowStep.type}
-        </p>
-      </div>
+      <StudioStepInfo
+        workflowStep={workflowStep}
+        workflowId={workflowId}
+        workflowVersion={workflowVersion}
+      />
     );
   }
 
   // ---- Loading ----
   if (isLoading) {
     return (
-      <div className="flex-1 p-6 space-y-4">
+      <div className="flex-1 space-y-4 px-6 py-5" data-testid="studio-editor-loading">
         <div className="flex gap-3">
           <Skeleton className="h-8 w-24" />
           <Skeleton className="h-8 w-24" />
@@ -330,7 +338,7 @@ export function StudioEditorPanel({
   // ---- Error ----
   if (isError) {
     return (
-      <div className="flex-1 p-6">
+      <div className="flex-1 px-6 py-5">
         <ErrorState
           error={error}
           message={t("common.error", "An error occurred")}
@@ -345,7 +353,7 @@ export function StudioEditorPanel({
   const typeName = t(`${rt.labelKey}.name`, slug);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4" data-testid="studio-editor-panel">
+    <div className="flex-1 overflow-y-auto px-6 py-5" data-testid="studio-editor-panel">
       {!readOnly && (
       <CompatibleVersionCheckbox
         checked={compatible}
@@ -358,6 +366,7 @@ export function StudioEditorPanel({
       <OwningAgentContext.Provider value={agentId}>
       <ConfigEditorLayout
         typeName={typeName}
+        typeIcon={getExtensionIcon(workflowStep.type)}
         resourceId={resourceId}
         data={JSON.stringify(data, null, 2)}
         versions={versions}
@@ -383,19 +392,130 @@ export function StudioEditorPanel({
   );
 }
 
+// ==================== Store-less steps ====================
+
+/** Step types that only render templates and have no configuration of their own. */
+const TEMPLATING_TYPES = new Set(["eddi://ai.labs.templating", "eddi://ai.labs.output.template"]);
+
+type StepInfoKind = "templating" | "inline" | "noConfig" | "unknown";
+
+/**
+ * What the Studio shows for a step with no stored configuration resource
+ * behind it, instead of a bare "no editor" warning: what the step is, why there
+ * is nothing to edit here, its inline configuration (read-only), and the way to
+ * the workflow page, where steps are attached, configured inline and reordered.
+ */
+function StudioStepInfo({
+  workflowStep,
+  workflowId,
+  workflowVersion,
+}: {
+  workflowStep: WorkflowStep;
+  workflowId: string;
+  workflowVersion: number;
+}) {
+  const { t } = useTranslation();
+  const type = workflowStep.type.startsWith("eddi://") ? workflowStep.type : `eddi://${workflowStep.type}`;
+  const Icon = getExtensionIcon(type);
+  const label = getExtensionLabel(type, t);
+  const config: Record<string, unknown> = workflowStep.config ?? {};
+  const uri = typeof config.uri === "string" ? config.uri : "";
+  const inlineConfig = Object.fromEntries(Object.entries(config).filter(([key]) => key !== "uri"));
+  const extensions = workflowStep.extensions ?? {};
+  const hasInline = Object.keys(inlineConfig).length > 0 || Object.keys(extensions).length > 0;
+
+  let kind: StepInfoKind;
+  if (TEMPLATING_TYPES.has(type)) kind = "templating";
+  // A URI whose store and type this Manager has no editor for.
+  else if (uri) kind = "unknown";
+  else if (hasInline) kind = "inline";
+  else if (getResourceSlugForExtension(type)) kind = "noConfig";
+  else kind = "unknown";
+
+  const messages: Record<StepInfoKind, string> = {
+    templating: t(
+      "studio.stepInfo.templating",
+      "Renders the {…} placeholders in this turn's output texts and quick replies. It has no configuration of its own, so there is nothing to edit here."
+    ),
+    inline: t(
+      "studio.stepInfo.inlineConfig",
+      "This step's configuration is embedded in the workflow rather than stored as a separate resource. Edit it on the workflow page."
+    ),
+    noConfig: t(
+      "studio.stepInfo.noConfig",
+      "This step references no configuration resource. Attach one on the workflow page."
+    ),
+    unknown: t(
+      "studio.stepInfo.unknown",
+      "The Manager has no editor for this step type. Its configuration as stored in the workflow is shown below."
+    ),
+  };
+
+  const showJson = hasInline || !!uri;
+
+  return (
+    <div className="flex-1 overflow-y-auto px-6 py-5" data-testid="studio-step-info" data-kind={kind}>
+      <div className="mx-auto max-w-3xl space-y-4">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
+            <Icon className={cn("h-5 w-5", getExtensionColor(type))} aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-foreground">{label}</h2>
+            <p className="truncate font-mono text-xs text-muted-foreground" data-testid="studio-step-info-type">
+              {workflowStep.type}
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link
+              to={`/manage/workflowview/${workflowId}?version=${workflowVersion}`}
+              data-testid="studio-step-info-open-workflow"
+            >
+              <ExternalLink className="rtl:-scale-x-100" aria-hidden="true" />
+              {t("studio.stepInfo.openWorkflow", "Open workflow")}
+            </Link>
+          </Button>
+        </div>
+        <p
+          className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground"
+          data-testid="studio-step-info-message"
+        >
+          {messages[kind]}
+        </p>
+        {showJson && (
+          <section className="space-y-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("studio.stepInfo.configHeading", "Step configuration (read-only)")}
+            </h3>
+            <pre
+              className="max-h-[60vh] overflow-auto rounded-xl border border-border bg-muted/40 p-4 font-mono text-xs text-foreground"
+              data-testid="studio-step-info-json"
+            >
+              {JSON.stringify({ config, extensions }, null, 2)}
+            </pre>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ==================== Empty Placeholder ====================
 
 export function StudioEditorEmpty() {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-      <SquarePen className="h-16 w-16 text-muted-foreground/15 mb-4" />
-      <p className="text-sm font-medium text-foreground">
-        {t("studio.selectStage", "Click a pipeline stage to open its editor")}
-      </p>
-      <p className="mt-1.5 text-xs text-muted-foreground max-w-xs">
-        {t("studio.selectStageHint", "Select any extension in the pipeline to view and edit its configuration inline")}
-      </p>
+    <div className="flex flex-1 items-center justify-center px-6 py-5" data-testid="studio-editor-empty">
+      <div className="w-full max-w-lg">
+        <EmptyState
+          icon={SquarePen}
+          title={t("studio.selectStage", "Click a pipeline stage to open its editor")}
+          description={t(
+            "studio.selectStageHint",
+            "Select any extension in the pipeline to view and edit its configuration inline"
+          )}
+        />
+      </div>
     </div>
   );
 }

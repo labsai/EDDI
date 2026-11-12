@@ -9,7 +9,6 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -114,7 +113,7 @@ class AgentSetupVaultKeyReuseTest {
     }
 
     private static SecretMetadata entry(String keyName, String value, Instant createdAt, List<String> allowedAgents) {
-        return new SecretMetadata(SecretReference.DEFAULT_TENANT, keyName, createdAt, null, null, EnvelopeCrypto.sha256Hex(value),
+        return new SecretMetadata(SecretReference.DEFAULT_TENANT, keyName, createdAt, null, null, VaultChecksum.legacy(value),
                 "test", allowedAgents);
     }
 

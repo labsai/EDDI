@@ -121,7 +121,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      */
     private static final List<String> RESUME_ONLY_BATCH_FIELDS = List.of("hitlPendingToolCalls.chatTranscriptJson",
             "hitlPendingToolCalls.gatingAssistantMessageJson", "hitlPendingToolCalls.traceSoFar", "hitlPendingToolCalls.fingerprint",
-            "hitlPendingToolCalls.calls.argumentsRaw");
+            "hitlPendingToolCalls.planNonce", "hitlPendingToolCalls.calls.argumentsRaw");
     /**
      * Keys the append path handles with a dedicated operator, so they must not also
      * be {@code $set} or {@code $unset}: the two step/output arrays are pushed to,
@@ -1343,7 +1343,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
         // would linger on an ended or cancelled conversation document.
         for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
-                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext", "hitlPlanHash",
                 "hitlPauseType", "hitlPendingToolCalls")) {
             unset.append(field, "");
         }

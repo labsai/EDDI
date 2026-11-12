@@ -887,10 +887,11 @@ public class RestAgentStore implements IRestAgentStore {
         }
         // Crypto is enabled — validate that a public key exists on the agent identity.
         // There is deliberately no endpoint named here: none exists.
-        // AgentSigningService.generateKeyPair has no production caller, so the only way
-        // to satisfy this check today is to write the key material into the config
-        // yourself. Pointing at POST /agentstore/{agentId}/signing/keys — which returns
-        // 404 — sent operators looking for a route that was never built.
+        // Nothing in EDDI generates an agent signing key (docs/architecture.md,
+        // "Cryptographic Agent Identity"), so the only way to satisfy this check
+        // today is to write the key material into the config yourself. Pointing
+        // at POST /agentstore/{agentId}/signing/keys — which returns 404 — sent
+        // operators looking for a route that was never built.
         var identity = config.getIdentity();
         boolean hasLegacyKey = identity != null && identity.getPublicKey() != null
                 && !identity.getPublicKey().isBlank();

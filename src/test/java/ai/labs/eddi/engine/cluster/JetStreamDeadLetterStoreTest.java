@@ -150,6 +150,10 @@ class JetStreamDeadLetterStoreTest {
         assertEquals("nats://***@nats-1:4222", ClusterConfig.redactUserInfo("nats://token@nats-1:4222"));
         assertEquals("nats://nats-1:4222", ClusterConfig.redactUserInfo("nats://nats-1:4222"));
         assertEquals("nats://a:4222/x@y", ClusterConfig.redactUserInfo("nats://a:4222/x@y"));
+        // A tab or newline inside the userinfo is still userinfo: it must not end the
+        // match and leave the secret in the log.
+        assertEquals("nats://***@nats-1:4222", ClusterConfig.redactUserInfo("nats://eddi:s3\tcret@nats-1:4222"));
+        assertEquals("nats://***@nats-1:4222", ClusterConfig.redactUserInfo("nats://eddi:s3\ncret@nats-1:4222"));
         ClusterConfig config = ClusterConfig.defaults().withNatsUrl("nats://u:p@a:4222, nats://b:4222");
         assertEquals(List.of("nats://***@a:4222", "nats://b:4222"), config.natsServersForLog());
     }

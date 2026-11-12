@@ -1156,6 +1156,10 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   `dynamicOrigin` names this discussion, leaves agents marked for another one
   alone, and only **undeploys** — never deletes — an agent with no marker (one
   created before markers existed, or never created by `create_sub_agent`).
+- An undeploy by either of them is a real undeploy, as over REST: the agent's
+  `production` deployment records are marked undeployed, so neither the
+  deployment sweep nor a restart brings it back, and in a cluster every node
+  undeploys it.
 - `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
 - `converse_with_agent` continues only a conversation owned by the same user the
   calling conversation belongs to (a conversation of another user, or one that
@@ -1434,6 +1438,20 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 ### Follow-up Conversations
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
+## Restarts
+
+A discussion's leg runs in the JVM that started or resumed it, and nothing
+picks it up after that process dies. On a single node (`eddi.messaging.type=in-memory`)
+the startup HITL crash recovery therefore **cancels** every discussion still
+`IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
+started, so it does not sit in a running state that `continue` and `followup`
+refuse. Paused discussions are not affected: their timeout schedules are
+re-armed instead. Details, and when to turn it off
+(`eddi.hitl.crash-recovery.recover-in-progress`), are in
+[HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
+interrupted discussion still needs a manual cancel — or, for a standing team,
+the claim TTL (see [Standing Teams](#standing-teams-i13)).
 
 ## Not yet supported
 

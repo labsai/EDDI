@@ -531,6 +531,17 @@ public class ConversationAccessGuard {
     }
 
     /**
+     * The owner a listing of the caller's own conversations matches: the caller's
+     * principal name, which a conversation they start records as its owner.
+     * {@code null} without a named caller and with authorization disabled, where a
+     * conversation records the userId the client passed (or a generated anonymous
+     * one) rather than the principal, so there is no owner to match.
+     */
+    public String ownConversationsOwner() {
+        return ownershipValidator.isAuthEnabled() ? callerActor(null) : null;
+    }
+
+    /**
      * Resolves the owner to stamp on a <em>new</em> conversation: the caller's own
      * identity, unless an admin explicitly starts one on another user's behalf.
      * <p>

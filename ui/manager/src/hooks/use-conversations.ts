@@ -11,6 +11,7 @@ import {
   getActiveConversations,
   endActiveConversations,
   purgeEndedConversations,
+  type ConversationListingOptions,
   type ConversationState,
   type ConversationStatus,
   type ViewState,
@@ -27,13 +28,15 @@ export function useConversationDescriptors(
   agentId = "",
   conversationState?: ConversationState,
   agentVersion?: number,
-  viewState?: ViewState
+  viewState?: ViewState,
+  options: ConversationListingOptions = {}
 ) {
+  const mine = options.mine === true;
   return useQuery({
     queryKey: [
       ...CONVERSATIONS_KEY,
       "descriptors",
-      { limit, index, filter, agentId, conversationState, agentVersion, viewState },
+      { limit, index, filter, agentId, conversationState, agentVersion, viewState, mine },
     ],
     queryFn: () =>
       getConversationDescriptors(
@@ -43,7 +46,8 @@ export function useConversationDescriptors(
         agentId,
         agentVersion,
         conversationState,
-        viewState
+        viewState,
+        { mine }
       ),
     // Keep the previous page visible while the next one loads so paging
     // doesn't flash the skeleton on every click.
