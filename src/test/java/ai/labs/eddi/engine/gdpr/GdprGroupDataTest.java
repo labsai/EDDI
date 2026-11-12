@@ -233,7 +233,8 @@ class GdprGroupDataTest {
     @Test
     void export_masksTheOtherHumanMembersOfTheUsersDiscussions() throws Exception {
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
-        // agent-0 got a member conversation, so the stored discussion records it as an agent
+        // agent-0 got a member conversation, so the stored discussion records it as an
+        // agent
         var gc = discussion("gc-1", "member-1");
         gc.getTranscript().add(new TranscriptEntry("agent-0", "Analyst", "an opinion", 0, "p", TranscriptEntryType.OPINION, Instant.EPOCH, null,
                 null));
