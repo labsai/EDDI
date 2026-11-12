@@ -44,7 +44,12 @@ may use, and chat, without any page answering 403.
 - **D5:** the Workforce top bar no longer mounts the Operator drawer. Admins get a link to
   `/manage/operator`.
 - **D6:** `/welcome` sends an end user straight to `/workforce`, including with `?choose` and with
-  a stale `manage` preference.
+  a stale `manage` preference. A dedicated `eddi-viewer` or `eddi-approver` cannot read
+  `/catalog/*`, so it goes to the Manager instead: an approver to `/manage/approvals`, a viewer to
+  `/manage`.
+- The `GET /catalog/agents` OpenAPI description no longer claims an anonymous caller sees published
+  agents (copied from `/v1/models`): with authorization on an anonymous caller is refused, with it
+  off visibility is not consulted.
 - The catalog's empty state explains how to list an agent to authors (shown on their dashboard as
   **What end users see**). A plain user gets a neutral sentence.
 - A **Listed in the catalog** switch on the agent page, in the Manager's group panel (saves at once),
@@ -56,7 +61,7 @@ may use, and chat, without any page answering 403.
   only with the mock API active) and fails if any Workforce page requests a store the backend
   refuses that role.
 - Platform Operator: the prompt explains `listed` and the catalog, the allow-list gains
-  `GET /catalog/agents` and `GET /catalog/groups`, and `operator-revision.json` moves to 53.
+  `GET /catalog/agents` and `GET /catalog/groups`, and `operator-revision.json` gets a revision bump.
 
 **Not done here / next:** phase 3 of the plan (`@eddi/ui` and the agent kind). The catalog has no
 paging; it is bounded at 2,000 group descriptors per request.
