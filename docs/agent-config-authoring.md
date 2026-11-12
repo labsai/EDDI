@@ -305,9 +305,12 @@ most sessions and are not mapped yet.
 
 The save is refused (400 naming the field) for an unknown outcome, a reserved
 action that cannot be mapped, an empty or overlong action name, more than 100
-mappings, or a window of an unknown origin or outside 1–720 hours. An agent that
-reached the store another way (a ZIP import of an older version) is read
-leniently: an invalid entry is ignored.
+mappings, or a window of an unknown origin or outside 1–720 hours. A ZIP import
+or a sync runs the same checks and is refused with the same 400 — a `create`
+or `merge` import before it writes anything (no `healthConfig` that a save
+accepted is refused). An agent
+stored without them — written by hand, say — is read leniently: an invalid
+entry is ignored.
 
 ## ZIP Structure for Agent Import
 

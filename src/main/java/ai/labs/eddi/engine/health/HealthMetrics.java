@@ -52,15 +52,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * <li>{@code eddi.health.outcomes.failures} — conversation evaluations that
  * failed (the feed retries them for up to an hour, then with their next change
  * or due time);</li>
- * <li>{@code eddi.health.outcomes.rating.marks} — rating marks (a rating saved
- * or withdrawn makes its session due) that could not be stored when the rating
- * arrived, tagged {@code result}: {@code deferred} (the hand-off queue was full
- * or the store failed; the next outcome pass on this node marks the
- * conversation's sessions) or {@code lost} (the deferred set was full too; the
- * session is judged again with its next change or due time);</li>
  * <li>{@code eddi.health.outcomes.lag.seconds} — how far the outcome feed's
  * watermark is behind the clock (a gauge over the shared state, like the
- * backlog gauges).</li>
+ * backlog gauges);</li>
+ * <li>{@code eddi.health.outcomes.rating.overflow} — rating changes the outcome
+ * hand-off queue had no room for, or whose mark the store refused, tagged
+ * {@code result}: {@code deferred} (the conversation is marked once the
+ * hand-off thread catches up, or by the node's next outcome pass) or
+ * {@code dropped} (the deferred set was full too: the mark is lost and a
+ * rate-limited WARN says so). Both should stay at zero.</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -95,7 +95,11 @@ public class HealthMetrics {
     static final String OUTCOME_SESSIONS = "eddi.health.outcomes.sessions";
     static final String OUTCOME_FAILURES = "eddi.health.outcomes.failures";
     static final String OUTCOME_LAG = "eddi.health.outcomes.lag.seconds";
-    static final String OUTCOME_RATING_MARKS = "eddi.health.outcomes.rating.marks";
+    static final String RATING_OVERFLOW = "eddi.health.outcomes.rating.overflow";
+    /** A rating mark the full hand-off queue refused, deferred to its thread. */
+    static final String RESULT_DEFERRED = "deferred";
+    /** A rating mark lost: the queue and the deferred set were both full. */
+    static final String RESULT_DROPPED = "dropped";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -105,8 +109,6 @@ public class HealthMetrics {
     private final Counter rollupFailures;
     private final Counter outcomeSessions;
     private final Counter outcomeFailures;
-    private final Counter ratingMarksDeferred;
-    private final Counter ratingMarksLost;
     /** How long one read of the backlog serves the gauges. */
     static final Duration BACKLOG_CACHE = Duration.ofSeconds(10);
 
@@ -135,10 +137,18 @@ public class HealthMetrics {
                 .register(registry);
         this.outcomeFailures = Counter.builder(OUTCOME_FAILURES).description("Conversations whose health outcome evaluation failed")
                 .register(registry);
-        this.ratingMarksDeferred = Counter.builder(OUTCOME_RATING_MARKS).description("Agent Health rating marks not stored on arrival")
-                .tag("result", "deferred").register(registry);
-        this.ratingMarksLost = Counter.builder(OUTCOME_RATING_MARKS).description("Agent Health rating marks not stored on arrival")
-                .tag("result", "lost").register(registry);
+        ratingOverflow0(RESULT_DEFERRED);
+        ratingOverflow0(RESULT_DROPPED);
+    }
+
+    /** A rating change the outcome hand-off queue had no room for. */
+    void ratingMarkOverflow(String result) {
+        ratingOverflow0(result).increment();
+    }
+
+    private Counter ratingOverflow0(String result) {
+        return Counter.builder(RATING_OVERFLOW).description("Rating changes the Agent Health outcome hand-off queue had no room for")
+                .tag("result", result).register(registry);
     }
 
     /**
@@ -213,16 +223,6 @@ public class HealthMetrics {
     void outcomesEvaluated(long sessions, long failures) {
         outcomeSessions.increment(sessions);
         outcomeFailures.increment(failures);
-    }
-
-    /** A rating mark that could not be stored was kept for the next pass. */
-    void ratingMarkDeferred() {
-        ratingMarksDeferred.increment();
-    }
-
-    /** A rating mark that could not be stored, nor kept for the next pass. */
-    void ratingMarkLost() {
-        ratingMarksLost.increment();
     }
 
     void registerQueueDepth(ThreadPoolExecutor executor) {

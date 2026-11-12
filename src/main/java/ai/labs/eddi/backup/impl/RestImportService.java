@@ -50,6 +50,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
+import ai.labs.eddi.engine.health.HealthConfigValidator;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
@@ -892,6 +893,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // import), and surfaced as a 500 instead of a 400.
                 HitlConfigValidation.validate(agentConfig.getHitlConfig());
                 AgentStore.validateContinuation(agentConfig);
+                // The save-time health checks too: a new agent is created through the store
+                // directly, so without this an import stored a healthConfig the REST save
+                // refuses (a merge's updateAgent refused it, but only after the workflows
+                // had landed). The field shipped together with its validator, so this
+                // refuses only what no save ever accepted, never an earlier export.
+                HealthConfigValidator.validate(agentConfig);
 
                 // Each distinct workflow once. The first pass repoints every occurrence of
                 // a URI, so a repeated one used to be imported again for nothing — a full

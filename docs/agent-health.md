@@ -205,9 +205,10 @@ They are recomputed, never incremented:
    (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
    minute behind the clock, at most 10,000 pairs a pass; a window holding more
    is halved until one fits, and the watermark moves only past what was
-   marked. The one exception: a one-second window that still holds more than
-   10,000 pairs has only 10,000 of them marked, with a WARN, and the watermark
-   moves past it anyway, so the rest rely on their own marks). A row that reaches the store more than 30 seconds after its capture
+   marked. A one-second window that still holds more than 10,000 pairs is not
+   cut: all of its pairs are streamed and marked in chunks of 10,000, with a
+   WARN, so the watermark never passes a pair it did not mark — even when many
+   rows share one timestamp). A row that reaches the store more than 30 seconds after its capture
    time, which this scan may already be past, marks its days in the store
    **before** it is written, instead of on the five-second flush, so a node
    stopping between the write and the mark cannot lose it (a mark whose row then
@@ -252,7 +253,13 @@ user's, or a deleted conversation's, contribution to those counts stays until
 
 The views cache what they read from the stores for `eddi.health.cache-ttl`
 (60 s; 0 switches it off), keyed by the full query and per agent, never per
-caller — who may see what is decided before the cache is asked. The portfolio
+caller — who may see what is decided before the cache is asked. Loads are
+single-flight per key: when an entry is missing or expired, one caller runs the
+query and every concurrent caller of the same query waits for that result, so a
+Manager poll from several tabs or users cannot stampede the store. A failed or
+empty (`null`) load is not cached — the callers waiting on it see that one
+outcome, and the next caller retries. The portfolio's batch reads over many
+agents are shared the same way between identical requests. The portfolio
 counts every listed agent's traffic, now and in the baseline, in one pass over
 the turn rows (indexed by `(agentId, day)`).
 A change that alters how stored turns are counted (later phases) marks a whole
@@ -400,11 +407,10 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    such a new row is written final from ratings it read, the ratings are read
    once more after the write, and a change makes the row due. A mark that cannot
    be stored when it arrives — the worker's queue (1,000) is full, or the store
-   fails — is kept on that node (up to 10,000 conversations) and stored by its
-   next pass, marking every session of the conversation, before the due
-   sessions are read; past that bound it is lost (each case counted in
-   `eddi_health_outcomes_rating_marks_total{result="deferred"|"lost"}`), and
-   the session waits for its next change or due time. Each due session is
+   fails — is deferred on that node (up to 10,000 conversations) and stored,
+   marking every session of the conversation, after the worker's next mark or
+   at the start of the node's next pass, before the due sessions are read; it
+   stays deferred until that write succeeds (see [Metrics](#metrics)). Each due session is
    judged over its own steps only, up to the next stored session. A due session
    whose evaluation fails is made due again later — 15 minutes at the least,
    growing with the time since it was last judged, up to 6 hours — so sessions
@@ -447,7 +453,9 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    WARN; its next change or due time judges it). The node that saw the failure
    also retries it directly at the start of each replay, so with several
    failures a later one is retried every pass too, not only once the replay —
-   restarted at the earliest — gets that far. Nothing is written for it in
+   restarted at the earliest — gets that far. A conversation given up starts a
+   new retry window when a later capture of it fails; a re-read of the same
+   capture does not. Nothing is written for it in
    the meantime: a session is never judged under default settings, or as
    silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns
    recorded before outcomes existed are judged too, up to 5,000 conversations
@@ -497,7 +505,7 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/agents/{agentId}/health` | The report: every section with its measures, the baseline, the golden-suite check |
 | `GET` | `/agents/{agentId}/health/series` | One point per day per measure (`measure=` repeatable, 1–6), `groupBy=none\|version\|origin`, and the change markers of the period |
 | `GET` | `/agents/{agentId}/health/compare` | `from=<version>&to=<version>[&days=14]`: both sides' sections and per-measure `deltas` |
-| `GET` | `/health/agents` | The portfolio: every agent the caller may view, `sort=attention\|name\|traffic`, `limit` (≤ 500), `cursor`, plus `platformIncidents` |
+| `GET` | `/health/agents` | The portfolio: every agent the caller may view (at most 5,000; `agentsTruncated: true` when there are more), `sort=attention\|name\|traffic`, `limit` (default 100, ≤ 500), `cursor` (`nextCursor`, `null` on the last page), plus `platformIncidents` |
 | `GET` | `/agents/{agentId}/health/sessions` | The drill-down: one row per session — conversation id, `sessionNo`, start and end, version, origin, engaged, outcome, evidence, `provisional`, turns, cost, failed turns — newest first. Filters `outcome=` and `evidence=` (repeatable), `origin`, `version`, `period`/`from`/`to`; `limit` 1–100 (default 50), `cursor` |
 | `GET` | `/agents/{agentId}/health/outcome-suggestions` | The actions that most often end engaged, closed sessions and are not mapped in the current version's `healthConfig.outcomes`, with `sessionsEndingWith`, a `suggested` outcome from the action's name (`*confirm*`, `*done*`, `*complete*`, `*booked*` → `RESOLVED`; `*handoff*`, `*human*`, `*escalat*` → `ESCALATED`; `*out_of_scope*`, `*not_supported*` → `DEFLECTED`; else none) and a `reason`. At most 20; reserved actions are left out. Never applies anything |
 
@@ -789,8 +797,16 @@ eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent da
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
-eddi_health_outcomes_rating_marks_total  # Rating marks not stored on arrival; tag: result (deferred = stored by the next pass | lost)
+eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
+
+A rating saved or withdrawn marks its session for another look on a hand-off
+thread (1,000 marks queued), so the rating request never waits. When that queue
+is full, or the store fails to take the mark, the conversation is deferred
+(`deferred`) and marked — every session of it — once the thread runs its next
+mark or the node runs its next outcome pass; it leaves the deferred set only
+once that mark is stored. Only past 10,000 deferred conversations is a mark
+lost (`dropped`, with a WARN at most once a minute). Both should stay at zero.
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because

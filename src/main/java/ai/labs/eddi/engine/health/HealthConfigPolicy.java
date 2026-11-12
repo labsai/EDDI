@@ -30,9 +30,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * not decide outcomes for half an hour.
  * <p>
  * Lenient on purpose: an agent that reached the store without the save-time
- * checks ({@link HealthConfigValidator}) — a ZIP import, an older version — has
- * its unknown outcome values ignored and its out-of-range windows replaced by
- * the deployment's.
+ * checks ({@link HealthConfigValidator}) — written by hand, or by an import
+ * before imports ran them — has its unknown outcome values ignored and its
+ * out-of-range windows replaced by the deployment's.
  */
 @ApplicationScoped
 public class HealthConfigPolicy {

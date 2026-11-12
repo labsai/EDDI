@@ -40,6 +40,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -138,8 +140,6 @@ public class HealthOutcomeEvaluator {
     static final Duration DUE_RETRY_MIN = Duration.ofMinutes(15);
     /** The longest wait before a failed due session is looked at again. */
     static final Duration DUE_RETRY_MAX = Duration.ofHours(6);
-    /** The most conversations whose rating mark waits for the next pass. */
-    static final int MAX_RATING_RETRIES = 10_000;
 
     /** What one pass did. */
     public record Result(int conversations, int sessions, int failed) {
@@ -157,19 +157,32 @@ public class HealthOutcomeEvaluator {
     private final HealthMetrics metrics;
     private final Clock clock;
 
+    /** Rating marks waiting on the hand-off thread. */
+    static final int RATING_QUEUE = 1_000;
+    /** The most conversations a full hand-off queue defers. */
+    static final int MAX_DEFERRED_RATINGS = 10_000;
+    /** At most one WARN about lost rating marks per this long. */
+    static final Duration RATING_WARN_INTERVAL = Duration.ofMinutes(1);
+
     /**
      * Where rating events are handed off: the rating request must never wait for
-     * Agent Health. One thread, a bounded queue; a mark the full queue rejects, or
-     * that the store fails to take, is kept in {@link #ratingRetries}.
+     * Agent Health. One thread, a bounded queue. A mark the full queue refuses, or
+     * the store fails to take, is not dropped: its conversation is deferred
+     * ({@link #deferredRatings}) and marked — every session, as a withdrawal is —
+     * by the hand-off thread once it catches up, or by the next pass on this node.
+     * A closed session has no next change to be judged again with, so a dropped
+     * mark would have left a rating out of its outcome for good.
      */
     private Executor ratingExecutor;
-    private ExecutorService ownedExecutor;
     /**
-     * Conversations whose rating mark could not be stored: the next pass on this
-     * node marks every session of each due before it reads the due sessions.
-     * Bounded by {@link #MAX_RATING_RETRIES}; past that a mark is counted as lost.
+     * Conversations whose rating mark the full queue refused, coalesced and bounded
+     * ({@link #MAX_DEFERRED_RATINGS}); only beyond that is a mark lost — counted
+     * and logged.
      */
-    private final Set<String> ratingRetries = ConcurrentHashMap.newKeySet();
+    private final Set<String> deferredRatings = ConcurrentHashMap.newKeySet();
+    private final AtomicLong ratingsLostSinceWarn = new AtomicLong();
+    private final AtomicReference<Instant> lastRatingWarn = new AtomicReference<>();
+    private ExecutorService ownedExecutor;
     /**
      * When the feed first failed to evaluate a conversation, by this node's clock:
      * the retry limit runs from then, not from the turn's capture, so a backfilled
@@ -189,13 +202,22 @@ public class HealthOutcomeEvaluator {
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
             IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics) {
         this(turnStore, outcomeStore, configPolicy, ratingStore, fence, settings, metrics, Clock.systemUTC());
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1_000), r -> {
+        ThreadPoolExecutor executor = newRatingExecutor(RATING_QUEUE);
+        this.ownedExecutor = executor;
+        this.ratingExecutor = executor;
+    }
+
+    /**
+     * The rating hand-off: one thread and a bounded queue that <em>refuses</em> a
+     * task when full ({@code AbortPolicy}, the default) — {@link #handOff} defers
+     * what it refuses, where a discarding policy lost it without a trace.
+     */
+    static ThreadPoolExecutor newRatingExecutor(int queueSize) {
+        return new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(queueSize), r -> {
             Thread thread = new Thread(r, "health-outcome-ratings");
             thread.setDaemon(true);
             return thread;
         });
-        this.ownedExecutor = executor;
-        this.ratingExecutor = executor;
     }
 
     HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
@@ -246,7 +268,7 @@ public class HealthOutcomeEvaluator {
         // Due sessions first, within half of the time: windows close and ratings are
         // re-checked even while a backfill fills the feed.
         Instant dueDeadline = start.plus(Duration.between(start, deadline).dividedBy(2));
-        retryRatingMarks(dueDeadline);
+        drainDeferredRatings(dueDeadline);
         try {
             due(dueDeadline, done);
         } catch (RuntimeException e) {
@@ -410,6 +432,13 @@ public class HealthOutcomeEvaluator {
         }
         Instant now = clock.instant();
         FeedFailure failure = feedFailures.get(conversationId, k -> new FeedFailure(now, false, activity.lastUpdatedAt()));
+        if (activity.lastUpdatedAt().isAfter(failure.capturedAt())) {
+            // A later change of the conversation: kept as its capture, and for a
+            // conversation that was given up the start of a new retry window — a
+            // re-read of the same capture does not start one.
+            failure = new FeedFailure(failure.givenUp() ? now : failure.first(), false, activity.lastUpdatedAt());
+            feedFailures.put(conversationId, failure);
+        }
         if (failure.givenUp()) {
             return failedAt;
         }
@@ -663,50 +692,69 @@ public class HealthOutcomeEvaluator {
     }
 
     private void handOff(String conversationId, Runnable task) {
-        try {
-            ratingExecutor.execute(task);
-        } catch (RejectedExecutionException e) {
-            // The queue is full (or the application stops): never wait, keep it.
-            defer(conversationId);
-        }
-    }
-
-    /**
-     * Keeps a conversation whose rating mark could not be stored for the next pass
-     * on this node, which marks all of its sessions (the mark's own session is not
-     * kept: marking them all is the safe superset). Never blocks; a full set counts
-     * the mark as lost.
-     */
-    private void defer(String conversationId) {
         if (conversationId == null || conversationId.isBlank()) {
             return;
         }
-        if (ratingRetries.size() >= MAX_RATING_RETRIES && !ratingRetries.contains(conversationId)) {
-            metrics.ratingMarkLost();
-            LOGGER.warnf("An Agent Health rating mark of conversation %s was lost: %d marks already wait for the next pass; its session is "
-                    + "judged again with its next change or due time", sanitize(conversationId), MAX_RATING_RETRIES);
-            return;
-        }
-        if (ratingRetries.add(conversationId)) {
-            metrics.ratingMarkDeferred();
+        try {
+            ratingExecutor.execute(() -> {
+                task.run();
+                drainDeferredRatings();
+            });
+        } catch (RejectedExecutionException e) {
+            if (ownedExecutor != null && ownedExecutor.isShutdown()) {
+                // The application stops; the queue's own marks go with it.
+                return;
+            }
+            deferRating(conversationId);
         }
     }
 
     /**
-     * Stores the deferred rating marks, every session of each conversation due now,
-     * before the due sessions are read. Stops at the first store failure (the rest
-     * wait for the next pass) or at {@code deadline}. Never throws.
+     * The queue is full, or the store failed to take the mark: the conversation
+     * waits in {@link #deferredRatings}, drained by the hand-off thread after every
+     * mark it runs and by every outcome pass on this node, before the due sessions
+     * are read.
      */
-    void retryRatingMarks(Instant deadline) {
-        for (String conversationId : List.copyOf(ratingRetries)) {
-            if (!clock.instant().isBefore(deadline)) {
+    private void deferRating(String conversationId) {
+        if (deferredRatings.contains(conversationId) || deferredRatings.size() < MAX_DEFERRED_RATINGS && deferredRatings.add(conversationId)) {
+            metrics.ratingMarkOverflow(HealthMetrics.RESULT_DEFERRED);
+            return;
+        }
+        metrics.ratingMarkOverflow(HealthMetrics.RESULT_DROPPED);
+        long lost = ratingsLostSinceWarn.incrementAndGet();
+        Instant now = clock.instant();
+        Instant last = lastRatingWarn.get();
+        if ((last == null || !now.isBefore(last.plus(RATING_WARN_INTERVAL))) && lastRatingWarn.compareAndSet(last, now)) {
+            ratingsLostSinceWarn.addAndGet(-lost);
+            LOGGER.warnf("Agent Health could not keep up with rating changes: %d rating mark(s) lost (conversation %s among them); "
+                    + "those sessions keep their outcome until they are judged again", lost, sanitize(conversationId));
+        }
+    }
+
+    /**
+     * Marks every session of each deferred conversation for another look — what a
+     * withdrawal does, since the deferred rating's own session is no longer known.
+     * A conversation leaves the set only once its mark is stored: at the first
+     * store failure the drain stops and the rest wait for the next drain (after the
+     * next hand-off, or the next pass on this node). Never throws.
+     */
+    void drainDeferredRatings() {
+        drainDeferredRatings(null);
+    }
+
+    /**
+     * As {@link #drainDeferredRatings()}, stopping at {@code deadline} if given.
+     */
+    void drainDeferredRatings(Instant deadline) {
+        for (String conversationId : List.copyOf(deferredRatings)) {
+            if (deadline != null && !clock.instant().isBefore(deadline)) {
                 return;
             }
             try {
                 outcomeStore.markDue(conversationId, null, clock.instant());
-                ratingRetries.remove(conversationId);
+                deferredRatings.remove(conversationId);
             } catch (RuntimeException e) {
-                LOGGER.debugf("Could not store the deferred Agent Health rating marks; the next pass retries: %s", sanitize(e.getMessage()));
+                LOGGER.debugf("Could not store the deferred Agent Health rating marks; they are retried: %s", sanitize(e.getMessage()));
                 return;
             }
         }
@@ -756,9 +804,9 @@ public class HealthOutcomeEvaluator {
                 outcomeStore.markDue(conversationId, List.of(target), now);
             }
         } catch (RuntimeException e) {
-            LOGGER.debugf("Could not mark the sessions of conversation %s for another look; the next pass does: %s", sanitize(conversationId),
+            LOGGER.debugf("Could not mark the sessions of conversation %s for another look; it is deferred: %s", sanitize(conversationId),
                     sanitize(e.getMessage()));
-            defer(conversationId);
+            deferRating(conversationId);
         }
     }
 

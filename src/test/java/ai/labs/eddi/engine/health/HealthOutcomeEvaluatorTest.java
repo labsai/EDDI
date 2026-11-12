@@ -34,7 +34,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -492,6 +495,33 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("a conversation given up at the retry limit starts a new retry window with a later capture that fails")
+        void laterCaptureAfterGivingUpIsRetried() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant first = NOW.minus(Duration.ofMinutes(30));
+            List<ConversationActivity> feed = new ArrayList<>(List.of(new ConversationActivity("bad", first)));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of("bad"));
+            cursor = HealthFeedCursor.at(first.minusSeconds(60));
+
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(first, cursor.replayAt());
+            clock.now = NOW.plus(HealthOutcomeEvaluator.MAX_RETRY);
+            evaluator.run(clock.now.plusSeconds(60));
+            assertTrue(cursor.replayAt() == null || cursor.replayAt().isAfter(first), "given up at the limit: " + cursor);
+
+            // The conversation changes again, and that capture fails too.
+            Instant later = clock.now.minus(Duration.ofMinutes(5));
+            feed.set(0, new ConversationActivity("bad", later));
+            cursor = HealthFeedCursor.at(later.minusSeconds(60));
+            evaluator.run(clock.now.plusSeconds(60));
+
+            assertEquals(later, cursor.replayAt(), "the later capture is retried: " + cursor);
+        }
+
+        @Test
         @DisplayName("M4: due sessions are judged before the feed, so a backfill cannot starve them")
         void dueFirst() {
             HealthOutcome due = stored("c1", 0, NOW.minus(Duration.ofDays(2)));
@@ -769,42 +799,39 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
-        @DisplayName("a rating mark the full hand-off queue rejects, or the store fails to take, is counted and stored by the next pass — "
-                + "every session of the conversation due")
-        void lostRatingMarksAreRetried() {
+        @DisplayName("a rating mark the store fails to take is deferred like one the full queue refuses, and marks every session once the "
+                + "store takes it")
+        void storeFailureDefersTheMark() {
+            when(outcomes.findByConversation("failed")).thenReturn(List.of(stored("failed", 0, NOW)));
+            when(outcomes.markDue(eq("failed"), anyCollection(), any())).thenThrow(new HealthStoreException("down", null));
+
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("failed", 2));
+
+            assertEquals(1.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DEFERRED).counter().count());
+            // Drained right after the failed mark, by the hand-off itself.
+            verify(outcomes).markDue(eq("failed"), isNull(), eq(NOW));
+        }
+
+        @Test
+        @DisplayName("a deferred mark leaves the set only once it is stored: a store failure keeps it, and the next pass stores it")
+        void drainKeepsWhatTheStoreRefuses() {
             when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
             evaluator.ratingExecutor(task -> {
                 throw new RejectedExecutionException("full");
             });
             evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("queued", 4));
-            evaluator.ratingExecutor(Runnable::run);
-            when(outcomes.findByConversation("failed")).thenReturn(List.of(stored("failed", 0, NOW)));
-            when(outcomes.markDue(eq("failed"), anyCollection(), any())).thenThrow(new HealthStoreException("down", null));
-            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("failed", 2));
-            assertEquals(2.0, registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "deferred").counter().count());
-            verify(outcomes, never()).markDue(anyString(), isNull(), any());
+            when(outcomes.markDue(eq("queued"), isNull(), any())).thenThrow(new HealthStoreException("down", null)).thenReturn(1L);
 
-            evaluator.run(NOW.plusSeconds(60));
-            verify(outcomes).markDue(eq("queued"), isNull(), eq(NOW));
-            verify(outcomes).markDue(eq("failed"), isNull(), eq(NOW));
-
-            // Stored: the next pass does not mark them again.
-            evaluator.run(NOW.plusSeconds(60));
+            evaluator.drainDeferredRatings();
             verify(outcomes, times(1)).markDue(eq("queued"), isNull(), eq(NOW));
-        }
 
-        @Test
-        @DisplayName("past the deferred set's bound a rating mark is counted as lost")
-        void deferredSetBounded() {
-            evaluator.ratingExecutor(task -> {
-                throw new RejectedExecutionException("full");
-            });
-            for (int i = 0; i <= HealthOutcomeEvaluator.MAX_RATING_RETRIES; i++) {
-                evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c" + i, 1));
-            }
-            assertEquals(HealthOutcomeEvaluator.MAX_RATING_RETRIES,
-                    registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "deferred").counter().count());
-            assertEquals(1.0, registry.get(HealthMetrics.OUTCOME_RATING_MARKS).tag("result", "lost").counter().count());
+            evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes, times(2)).markDue(eq("queued"), isNull(), eq(NOW));
+
+            // Stored: neither the next drain nor the next pass marks it again.
+            evaluator.drainDeferredRatings();
+            evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes, times(2)).markDue(eq("queued"), isNull(), eq(NOW));
         }
 
         @Test
@@ -853,6 +880,71 @@ class HealthOutcomeEvaluatorTest {
             evaluator.ratingChanged("c1", 3, NOW);
             evaluator.ratingChanged(" ", 3, NOW);
             verify(outcomes, times(1)).markDue("c1", List.of(0), NOW);
+        }
+
+        @Test
+        @DisplayName("a full hand-off queue defers the mark, counted, and the next mark that runs marks the deferred conversation too")
+        void fullQueueDefersTheMark() {
+            when(outcomes.findByConversation(anyString())).thenReturn(List.of(stored("c1", 0, NOW)));
+            List<Runnable> queued = new ArrayList<>();
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c1", 3));
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c1", 4));
+            verify(outcomes, never()).markDue(anyString(), any(), any());
+            assertEquals(2.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DEFERRED).counter().count());
+
+            // The queue has room again: the next mark it runs also marks c1 — every
+            // session, since the deferred rating's own one is not kept — and only once.
+            evaluator.ratingExecutor(queued::add);
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c2", 3));
+            queued.get(0).run();
+            verify(outcomes).markDue(eq("c1"), isNull(), eq(NOW));
+            verify(outcomes).markDue("c2", List.of(0), NOW);
+            evaluator.drainDeferredRatings();
+            verify(outcomes, times(1)).markDue(eq("c1"), isNull(), eq(NOW));
+            assertEquals(0.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DROPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("beyond the deferred set's bound a mark is lost, and counted as dropped")
+        void deferredSetIsBounded() {
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            for (int i = 0; i < HealthOutcomeEvaluator.MAX_DEFERRED_RATINGS + 2; i++) {
+                evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("c" + i, -1));
+            }
+            assertEquals(HealthOutcomeEvaluator.MAX_DEFERRED_RATINGS,
+                    registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DEFERRED).counter().count());
+            assertEquals(2.0, registry.get(HealthMetrics.RATING_OVERFLOW).tag("result", HealthMetrics.RESULT_DROPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("the production hand-off refuses a task when its queue is full, rather than discarding it unseen")
+        void productionExecutorRefusesWhenFull() throws Exception {
+            ThreadPoolExecutor executor = HealthOutcomeEvaluator.newRatingExecutor(1);
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch started = new CountDownLatch(1);
+            try {
+                executor.execute(() -> {
+                    started.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                assertTrue(started.await(10, TimeUnit.SECONDS));
+                executor.execute(() -> {
+                });
+                assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {
+                }), "a discarding policy loses the mark without the caller ever knowing");
+            } finally {
+                release.countDown();
+                executor.shutdownNow();
+            }
         }
 
         @Test

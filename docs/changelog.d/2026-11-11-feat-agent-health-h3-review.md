@@ -84,6 +84,41 @@ Documented in [`docs/agent-health.md`](../agent-health.md#the-evaluation).
 - The overlap trade-off under sustained overload is unchanged in kind: a conversation the replay already passed in
   the current sweep is not re-read for a row that lands after the sweep passed it.
 
+## 🐛 fix(health): a rating change is never lost silently, and an import checks the healthConfig (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+### What changed and why
+
+Three further review findings on PR #1389.
+
+- **A full rating hand-off queue defers the mark instead of discarding it.** `HealthOutcomeEvaluator`'s rating
+  executor (one thread, 1,000 queued marks) used `ThreadPoolExecutor.DiscardPolicy`, so under a burst of ratings a
+  mark was dropped with no log and no metric — and its `RejectedExecutionException` catch never ran. A closed
+  session has no next change, so a dropped mark left a rating out of its outcome for good. The executor now refuses
+  (`AbortPolicy`); a refused mark puts its conversation in a bounded, coalescing set (10,000), which the hand-off
+  thread drains after each mark it runs, marking every session of the conversation due (as a withdrawal does —
+  the original session is not kept). The request thread never waits. Only beyond that bound is a mark lost, with a
+  WARN at most once a minute. New counter `eddi.health.outcomes.rating.overflow{result=deferred|dropped}`, on the
+  Full Metrics dashboard and in [`docs/metrics.md`](../metrics.md).
+- **A ZIP import runs `HealthConfigValidator`.** A `create` import wrote the agent through the store directly, so a
+  `healthConfig` the REST save refuses was stored; a `merge` refused it in `updateAgent`, but only after the
+  workflows had landed. Both now refuse it with the save's 400 before anything is written, next to the HITL and
+  continuation checks. Upgrades and syncs already wrote through `RestAgentStore.updateAgent`. Documented in
+  [`docs/agent-config-authoring.md`](../agent-config-authoring.md).
+- Tests: `HealthOutcomeEvaluatorTest` (a refused mark is deferred, counted and marked by the next one that runs; the
+  bound; the production executor refuses when full), `RestImportServiceArchiveContractTest` (an invalid
+  `healthConfig` is a 400 with nothing created; a valid one imports unchanged).
+
+### Design decisions
+
+- On import every rule refuses: `healthConfig` shipped with its validator, so no export a save accepted can fail.
+  A rule tightened later must report on import instead of refusing, or older exports stop importing (noted on
+  `HealthConfigValidator`).
+- Left as is: `HealthDrillDownAccess.reviewableVersions` reads the review setting of up to 100 versions, once per
+  request (not per listed session), and `ConversationReviewPolicy` caches each immutable version for 30 minutes —
+  at most 101 agent reads on a cold cache for an agent with 100+ versions.
+
 ## 🐛 fix(health): rating marks, failed due sessions and later feed failures are never silently dropped (2026-11-11)
 
 **Repo:** EDDI (`feat/agent-health-h3`)
@@ -98,12 +133,14 @@ and [`docs/metrics.md`](../metrics.md#agent-health-metrics).
   it read, it reads them once more after the upsert, and a change (or a failed read) makes those new rows due. Rows
   that existed already keep a mark through the upsert, as before; a provisional row reads the ratings again at its
   window's close.
-- **A rating mark that cannot be stored is deferred, not dropped.** The hand-off executor no longer uses
-  `DiscardPolicy`: a rejected mark, or one whose `markDue` fails, puts the conversation in a bounded per-node set
-  (10,000) that the next pass on that node stores first, marking every session of it. Past the bound the mark is
-  lost with a WARN. Both are counted in `eddi.health.outcomes.rating.marks{result=deferred|lost}`, charted on the
-  Full Metrics Reference's "Agent Health rollup work" panel (Kubernetes copy re-synced with
-  `scripts/sync-monitoring-assets.py`).
+- **A rating mark the store fails to take is deferred too, and stays deferred until it is stored.** This builds on
+  the refused-mark deferral in the entry above and is merged with it: one set (`deferredRatings`) and one counter
+  (`eddi.health.outcomes.rating.overflow`). A `markDue` failure in `ratingChanged` now defers the conversation
+  instead of only logging it. `drainDeferredRatings` used to remove a conversation *before* marking it, so a store
+  failure there lost the mark. It now marks first (`markDue(conversation, null, now)`), removes the conversation
+  only once that succeeds, and stops at the first failure. The drain also runs at the start of every outcome pass on
+  the node, before the due sessions are read, so a deferred mark does not wait for a next rating that may never
+  come.
 - **A failing due session backs off.** Its `dueAt` is pushed to `now + age` (time since its last successful
   evaluation, between 15 minutes and 6 hours), so sessions that keep failing no longer fill every pass's page of
   1,000 and starve the rest. `IHealthOutcomeStore.markDue` is unchanged; only its Javadoc names the later `at`.
@@ -112,13 +149,18 @@ and [`docs/metrics.md`](../metrics.md#agent-health-metrics).
   given up, and could then be given up on its first retry. The evaluator now also retries every failure it holds
   (`feedFailures`, per node) directly at the start of the replay, oldest capture first, within the replay's share.
   The persisted replay reset stays as the cross-node path.
+- **A given-up conversation is retried again when it changes.** Once a conversation reached the retry limit, every
+  later failure returned at `givenUp()` without a capture, so a new turn that also failed scheduled no retry. A
+  failure now records its capture time, and a failing capture later than the recorded one starts a new retry window.
+  A re-read of the same capture still does not.
 - **The orphan sweep deletes an outcome-only orphan's turn rows first.** A conversation found only by its recently
   evaluated sessions (its turn rows older than the window, left by a failed purge) had its sessions deleted and its
   turn rows skipped. Agentless candidates now go through `deleteConversationIfDaysKnown`: the rows are deleted and
   their days marked when the days can be read; otherwise rows and sessions are both kept for the next sweep. A
   candidate whose turn delete fails keeps its sessions too.
-- Tests: `HealthOutcomeEvaluatorTest` (rating during a first evaluation, unchanged ratings, deferred and lost rating
-  marks, due back-off, a later failure behind an earlier one), `HealthOutcomeGdprParticipantTest` (outcome-only
+- Tests: `HealthOutcomeEvaluatorTest` (rating during a first evaluation, unchanged ratings, a store failure defers
+  the mark, the drain keeps what the store refuses, due back-off, a later failure behind an earlier one, a later
+  capture after giving up), `HealthOutcomeGdprParticipantTest` (outcome-only
   orphan with readable and unreadable days). Store interfaces are unchanged, so the store contract tests are too;
   the ITs (Docker) were not run.
 
@@ -133,5 +175,5 @@ and [`docs/metrics.md`](../metrics.md#agent-health-metrics).
   close (at least 1 hour), or with the conversation's next turn. Only a row that lands in a session already judged
   final, while a sweep is pending, waits for that.
 - The deferred rating marks and the direct feed retries are per node. A claim that moves to another node re-reads
-  the feed from the persisted replay reset. Rating marks deferred on a node that never runs a pass again wait for
-  their session's next change or due time.
+  the feed from the persisted replay reset. A rating mark deferred on a node that neither hands off another rating
+  nor runs another pass waits for its session's next change or due time.
