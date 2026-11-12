@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.gdpr;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -20,6 +21,7 @@ import java.util.Set;
 
 import static ai.labs.eddi.engine.gdpr.ThirdPartyIdentifiers.OTHER_PERSON;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -60,6 +62,35 @@ class ThirdPartyIdentifiersTest {
         assertEquals("owner", masked.get(2).speakerAgentId(), "the subject's own entries are kept");
         assertEquals(OTHER_PERSON, masked.get(2).targetAgentId());
         assertSame(legacy.getTranscript().get(3), masked.get(3));
+    }
+
+    @Test
+    @DisplayName("a timed-out human turn's generated reason loses the name with the speaker, keeps the window")
+    void timedOutReasonIsMaskedWithTheSpeaker() {
+        for (GroupConversation discussion : List.of(recorded(), new GroupConversation())) {
+            String reason = HumanTurnSkipReasons.timedOut("Xena Example", "PT4H");
+            discussion.setTranscript(List.of(new TranscriptEntry("x", "Xena Example", null, 0, "p", TranscriptEntryType.SKIPPED,
+                    Instant.EPOCH, reason, null),
+                    new TranscriptEntry("owner", "Owner", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH,
+                            HumanTurnSkipReasons.timedOut("Owner", null), null)));
+
+            List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(discussion, "owner");
+
+            assertEquals("No response from " + OTHER_PERSON + " within PT4H", masked.get(0).errorReason(),
+                    "legacy=" + (discussion.getHumanMemberIds() == null));
+            assertFalse(masked.get(0).errorReason().contains("Xena"));
+            assertEquals("No response from Owner", masked.get(1).errorReason(), "the subject's own reason is kept");
+        }
+    }
+
+    @Test
+    @DisplayName("masking a timed-out reason drops a window it cannot tell from the name")
+    void maskTimedOutNameFailsClosed() {
+        assertEquals("No response from [x]", HumanTurnSkipReasons.maskTimedOutName("No response from Ann", "[x]"));
+        assertEquals("No response from [x] within PT1H",
+                HumanTurnSkipReasons.maskTimedOutName("No response from Ann within Reach within PT1H", "[x]"));
+        assertEquals("No response from [x]", HumanTurnSkipReasons.maskTimedOutName("No response from Ann within the team", "[x]"));
+        assertEquals("Agent not deployed", HumanTurnSkipReasons.maskTimedOutName("Agent not deployed", "[x]"));
     }
 
     private static TranscriptEntry entry(String speaker, String name, TranscriptEntryType type, String target) {

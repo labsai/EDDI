@@ -27,7 +27,40 @@ public final class HumanTurnSkipReasons {
 
     private static final List<String> PREFIXES = List.of(TIMED_OUT_PREFIX, AUTOMATED_TURN);
 
+    /** What separates the member's name from the window in a timed-out reason. */
+    static final String WINDOW_SEPARATOR = " within ";
+
     private HumanTurnSkipReasons() {
+    }
+
+    /**
+     * The reason for a human turn that timed out: {@link #TIMED_OUT_PREFIX}, the
+     * member's display name and, when there was one, {@code " within <window>"}.
+     */
+    public static String timedOut(String displayName, String window) {
+        return TIMED_OUT_PREFIX + displayName + (window != null ? WINDOW_SEPARATOR + window : "");
+    }
+
+    /**
+     * {@code reason} with the member's name replaced by {@code replacement} when it
+     * is a timed-out reason ({@link #timedOut}); any other reason unchanged. The
+     * window is kept only when it is recognisably the one the writer appended — the
+     * last {@link #WINDOW_SEPARATOR} followed by a single token — so a display name
+     * that itself contains the separator cannot leak through it.
+     */
+    public static String maskTimedOutName(String reason, String replacement) {
+        if (reason == null || !reason.startsWith(TIMED_OUT_PREFIX)) {
+            return reason;
+        }
+        String rest = reason.substring(TIMED_OUT_PREFIX.length());
+        int at = rest.lastIndexOf(WINDOW_SEPARATOR);
+        if (at >= 0) {
+            String window = rest.substring(at + WINDOW_SEPARATOR.length());
+            if (!window.isEmpty() && window.chars().noneMatch(Character::isWhitespace)) {
+                return TIMED_OUT_PREFIX + replacement + WINDOW_SEPARATOR + window;
+            }
+        }
+        return TIMED_OUT_PREFIX + replacement;
     }
 
     /**

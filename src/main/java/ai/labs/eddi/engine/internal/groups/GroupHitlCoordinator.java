@@ -1369,8 +1369,7 @@ public class GroupHitlCoordinator {
                 tieBreakPauses.onTimeout(gc, pending, gc.getPauseId());
                 return;
             }
-            String reason = HumanTurnSkipReasons.TIMED_OUT_PREFIX + pending.displayName()
-                    + (gc.getHitlApprovalTimeout() != null ? " within " + gc.getHitlApprovalTimeout() : "");
+            String reason = HumanTurnSkipReasons.timedOut(pending.displayName(), gc.getHitlApprovalTimeout());
             // Bound to the pause the timeout read (and just checked against
             // expectedPauseId): the write conflicts if the turn was answered and the
             // discussion paused on a new one in between.

@@ -169,7 +169,13 @@ public final class ThirdPartyIdentifiers {
             }
             masked.add(new TranscriptEntry(speakerMasked ? OTHER_PERSON : entry.speakerAgentId(),
                     speakerMasked ? OTHER_PERSON : entry.speakerDisplayName(), entry.content(), entry.phaseIndex(), entry.phaseName(),
-                    entry.type(), entry.timestamp(), entry.errorReason(), targetMasked ? OTHER_PERSON : entry.targetAgentId(),
+                    entry.type(), entry.timestamp(),
+                    // A timed-out human turn's reason is generated with the member's display
+                    // name in it; masked with the speaker. Nothing a person wrote is touched.
+                    speakerMasked && entry.type() == TranscriptEntryType.SKIPPED
+                            ? HumanTurnSkipReasons.maskTimedOutName(entry.errorReason(), OTHER_PERSON)
+                            : entry.errorReason(),
+                    targetMasked ? OTHER_PERSON : entry.targetAgentId(),
                     entry.signature(), entry.signatureNonce(), entry.signatureTimestampMs(), entry.signatureKeyVersion()));
         }
         return masked;
