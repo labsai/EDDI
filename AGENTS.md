@@ -413,8 +413,8 @@ public void execute(IConversationMemory memory, Object component) {
 ```java
 @Inject PrePostUtils prePostUtils;
 
-// Before main logic — returns the template data rebuilt with the new properties; keep it
-templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
+// Before main logic — updates templateDataObjects in place (refreshed {properties}, vaulted secrets scrubbed); the return value is that same map
+prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 // After main logic
 prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, httpCode, validationError);
 ```

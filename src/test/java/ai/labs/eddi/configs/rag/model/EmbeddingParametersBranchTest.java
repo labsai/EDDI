@@ -39,6 +39,16 @@ class EmbeddingParametersBranchTest {
     }
 
     @Test
+    void everyEndpointSpellingIsRefusedWhereItIsIgnored() {
+        // Vertex honours "endpoint"; "apiEndpoint" is the chat builder's spelling and
+        // would be silently dropped here.
+        String problem = EmbeddingParameters.findProblem("vertex", params("apiEndpoint", "europe-west4-aiplatform.googleapis.com:443"));
+        assertTrue(problem != null && problem.startsWith("embeddingParameters.apiEndpoint is not supported"), problem);
+        String hostname = EmbeddingParameters.findProblem("bedrock", params("hostname", "bedrock.private.example"));
+        assertTrue(hostname != null && hostname.startsWith("embeddingParameters.hostname is not supported"), hostname);
+    }
+
+    @Test
     void anHonouredEndpointParameterIsFine() {
         assertNull(EmbeddingParameters.findProblem("openai", params("baseUrl", "https://proxy.example/v1", "model", "text-embedding-3-small")));
         assertNull(EmbeddingParameters.findProblem("azure-openai", params("endpoint", "https://x.openai.azure.com")));

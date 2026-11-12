@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
@@ -72,7 +71,6 @@ public class PrePostUtils {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final IJsonSerialization jsonSerialization;
-    private final IMemoryItemConverter memoryItemConverter;
     private final ITemplatingEngine templatingEngine;
     private final IDataFactory dataFactory;
     private final PropertyInstructionExecutor propertyInstructionExecutor;
@@ -80,23 +78,36 @@ public class PrePostUtils {
     private static final Logger LOGGER = Logger.getLogger(PrePostUtils.class);
 
     @Inject
-    public PrePostUtils(IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter, ITemplatingEngine templatingEngine,
+    public PrePostUtils(IJsonSerialization jsonSerialization, ITemplatingEngine templatingEngine,
             IDataFactory dataFactory, SecretPropertyVault secretPropertyVault) {
         this.jsonSerialization = jsonSerialization;
-        this.memoryItemConverter = memoryItemConverter;
         this.templatingEngine = templatingEngine;
         this.dataFactory = dataFactory;
         this.propertyInstructionExecutor = new PropertyInstructionExecutor(templatingEngine, secretPropertyVault, jsonSerialization::deserialize);
     }
 
+    /**
+     * Runs the {@code preRequest} property instructions against
+     * {@code templateDataObjects} and updates that map in place, as
+     * {@link #runPostResponse} does: each instruction refreshes
+     * {@code {properties}} in it, and a plaintext a {@code scope: "secret"}
+     * instruction vaulted is scrubbed from it.
+     * <p>
+     * The map is never rebuilt from conversation memory. It carries what memory
+     * does not — the arguments an LLM tool call merged in, the responses earlier
+     * calls of the same turn saved — and a rebuild rendered every one of them empty
+     * in the request this step prepares.
+     *
+     * @return {@code templateDataObjects} itself
+     */
     public Map<String, Object> executePreRequestPropertyInstructions(IConversationMemory memory, Map<String, Object> templateDataObjects,
                                                                      PreRequest preRequest)
             throws ITemplatingEngine.TemplateEngineException {
 
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
-            var propertyInstructions = preRequest.getPropertyInstructions();
-            executePropertyInstructions(propertyInstructions, 0, false, memory, templateDataObjects);
-            templateDataObjects = memoryItemConverter.convert(memory);
+            Set<String> vaulted = executePropertyInstructions(preRequest.getPropertyInstructions(), 0, false, memory, templateDataObjects);
+            // The data the token was read from is what the request templates render next.
+            scrubTemplateData(templateDataObjects, vaulted);
         }
         return templateDataObjects;
     }

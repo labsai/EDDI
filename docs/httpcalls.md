@@ -91,11 +91,14 @@ than degrading quietly:
   could not be captured never gets the self release.
 
   With `eddi.security.ssrf-protection.enabled=true`, the loopback default is
-  refused before any request is made (loopback is exactly what that protection
-  blocks), so such a deployment must set `eddi.self.base-url` to an address the
-  server can reach *and* that passes the full SSRF target policy — which also
-  rejects private and link-local addresses, so an in-cluster service name that
-  resolves to a private IP stays blocked. `eddi.self.base-url` must be a bare
+  refused (loopback is exactly what that protection blocks; httpcalls have no
+  self exception), and an httpcall naming it literally fails to deploy. Such a
+  deployment either lists the self host in
+  `eddi.security.ssrf-protection.allowed-hosts` (`127.0.0.1:7070`), or sets
+  `eddi.self.base-url` to an address the server can reach *and* that passes the
+  full SSRF target policy — which also rejects private and link-local
+  addresses, so an in-cluster service name that resolves to a private IP must be
+  listed as well. `eddi.self.base-url` must be a bare
   `scheme://host[:port]`; a value with a path, query, fragment or credentials is
   ignored (logged at ERROR). A plain-`http` value naming a non-loopback host is
   accepted but logged at WARN, since the caller's token would cross the network
@@ -426,7 +429,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.forEach.maxTotalResponseSizeInBytes                                | (`Integer`, default: the call's `maxResponseSizeInBytes`) budget for every item's stored body together; bodies past it are dropped (status kept) and marked `bodyDropped`.                                                         |
 | httpCall.preRequest.delayBeforeExecutingInMillis                            | (`Integer`, default `0`) wait this long before sending the request.                                                                                                                                                            |
 | httpCall.preRequest.propertyInstructions                                    | (`List`) property instructions run before the request is built, with the same fields and behaviour as `postResponse.propertyInstructions` (no HTTP-code gate).                                                                  |
-| httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently.                                                                                                                       |
+| httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently. In either mode a request that fails (a timeout, a refused connection) is logged with its position in the batch and the rest are still sent. |
 | httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent — use [`forEach`](#foreach--one-call-per-element) to collect per-element results. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.preRequest.batchRequests.maxBatchSize                              | (`Integer`, default `100`, at most `1000` — both operator-configurable, see `eddi.httpcalls.batch.*` in the [configuration reference](configuration-reference.md)) most requests the batch may expand into. A target array with more elements refuses the whole call — nothing is sent and the turn fails with a message naming the limit — instead of silently dropping the tail. Saving a value above the ceiling is refused with `400`. |
@@ -437,7 +440,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
-| httpCall.postResponse.retryApiCallInstruction.maxRetries                    | (`Integer`, default `3`) how often the call is repeated when a retry condition below matches.                                                                                                                                   |
+| httpCall.postResponse.retryApiCallInstruction.maxRetries                    | (`Integer`, default `3`) how often the call is repeated when a retry condition below matches. Only the final attempt's outcome is kept: a failed attempt's `{responseObjectName}Error` and `{responseObjectName}HttpCode` are visible to the retry conditions of that attempt only, and a retry that succeeds leaves neither behind. |
 | httpCall.postResponse.retryApiCallInstruction.exponentialBackoffDelayInMillis | (`Integer`, default `1000`) base delay of the exponential backoff between attempts.                                                                                                                                            |
 | httpCall.postResponse.retryApiCallInstruction.maxBackoffDelayInMillis       | (`Integer`) upper bound for one backoff delay — the engine clamps it to 30 s in any case.                                                                                                                                      |
 | httpCall.postResponse.retryApiCallInstruction.retryOnHttpCodes              | (`List<Integer>`, default `[502, 503]`) response codes that trigger a retry.                                                                                                                                                   |

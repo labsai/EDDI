@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.setup;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.secrets.ISecretProvider;
-import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
 import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -206,7 +205,7 @@ class AgentSetupAllowedHostsTest {
     class Reuse {
 
         private SecretMetadata entry(String keyName, List<String> hosts) {
-            return new SecretMetadata(SecretReference.DEFAULT_TENANT, keyName, Instant.EPOCH, null, null, EnvelopeCrypto.sha256Hex(KEY), "test",
+            return new SecretMetadata(SecretReference.DEFAULT_TENANT, keyName, Instant.EPOCH, null, null, VaultChecksum.legacy(KEY), "test",
                     List.of("*"), hosts);
         }
 
