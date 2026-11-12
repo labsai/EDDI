@@ -523,6 +523,43 @@ class TaskListParserTest {
     }
 
     @Test
+    @DisplayName("a colon inside an (assignedTo: …) annotation does not split the title")
+    void markdownAssignment_colonInsideAnnotation() {
+        // Split at the colon, the title became "Research (assignedTo", no assignee was
+        // found and the task went round-robin. (main behaved the same way.)
+        var result = TaskListParser.parse("1. Research (assignedTo: agent-2) — find references", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Research", result.getFirst().subject());
+        assertEquals("agent-2", result.getFirst().assignedTo());
+        assertEquals("find references", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("the other annotation shapes parse as they always did")
+    void markdownAssignment_neighbourShapes() {
+        var spaced = TaskListParser.parse("1. Research (assigned to agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", spaced.subject());
+        assertEquals("agent-2", spaced.assignedTo());
+        assertEquals("Research", spaced.description());
+
+        var equals = TaskListParser.parse("1. Research (assignedTo=agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", equals.subject());
+        assertEquals("agent-2", equals.assignedTo());
+
+        // After the description it was never read as an assignment, and still is not.
+        var trailing = TaskListParser.parse("1. Research — find references (assigned to agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", trailing.subject());
+        assertNull(trailing.assignedTo());
+        assertEquals("find references (assigned to agent-2)", trailing.description());
+
+        // An unclosed parenthesis does not hide the separator after it.
+        var unclosed = TaskListParser.parse("1. Draft (notes: later", MEMBERS).getFirst();
+        assertEquals("Draft (notes", unclosed.subject());
+        assertEquals("later", unclosed.description());
+    }
+
+    @Test
     @DisplayName("a separator glued to the next word does not split the title")
     void markdownSeparatorNeedsWhitespace() {
         var result = TaskListParser.parse("1. Build well-known parts: then test", MEMBERS);

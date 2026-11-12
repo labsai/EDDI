@@ -247,12 +247,24 @@ public final class TaskListParser {
      * more character after it — what the former lazy pattern matched. Returns
      * {@code [title, description]}, the description {@code null} when there is no
      * separator.
+     * <p>
+     * A separator inside a closed parenthesis does not count, so
+     * {@code Research (assignedTo: agent-2) — find references} splits at the dash
+     * and keeps its assignment annotation in the title, where it is read. (The
+     * former pattern split at that colon, so the task lost its assignee.) An
+     * unclosed parenthesis hides nothing. Linear: each closing parenthesis is
+     * searched for once and the scan resumes after it.
      */
     static String[] splitTitle(String item) {
-        for (int k = 1; k + 2 < item.length(); k++) {
+        int lastClose = item.lastIndexOf(')');
+        for (int k = 0; k + 2 < item.length(); k++) {
             char c = item.charAt(k);
+            if (c == '(' && k < lastClose) {
+                k = item.indexOf(')', k);
+                continue;
+            }
             char after = item.charAt(k + 1);
-            if ((c == ':' || c == '—' || c == '–' || c == '-')
+            if (k >= 1 && (c == ':' || c == '—' || c == '–' || c == '-')
                     && (after == ' ' || after == '\t' || after == '\u000B' || after == '\f')) {
                 return new String[]{item.substring(0, k).trim(), item.substring(k + 1).trim()};
             }
