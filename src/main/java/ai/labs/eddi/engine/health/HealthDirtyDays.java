@@ -119,6 +119,24 @@ public class HealthDirtyDays {
      * residual loss the class comment describes).
      */
     public void markDeleted(Map<String, Set<LocalDate>> agentDays) {
+        markAtOnce(agentDays, "deleted Agent Health rows");
+    }
+
+    /**
+     * Marks the days of a row written late — after the rollup's self-heal grace had
+     * passed its capture time — dirty <b>at once</b>, like {@link #markDeleted}.
+     * The self-heal finds rows by their capture time, and its watermark may already
+     * be past this one's: a mark held in memory and lost with the node could then
+     * not be found again.
+     */
+    public void markLateWrite(String agentId, Collection<LocalDate> days) {
+        if (agentId == null || days == null) {
+            return;
+        }
+        markAtOnce(Map.of(agentId, new HashSet<>(days)), "late-written Agent Health rows");
+    }
+
+    private void markAtOnce(Map<String, Set<LocalDate>> agentDays, String what) {
         if (agentDays == null) {
             return;
         }
@@ -138,9 +156,8 @@ public class HealthDirtyDays {
                 }
             }
             note(agentId, days);
-            LOGGER.warnf("Could not mark %d day(s) of deleted Agent Health rows of agent %s dirty at once; they are queued for the next "
-                    + "flush, and lost if this node stops before one succeeds: %s", days.size(), sanitize(agentId),
-                    sanitize(failure.getMessage()));
+            LOGGER.warnf("Could not mark %d day(s) of %s of agent %s dirty at once; they are queued for the next flush, and lost if "
+                    + "this node stops before one succeeds: %s", days.size(), what, sanitize(agentId), sanitize(failure.getMessage()));
         });
     }
 

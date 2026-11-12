@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
@@ -53,27 +54,36 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li><b>due sessions</b> — sessions whose window has closed since they were
  * judged ({@code dueAt}), and those a rating (saved or withdrawn) made due — at
  * most half of the pass's time, so they are never starved by a backfill;</li>
- * <li><b>the incremental feed</b> — conversations with turn rows captured since
- * the stored watermark <em>minus</em> {@code eddi.health.outcome-feed-overlap}
- * (15 minutes), up to one minute ago; paged by each conversation's newest
- * capture (then its id), oldest first, so a pass can stop anywhere and the next
- * resumes without a gap. Rows are ordered by their <em>capture</em> time, set
- * on the turn's node before the row waits on that node's health queue, so a row
- * can reach the store after the watermark passed its capture time; the overlap
- * re-reads every conversation of the last minutes each pass (the evaluation is
- * idempotent) and catches a row that late — the trade-off is that much
- * re-evaluation, bounded: the re-read of the overlap gets at most half of the
- * pass's time and conversations, then the feed goes on from the watermark, so a
- * busy overlap can never stop it from moving on. The first pass starts at the
- * turn-row retention, so turns recorded before outcomes existed are judged too,
- * a bounded batch per pass.</li>
+ * <li><b>the incremental feed</b> — conversations with turn rows captured up to
+ * one minute ago, paged by each conversation's newest capture (then its id),
+ * oldest first. Where it stands is a persisted {@link HealthFeedCursor} of two
+ * such (capture, conversation) pairs, so a pass can stop anywhere — even inside
+ * a run of conversations sharing one capture time — and the next resumes right
+ * after the last conversation read, without a gap or a restart:
+ * <ul>
+ * <li>the <b>replay</b> re-reads what the forward feed already read, from
+ * {@code eddi.health.outcome-feed-overlap} (15 minutes) behind its watermark.
+ * Rows are ordered by their <em>capture</em> time, set on the turn's node
+ * before the row waits on that node's health queue, so a row can reach the
+ * store after the watermark passed its capture time; the replay catches a row
+ * that late (the evaluation is idempotent). It gets at most half of the pass's
+ * time and conversations; what it does not reach it resumes next pass from its
+ * own position, instead of being skipped;</li>
+ * <li>the <b>forward feed</b> then reads on from the watermark. While a replay
+ * is pending, the stored watermark is kept within one overlap of it, so the
+ * replay never trails it by more than that — and since the replay's own
+ * position only moves on, the feed keeps moving too.</li>
+ * </ul>
+ * The first pass starts at the turn-row retention, so turns recorded before
+ * outcomes existed are judged too, a bounded batch per pass.</li>
  * </ol>
- * A conversation whose evaluation fails holds the watermark at its capture time
- * (never further back than the watermark), so the next passes retry it — for at
- * most {@link #MAX_RETRY} from its first failure, then it is left (a WARN; its
- * next change or due time evaluates it again). A failure is any store that
- * cannot be read — turn rows, outcomes, the agent's {@code healthConfig}, the
- * ratings — so no session is judged on what was merely unavailable.
+ * A conversation whose evaluation fails, in either part, sets the replay's
+ * position back to its capture time, so the next passes retry it however far
+ * the forward feed has got — for at most {@link #MAX_RETRY} from its first
+ * failure, then it is given up (a WARN; its next change or due time evaluates
+ * it again). A failure is any store that cannot be read — turn rows, outcomes,
+ * the agent's {@code healthConfig}, the ratings — so no session is judged on
+ * what was merely unavailable.
  * <p>
  * Per conversation it reads the turn rows of a <em>range of steps</em>, oldest
  * first: from the latest stored session on (the feed), or one stored session's
@@ -99,8 +109,8 @@ public class HealthOutcomeEvaluator {
     /** Rows younger than this are left for the next pass. */
     static final Duration GRACE = Duration.ofMinutes(1);
     /**
-     * How long, from its first failure, a failed conversation holds the feed's
-     * watermark back.
+     * How long, from its first failure, a failed conversation is retried by the
+     * feed's replay.
      */
     static final Duration MAX_RETRY = Duration.ofHours(1);
     /** Conversations read per page of the feed. */
@@ -143,10 +153,14 @@ public class HealthOutcomeEvaluator {
      * turn captured days ago is retried as long as a fresh one. Bounded and per
      * node — on another node the limit starts again, which only retries longer.
      */
-    private final Cache<String, Instant> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
+    private final Cache<String, FeedFailure> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
             .build();
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
     private int maxRangeTurns = MAX_RANGE_TURNS;
+    /** {@link #FEED_PAGE}, lowered by tests. */
+    private int feedPage = FEED_PAGE;
+    /** {@link #MAX_CONVERSATIONS} for the feed, lowered by tests. */
+    private int maxConversations = MAX_CONVERSATIONS;
 
     @Inject
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
@@ -185,6 +199,16 @@ public class HealthOutcomeEvaluator {
         this.maxRangeTurns = max;
     }
 
+    /** For tests: conversations read per page of the feed. */
+    void feedPage(int size) {
+        this.feedPage = size;
+    }
+
+    /** For tests: the most conversations one pass evaluates. */
+    void maxConversations(int max) {
+        this.maxConversations = max;
+    }
+
     @PreDestroy
     void stop() {
         if (ownedExecutor != null) {
@@ -207,7 +231,7 @@ public class HealthOutcomeEvaluator {
         try {
             feed(deadline, done);
         } catch (RuntimeException e) {
-            LOGGER.warnf("The Agent Health outcome feed failed; the next pass resumes from the same watermark: %s", sanitize(e.getMessage()));
+            LOGGER.warnf("The Agent Health outcome feed failed; the next pass resumes from the same cursor: %s", sanitize(e.getMessage()));
         }
         metrics.outcomesEvaluated(done[1], done[2]);
         return new Result(done[0], done[1], done[2]);
@@ -217,78 +241,123 @@ public class HealthOutcomeEvaluator {
         Instant now = clock.instant();
         Instant until = now.minus(GRACE);
         Instant oldest = now.minus(settings.factsRetention());
-        Instant watermark = outcomeStore.watermark().orElse(oldest);
-        Instant since = watermark.minus(settings.outcomeFeedOverlap());
-        if (since.isBefore(oldest)) {
-            since = oldest;
+        Duration overlap = settings.outcomeFeedOverlap();
+        HealthFeedCursor cursor = outcomeStore.feedCursor().orElse(HealthFeedCursor.at(oldest));
+        Instant watermark = cursor.watermark();
+        String afterId = cursor.afterId();
+        // The replay of the overlap: resumed where the last pass left it, else afresh.
+        Instant replayAt = cursor.replayAt() != null ? cursor.replayAt() : watermark.minus(overlap);
+        String replayAfter = cursor.replayAt() != null ? cursor.replayAfterId() : null;
+        if (replayAt.isBefore(oldest)) {
+            replayAt = oldest;
+            replayAfter = null;
         }
-        // Re-reading the overlap gets at most half of what is left of the pass, so the
-        // replay can never keep the feed from moving past the watermark.
-        Instant overlapDeadline = now.plus(Duration.between(now, deadline).dividedBy(2));
-        int overlapLimit = done[0] + Math.max(0, MAX_CONVERSATIONS - done[0]) / 2;
-        String after = null;
         Set<String> seen = new HashSet<>();
         Instant failedAt = null;
-        Instant reached = since;
-        boolean complete = true;
         boolean read = false;
-        while (since.isBefore(until)) {
-            if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
-                complete = false;
+
+        // 1. The replay: what the forward feed already read once, from the overlap
+        // behind it — at most half of what is left of the pass, so it can never keep
+        // the feed from moving on; what it does not reach, it resumes next pass.
+        Instant replayDeadline = now.plus(Duration.between(now, deadline).dividedBy(2));
+        int replayLimit = done[0] + Math.max(0, maxConversations - done[0]) / 2;
+        boolean replayDone = !replayAt.isBefore(watermark) && (afterId == null || replayAt.isAfter(watermark));
+        replay : while (!replayDone) {
+            if (!replayAt.isBefore(until)) {
+                replayDone = true;
                 break;
             }
-            List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(since, after, until, FEED_PAGE);
+            if (!clock.instant().isBefore(replayDeadline) || done[0] >= replayLimit) {
+                break;
+            }
+            List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(replayAt, replayAfter, until, feedPage);
             read = true;
-            Instant next = until;
-            String nextAfter = null;
-            boolean leftOverlap = false;
             for (ConversationActivity activity : page) {
-                if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
-                    // Resume at this conversation's newest capture next time.
-                    next = activity.lastUpdatedAt();
-                    complete = false;
-                    break;
+                if (!behind(activity, watermark, afterId)) {
+                    // Where the forward feed has not been yet: the replay is done.
+                    replayDone = true;
+                    break replay;
                 }
-                if (activity.lastUpdatedAt().isBefore(watermark) && (!clock.instant().isBefore(overlapDeadline) || done[0] >= overlapLimit)) {
-                    // The overlap's share is used up: the rest of it is left, the feed
-                    // goes on from the watermark.
-                    next = watermark;
-                    leftOverlap = true;
-                    break;
+                if (!clock.instant().isBefore(replayDeadline) || done[0] >= replayLimit) {
+                    break replay;
                 }
                 if (seen.add(activity.conversationId())) {
                     failedAt = evaluateInFeed(activity, done, failedAt);
                 }
+                replayAt = activity.lastUpdatedAt();
+                replayAfter = activity.conversationId();
+                if (activity.lastUpdatedAt().equals(watermark) && activity.conversationId().equals(afterId)) {
+                    // The forward feed's last conversation: everything behind it is re-read.
+                    replayDone = true;
+                    break replay;
+                }
             }
-            if (complete && !leftOverlap && page.size() >= FEED_PAGE) {
-                // Gapless: after the last entry's (capture, conversation) pair.
-                ConversationActivity last = page.get(page.size() - 1);
-                next = last.lastUpdatedAt();
-                nextAfter = last.conversationId();
+            if (page.size() < feedPage) {
+                replayDone = true;
             }
-            reached = next;
-            since = next;
-            after = nextAfter;
-            if (!complete) {
+        }
+
+        // 2. The forward feed: strictly after (watermark, afterId), up to a minute ago.
+        Instant forwardAt = watermark;
+        String forwardAfter = afterId;
+        forward : while (forwardAt.isBefore(until)) {
+            if (!clock.instant().isBefore(deadline) || done[0] >= maxConversations) {
                 break;
+            }
+            List<ConversationActivity> page = turnStore.conversationsUpdatedBetween(forwardAt, forwardAfter, until, feedPage);
+            read = true;
+            for (ConversationActivity activity : page) {
+                if (!clock.instant().isBefore(deadline) || done[0] >= maxConversations) {
+                    // Resumed right after the last conversation read.
+                    break forward;
+                }
+                if (seen.add(activity.conversationId())) {
+                    failedAt = evaluateInFeed(activity, done, failedAt);
+                }
+                forwardAt = activity.lastUpdatedAt();
+                forwardAfter = activity.conversationId();
+            }
+            if (page.size() < feedPage) {
+                forwardAt = until;
+                forwardAfter = null;
             }
         }
         if (!read) {
             return;
         }
-        Instant stored = reached.isAfter(watermark) ? reached : watermark;
-        if (failedAt != null && failedAt.isBefore(stored)) {
-            // Retried next pass, from here — never further back than the watermark: a
-            // failure inside the overlap is in the next pass's overlap again.
-            stored = failedAt.isBefore(watermark) ? watermark : failedAt;
+
+        Instant nextReplayAt = replayDone ? null : replayAt;
+        String nextReplayAfter = replayDone ? null : replayAfter;
+        if (failedAt != null && (nextReplayAt == null || !failedAt.isAfter(nextReplayAt))) {
+            // Retried by the next pass's replay, which starts there — wherever the
+            // forward feed has got to — until the retry limit gives it up.
+            nextReplayAt = failedAt;
+            nextReplayAfter = null;
         }
-        outcomeStore.setWatermark(stored);
+        if (nextReplayAt != null && forwardAt.isAfter(nextReplayAt.plus(overlap))) {
+            // The forward feed stays within one overlap of a pending replay, so the
+            // replay never trails it by more than the overlap it exists for.
+            forwardAt = nextReplayAt.plus(overlap);
+            forwardAfter = null;
+        }
+        outcomeStore.setFeedCursor(new HealthFeedCursor(forwardAt, forwardAfter, nextReplayAt, nextReplayAfter));
+    }
+
+    /**
+     * Whether a feed entry is one the forward feed, at ({@code watermark},
+     * {@code afterId}), has already read: older than the watermark, or at it while
+     * the forward feed is part-way through that capture time — the replay stops at
+     * {@code afterId} itself, so conversation ids are only ever ordered by the
+     * database, in its collation, never here.
+     */
+    private static boolean behind(ConversationActivity activity, Instant watermark, String afterId) {
+        return activity.lastUpdatedAt().isBefore(watermark) || (afterId != null && activity.lastUpdatedAt().equals(watermark));
     }
 
     /**
      * Evaluates one conversation of the feed.
      *
-     * @return the capture the watermark is held at for a retry — the earlier of
+     * @return the capture the next pass retries from — the earlier of
      *         {@code failedAt} and this conversation's, when it failed for less
      *         than {@link #MAX_RETRY} since its first failure
      */
@@ -299,14 +368,25 @@ public class HealthOutcomeEvaluator {
             return failedAt;
         }
         Instant now = clock.instant();
-        Instant first = feedFailures.get(conversationId, k -> now);
-        if (Duration.between(first, now).compareTo(MAX_RETRY) >= 0) {
-            feedFailures.invalidate(conversationId);
+        FeedFailure failure = feedFailures.get(conversationId, k -> new FeedFailure(now, false));
+        if (failure.givenUp()) {
+            return failedAt;
+        }
+        if (Duration.between(failure.first(), now).compareTo(MAX_RETRY) >= 0) {
+            // Kept as given up, so a later re-read of it does not start the limit again.
+            feedFailures.put(conversationId, new FeedFailure(failure.first(), true));
             LOGGER.warnf("Agent Health outcome evaluation kept failing for conversation %s (captured at %s) since %s; it is evaluated again "
-                    + "with its next change or due time", sanitize(conversationId), activity.lastUpdatedAt(), first);
+                    + "with its next change or due time", sanitize(conversationId), activity.lastUpdatedAt(), failure.first());
             return failedAt;
         }
         return failedAt == null || activity.lastUpdatedAt().isBefore(failedAt) ? activity.lastUpdatedAt() : failedAt;
+    }
+
+    /**
+     * A conversation the feed failed to evaluate: since when, and whether it was
+     * given up.
+     */
+    private record FeedFailure(Instant first, boolean givenUp) {
     }
 
     private void due(Instant deadline, int[] done) {
@@ -319,7 +399,7 @@ public class HealthOutcomeEvaluator {
         }
         for (Map.Entry<String, Set<Integer>> entry : bySession.entrySet()) {
             for (Integer sessionNo : entry.getValue()) {
-                if (!clock.instant().isBefore(deadline) || done[0] >= MAX_CONVERSATIONS) {
+                if (!clock.instant().isBefore(deadline) || done[0] >= maxConversations) {
                     return;
                 }
                 evaluateSafely(entry.getKey(), sessionNo, done);

@@ -46,3 +46,40 @@ Review findings on PR #1389 (H3, session outcomes), documented in [`docs/agent-h
   pause.
 - The action cap stays config-free: the factory does not read `healthConfig` on the turn's thread. A mapped action
   followed by 32 or more other actions in the same turn is still dropped.
+
+## 🐛 fix(health): the outcome feed persists a cursor, so no part of the overlap or a shared timestamp is skipped (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+### What changed and why
+
+Three further review findings on PR #1389, all about the outcome feed persisting only an `Instant` watermark.
+Documented in [`docs/agent-health.md`](../agent-health.md#the-evaluation).
+
+- **The feed's state is a cursor**, `HealthFeedCursor(watermark, afterId, replayAt, replayAfterId)`:
+  `IHealthOutcomeStore.feedCursor()` / `setFeedCursor(...)` replace `setWatermark`; `watermark()` is now a default
+  method over the cursor (the lag gauge and the report hint read it). MongoDB keeps the one `healthrollupstate`
+  document `outcomes` and adds `afterId`, `replayAt`, `replayAfterId` (an older document with `at` alone reads as a
+  bare watermark). PostgreSQL adds a nullable `ref VARCHAR(255)` to `health_rollup_state`
+  (`ADD COLUMN IF NOT EXISTS`, run after `CREATE_STATE`; the dirty-day store's rows never set it) and keeps the
+  forward position in row `outcomes` and the replay in row `outcomes.replay`, deleted when none is pending — both in
+  one transaction.
+- **A pass that stops inside one capture time resumes after the last conversation read.** Before, only the time was
+  stored, so more than a pass of conversations sharing one `lastUpdatedAt` restarted at the same prefix every pass.
+- **The overlap re-read resumes where it stopped** instead of jumping to the watermark and skipping the rest. While
+  a replay is pending, the stored watermark is capped at `replayAt + overlap`, so the replay never trails the
+  forward feed by more than the overlap; the replay position itself only advances, so the feed still always moves.
+- **A failure is retried from the replay**, which is set back to the failed capture: every following pass reaches it
+  first, wherever the forward feed has got and whatever the overlap's share, until `MAX_RETRY` (1 h from the first
+  failure). A conversation given up at the limit stays marked as given up, so a later re-read does not start the
+  hour again.
+- Tests: `HealthOutcomeEvaluatorTest` (conversations sharing one capture across passes, an exhausted overlap that
+  resumes and still judges a late row after the feed moved on by more than the overlap, an overlap failure retried
+  every pass until the limit), the store contract round-trips the cursor including nulls.
+
+### Design decisions
+
+- The replay never compares conversation ids in Java: it stops at the forward cursor's own conversation id, so the
+  order is always the database's (PostgreSQL's collation may differ from `String.compareTo`).
+- The overlap trade-off under sustained overload is unchanged in kind: a conversation the replay already passed in
+  the current sweep is not re-read for a row that lands after the sweep passed it.

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
@@ -27,6 +28,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +66,10 @@ class HealthOutcomeEvaluatorTest {
     private HealthErasureFence fence;
     private SimpleMeterRegistry registry;
     private HealthOutcomeEvaluator evaluator;
+    /** What the store holds as the feed cursor. */
+    private HealthFeedCursor cursor;
+    /** Every cursor stored, in order. */
+    private List<HealthFeedCursor> cursors;
 
     @BeforeEach
     void setUp() {
@@ -76,6 +82,15 @@ class HealthOutcomeEvaluatorTest {
         when(policy.require(anyString(), any())).thenReturn(Resolved.DEFAULTS);
         when(policy.windowOf(anyString(), any())).thenReturn(Duration.ofHours(24));
         when(outcomes.watermark()).thenReturn(Optional.empty());
+        // The feed cursor round-trips as a store would keep it.
+        cursor = null;
+        cursors = new ArrayList<>();
+        when(outcomes.feedCursor()).thenAnswer(inv -> Optional.ofNullable(cursor));
+        doAnswer(inv -> {
+            cursor = inv.getArgument(0);
+            cursors.add(cursor);
+            return null;
+        }).when(outcomes).setFeedCursor(any());
         evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
@@ -158,7 +173,7 @@ class HealthOutcomeEvaluatorTest {
             assertEquals(HealthOutcomes.EVIDENCE_SILENCE, s.evidence());
             assertTrue(s.engaged());
             assertEquals(NOW, s.evaluatedAt(), "the evaluation's start: a mark after it survives the upsert");
-            verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
+            assertEquals(HealthFeedCursor.at(NOW.minus(HealthOutcomeEvaluator.GRACE)), cursor);
             assertEquals(1, result.conversations());
             assertEquals(1, result.sessions());
             assertEquals(1.0, registry.get(HealthMetrics.OUTCOME_SESSIONS).counter().count());
@@ -168,7 +183,7 @@ class HealthOutcomeEvaluatorTest {
         @DisplayName("M2: every pass re-reads the overlap behind the watermark, so a row that reached the store late is judged")
         void overlapCatchesLateRows() {
             Instant watermark = NOW.minus(Duration.ofMinutes(10));
-            when(outcomes.watermark()).thenReturn(Optional.of(watermark));
+            cursor = HealthFeedCursor.at(watermark);
             // Captured before the watermark, written after it moved past.
             Instant lateCapture = watermark.minus(Duration.ofMinutes(5));
             when(turns.conversationsUpdatedBetween(eq(watermark.minus(Duration.ofMinutes(15))), isNull(), any(), anyInt()))
@@ -178,22 +193,21 @@ class HealthOutcomeEvaluatorTest {
             evaluator.run(NOW.plusSeconds(60));
 
             assertEquals(1, upserted().size());
-            verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
+            assertEquals(HealthFeedCursor.at(NOW.minus(HealthOutcomeEvaluator.GRACE)), cursor);
         }
 
         @Test
-        @DisplayName("M2: the watermark never moves back past what was stored, except to retry a failure")
+        @DisplayName("M2: the watermark never moves back past what was stored")
         void watermarkMonotonic() {
-            Instant watermark = NOW.minus(Duration.ofMinutes(2));
-            when(outcomes.watermark()).thenReturn(Optional.of(watermark));
+            cursor = HealthFeedCursor.at(NOW.minus(Duration.ofMinutes(2)));
             when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of());
             evaluator.run(NOW.plusSeconds(60));
-            verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
+            assertEquals(HealthFeedCursor.at(NOW.minus(HealthOutcomeEvaluator.GRACE)), cursor);
         }
 
         @Test
-        @DisplayName("M2: a failed evaluation holds the watermark at its capture, so the next pass retries it")
-        void failureHoldsWatermark() {
+        @DisplayName("M2: a failed evaluation sets the replay back to its capture, so the next pass retries it")
+        void failureIsReplayed() {
             when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenReturn(List.of(
                     new ConversationActivity("bad", NOW.minusSeconds(300)), new ConversationActivity("c1", NOW.minusSeconds(120))));
             when(outcomes.findByConversation("bad")).thenThrow(new HealthStoreException("down", null));
@@ -202,11 +216,13 @@ class HealthOutcomeEvaluatorTest {
             HealthOutcomeEvaluator.Result result = evaluator.run(NOW.plusSeconds(60));
 
             assertEquals(1, result.failed());
-            verify(outcomes).setWatermark(NOW.minusSeconds(300));
+            assertEquals(new HealthFeedCursor(NOW.minus(HealthOutcomeEvaluator.GRACE), null, NOW.minusSeconds(300), null), cursor);
+            evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes, times(2)).findByConversation("bad");
         }
 
         @Test
-        @DisplayName("M2: a failure holds the watermark for the retry limit from its first failure, however old its capture — then it is released")
+        @DisplayName("M2: a failure is retried for the retry limit from its first failure, however old its capture — then it is given up")
         void failureRetriedFromFirstFailure() {
             MovableClock clock = new MovableClock();
             evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
@@ -217,22 +233,29 @@ class HealthOutcomeEvaluatorTest {
             when(outcomes.findByConversation("bad")).thenThrow(new HealthStoreException("down", null));
 
             evaluator.run(NOW.plusSeconds(60));
-            verify(outcomes).setWatermark(captured);
+            // The forward feed is kept within one overlap of the retry.
+            assertEquals(new HealthFeedCursor(captured.plus(Duration.ofMinutes(15)), null, captured, null), cursor);
 
             clock.now = NOW.plus(HealthOutcomeEvaluator.MAX_RETRY);
             evaluator.run(clock.now.plusSeconds(60));
-            verify(outcomes).setWatermark(clock.now.minus(HealthOutcomeEvaluator.GRACE));
+            verify(outcomes, times(2)).findByConversation("bad");
+            assertEquals(HealthFeedCursor.at(clock.now.minus(HealthOutcomeEvaluator.GRACE)), cursor);
+
+            // Given up: a later re-read does not start the limit again.
+            cursor = HealthFeedCursor.at(captured);
+            evaluator.run(clock.now.plusSeconds(60));
+            assertEquals(HealthFeedCursor.at(clock.now.minus(HealthOutcomeEvaluator.GRACE)), cursor);
         }
 
         @Test
         @DisplayName("M2: re-reading the overlap takes at most half of the pass, so a busy overlap cannot keep the feed from moving past the "
-                + "watermark")
+                + "watermark — and the replay resumes next pass where it stopped")
         void overlapCannotStallTheFeed() {
             MovableClock clock = new MovableClock();
             evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
                     clock);
             Instant watermark = NOW.minus(Duration.ofMinutes(10));
-            when(outcomes.watermark()).thenReturn(Optional.of(watermark));
+            cursor = HealthFeedCursor.at(watermark);
             ConversationActivity beyond = new ConversationActivity("n1", watermark.plusSeconds(60));
             when(turns.conversationsUpdatedBetween(eq(watermark.minus(Duration.ofMinutes(15))), isNull(), any(), anyInt())).thenReturn(List
                     .of(new ConversationActivity("o1", watermark.minusSeconds(120)), new ConversationActivity("o2", watermark.minusSeconds(60)),
@@ -253,7 +276,7 @@ class HealthOutcomeEvaluatorTest {
 
             verify(outcomes, never()).findByConversation("o2");
             verify(outcomes).findByConversation("n1");
-            verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
+            assertEquals(new HealthFeedCursor(NOW.minus(HealthOutcomeEvaluator.GRACE), null, watermark.minusSeconds(120), "o1"), cursor);
         }
 
         @Test
@@ -261,7 +284,7 @@ class HealthOutcomeEvaluatorTest {
         void pagesWithoutGap() {
             Instant watermark = NOW.minus(Duration.ofHours(1));
             Instant since = watermark.minus(Duration.ofMinutes(15));
-            when(outcomes.watermark()).thenReturn(Optional.of(watermark));
+            cursor = HealthFeedCursor.at(watermark);
             List<ConversationActivity> full = new ArrayList<>();
             for (int i = 0; i < HealthOutcomeEvaluator.FEED_PAGE; i++) {
                 full.add(new ConversationActivity("c" + i, since.plusSeconds(i)));
@@ -275,11 +298,11 @@ class HealthOutcomeEvaluatorTest {
             evaluator.run(NOW.plusSeconds(60));
 
             verify(turns).conversationsUpdatedBetween(eq(last), eq(lastId), any(), anyInt());
-            verify(outcomes).setWatermark(NOW.minus(HealthOutcomeEvaluator.GRACE));
+            assertEquals(HealthFeedCursor.at(NOW.minus(HealthOutcomeEvaluator.GRACE)), cursor);
         }
 
         @Test
-        @DisplayName("a pass that runs out of time resumes at the conversation it did not reach")
+        @DisplayName("a pass that runs out of time resumes right after the last conversation it read")
         void stopsAtTheDeadline() {
             MovableClock clock = new MovableClock();
             evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
@@ -294,17 +317,143 @@ class HealthOutcomeEvaluatorTest {
 
             evaluator.run(NOW.plusSeconds(60));
 
-            verify(outcomes).setWatermark(NOW.minusSeconds(500));
+            assertEquals(new HealthFeedCursor(NOW.minusSeconds(600), "c1", null, null), cursor);
             verify(outcomes, never()).findByConversation("c2");
         }
 
         @Test
-        @DisplayName("a pass whose time is already up reads nothing and leaves the watermark")
+        @DisplayName("a pass whose time is already up reads nothing and leaves the cursor")
         void nothingPastTheDeadline() {
             HealthOutcomeEvaluator.Result result = evaluator.run(NOW);
             verify(turns, never()).conversationsUpdatedBetween(any(), any(), any(), anyInt());
-            verify(outcomes, never()).setWatermark(any());
+            verify(outcomes, never()).setFeedCursor(any());
             assertTrue(result.isEmpty());
+        }
+
+        /**
+         * The feed as the turn store serves it, over {@code feed}: [since, until),
+         * strictly after (since, after), by capture then id, at most a page. Records
+         * each conversation evaluated; the ones in {@code failing} fail.
+         */
+        private void fakeFeed(List<ConversationActivity> feed, List<String> evaluated, Set<String> failing) {
+            when(turns.conversationsUpdatedBetween(any(), any(), any(), anyInt())).thenAnswer(inv -> {
+                Instant since = inv.getArgument(0);
+                String after = inv.getArgument(1);
+                Instant until = inv.getArgument(2);
+                int limit = inv.getArgument(3);
+                return feed.stream().filter(a -> !a.lastUpdatedAt().isBefore(since) && a.lastUpdatedAt().isBefore(until))
+                        .filter(a -> after == null || a.lastUpdatedAt().isAfter(since) || a.conversationId().compareTo(after) > 0)
+                        .sorted(Comparator.comparing(ConversationActivity::lastUpdatedAt).thenComparing(ConversationActivity::conversationId))
+                        .limit(limit).toList();
+            });
+            when(outcomes.findByConversation(anyString())).thenAnswer(inv -> {
+                String id = inv.getArgument(0);
+                evaluated.add(id);
+                if (failing.contains(id)) {
+                    throw new HealthStoreException("down", null);
+                }
+                return List.of();
+            });
+            when(turns.findByConversationSteps(anyString(), anyInt(), any(), anyInt())).thenReturn(List.of());
+        }
+
+        @Test
+        @DisplayName("more than a pass of conversations sharing one capture time are all judged, pass after pass — the cursor keeps the "
+                + "conversation, not just the time")
+        void sharedCaptureTimeAcrossPasses() {
+            Instant shared = NOW.minus(Duration.ofMinutes(30));
+            List<ConversationActivity> feed = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                feed.add(new ConversationActivity("g" + i, shared));
+            }
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of());
+            evaluator.feedPage(2);
+            evaluator.maxConversations(2);
+
+            for (int pass = 0; pass < 5 && !Set.copyOf(evaluated).containsAll(List.of("g0", "g1", "g2", "g3", "g4")); pass++) {
+                evaluator.run(NOW.plusSeconds(60));
+            }
+
+            assertEquals(Set.of("g0", "g1", "g2", "g3", "g4"), Set.copyOf(evaluated));
+        }
+
+        @Test
+        @DisplayName("an overlap whose share is used up resumes next pass where it stopped, so a late row behind the watermark is judged even "
+                + "after the forward feed moved on by more than the overlap")
+        void exhaustedOverlapResumes() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            evaluator.maxConversations(4);
+            Instant watermark = NOW.minus(Duration.ofMinutes(10));
+            cursor = HealthFeedCursor.at(watermark);
+            List<ConversationActivity> feed = new ArrayList<>();
+            for (int i = 1; i <= 4; i++) {
+                feed.add(new ConversationActivity("o" + i, NOW.minus(Duration.ofMinutes(15)).plusSeconds(i)));
+            }
+            // Far ahead: the forward feed reaches it in the next pass.
+            feed.add(new ConversationActivity("n1", NOW.plus(Duration.ofMinutes(20))));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of());
+
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(List.of("o1", "o2"), evaluated, "half of the pass's conversations for the overlap");
+            assertEquals(NOW.minus(Duration.ofMinutes(15)).plusSeconds(2), cursor.replayAt());
+
+            // Captured behind the watermark, written only now.
+            feed.add(new ConversationActivity("late", NOW.minus(Duration.ofMinutes(1)).minusSeconds(30)));
+            clock.now = NOW.plus(Duration.ofMinutes(30));
+            evaluator.run(clock.now.plusSeconds(60));
+            assertTrue(evaluated.contains("n1"), "the forward feed moved on past the overlap");
+            for (int pass = 0; pass < 3 && !evaluated.contains("late"); pass++) {
+                clock.now = clock.now.plus(Duration.ofMinutes(10));
+                evaluator.run(clock.now.plusSeconds(60));
+            }
+
+            assertTrue(evaluated.contains("late"), "the late row behind the watermark is judged: " + evaluated);
+            assertTrue(evaluated.containsAll(List.of("o3", "o4")));
+        }
+
+        @Test
+        @DisplayName("a failure inside the overlap is retried every pass until the retry limit, even when the overlap's share runs out before "
+                + "the replay would reach it")
+        void overlapFailureRetriedUntilTheLimit() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant watermark = NOW.minus(Duration.ofMinutes(10));
+            cursor = HealthFeedCursor.at(watermark);
+            List<ConversationActivity> feed = new ArrayList<>();
+            for (int i = 1; i <= 4; i++) {
+                feed.add(new ConversationActivity("o" + i, NOW.minus(Duration.ofMinutes(15)).plusSeconds(i)));
+            }
+            Instant badCapture = NOW.minus(Duration.ofMinutes(12));
+            feed.add(new ConversationActivity("bad", badCapture));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of("bad"));
+
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(1, evaluated.stream().filter("bad"::equals).count());
+            assertEquals(badCapture, cursor.replayAt());
+
+            // From now on the overlap's share is two conversations — fewer than stand
+            // before the failure in the overlap — and new turns keep moving the feed.
+            evaluator.maxConversations(4);
+            int passes = 1;
+            while (clock.now.isBefore(NOW.plus(HealthOutcomeEvaluator.MAX_RETRY))) {
+                clock.now = clock.now.plus(Duration.ofMinutes(10));
+                feed.add(new ConversationActivity("n" + passes, clock.now.minus(Duration.ofMinutes(2))));
+                evaluator.run(clock.now.plusSeconds(60));
+                passes++;
+                assertEquals(passes, evaluated.stream().filter("bad"::equals).count(), "retried on pass " + passes);
+            }
+
+            // Given up at the limit: the replay moves on, and so does the feed.
+            assertTrue(cursor.replayAt() == null || cursor.replayAt().isAfter(badCapture), String.valueOf(cursor));
+            clock.now = clock.now.plus(Duration.ofMinutes(10));
+            evaluator.run(clock.now.plusSeconds(60));
+            assertEquals(passes, evaluated.stream().filter("bad"::equals).count());
         }
 
         @Test

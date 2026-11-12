@@ -203,16 +203,30 @@ They are recomputed, never incremented:
    by an undo, since its last pass. A discard leaves the row's write time
    alone, so the time a row was first discarded is stored with it for this
    (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
-   minute behind the clock, at most 10,000 pairs a pass) — and then drains the
+   minute behind the clock, at most 10,000 pairs a pass; a window holding more
+   is halved until one fits, and the watermark moves only past what was
+   marked. The one exception: a one-second window that still holds more than
+   10,000 pairs has only 10,000 of them marked, with a WARN, and the watermark
+   moves past it anyway, so the rest rely on their own marks). A row that reaches the store more than 30 seconds after its capture
+   time, which this scan may already be past, marks its days in the store
+   **before** it is written, instead of on the five-second flush, so a node
+   stopping between the write and the mark cannot lose it (a mark whose row then
+   fails to write only costs a recompute), and again, at once, after the write:
+   a rollup that ran in between recomputed the day without the row, and the
+   second mark is another durable attempt if the first could not reach the
+   store. The mark is lost only if the node stops at a bad moment, in one of two
+   ways: a rollup clears the pre-mark just before the write and the node stops
+   just after it, before the second mark; or all four writes (two before, two
+   after) fail and the mark is still waiting in memory, as a deletion mark does. Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked
    again meanwhile** (a token per mark). A turn written while its day was being
    recomputed therefore keeps the day dirty for the next pass. A pass stops after
    90 seconds and leaves the rest for the next. A day whose rollup fails moves
-   to the back of the queue, so it cannot block the days behind it, and after
-   five failures in a row it is dropped with a WARN (the next write to it marks
-   it again).
+   to the back of the queue, so it cannot block the days behind it. It is never
+   dropped, because the day may have no later write to mark it again: it is
+   retried every pass, with a WARN once it has failed five times.
 3. A dirty day older than the turn-row retention (`eddi.health.facts-retention`)
    is dropped from the queue without recomputing: its turns are gone, and the
    daily rows it already has are kept.
@@ -384,22 +398,32 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    session was already overdue: a mark always sets the session due at its own
    time. Each due session is judged over
    its own steps only, up to the next stored session.
-2. **The feed** — conversations with turn rows captured since the watermark
-   (`healthrollupstate` / `health_rollup_state`, row `outcomes`) **minus
-   `eddi.health.outcome-feed-overlap`** (15 min), up to a minute ago, paged by
-   each conversation's newest capture (then its id), oldest first: a pass can
-   stop anywhere and the next resumes without a gap, even where more than a page
-   of conversations share one capture millisecond. Rows are ordered by *capture* time, set on the
-   turn's node before the row waits on that node's health queue, so a row can
-   reach the store after the watermark passed it; the overlap re-reads the last
-   minutes every pass and catches it — the price is re-judging those
-   conversations each pass (the evaluation is idempotent), at most half of the
-   pass's time and conversations: then the feed goes on from the watermark, so a
-   busy overlap never keeps it from moving on. A conversation whose evaluation
-   fails — any store it needs cannot be read: turn rows, outcomes, the agent
-   version's `healthConfig`, the ratings — holds the watermark at its capture
-   time (never further back than the watermark), so the following passes retry
-   it, for at most an hour from its first failure, however old the turn (then a
+2. **The feed** — conversations with turn rows captured up to a minute ago,
+   paged by each conversation's newest capture (then its id), oldest first.
+   Where it stands is a **cursor** of two such (capture, conversation) pairs
+   (`healthrollupstate` document `outcomes` / `health_rollup_state` rows
+   `outcomes` and `outcomes.replay`, written together), so a pass can stop
+   anywhere — even inside a run of more than a page, or more than a pass, of
+   conversations sharing one capture millisecond — and the next resumes right
+   after the last conversation read. Each pass has two parts:
+   - the **replay** re-reads what the feed already read, from
+     **`eddi.health.outcome-feed-overlap`** (15 min) behind its watermark. Rows
+     are ordered by *capture* time, set on the turn's node before the row waits
+     on that node's health queue, so a row can reach the store after the
+     watermark passed it; the replay catches it — the price is re-judging those
+     conversations (the evaluation is idempotent). It gets at most half of the
+     pass's time and conversations; what it does not reach it resumes next pass
+     from its own position, instead of skipping it;
+   - the **forward feed** then reads on from the watermark. While a replay is
+     pending, the stored watermark stays within one overlap of it, so the replay
+     never trails it by more than that; the replay's own position only moves
+     on, so the feed always does too.
+
+   A conversation whose evaluation fails, in either part — any store it needs
+   cannot be read: turn rows, outcomes, the agent version's `healthConfig`, the
+   ratings — sets the replay back to its capture time, so every following pass
+   retries it first, however far the forward feed has got, for at most an hour
+   from its first failure, however old the turn (then it is given up with a
    WARN; its next change or due time judges it). Nothing is written for it in
    the meantime: a session is never judged under default settings, or as
    silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns
