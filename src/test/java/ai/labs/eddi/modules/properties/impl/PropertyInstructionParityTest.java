@@ -263,7 +263,7 @@ class PropertyInstructionParityTest {
         var memory = memory(existing);
         var jsonSerialization = mock(IJsonSerialization.class);
         when(jsonSerialization.deserialize(anyString())).thenAnswer(invocation -> MAPPER.readValue((String) invocation.getArgument(0), Map.class));
-        var prePostUtils = new PrePostUtils(jsonSerialization, memoryItemConverter, templatingEngine, new DataFactory(),
+        var prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, new DataFactory(),
                 mock(SecretPropertyVault.class));
 
         prePostUtils.executePropertyInstructions(List.of(instruction), 200, false, memory, templateData());

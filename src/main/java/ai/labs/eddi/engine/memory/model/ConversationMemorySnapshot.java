@@ -177,6 +177,14 @@ public class ConversationMemorySnapshot {
      * {@code approvalContext}. Cleared with the bookmark.
      */
     private RenderedApprovalContext hitlApprovalContext;
+    /**
+     * The plan hash of the current pause (see {@code HitlPlanHash}): what an
+     * approval carries to bind to exactly this plan. {@code null} for a pause
+     * committed before plan hashing existed. Cleared with the bookmark.
+     *
+     * @since 6.8.0
+     */
+    private String hitlPlanHash;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     /**
@@ -695,6 +703,14 @@ public class ConversationMemorySnapshot {
 
     public void setHitlApprovalContext(RenderedApprovalContext hitlApprovalContext) {
         this.hitlApprovalContext = hitlApprovalContext;
+    }
+
+    public String getHitlPlanHash() {
+        return hitlPlanHash;
+    }
+
+    public void setHitlPlanHash(String hitlPlanHash) {
+        this.hitlPlanHash = hitlPlanHash;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
+import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.exception.AuthenticationException;
 import dev.langchain4j.exception.HttpException;
@@ -26,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -82,7 +85,9 @@ class HelperModelCallRetryTest {
         ChatModel model = mock(ChatModel.class);
         when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(model);
         when(model.chat(any(ChatRequest.class))).thenThrow(new InternalServerException("upstream")).thenReturn(reply("short summary"));
-        var truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), registry);
+        var variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        var truncator = new ToolResponseTruncator(new SimpleMeterRegistry(), registry, variables, mock(PaginatedResponseStore.class));
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(100);
         limits.setTruncationStrategy("summarize");

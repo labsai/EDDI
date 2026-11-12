@@ -4,7 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
+import { useChatLocation } from "@/location";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
 
@@ -110,21 +111,18 @@ function mockBackend(options: BackendOptions = {}) {
 }
 
 function LocationProbe() {
-  const location = useLocation();
+  const { location } = useChatLocation();
   return <span data-testid="location">{location.pathname + location.search}</span>;
 }
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-        </Routes>
+    <ChatProvider>
+      <ChatLocationProvider initialPath={path}>
+        <ChatWidget />
         <LocationProbe />
-      </ChatProvider>
-    </MemoryRouter>,
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 

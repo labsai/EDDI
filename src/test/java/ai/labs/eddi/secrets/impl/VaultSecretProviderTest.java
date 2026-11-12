@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider.SecretNotFoundException;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
@@ -113,7 +114,7 @@ class VaultSecretProviderTest {
      */
     private EncryptedSecret createEncryptedSecret(String plaintext, byte[] dek) {
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encrypt(plaintext, dek);
-        String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+        String checksum = VaultChecksum.legacy(plaintext);
         return new EncryptedSecret(
                 "secret-id-1", TENANT_ID, KEY_NAME,
                 encResult.ciphertext(), encResult.iv(),
