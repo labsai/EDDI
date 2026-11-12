@@ -565,7 +565,6 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.mcp.list.max-pages` | `20` | Most pages one paginated `tools/list`, `resources/list` or `resources/templates/list` may request. A server that keeps returning a cursor is stopped here, the discovery fails, and its client is dropped |
 | `eddi.mcp.list.max-items` | `2000` | Most entries one such listing may return across its pages |
 | `eddi.mcp.list.deadline-ms` | `30000` | Longest one such listing may take from its first page |
-| `eddi.mcp.client-cache.close-grace-ms` | `120000` | The MCP client cache holds at most 256 clients and drops one idle for 30 minutes; an evicted client is closed after this delay, so a tool call already running on it finishes. `0` closes at once |
 
 ### A2A
 

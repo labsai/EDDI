@@ -61,7 +61,6 @@ class McpListingBoundsTest {
         manager = new McpToolProviderManager(mock(GlobalVariableResolver.class), mock(SecretResolver.class), false,
                 McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
         manager.maxListPages = 3;
-        manager.clientCloseGraceMillis = 0;
     }
 
     @AfterEach

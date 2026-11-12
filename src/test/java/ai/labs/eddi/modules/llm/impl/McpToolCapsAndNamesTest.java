@@ -8,7 +8,6 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -16,8 +15,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,87 +25,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The client cache is bounded and closes what it evicts (after a grace), and a
- * server's tool contribution is bounded in count, in name shape and — for names
- * and descriptions as well as schemas — in bytes.
+ * A server's tool contribution is bounded in name shape and — for names and
+ * descriptions as well as schemas — in bytes; the per-agent count cap is read
+ * from here and applied after the whitelist (see
+ * McpToolsProviderDiscoveryTest). The client cache's own size and idle bound is
+ * PR #1401's, not tested here.
  */
-@DisplayName("McpToolProviderManager — bounded client cache and per-server tool caps")
-class McpClientCacheAndToolCapTest {
+@DisplayName("McpToolProviderManager — tool name rule, byte budget and per-server tool cap")
+class McpToolCapsAndNamesTest {
 
     private final GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
     private final SecretResolver secretResolver = mock(SecretResolver.class);
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, McpClient> clientCache(McpToolProviderManager manager) throws Exception {
-        Field field = McpToolProviderManager.class.getDeclaredField("clientCache");
-        field.setAccessible(true);
-        return (Map<String, McpClient>) field.get(manager);
-    }
-
-    private static long closedCount(List<McpClient> clients) {
-        return clients.stream()
-                .filter(c -> mockingDetails(c).getInvocations().stream().anyMatch(i -> "close".equals(i.getMethod().getName())))
-                .count();
-    }
-
-    @Nested
-    @DisplayName("client cache")
-    class ClientCache {
-
-        @Test
-        @DisplayName("past the size bound a client is evicted and closed — one probe per URL no longer leaves a client per URL")
-        void sizeBoundEvictsAndCloses() throws Exception {
-            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
-            manager.clientCloseGraceMillis = 0;
-            var cache = clientCache(manager);
-            List<McpClient> clients = new ArrayList<>();
-            for (int n = 0; n <= McpToolProviderManager.MAX_CACHED_CLIENTS; n++) {
-                McpClient client = mock(McpClient.class);
-                clients.add(client);
-                cache.put("https://host.example/mcp?n=" + n + "|anonymous|t30000", client);
-            }
-
-            assertEquals(McpToolProviderManager.MAX_CACHED_CLIENTS, manager.cleanUpClientCache());
-            assertEquals(1, closedCount(clients), "exactly the evicted client is closed");
-        }
-
-        @Test
-        @DisplayName("an evicted client is not closed under a running call: the close waits for the grace")
-        void evictionClosesAfterGrace() throws Exception {
-            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
-            manager.clientCloseGraceMillis = 60_000;
-            var cache = clientCache(manager);
-            List<McpClient> clients = new ArrayList<>();
-            for (int n = 0; n <= McpToolProviderManager.MAX_CACHED_CLIENTS; n++) {
-                McpClient client = mock(McpClient.class);
-                clients.add(client);
-                cache.put("https://host.example/mcp?n=" + n + "|anonymous|t30000", client);
-            }
-
-            manager.cleanUpClientCache();
-            assertEquals(0, closedCount(clients), "nothing is closed inside the grace");
-        }
-
-        @Test
-        @DisplayName("an explicit close still closes at once, exactly once")
-        void explicitCloseIsImmediate() throws Exception {
-            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
-            McpClient client = mock(McpClient.class);
-            clientCache(manager).put("https://host.example/mcp|anonymous|t30000", client);
-
-            manager.closeClient("https://host.example/mcp");
-            manager.cleanUpClientCache();
-
-            verify(client).close();
-        }
-    }
 
     private static McpServerConfig config() {
         var config = new McpServerConfig();
@@ -206,7 +139,7 @@ class McpClientCacheAndToolCapTest {
     }
 
     @Test
-    @DisplayName("a probe never touches the tool cache, so a cached agent list is not replaced by it either")
+    @DisplayName("a probe never writes the tool cache, so a cached agent list is not replaced by it")
     void probeSkipsToolCache() {
         var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
         ToolExecutor executor = (request, memoryId) -> "ok";

@@ -217,12 +217,10 @@ outruns scrubbing.
 
 Rotating a vault secret evicts cached MCP clients immediately, so the next call presents the new value.
 
-The client cache holds at most 256 clients (one per URL, credential and timeout)
-and drops one idle for 30 minutes, closing it after
-`eddi.mcp.client-cache.close-grace-ms` (default 2 minutes) so a call already
-running on it is not cut off. Clients run no background health-check ping. The
-`discover-tools` probe builds its client for the one listing and closes it — it
-never enters the cache.
+Clients run no background health-check ping. The `discover-tools` probe builds its
+client for the one listing and closes it — its client never enters the client
+cache, and its tool list is not cached. (The size and idle bound of the client
+cache itself comes with a separate change, PR #1401.)
 
 ### Network safety
 
