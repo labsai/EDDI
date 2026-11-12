@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -835,6 +836,11 @@ public class McpConversationTools {
                     LogSanitizer.sanitize(intent), LogSanitizer.sanitize(userId));
             meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", "chat_managed").increment();
             return errorJson("Access denied: you do not own this managed conversation");
+        } catch (IConversationService.AgentNotReadyException e) {
+            // Not a failure: no version of the trigger's agent is deployed yet (startup,
+            // rolling deploy). REST answers 503 with Retry-After for the same case.
+            LOGGER.infof("chat_managed: agent for intent %s not ready yet", LogSanitizer.sanitize(intent));
+            return errorJson("Agent for intent '" + intent + "' is not ready yet; retry shortly", "UNAVAILABLE", null);
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent", e);
@@ -940,17 +946,17 @@ public class McpConversationTools {
 
     /**
      * Get an existing user conversation for the intent+userId, or create a new one.
-     * Mirrors the logic from {@code RestAgentManagement.initUserConversation}.
+     * Claims the mapping the way {@code RestAgentManagement.initUserConversation}
+     * does: an ended mapping is deleted only while it still names the ended
+     * conversation, and a lost insert adopts the winner
+     * ({@link IUserConversationStore#createOrAdopt}). Unlike REST it also re-checks
+     * that the trigger still exists before reusing a mapping.
      */
     private UserConversation getOrCreateManagedConversation(String intent, String userId, Deployment.Environment env) throws Exception {
 
-        // Try to read existing conversation
-        UserConversation existing = null;
-        try {
-            existing = userConversationStore.readUserConversation(intent, userId);
-        } catch (IResourceStore.ResourceStoreException ignored) {
-            // Not found — will create
-        }
+        // A store failure is not "no mapping": creating one would orphan the
+        // conversation the user already has. The store answers null when none exists.
+        UserConversation existing = userConversationStore.readUserConversation(intent, userId);
 
         if (existing != null) {
             // Validate that the trigger still exists — if it was deleted,
@@ -990,8 +996,10 @@ public class McpConversationTools {
                 LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
                         intent, userId, existing.getConversationId());
             }
-            // Ended or stale — delete and create fresh
-            userConversationStore.deleteUserConversation(intent, userId);
+            // Ended or stale — replace it. Conditioned on the ended id: a concurrent
+            // call that replaced it already keeps its fresh mapping, and this one
+            // adopts that below.
+            userConversationStore.deleteUserConversationIfMatches(intent, userId, existing.getConversationId());
         }
 
         // Create a new conversation from the Agent trigger
@@ -1000,8 +1008,10 @@ public class McpConversationTools {
             throw new RuntimeException("No Agent trigger configured for intent: " + intent);
         }
 
-        // Pick first deployment
-        AgentDeployment deployment = trigger.getAgentDeployments().getFirst();
+        // A random deployment, as RestAgentManagement.selectAgentDeployment picks it:
+        // a trigger with several deployments spreads its users across them.
+        var deployments = trigger.getAgentDeployments();
+        AgentDeployment deployment = deployments.get(ThreadLocalRandom.current().nextInt(deployments.size()));
         String agentId = deployment.getAgentId();
         var usedEnv = deployment.getEnvironment() != null ? deployment.getEnvironment() : env;
 
@@ -1016,11 +1026,34 @@ public class McpConversationTools {
         var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
         String conversationId = convResult.conversationId();
 
-        // Store the user conversation mapping
-        var userConversation = new UserConversation(intent, userId, usedEnv, agentId, conversationId);
-        userConversationStore.createUserConversation(userConversation);
+        // Claim the mapping, or adopt the one a concurrent call stored first.
+        UserConversation claimed;
+        try {
+            claimed = userConversationStore.createOrAdopt(new UserConversation(intent, userId, usedEnv, agentId, conversationId));
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // Not claimed, so nothing reaches this conversation. Unchecked too: the
+            // MongoDB store lets driver failures through as they are.
+            endUnclaimedConversation(conversationId);
+            throw e;
+        }
+        if (!conversationId.equals(claimed.getConversationId())) {
+            endUnclaimedConversation(conversationId);
+        }
+        return claimed;
+    }
 
-        return userConversation;
+    /**
+     * Ends a conversation this call started but could not claim the mapping for, so
+     * it does not sit as a live conversation nobody can reach. Best effort, like
+     * the channel adapters' lost-create-race cleanup: the call already has the
+     * conversation it will use, or is failing for another reason.
+     */
+    private void endUnclaimedConversation(String conversationId) {
+        try {
+            conversationService.endConversation(conversationId, "system:lost-create-race");
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not end the unclaimed managed conversation %s", LogSanitizer.sanitize(conversationId));
+        }
     }
 
     /**

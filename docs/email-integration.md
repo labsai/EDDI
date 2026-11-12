@@ -1,6 +1,6 @@
 # Email Integration
 
-> **Since**: v6.6.0
+> **Since**: v6.7.0
 
 An **email integration** connects a mailbox to an agent: EDDI polls the mailbox over IMAP and every new mail starts
 one agent turn, with the mail as the turn's input and its attachments as files. It is a channel integration with
@@ -91,8 +91,22 @@ connection. `headerName` is required by the connection model but not used by a m
 }
 ```
 
-Gmail and Google Workspace are not supported yet: IMAP with XOAUTH2 there needs a per-user grant, which a polling job
-cannot hold without the run-as-principal mechanism the plan schedules for later.
+#### Gmail and Google Workspace
+
+**Not supported as an inbound channel today.** Gmail's IMAP takes OAuth through SASL `XOAUTH2`, and the token for a
+mailbox comes from an authorization-code grant: a person consents on Google's screen. EDDI files that grant `PER_USER`
+only — an `OAUTH2_AUTHORIZATION_CODE` connection must be bound `PER_USER`, the model refuses any other binding at save
+time — and a poll runs as no verified user, so it has no principal to look the grant up under. The integration is
+therefore refused at save: `platformConfig.connection` fails the check above with "is bound PER_USER, but a mailbox
+poll runs as no verified user".
+
+An **app password** over `BASIC`, with `imaps://imap.gmail.com` in the connection's allowlist (and
+`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not blocked by any code path — but it is **untested** with
+Gmail, and Google Workspace administrators commonly disable app passwords and IMAP access, so do not plan on it.
+
+What is planned: an admin-linked `SERVICE` grant (an administrator consents once for the integration's mailbox) and
+Workspace **domain-wide delegation**. Until then, Gmail and Drive work as **conversation tools** on each signed-in
+user's own account — see [Google Workspace](google-workspace.md).
 
 ### 2. The integration
 
@@ -154,7 +168,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `port` | `993` | `993` (TLS) or `143` (STARTTLS, required — never a plaintext login) |
 | `address` | — (required) | The mailbox address. Unique per deployment. Mail **from** it is always refused |
 | `folder` | `INBOX` | The one folder that is polled. Poll the folder that comes *after* the server's spam filtering |
-| `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there** |
+| `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there**. `label:<name>` is reserved for transports with labels (the Gmail API) and is refused for `imap`, which has none |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
 | `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)). Always `true` in conversation mode: `false` is refused |
 | `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains), at most 200 entries. Matched against the `From`, which without `requireAuthentication` anyone can forge |
@@ -327,8 +341,10 @@ One row per inbound mail per integration (`email_message_ledger`):
 `RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED`, the refusal or deferral reason in `lastError`. A deferred mail
 is `RECEIVED` with the time of its next attempt. A mail whose turn was refused after its conversation had started (a
 quota, a busy executor, a failed submission) keeps that conversation on its row, and the retry sends the turn there:
-the conversation's `CONVERSATION_START` runs once per mail, not once per attempt. Per mailbox, `email_mailbox_state` keeps the IMAP cursor (`UIDVALIDITY` plus the last settled UID), the poll back-off and the day's
-spend. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, deduplicated by the ledger and the
+the conversation's `CONVERSATION_START` runs once per mail, not once per attempt. Per mailbox, `email_mailbox_state` keeps the poll cursor, the poll back-off and the day's spend. The cursor is opaque
+to the poller and defined by the transport (`mailboxCursor` / `mailbox_cursor`, as `<transport>:<position>`); for IMAP
+it is `UIDVALIDITY` plus the last settled UID, also kept in the `uidValidity`/`lastUid` fields older versions read,
+so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, deduplicated by the ledger and the
 `$EddiProcessed` keyword.
 
 ## Operations

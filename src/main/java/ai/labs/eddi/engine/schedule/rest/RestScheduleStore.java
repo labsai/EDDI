@@ -259,7 +259,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             // re-check that they may still use the agent (shares with their teams
             // included) without a request around. Never taken from the body.
             schedule.setCreatorTeams(resourceAccessGuard.currentTeamSubjects());
-            schedule.setCreatorAdmin(resourceAccessGuard.callerIsAdmin());
+            schedule.setCreatorAdmin(resourceAccessGuard.isAdmin());
             schedule.setDisabledReason(null);
 
             // A caller must not seed a schedule with a persistent conversation it does

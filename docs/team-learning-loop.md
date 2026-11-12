@@ -98,7 +98,8 @@ POST /groupstore/groups/{groupId}/outcomes
   An external system uses a service account; the recorded principal is the authenticated caller, never a body field.
 - **201** when stored, **200** with the stored event when the `idempotencyKey` was already stored (scoped to the team, so
   a retrying webhook stores once), **400** invalid, **404** no such task on the team's backlog, **409** outcomes are not
-  enabled for the group (add `outcomeConfig`) or the subject is full.
+  enabled for the group (add `outcomeConfig`) or the subject is full. The subject cap is checked and the event stored in
+  one step, so concurrent posts into a subject's last free place store one event, not one each.
 - `kind` is required. `kind`, `metric`, `unit`, `source` and `idempotencyKey` are tokens of the same character set, at most 64, 100, 32, 100 and 128 characters; `subjectId` at most 200; `value` must be finite.
 - `GET /groupstore/groups/{groupId}/outcomes[?subjectId=…&limit=…]` reads them back, newest first (`limit` default 50, at most 200).
 - A permanent group deletion removes the team's outcomes. A GDPR erasure keeps them (they describe work, not a person) and

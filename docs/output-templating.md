@@ -170,7 +170,7 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 | --- | --- | --- |
 | `json` | `{json:serialize(obj)}` | Serialise a value to JSON text |
 | `json` | `{json:deserialize(text)}` | Parse JSON text into a map or list |
-| `encoder` | `{encoder:base64(data)}` | Base64 encode (also `base64Url`, `base64Mime`) |
+| `encoder` | `{encoder:base64(data)}` | Base64 encode (also `base64Url`, `base64Mime`; `mimeHeader` writes a mail header value as folded RFC 2047 encoded words) |
 
 ### What a template can reach
 

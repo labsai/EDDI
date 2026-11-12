@@ -700,7 +700,10 @@ POST /groupstore/templates/{id}/instantiate      {"name": "...", "roleAssignment
 ```
 
 MCP: `list_group_templates`, `create_group_from_template`. Missing or unknown
-roles fail loudly, naming the template's real roles.
+roles fail loudly, naming the template's real roles. The group is saved through
+the normal store path, so an assigned agent you may not use is refused there,
+exactly as for a hand-written config: `403` over REST, and
+`"errorCode": "FORBIDDEN"` from the MCP tool.
 
 | Template | Style | What it packages |
 |---|---|---|
@@ -1347,6 +1350,13 @@ split is internal.
 | `list_team_backlog` | Read a standing team's backlog |
 | `list_group_templates` | List the preset group templates (I10) |
 | `create_group_from_template` | Create a group from a template + role assignments |
+
+`discuss_with_group`, `start_group_discussion`, `followup_with_member` and
+`continue_group_discussion` hold their arguments to the REST request ceilings: a
+question is required and at most 50,000 characters, and `userId` and
+`targetAgentId` at most 256. A refusal is
+`{"error": "…", "errorCode": "BAD_REQUEST"}`, returned before anything is read
+or run.
 
 ## Slack Integration
 

@@ -11,6 +11,9 @@ import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.TransientDeployments;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -68,8 +71,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -227,6 +233,30 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
     @Inject
     IClusterEventBus clusterEvents;
+
+    /**
+     * Holds {@link #DOCUMENT_MIGRATIONS_LEASE} while the document migrations run;
+     * see {@link #runDocumentMigrations()}. The local manager (single node) grants
+     * it at once. Field-injected; null in tests built with {@code new}, which then
+     * run the migrations without it.
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    /**
+     * The cluster lease the document migrations run under. Not a {@code leader.}
+     * key: a drained node hands those back at once, which would let a second node
+     * start the pass while this one is still writing.
+     */
+    static final String DOCUMENT_MIGRATIONS_LEASE = "migration.documents";
+
+    /**
+     * How long a node waits for another node's document migrations. The holder
+     * renews the lease only while it is alive, so a node that crashed mid-pass is
+     * taken over after the lease TTL; this bound only matters for a live holder
+     * that is still working. Readiness is DOWN for the whole wait.
+     */
+    Duration documentMigrationsLeaseWait = Duration.ofMinutes(15);
 
     /**
      * Cluster mode: the shared record of {@code autoDeploy=false} deployments,
@@ -777,7 +807,86 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    /**
+     * Runs the document migrations under the cluster lease
+     * {@link #DOCUMENT_MIGRATIONS_LEASE}, so that replicas starting together do not
+     * run them at the same time.
+     * <p>
+     * Each migration checks its completion flag and writes it at the end, with
+     * nothing in between that another node could see. Two nodes starting together
+     * both found the flag unset and both ran the pass: the in-place rewrites of the
+     * Qute and access-index migrations converge on the same result, but the channel
+     * connector migration <em>creates</em> a configuration per channel, under a
+     * fresh id each time, and its duplicate check could not see what the other node
+     * was creating at that moment, so every channel was migrated once per node.
+     * <p>
+     * A node that waits gets the lease once the holder is done and then finds every
+     * flag set, so the pass is a no-op there. A node that cannot get the lease
+     * within {@link #documentMigrationsLeaseWait}, or because NATS is unreachable
+     * and the degraded policy is {@code reject}, skips the pass: whatever the other
+     * node does not finish is retried on the next start, as for any failed
+     * migration. Under the {@code local} degraded policy the lease comes back
+     * unfenced and the pass runs, as a turn would.
+     */
     private void runDocumentMigrations() {
+        if (leaseManager == null) {
+            runDocumentMigrationsNow();
+            return;
+        }
+        LeaseHandle lease = acquireDocumentMigrationsLease();
+        if (lease == null) {
+            return;
+        }
+        try {
+            runDocumentMigrationsNow();
+        } finally {
+            try {
+                leaseManager.release(lease);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not release the document-migration lease (it expires on its own): %s", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The document-migration lease, or {@code null} when this node skips the pass.
+     */
+    private LeaseHandle acquireDocumentMigrationsLease() {
+        CompletableFuture<LeaseHandle> pending = leaseManager.acquireKey(DOCUMENT_MIGRATIONS_LEASE, documentMigrationsLeaseWait)
+                .toCompletableFuture();
+        try {
+            // A little longer than the lease manager's own deadline, which answers first.
+            long waitMillis = documentMigrationsLeaseWait.toMillis();
+            return pending.get(waitMillis + Math.min(30_000, waitMillis), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pending.cancel(false);
+            LOGGER.warn("Interrupted while waiting for the document-migration lease — skipping the document migrations; "
+                    + "they are retried on the next start.");
+        } catch (TimeoutException e) {
+            // Completing the future here makes a grant that arrives later hand the lease
+            // straight back.
+            pending.cancel(false);
+            LOGGER.warnf("Another node has held the document-migration lease for more than %s — skipping the document "
+                    + "migrations here; whatever that node does not finish is retried on the next start.",
+                    documentMigrationsLeaseWait);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof LeaseUnavailableException unavailable
+                    && unavailable.reason() == LeaseUnavailableException.Reason.TIMEOUT) {
+                LOGGER.warnf("Another node has held the document-migration lease for more than %s — skipping the document "
+                        + "migrations here; whatever that node does not finish is retried on the next start.",
+                        documentMigrationsLeaseWait);
+            } else {
+                LOGGER.warnf("Could not take the document-migration lease (%s) — skipping the document migrations, so "
+                        + "that two nodes cannot run them at once; they are retried on the next start.",
+                        cause == null ? e.getMessage() : cause.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private void runDocumentMigrationsNow() {
         try {
             v6QuteMigration.runIfNeeded();
         } catch (Exception e) {

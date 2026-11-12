@@ -13,8 +13,11 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore.MailboxState;
 import ai.labs.eddi.integrations.email.transport.ImapMailTransport;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
+import ai.labs.eddi.integrations.email.transport.MailTransport.Batch;
+import ai.labs.eddi.integrations.email.transport.MailTransport.Entry;
 import ai.labs.eddi.integrations.email.transport.MailTransport.MailboxMessage;
 import ai.labs.eddi.integrations.email.transport.MailTransport.MailboxSession;
+import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -35,19 +38,22 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * schedule (email plan §7.1). The schedule's cluster-wide claim means one node
  * polls a mailbox at a time.
  * <p>
- * <b>The cursor.</b> {@code UIDVALIDITY} plus the last UID up to which every
- * message is settled, in {@link IEmailMailboxStateStore}. A deferred message (a
- * budget, a temporary authentication result, a quota) holds the cursor back, so
- * it is seen again; later messages are still processed, and when they come
- * round again the ledger or the {@code $EddiProcessed} keyword settles them
- * without a download. A changed {@code UIDVALIDITY} starts the folder over,
+ * <b>The cursor.</b> A {@link MailboxCursor} the transport defines (IMAP:
+ * {@code UIDVALIDITY} plus the last UID up to which every message is settled),
+ * in {@link IEmailMailboxStateStore}; the poller never reads inside it. A
+ * deferred message (a budget, a temporary authentication result, a quota) holds
+ * the cursor back, so it is seen again; later messages are still processed, and
+ * when they come round again the ledger or the {@code $EddiProcessed} keyword
+ * settles them without a download. A cursor the transport can no longer
+ * continue from (IMAP: a changed {@code UIDVALIDITY}) starts the folder over,
  * deduplicated by the ledger and the keyword, and is counted.
  * <p>
  * <b>Mail that predates the integration is not processed.</b> The first poll
- * starts the cursor at {@code UIDNEXT} and records the instant; mail whose
- * {@code INTERNALDATE} is older is skipped on every later scan, a rescan after
- * a {@code UIDVALIDITY} change included. Connecting an integration to a full
- * mailbox does not make the agent work through years of mail.
+ * starts the cursor at the transport's start cursor (IMAP: {@code UIDNEXT}) and
+ * records the instant; mail whose {@code INTERNALDATE} is older is skipped on
+ * every later scan, a rescan after a cursor reset included. Connecting an
+ * integration to a full mailbox does not make the agent work through years of
+ * mail.
  * <p>
  * <b>Bounded work.</b> At most {@code eddi.email.poll.max-messages-per-poll}
  * messages are processed and {@code eddi.email.poll.max-duration} spent per
@@ -72,7 +78,7 @@ public class EmailMailboxPoller {
     /**
      * Slack on the "older than the integration" rule: {@code INTERNALDATE} has
      * whole-second precision and server clocks drift, so mail delivered just around
-     * the first poll is never mistaken for old mail. (The UID cursor already
+     * the first poll is never mistaken for old mail. (The start cursor already
      * excludes pre-existing mail; this rule matters for rescans.)
      */
     static final Duration SINCE_GRACE = Duration.ofMinutes(5);
@@ -164,38 +170,38 @@ public class EmailMailboxPoller {
         }
         var context = new IntegrationContext(id, integration.configuration(), settings, directory.otherAddresses(id));
         try (MailboxSession session = transport.open(id, settings)) {
-            long uidValidity = session.uidValidity();
             boolean sameFolder = state.isPresent() && settings.folder().equals(state.get().folder());
-            long lastUid;
             Instant since;
-            if (state.isEmpty() || state.get().uidValidity() == 0 || !sameFolder) {
+            if (state.isEmpty() || state.get().cursor() == null || !sameFolder) {
                 // First poll of this folder: start after what is already there.
-                lastUid = Math.max(0, session.uidNext() - 1);
+                MailboxCursor start = session.startCursor();
                 since = state.isPresent() && state.get().since() != null && sameFolder ? state.get().since() : started;
-                stateStore.saveCursor(id, settings.folder(), uidValidity, lastUid, since, started);
+                stateStore.saveCursor(id, settings.folder(), start, since, started);
                 return new PollReport(false, "Cursor initialised; mail delivered from now on is processed.");
             }
             int resubmitted = resubmit(context, session, settings);
             since = state.get().since();
-            lastUid = state.get().lastUid();
-            if (state.get().uidValidity() != uidValidity) {
-                LOGGER.warnf("Email integration %s: UIDVALIDITY of '%s' changed — rescanning the folder, deduplicated by the ledger",
-                        sanitize(id), sanitize(settings.folder()));
+            // Envelopes are cheap; they are listed beyond the processing cap so skipped
+            // (already flagged, too old) messages do not stall the cursor.
+            Batch batch = session.messagesAfter(state.get().cursor(), maxMessagesPerPoll * 20);
+            if (batch.cursorReset()) {
+                LOGGER.warnf("Email integration %s: the cursor of '%s' can no longer be continued (IMAP: UIDVALIDITY changed) — rescanning "
+                        + "the folder, deduplicated by the ledger", sanitize(id), sanitize(settings.folder()));
                 metrics.cursorReset(id, settings);
-                lastUid = 0;
             }
-            long settledUpTo = lastUid;
+            MailboxCursor settledUpTo = batch.start();
             boolean contiguous = true;
+            boolean listedToTheEnd = true;
             int processed = 0;
             int marked = 0;
             int deferred = 0;
             Instant deadline = started.plus(maxDuration);
-            // Envelopes are cheap; they are listed beyond the processing cap so skipped
-            // (already flagged, too old) messages do not stall the cursor.
-            for (MailboxMessage message : session.messagesAfter(lastUid, maxMessagesPerPoll * 20)) {
+            for (Entry entry : batch.entries()) {
                 if (processed >= maxMessagesPerPoll || Instant.now().isAfter(deadline)) {
+                    listedToTheEnd = false;
                     break;
                 }
+                MailboxMessage message = entry.message();
                 Disposition disposition;
                 if (message.alreadyProcessed()
                         || (since != null && message.internalDate() != null && message.internalDate().isBefore(since.minus(SINCE_GRACE)))) {
@@ -221,7 +227,7 @@ public class EmailMailboxPoller {
                 }
                 if (disposition == null || disposition == Disposition.SETTLED) {
                     if (contiguous) {
-                        settledUpTo = message.uid();
+                        settledUpTo = entry.settles();
                     }
                     continue;
                 }
@@ -231,7 +237,12 @@ public class EmailMailboxPoller {
                     break;
                 }
             }
-            stateStore.saveCursor(id, settings.folder(), uidValidity, settledUpTo, since, Instant.now());
+            if (contiguous && listedToTheEnd) {
+                // Everything listed is settled: the batch's end, which for a history-based
+                // transport may lie past the last message.
+                settledUpTo = batch.end();
+            }
+            stateStore.saveCursor(id, settings.folder(), settledUpTo, since, Instant.now());
             return new PollReport(false,
                     processed + " processed, " + marked + " marked, " + deferred + " deferred"
                             + (resubmitted > 0 ? ", " + resubmitted + " resubmitted" : ""));
@@ -277,11 +288,6 @@ public class EmailMailboxPoller {
     /** A message found again, as the processor reads one. */
     static MailboxMessage refetched(String messageId, MailTransport.FoundMessage found) {
         return new MailboxMessage() {
-            @Override
-            public long uid() {
-                return -1;
-            }
-
             @Override
             public String envelopeMessageId() {
                 return messageId;

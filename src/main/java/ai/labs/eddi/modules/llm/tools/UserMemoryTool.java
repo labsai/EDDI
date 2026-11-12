@@ -65,7 +65,11 @@ public class UserMemoryTool {
     private final AgentConfiguration.UserMemoryConfig config;
     private final AgentConfiguration.Guardrails guardrails;
     private final BooleanSupplier turnDiscarded;
-    private int writesThisTurn = 0;
+    /**
+     * Writes this turn — remembers and forgets alike — against
+     * {@code maxWritesPerTurn}.
+     */
+    private final TurnCounter writesThisTurn;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config) {
@@ -82,6 +86,19 @@ public class UserMemoryTool {
      */
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, TurnCounter.local());
+    }
+
+    /**
+     * @param writesThisTurn
+     *            the turn's write count, which {@code maxWritesPerTurn} bounds.
+     *            Pass {@link TurnCounter#onStep} so every instance built during one
+     *            turn — one per cascade step, another on a HITL resume — spends the
+     *            same budget; {@code null} counts per instance.
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn) {
+        this.writesThisTurn = writesThisTurn != null ? writesThisTurn : TurnCounter.local();
         this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
         this.userId = userId;
@@ -186,9 +203,8 @@ public class UserMemoryTool {
             }
 
             // Guardrail: write-rate limit
-            if (writesThisTurn >= guardrails.getMaxWritesPerTurn()) {
-                return ("⚠️ Maximum writes per turn (%d) reached. Do not retry this turn — tell the user which facts were not "
-                        + "saved; they can be saved in the next turn.").formatted(guardrails.getMaxWritesPerTurn());
+            if (writeBudgetSpent()) {
+                return writeLimitRefusal();
             }
 
             // Check capacity — returns a user-facing message when the write must not
@@ -266,7 +282,7 @@ public class UserMemoryTool {
                     return overCap;
                 }
             }
-            writesThisTurn++;
+            writesThisTurn.increment();
 
             LOGGER.debugf("[MEMORY] Tool rememberFact: user='%s', key='%s', category='%s', visibility='%s'", userId, key, normalizedCategory, vis);
 
@@ -353,11 +369,17 @@ public class UserMemoryTool {
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
             }
+            // A deletion is a write: without the budget, one injected "forget everything"
+            // deleted every memory of the user this agent owns in a single turn.
+            if (writeBudgetSpent()) {
+                return writeLimitRefusal();
+            }
             if (turnDiscarded.getAsBoolean()) {
                 return TURN_DISCARDED_REFUSAL;
             }
 
             store.deleteEntry(target.id());
+            writesThisTurn.increment();
             LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s'", userId, key);
 
             return "✅ Forgotten: %s".formatted(key);
@@ -366,6 +388,15 @@ public class UserMemoryTool {
             LOGGER.errorf("[MEMORY] Failed to forget fact: %s", e.getMessage());
             return "❌ Failed to forget memory: " + e.getMessage();
         }
+    }
+
+    private boolean writeBudgetSpent() {
+        return writesThisTurn.get() >= guardrails.getMaxWritesPerTurn();
+    }
+
+    private String writeLimitRefusal() {
+        return ("⚠️ Maximum writes per turn (%d) reached. Do not retry this turn — tell the user which facts were not "
+                + "saved or forgotten; that can be done in the next turn.").formatted(guardrails.getMaxWritesPerTurn());
     }
 
     /**
