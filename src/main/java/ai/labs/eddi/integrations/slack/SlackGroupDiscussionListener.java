@@ -459,7 +459,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // older card for the same discussion cannot approve a later phase.
             String subject = SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId;
             String cardId = ISlackApprovalRecordStore.newCardId();
-            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId);
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId, event.planHash());
 
             // Record the card BEFORE posting it, keyed by this pause's identity: the
             // interactivity endpoint refuses a decision on a subject this integration

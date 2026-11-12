@@ -367,6 +367,20 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The plan hash of the current pause (see {@code HitlPlanHash}) — what an
+     * approval carries to bind to exactly this plan; null for a pause committed
+     * before plan hashing existed.
+     *
+     * @since 6.8.0
+     */
+    default String getHitlPlanHash() {
+        return null;
+    }
+
+    default void setHitlPlanHash(String planHash) {
+    }
+
+    /**
      * How this conversation's {@link #getUserId()} came to be, fixed when the
      * conversation was created and persisted with it.
      * <p>

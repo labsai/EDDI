@@ -310,6 +310,8 @@ Check if another `Behavior Rule` has met it's condition or not in the same `conv
 (...)
 ```
 
+`reference` is **required** and validated when the ruleset is loaded — without it the condition could only fail. A reference that names no rule fails the condition. Several rules may share the referenced name; the condition succeeds if any of them does.
+
 ### Action Matcher
 
 As `inputMatcher` doesn't look at expressions but it looks for actions instead, imagine a `Behavior Rule` has been triggered and you want to check if that action has been triggered before.
@@ -395,21 +397,20 @@ anything.
 {
   "type": "deploymentContext",
   "configs": {
-    "when": "production",
-    "tagMatches": "high-risk"
+    "when": "production"
   }
 }
 (...)
 ```
 
-| Config       | Type   | Description                                                                       |
-| ------------ | ------ | --------------------------------------------------------------------------------- |
-| `when`       | string | Optional. Matched against the current deployment environment; skipped when absent or blank |
-| `tagMatches` | string | Optional. When set, the `agent:tags` list in the current step's memory must also contain this value (case-insensitive) — see the note below |
+| Config | Type   | Description                                                                                          |
+| ------ | ------ | ---------------------------------------------------------------------------------------------------- |
+| `when` | string | Matched against the current deployment environment, ignoring case. A rule without it (or with a blank value) matches in every environment, which is rarely what anyone means — set it |
 
-Both are optional and both are checked when set, so a rule carrying only `tagMatches` matches on
-the tag alone in every environment. A rule with neither matches everywhere, which is rarely what
-anyone means — set at least one.
+A `tagMatches` config is refused when the ruleset is saved or deployed, with an error naming the
+rule. It was meant to match the agent's tags, but agents carry no tags, so a rule with it never
+fired. To vary behavior per agent, match a value the client sends with a `contextmatcher`, or give
+the agents different rulesets.
 
 `when` is compared case-insensitively. The environment is the MicroProfile Config property
 `eddi.deployment.env` (a system property, the environment variable `EDDI_DEPLOYMENT_ENV`, or

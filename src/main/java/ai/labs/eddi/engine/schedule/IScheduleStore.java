@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.IResourceStore;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -299,42 +300,70 @@ public interface IScheduleStore {
     // --- Polling & Claiming ---
 
     /**
-     * Find schedules that are due to fire. Returns schedules where: - enabled =
-     * true - nextFire <= now - fireStatus = PENDING, OR (fireStatus = CLAIMED AND
-     * claimedAt <= leaseExpiry) - OR (fireStatus = FAILED AND nextRetryAt <= now
-     * AND failCount < maxRetries)
+     * Find schedules that are due to fire: enabled, {@code nextFire <= now}, and
+     * either PENDING, CLAIMED with an expired lease, or FAILED with
+     * {@code nextRetryAt <= now} and {@code failCount < maxRetries}.
+     * <p>
+     * A lease is expired when {@code claimedAt} is at least {@code lease} old
+     * <em>by the database's clock</em>, which also writes {@code claimedAt} (see
+     * {@link #tryClaim}).
      *
      * @param now
-     *            current time
-     * @param leaseExpiry
-     *            cutoff for expired leases (now - leaseTimeout)
+     *            current time on this instance; decides due-ness and retry
+     *            readiness only
+     * @param lease
+     *            how long a claim is held before another instance may take it over
      * @param maxRetries
      *            maximum retry attempts before dead-lettering
      * @return list of due schedules
      */
-    List<ScheduleConfiguration> findDueSchedules(Instant now, Instant leaseExpiry, int maxRetries) throws IResourceStore.ResourceStoreException;
+    List<ScheduleConfiguration> findDueSchedules(Instant now, Duration lease, int maxRetries) throws IResourceStore.ResourceStoreException;
 
     /**
-     * Atomically claim a schedule for this instance. Uses CAS (compare-and-swap):
-     * succeeds only if the schedule is still in a claimable state — PENDING, a
-     * retryable FAILED (retryAt <= now), or a CLAIMED row whose lease has expired
-     * (claimedAt <= leaseExpiry). The lease-expired CLAIMED case lets a crashed or
-     * wedged instance's schedule be reclaimed; it MUST match what
-     * {@link #findDueSchedules} returns, or such rows are fetched every poll but
-     * never re-fired.
+     * Atomically claim a due schedule for this instance — the poller's claim. Uses
+     * CAS (compare-and-swap): succeeds only if the schedule is still enabled, still
+     * due ({@code nextFire <= now}) and still in a claimable state — PENDING, a
+     * retryable FAILED (retryAt <= now), or a CLAIMED row whose lease has expired.
+     * The lease-expired CLAIMED case lets a crashed or wedged instance's schedule
+     * be reclaimed; it MUST match what {@link #findDueSchedules} returns, or such
+     * rows are fetched every poll but never re-fired.
+     * <p>
+     * <b>Why the claim re-checks due-ness.</b> A poll batch is read once and then
+     * claimed row by row. A row that another instance claimed, fired and re-armed
+     * in between is PENDING again, but with a future {@code nextFire}; a claim on
+     * state alone took it and fired the same slot a second time, under a new
+     * {@code fireId} nothing downstream could tell apart from the first. A caller
+     * that may fire before the due time uses {@link #tryClaimAnyTime}.
+     * <p>
+     * <b>Leases are judged by the database's clock.</b> {@code claimedAt} is
+     * written by the database and the lease's age is measured against the same
+     * clock, so instances whose clocks disagree cannot take over each other's live
+     * claims. Judged on the claimers' own clocks, an instance running ahead by more
+     * than the lease minus the fire timeout stole a claim whose fire was still
+     * running.
      *
      * @param scheduleId
      *            schedule to claim
      * @param instanceId
      *            this instance's unique identifier
      * @param now
-     *            current time
-     * @param leaseExpiry
-     *            cutoff for stealing an expired lease (now - leaseTimeout); a
-     *            CLAIMED row with claimedAt <= this is reclaimable
+     *            current time on this instance; decides due-ness and retry
+     *            readiness, and keys the claim's {@link #fireIdOf fireId}
+     * @param lease
+     *            how long a claim is held: a CLAIMED row whose {@code claimedAt} is
+     *            at least this old by the database's clock is reclaimable
      * @return true if this instance successfully claimed the schedule
      */
-    boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException;
+    boolean tryClaim(String scheduleId, String instanceId, Instant now, Duration lease) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * {@link #tryClaim} without the due check: claims a schedule whose
+     * {@code nextFire} has not arrived yet. For a manual fire ({@code POST
+     * /schedules/{id}/fire}, {@code fire_schedule_now}), which an operator may
+     * trigger at any time. Every other condition of the claim — enabled, claimable
+     * state, a live lease never taken over — applies unchanged.
+     */
+    boolean tryClaimAnyTime(String scheduleId, String instanceId, Instant now, Duration lease) throws IResourceStore.ResourceStoreException;
 
     /**
      * The idempotency key {@link #tryClaim} persists for a claim.

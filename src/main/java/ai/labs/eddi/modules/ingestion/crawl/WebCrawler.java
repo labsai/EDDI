@@ -423,10 +423,13 @@ public class WebCrawler {
             if (link.attr("rel").toLowerCase().contains("nofollow")) {
                 continue;
             }
+            // jsoup resolves href="my doc.html" without encoding the space, and the
+            // fetcher's URI.create refuses it: the request goes out encoded.
+            String fetchUrl = CrawlUrls.fetchable(href);
             // The bound applies to the URL that will be fetched: canonicalizing drops
             // tracking parameters, so a short canonical id must not let an oversized
             // href through.
-            if (CrawlUrls.stripFragment(href).length() > MAX_LINK_LENGTH) {
+            if (fetchUrl.isEmpty() || fetchUrl.length() > MAX_LINK_LENGTH) {
                 continue;
             }
             String canonical = CrawlUrls.canonicalize(href);
@@ -438,7 +441,6 @@ public class WebCrawler {
             }
             // Both strings are retained, and a short relative link inherits the whole of
             // a long base URL: the count cap alone lets one page pin gigabytes.
-            String fetchUrl = CrawlUrls.stripFragment(href);
             long cost = (long) canonical.length() + fetchUrl.length();
             if (!frontier.admit(cost)) {
                 counters.discoveryIncomplete = true;
@@ -559,9 +561,10 @@ public class WebCrawler {
                     counters.discoveryIncomplete = true;
                     break;
                 }
-                // Bounded as fetched, before canonicalization drops tracking parameters
-                // (see enqueueLinks).
-                if (url == null || CrawlUrls.stripFragment(url).length() > MAX_LINK_LENGTH) {
+                // Encoded and bounded as fetched, before canonicalization drops tracking
+                // parameters (see enqueueLinks)
+                String fetchUrl = CrawlUrls.fetchable(url);
+                if (fetchUrl.isEmpty() || fetchUrl.length() > MAX_LINK_LENGTH) {
                     continue;
                 }
                 String canonical = CrawlUrls.canonicalize(url);
@@ -569,7 +572,7 @@ public class WebCrawler {
                 // anything at all — so it earns no exemption from the scope.
                 if (!canonical.isEmpty() && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
-                    frontier.queue.add(new Candidate(CrawlUrls.stripFragment(url), canonical, 0, false));
+                    frontier.queue.add(new Candidate(fetchUrl, canonical, 0, false));
                     pagesFromSitemaps++;
                     counters.sitemapPages++;
                 }

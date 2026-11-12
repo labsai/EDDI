@@ -153,6 +153,53 @@ class DependencyTest {
         }));
     }
 
+    /**
+     * Rule names are optional, so a ruleset can hold an unnamed rule. Dependency
+     * used to call {@code getName().equals(reference)} on every rule of the set, so
+     * one unnamed rule anywhere turned every dependency evaluation into a
+     * NullPointerException that failed the turn.
+     */
+    @Test
+    void anUnnamedRuleInTheSetDoesNotBreakTheLookup() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var unnamed = new Rule(null);
+        unnamed.setConditions(List.of(succeeding()));
+        var b = new Rule("b");
+        b.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(unnamed, b)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        var state = TemplateDataScope.call(memory, () -> dependencyOn("b", ruleSet).execute(memory, new ArrayList<>()));
+
+        assertEquals(IRuleCondition.ExecutionState.SUCCESS, state);
+    }
+
+    @Test
+    void validateConfiguration_missingReference_isRefused() {
+        var thrown = assertThrows(IllegalArgumentException.class, () -> new Dependency().validateConfiguration());
+
+        assertTrue(thrown.getMessage().contains("dependency"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("reference"), thrown.getMessage());
+    }
+
+    @Test
+    void validateConfiguration_blankReference_isRefused() {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", "  "));
+
+        assertThrows(IllegalArgumentException.class, dependency::validateConfiguration);
+    }
+
+    @Test
+    void validateConfiguration_withReference_passes() {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", "greetingRule"));
+
+        assertDoesNotThrow(dependency::validateConfiguration);
+    }
+
     private static Dependency dependencyOn(String reference, RuleSet ruleSet) {
         var dependency = new Dependency();
         dependency.setConfigs(Map.of("reference", reference));

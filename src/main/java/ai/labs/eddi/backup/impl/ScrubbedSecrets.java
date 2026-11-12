@@ -6,6 +6,7 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
+import ai.labs.eddi.utils.EndpointParameters;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -162,10 +163,10 @@ final class ScrubbedSecrets {
 
     /**
      * Whether this source object sends its requests to a different place than its
-     * target counterpart: a field naming a destination (any key ending in
-     * {@code url} such as {@code targetServerUrl} or {@code baseUrl}, or
-     * {@code uri}, {@code endpoint}, {@code host}, {@code hostname}, or a
-     * {@code path} that is an absolute URL on either side) whose origin differs.
+     * target counterpart: a field naming a destination (any key
+     * {@link EndpointParameters#isEndpointKey} accepts — {@code targetServerUrl},
+     * {@code baseUrl}, {@code apiEndpoint}, {@code host}, … — or a {@code path}
+     * that is an absolute URL on either side) whose origin differs.
      * <p>
      * A literal credential the target holds was authorised for the target's
      * destination; editors cannot read it back, which is the whole point of hiding
@@ -215,14 +216,12 @@ final class ScrubbedSecrets {
     }
 
     private static boolean isDestinationField(String key, String sourceValue, String targetValue) {
-        String normalized = key.toLowerCase(Locale.ROOT);
-        if (normalized.endsWith("url") || normalized.equals("uri") || normalized.equals("endpoint")
-                || normalized.equals("host") || normalized.equals("hostname")) {
+        if (EndpointParameters.isEndpointKey(key)) {
             return true;
         }
         // A relative path stays on the host its targetServerUrl names, which is
         // compared on its own; an absolute one is a destination in itself.
-        return normalized.equals("path") && (isAbsolute(sourceValue) || isAbsolute(targetValue));
+        return key.equalsIgnoreCase("path") && (isAbsolute(sourceValue) || isAbsolute(targetValue));
     }
 
     /**

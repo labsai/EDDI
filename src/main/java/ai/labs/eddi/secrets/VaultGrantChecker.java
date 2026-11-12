@@ -168,7 +168,8 @@ public class VaultGrantChecker {
      * metadata cannot be read — vault disabled, secret absent, provider error — is
      * skipped: "could not determine the grant" is not "the grant is missing", and a
      * deployment gate that fires on a transient store failure is worse than the
-     * hole it closes.
+     * hole it closes. A provider error is logged at WARN, naming the agent and the
+     * reference, so a deploy that went through unchecked can be found.
      * <p>
      * An absent secret has no grant to check yet, and deploying before it exists is
      * a supported flow (agent sync promotes a workflow to an instance that does not
@@ -461,15 +462,31 @@ public class VaultGrantChecker {
      * grant lists all allow — those are the shapes that mean "not restricted", and
      * the wizard writes the wildcard for every key it vaults. A secret that does
      * not exist, or whose grant cannot be read, is not a violation (see
-     * {@link #findUngrantedReferences(AgentConfiguration, String)}).
+     * {@link #findUngrantedReferences(AgentConfiguration, String)}) — but a grant
+     * that cannot be read is logged at WARN, since the check was skipped.
      */
     private boolean isGranted(String reference, String agentId) {
+        SecretReference secret;
+        try {
+            secret = SecretReference.parse(reference);
+        } catch (IllegalArgumentException e) {
+            // Resolves to nothing at runtime either, so it reaches no secret.
+            LOGGER.debugf("Ignoring unparseable vault reference %s in agent '%s'", sanitize(reference), sanitize(agentId));
+            return true;
+        }
         SecretMetadata metadata;
         try {
-            metadata = secretProvider.getMetadata(SecretReference.parse(reference));
+            metadata = secretProvider.getMetadata(secret);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            // Deploying before the secret exists is a supported flow; its grant is
+            // checked when it is created.
+            return true;
         } catch (Exception e) {
-            LOGGER.debugf("Could not read grant metadata for %s (%s) — not treating it as a violation",
-                    sanitize(reference), e.getClass().getSimpleName());
+            // Let through, as the class contract chooses, but not quietly: the resolver
+            // checks no grants, so a deploy is the one place a grant on this secret
+            // is enforced, and here it was not.
+            LOGGER.warnf("Could not verify the vault grant of %s for agent '%s' (%s); treating it as granted",
+                    sanitize(reference), sanitize(agentId), e.getClass().getSimpleName());
             return true;
         }
         if (metadata == null || metadata.allowedAgents() == null || metadata.allowedAgents().isEmpty()) {

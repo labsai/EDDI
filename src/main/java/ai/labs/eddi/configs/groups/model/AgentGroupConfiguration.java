@@ -1910,6 +1910,26 @@ public class AgentGroupConfiguration {
         private HitlGranularity granularity = HitlGranularity.PHASE;
         private HitlRejectionPolicy onTaskRejection = HitlRejectionPolicy.FAIL;
 
+        /**
+         * Strict plan binding: a human decision on this group's pauses must carry the
+         * pause's {@code planHash} (from approval-status), or it is refused with a 400
+         * and the pause stays. Absent or {@code false} = a decision without the hash is
+         * accepted and logged, as clients that predate plan hashing send it. The
+         * deployment property {@code eddi.hitl.plan-hash.strict} turns it on for every
+         * group. Automated decisions (timeouts) are never refused for it.
+         *
+         * @since 6.8.0
+         */
+        private Boolean requirePlanHash;
+
+        public Boolean getRequirePlanHash() {
+            return requirePlanHash;
+        }
+
+        public void setRequirePlanHash(Boolean requirePlanHash) {
+            this.requirePlanHash = requirePlanHash;
+        }
+
         public String getApprovalTimeout() {
             return approvalTimeout;
         }

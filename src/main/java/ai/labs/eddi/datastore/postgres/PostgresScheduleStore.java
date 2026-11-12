@@ -25,6 +25,7 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -884,29 +885,36 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     // ========================= Polling & Claiming =========================
 
+    /**
+     * The database's clock in epoch milliseconds, the unit {@code claimed_at} is
+     * stored in. A claim writes {@code claimed_at} with it and every lease check
+     * compares against it, so the instances' own clocks never meet in one
+     * comparison — see {@link IScheduleStore#tryClaim}.
+     */
+    private static final String DB_NOW_MS = "(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::bigint";
+
     @Override
-    public List<ScheduleConfiguration> findDueSchedules(Instant now, Instant leaseExpiry, int maxRetries)
+    public List<ScheduleConfiguration> findDueSchedules(Instant now, Duration lease, int maxRetries)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // Most overdue first (id breaks ties): an unordered LIMIT returns an
         // arbitrary subset once more rows are due than one poll batch holds.
         long nowMs = now.toEpochMilli();
-        long leaseMs = leaseExpiry.toEpochMilli();
 
         String sql = """
                 SELECT * FROM eddi_schedules
                 WHERE enabled = true AND next_fire <= ?
                 AND (
                     fire_status = 'PENDING'
-                    OR (fire_status = 'CLAIMED' AND claimed_at <= ?)
+                    OR (fire_status = 'CLAIMED' AND claimed_at <= %s - ?)
                     OR (fire_status = 'FAILED' AND next_retry_at <= ? AND fail_count < ?)
                 )
                 ORDER BY next_fire ASC, id ASC
                 LIMIT ?
-                """;
+                """.formatted(DB_NOW_MS);
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
-            ps.setLong(2, leaseMs);
+            ps.setLong(2, lease.toMillis());
             ps.setLong(3, nowMs);
             ps.setInt(4, maxRetries);
             ps.setInt(5, pollBatchSize);
@@ -917,30 +925,47 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Duration lease) throws IResourceStore.ResourceStoreException {
+        return claim(scheduleId, instanceId, now, lease, true);
+    }
+
+    @Override
+    public boolean tryClaimAnyTime(String scheduleId, String instanceId, Instant now, Duration lease)
+            throws IResourceStore.ResourceStoreException {
+        return claim(scheduleId, instanceId, now, lease, false);
+    }
+
+    /**
+     * The CAS claim behind {@link #tryClaim} ({@code dueOnly}) and
+     * {@link #tryClaimAnyTime}.
+     */
+    private boolean claim(String scheduleId, String instanceId, Instant now, Duration lease, boolean dueOnly)
+            throws IResourceStore.ResourceStoreException {
         ensureSchema();
         long nowMs = now.toEpochMilli();
-        long leaseMs = leaseExpiry.toEpochMilli();
         String fireId = IScheduleStore.fireIdOf(scheduleId, now);
 
         // The CLAIMED+lease-expired clause steals a crashed/wedged instance's claim
         // and MUST mirror findDueSchedules, else expired CLAIMED rows are returned
-        // every poll but never re-fired.
+        // every poll but never re-fired. The due term re-checks what the poll read:
+        // a row another instance fired and re-armed since then must not fire again.
         String sql = """
                 UPDATE eddi_schedules
-                SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = ?, fire_id = ?, updated_at = ?
+                SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = %1$s, fire_id = ?, updated_at = ?
                 WHERE id = ? AND enabled = TRUE AND (fire_status = 'PENDING'
                     OR (fire_status = 'FAILED' AND next_retry_at <= ?)
-                    OR (fire_status = 'CLAIMED' AND claimed_at <= ?))
-                """;
+                    OR (fire_status = 'CLAIMED' AND claimed_at <= %1$s - ?))
+                """.formatted(DB_NOW_MS) + (dueOnly ? " AND next_fire <= ?" : "");
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, instanceId);
-            ps.setLong(2, nowMs);
-            ps.setString(3, fireId);
-            ps.setLong(4, nowMs);
-            ps.setString(5, scheduleId);
-            ps.setLong(6, nowMs);
-            ps.setLong(7, leaseMs);
+            ps.setString(2, fireId);
+            ps.setLong(3, nowMs);
+            ps.setString(4, scheduleId);
+            ps.setLong(5, nowMs);
+            ps.setLong(6, lease.toMillis());
+            if (dueOnly) {
+                ps.setLong(7, nowMs);
+            }
             int rows = ps.executeUpdate();
             if (rows > 0) {
                 LOGGER.debugf("Claimed schedule %s on instance %s", scheduleId, instanceId);

@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.apicalls/apicallstore/apicalls/bbb000000000000000000003?version=1",
+  "name" : "Gmail tools",
+  "description" : "searchMail, readThread, createDraft against gmail.googleapis.com with the user's own grant. No send.",
+  "deleted" : false
+}

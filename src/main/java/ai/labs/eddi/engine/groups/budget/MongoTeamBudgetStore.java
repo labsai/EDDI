@@ -42,10 +42,10 @@ import static com.mongodb.client.model.Filters.ne;
  * with {@code _id = groupId:month}.
  * <p>
  * Spend is a {@code $inc} upsert; the first-insert duplicate-key race is
- * retried once, as in {@code MongoToolQuotaStore}. An adjustment is one
- * {@code findOneAndUpdate} (after an upsert that makes sure the document
- * exists) whose filter carries the "cap stays at or above spend" predicate for
- * a debit, so concurrent debits on any node cannot both pass. A TTL index on
+ * retried as a plain update, as in {@code MongoToolQuotaStore}. A debit is one
+ * {@code findOneAndUpdate} whose filter carries the "cap stays at or above
+ * spend" predicate, so concurrent debits on any node cannot both pass; a set is
+ * the same update with the expected adjustment in the filter. A TTL index on
  * {@code expiresAt} is the retention.
  */
 @ApplicationScoped
@@ -157,14 +157,7 @@ public class MongoTeamBudgetStore implements ITeamBudgetStore {
                                          String transferId, Instant expiresAt) {
         String id = id(groupId, month);
         try {
-            // The document must exist before a conditional update can match it.
-            try {
-                months.updateOne(eq("_id", id), initialFields(groupId, month, expiresAt, true), new UpdateOptions().upsert(true));
-            } catch (MongoException e) {
-                if (ErrorCategory.fromErrorCode(e.getCode()) != ErrorCategory.DUPLICATE_KEY) {
-                    throw e;
-                }
-            }
+            ensureDocument(groupId, month, expiresAt);
             List<Bson> conditions = new ArrayList<>();
             conditions.add(eq("_id", id));
             if (transferId != null) {
@@ -195,6 +188,39 @@ public class MongoTeamBudgetStore implements ITeamBudgetStore {
             return AdjustOutcome.REFUSED;
         } catch (MongoException e) {
             throw new TeamBudgetAccountingUnavailableException("Could not adjust the team budget", e);
+        }
+    }
+
+    @Override
+    public AdjustOutcome setAdjustment(String groupId, String month, double expectedAdjustmentUsd, double newAdjustmentUsd, double baseUsd,
+                                       TeamBudgetMonth.Adjustment entry, Instant expiresAt) {
+        String id = id(groupId, month);
+        try {
+            ensureDocument(groupId, month, expiresAt);
+            // One conditional update: the adjustment is still the one the caller read,
+            // and base + new adjustment >= spent.
+            Bson filter = and(eq("_id", id), eq(F_ADJ, expectedAdjustmentUsd),
+                    expr(new Document("$gte", List.of(new Document("$add", List.of(baseUsd, newAdjustmentUsd)), "$" + F_SPENT))));
+            Bson update = Updates.combine(Updates.set(F_ADJ, newAdjustmentUsd),
+                    Updates.pushEach(F_HISTORY, List.of(toDocument(entry)), new PushOptions().slice(-MAX_ADJUSTMENTS)));
+            if (months.findOneAndUpdate(filter, update, new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER)) != null) {
+                return AdjustOutcome.APPLIED;
+            }
+            Document current = months.find(eq("_id", id)).first();
+            return current != null && number(current, F_ADJ) != expectedAdjustmentUsd ? AdjustOutcome.CONFLICT : AdjustOutcome.REFUSED;
+        } catch (MongoException e) {
+            throw new TeamBudgetAccountingUnavailableException("Could not set the team budget", e);
+        }
+    }
+
+    /** The document must exist before a conditional update can match it. */
+    private void ensureDocument(String groupId, String month, Instant expiresAt) {
+        try {
+            months.updateOne(eq("_id", id(groupId, month)), initialFields(groupId, month, expiresAt, true), new UpdateOptions().upsert(true));
+        } catch (MongoException e) {
+            if (ErrorCategory.fromErrorCode(e.getCode()) != ErrorCategory.DUPLICATE_KEY) {
+                throw e;
+            }
         }
     }
 

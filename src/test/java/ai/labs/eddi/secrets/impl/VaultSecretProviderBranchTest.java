@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider.SecretProviderException;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
@@ -93,7 +94,7 @@ class VaultSecretProviderBranchTest {
 
     private EncryptedSecret createEncryptedSecret(String plaintext, byte[] dek) {
         EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encrypt(plaintext, dek);
-        String checksum = EnvelopeCrypto.sha256Hex(plaintext);
+        String checksum = VaultChecksum.legacy(plaintext);
         return new EncryptedSecret(
                 "secret-id-1", TENANT_ID, KEY_NAME,
                 encResult.ciphertext(), encResult.iv(),
@@ -576,7 +577,8 @@ class VaultSecretProviderBranchTest {
                     "Expected '3 secret(s) are stored' but got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("Set EDDI_VAULT_MASTER_KEY back"));
             assertTrue(ex.getMessage().contains("rotate-kek"));
-            assertTrue(ex.getMessage().contains("/reset"));
+            // The endpoint answers 400 without confirm=true, so the hint has to carry it.
+            assertTrue(ex.getMessage().contains("/reset?confirm=true"), ex.getMessage());
         }
 
         @Test

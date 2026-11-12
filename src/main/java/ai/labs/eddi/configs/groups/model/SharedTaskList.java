@@ -252,18 +252,6 @@ public class SharedTaskList {
     }
 
     /**
-     * Tasks assigned to a specific agent.
-     */
-    public synchronized List<TaskItem> findTasksForAgent(String agentId) {
-        if (agentId == null) {
-            return List.of();
-        }
-        return tasks.stream()
-                .filter(t -> agentId.equals(t.assignedAgentId()))
-                .toList();
-    }
-
-    /**
      * Check for circular dependencies. Returns the cycle path if found, or an empty
      * list if the dependency graph is acyclic.
      */

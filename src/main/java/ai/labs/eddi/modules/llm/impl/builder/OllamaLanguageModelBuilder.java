@@ -9,6 +9,7 @@ import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaChatRequestParameters;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,11 +18,11 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
-import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyStringList;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanOrNull;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.longValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringList;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringMap;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -104,6 +105,32 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_CUSTOM_HEADERS);
     }
 
+    /**
+     * Every setting the builders read; {@code null} leaves the provider default.
+     * The request-level ones travel as one {@link OllamaChatRequestParameters},
+     * handed to the synchronous and the streaming client alike.
+     */
+    private record Settings(String baseUrl, Long timeoutMs, Boolean returnThinking, Boolean logRequests, Boolean logResponses,
+            Map<String, String> customHeaders, OllamaChatRequestParameters requestParameters) {
+    }
+
+    private static Settings read(Map<String, String> p, OutboundTargetPolicy targetPolicy) {
+        String baseUrl = stringValue(p, KEY_BASE_URL);
+        if (baseUrl != null) {
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(baseUrl);
+        }
+        var requestParameters = OllamaChatRequestParameters.builder()
+                .modelName(isNullOrEmpty(p.get(KEY_MODEL)) ? null : p.get(KEY_MODEL)).temperature(doubleValue(p, KEY_TEMPERATURE))
+                .maxOutputTokens(intValue(p, KEY_MAX_TOKENS)).topP(doubleValue(p, KEY_TOP_P)).topK(intValue(p, KEY_TOP_K))
+                .numCtx(intValue(p, KEY_NUM_CTX)).minP(doubleValue(p, KEY_MIN_P)).repeatPenalty(doubleValue(p, KEY_REPEAT_PENALTY))
+                .repeatLastN(intValue(p, KEY_REPEAT_LAST_N)).seed(intValue(p, KEY_SEED)).stopSequences(stringList(p, KEY_STOP_SEQUENCES))
+                .truncate(booleanOrNull(p, KEY_TRUNCATE)).think(booleanOrNull(p, KEY_THINK)).build();
+        return new Settings(baseUrl, longValue(p, KEY_TIMEOUT), booleanOrNull(p, KEY_RETURN_THINKING), booleanOrNull(p, KEY_LOG_REQUESTS),
+                booleanOrNull(p, KEY_LOG_RESPONSES), stringMap(p, KEY_CUSTOM_HEADERS), requestParameters);
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));
@@ -114,98 +141,48 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      * the wire. Production goes through {@link #build(Map)}.
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        var builder = OllamaChatModel.builder().httpClientBuilder(httpClientBuilder);
-        applyTo(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        var b = OllamaChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(s.requestParameters());
+        if (s.baseUrl() != null)
+            b.baseUrl(s.baseUrl());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.returnThinking() != null)
+            b.returnThinking(s.returnThinking());
+        if (s.logRequests() != null)
+            b.logRequests(s.logRequests());
+        if (s.logResponses() != null)
+            b.logResponses(s.logResponses());
+        if (s.customHeaders() != null)
+            b.customHeaders(s.customHeaders());
 
         // executeWithRetry is the single retry owner; library retries multiply it.
-        builder.maxRetries(NO_LIBRARY_RETRIES);
+        b.maxRetries(NO_LIBRARY_RETRIES);
 
-        return builder.build();
+        return b.build();
     }
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
-        applyTo(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        return builder.build();
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder(targetPolicy));
     }
 
-    /**
-     * The synchronous and the streaming client are configured by identical bodies:
-     * their common base builder ({@code OllamaBaseChatModel.Builder}) is
-     * package-private in langchain4j, so it cannot be named here. Change both
-     * together.
-     */
-    private static void applyTo(OllamaChatModel.OllamaChatModelBuilder builder, Map<String, String> parameters,
-                                OutboundTargetPolicy targetPolicy) {
-        String baseUrl = stringValue(parameters, KEY_BASE_URL);
-        if (baseUrl != null) {
-            // Never the cloud instance-metadata service; with
-            // eddi.security.ssrf-protection.enabled no private address either.
-            targetPolicy.validateUrl(baseUrl);
-            builder.baseUrl(baseUrl);
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
-            builder.modelName(parameters.get(KEY_MODEL));
-        }
-        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-        applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
-        applyDouble(parameters, KEY_TOP_P, builder::topP);
-        applyInt(parameters, KEY_TOP_K, builder::topK);
-        applyInt(parameters, KEY_NUM_CTX, builder::numCtx);
-        applyDouble(parameters, KEY_MIN_P, builder::minP);
-        applyDouble(parameters, KEY_REPEAT_PENALTY, builder::repeatPenalty);
-        applyInt(parameters, KEY_REPEAT_LAST_N, builder::repeatLastN);
-        applyInt(parameters, KEY_SEED, builder::seed);
-        applyStringList(parameters, KEY_STOP_SEQUENCES, builder::stop);
-        applyBoolean(parameters, KEY_TRUNCATE, builder::truncate);
-        applyBoolean(parameters, KEY_THINK, builder::think);
-        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
-        applyBoolean(parameters, KEY_LOG_REQUESTS, builder::logRequests);
-        applyBoolean(parameters, KEY_LOG_RESPONSES, builder::logResponses);
-        Map<String, String> headers = stringMap(parameters, KEY_CUSTOM_HEADERS);
-        if (headers != null) {
-            builder.customHeaders(headers);
-        }
-    }
-
-    /**
-     * Streaming twin of
-     * {@link #applyTo(OllamaChatModel.OllamaChatModelBuilder, Map, OutboundTargetPolicy)};
-     * keep identical.
-     */
-    private static void applyTo(OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder, Map<String, String> parameters,
-                                OutboundTargetPolicy targetPolicy) {
-        String baseUrl = stringValue(parameters, KEY_BASE_URL);
-        if (baseUrl != null) {
-            // Never the cloud instance-metadata service; with
-            // eddi.security.ssrf-protection.enabled no private address either.
-            targetPolicy.validateUrl(baseUrl);
-            builder.baseUrl(baseUrl);
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
-            builder.modelName(parameters.get(KEY_MODEL));
-        }
-        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-        applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
-        applyDouble(parameters, KEY_TOP_P, builder::topP);
-        applyInt(parameters, KEY_TOP_K, builder::topK);
-        applyInt(parameters, KEY_NUM_CTX, builder::numCtx);
-        applyDouble(parameters, KEY_MIN_P, builder::minP);
-        applyDouble(parameters, KEY_REPEAT_PENALTY, builder::repeatPenalty);
-        applyInt(parameters, KEY_REPEAT_LAST_N, builder::repeatLastN);
-        applyInt(parameters, KEY_SEED, builder::seed);
-        applyStringList(parameters, KEY_STOP_SEQUENCES, builder::stop);
-        applyBoolean(parameters, KEY_TRUNCATE, builder::truncate);
-        applyBoolean(parameters, KEY_THINK, builder::think);
-        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
-        applyBoolean(parameters, KEY_LOG_REQUESTS, builder::logRequests);
-        applyBoolean(parameters, KEY_LOG_RESPONSES, builder::logResponses);
-        Map<String, String> headers = stringMap(parameters, KEY_CUSTOM_HEADERS);
-        if (headers != null) {
-            builder.customHeaders(headers);
-        }
+    /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
+    StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
+        var b = OllamaStreamingChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(s.requestParameters());
+        if (s.baseUrl() != null)
+            b.baseUrl(s.baseUrl());
+        if (s.timeoutMs() != null)
+            b.timeout(Duration.ofMillis(s.timeoutMs()));
+        if (s.returnThinking() != null)
+            b.returnThinking(s.returnThinking());
+        if (s.logRequests() != null)
+            b.logRequests(s.logRequests());
+        if (s.logResponses() != null)
+            b.logResponses(s.logResponses());
+        if (s.customHeaders() != null)
+            b.customHeaders(s.customHeaders());
+        return b.build();
     }
 }

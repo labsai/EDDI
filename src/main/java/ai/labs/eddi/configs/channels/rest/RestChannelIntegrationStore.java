@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -686,7 +687,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     /**
      * Reject create/update if another non-deleted config already claims the same
      * {@code channelType:channelId}. Prevents silent overwrites in the router's
-     * integrationMap.
+     * integrationMap. Fails closed like {@link #validateUniqueName}: a scan that
+     * cannot read the integration holding the channelId refuses the save (503)
+     * rather than store a second route for the same channel.
      *
      * @param excludeId
      *            the resource ID of the config being updated (null on create)
@@ -701,44 +704,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (channelType == null)
             return;
 
-        try {
-            var descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
-            for (var descriptor : descriptors) {
-                try {
-                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
-                    if (resId == null || resId.getId() == null)
-                        continue;
-                    // Skip the config being updated
-                    if (resId.getId().equals(excludeId))
-                        continue;
-
-                    var existing = channelStore.read(resId.getId(), resId.getVersion());
-                    if (existing != null
-                            && existing.getPlatformConfig() != null
-                            && channelType.equalsIgnoreCase(existing.getChannelType())
-                            && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
-                        // The sweep is deliberately unscoped: a channelId collides with every
-                        // integration in the deployment, not only the caller's own, so scoping it
-                        // would let two workspaces both bind the same Slack channel and route each
-                        // other's messages. What the message must NOT do is name the conflicting
-                        // integration — that would turn a uniqueness check into an enumeration
-                        // oracle for other people's channel integrations.
-                        throw new BadRequestException(
-                                "Another channel integration already uses channelId '" + channelId
-                                        + "' for type '" + channelType + "'.");
-                    }
-                } catch (BadRequestException e) {
-                    throw e; // re-throw validation errors
-                } catch (Exception e) {
-                    LOG.debugf("Skipping descriptor during uniqueness check: %s", e.getMessage());
-                }
+        forEachOtherIntegration(excludeId, "channelId", existing -> {
+            if (existing.getPlatformConfig() != null
+                    && channelType.equalsIgnoreCase(existing.getChannelType())
+                    && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
+                // The sweep is deliberately unscoped: a channelId collides with every
+                // integration in the deployment, not only the caller's own, so scoping it
+                // would let two workspaces both bind the same Slack channel and route each
+                // other's messages. What the message must NOT do is name the conflicting
+                // integration — that would turn a uniqueness check into an enumeration
+                // oracle for other people's channel integrations.
+                throw new BadRequestException(
+                        "Another channel integration already uses channelId '" + channelId
+                                + "' for type '" + channelType + "'.");
             }
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
-        }
+        });
     }
 
     /**
@@ -807,54 +787,81 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (name == null || name.isBlank() || channelType == null) {
             return;
         }
-        try {
-            var descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
-            for (var descriptor : descriptors) {
-                try {
-                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
-                    if (resId == null || resId.getId() == null || resId.getId().equals(excludeId)) {
-                        continue;
-                    }
-                    var existing = channelStore.read(resId.getId(), resId.getVersion());
-                    if (existing != null
-                            && channelType.equalsIgnoreCase(existing.getChannelType())
-                            && name.equalsIgnoreCase(existing.getName())) {
-                        // Do not name the conflicting integration — a uniqueness check must
-                        // not become an enumeration oracle for other people's integrations.
-                        throw new BadRequestException(
-                                "Another channel integration of type '" + channelType
-                                        + "' already uses the name '" + name + "'.");
-                    }
-                } catch (BadRequestException e) {
-                    throw e;
-                } catch (IResourceStore.ResourceNotFoundException e) {
-                    // The descriptor points at an integration that no longer exists — it
-                    // cannot hold the name, so it is not a conflict.
-                    LOG.debugf("Skipping a missing channel integration during the name uniqueness check: %s",
-                            sanitize(e.getMessage()));
-                } catch (Exception e) {
-                    if (!isUnreadableDocument(e)) {
-                        // A transient store failure: this entry may carry the very name being
-                        // saved, so the check is inconclusive — the outer handler fails closed.
-                        throw e;
-                    }
-                    // A stored document that cannot be deserialised is skipped, so one corrupt
-                    // entry cannot block every channel write on the instance. A duplicate that
-                    // slips past it still cannot be used: the router refuses an ambiguous name.
-                    LOG.warnf("Skipping an unreadable channel integration during the name uniqueness check: %s",
-                            sanitize(e.getMessage()));
-                }
+        forEachOtherIntegration(excludeId, "name", existing -> {
+            if (channelType.equalsIgnoreCase(existing.getChannelType())
+                    && name.equalsIgnoreCase(existing.getName())) {
+                // Do not name the conflicting integration — a uniqueness check must
+                // not become an enumeration oracle for other people's integrations.
+                throw new BadRequestException(
+                        "Another channel integration of type '" + channelType
+                                + "' already uses the name '" + name + "'.");
             }
-        } catch (BadRequestException e) {
-            throw e;
+        });
+    }
+
+    /**
+     * Hands every stored channel integration except {@code excludeId} to
+     * {@code check}, which throws a {@link BadRequestException} on a conflict. The
+     * one error policy of the uniqueness scans:
+     * <ul>
+     * <li>a descriptor whose integration no longer exists is skipped: it cannot
+     * hold a conflicting value;</li>
+     * <li>a stored document that no longer deserialises is skipped, so one corrupt
+     * entry cannot block every channel write on the instance (a duplicate name that
+     * slips past it still cannot be used: the router refuses an ambiguous
+     * name);</li>
+     * <li>any other failure, the descriptors cannot be listed or an entry cannot be
+     * read right now, leaves the check inconclusive: the unread entry may hold the
+     * very value being saved, so the save is refused with a 503.</li>
+     * </ul>
+     * The scan and {@link #uniquenessLock} serialise saves on this node only; two
+     * nodes saving the same value at the same moment can still both pass.
+     *
+     * @param excludeId
+     *            the resource id being updated (null on create)
+     * @param subject
+     *            what is checked, for the log and the 503 ({@code "name"},
+     *            {@code "channelId"})
+     */
+    private void forEachOtherIntegration(String excludeId, String subject,
+                                         Consumer<ChannelIntegrationConfiguration> check) {
+        List<DocumentDescriptor> descriptors;
+        try {
+            descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
         } catch (Exception e) {
-            // Fail closed: a save that skipped the check could create a duplicate name,
-            // and the router then refuses to resolve either integration by it.
-            LOG.warn("Failed to check channel name uniqueness — refusing save", e);
-            throw new ServiceUnavailableException(
-                    "Could not verify that the channel integration name is unique. Please retry.");
+            throw uniquenessUnverifiable(subject, e);
         }
+        for (var descriptor : descriptors) {
+            ChannelIntegrationConfiguration existing;
+            try {
+                var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                if (resId == null || resId.getId() == null || resId.getId().equals(excludeId)) {
+                    continue;
+                }
+                existing = channelStore.read(resId.getId(), resId.getVersion());
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                LOG.debugf("Skipping a missing channel integration during the %s uniqueness check: %s",
+                        subject, sanitize(e.getMessage()));
+                continue;
+            } catch (Exception e) {
+                if (!isUnreadableDocument(e)) {
+                    throw uniquenessUnverifiable(subject, e);
+                }
+                LOG.warnf("Skipping an unreadable channel integration during the %s uniqueness check: %s",
+                        subject, sanitize(e.getMessage()));
+                continue;
+            }
+            if (existing != null) {
+                check.accept(existing);
+            }
+        }
+    }
+
+    private static ServiceUnavailableException uniquenessUnverifiable(String subject, Exception cause) {
+        LOG.warnf(cause, "Failed to check channel integration %s uniqueness - refusing save", subject);
+        return new ServiceUnavailableException(
+                "Could not verify that the channel integration " + subject + " is unique. Please retry.");
     }
 
     /**
@@ -890,37 +897,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     }
 
     /**
-     * The lower-cased names of every integration of {@code channelType}. Best
-     * effort: an entry that cannot be read is skipped and a failed scan yields what
-     * was read so far — {@link #validateUniqueName} stays the authoritative check
-     * and fails closed on a transient read failure.
+     * The lower-cased names of every integration of {@code channelType}, read with
+     * the error policy of {@link #validateUniqueName}, which stays the
+     * authoritative check: a scan that cannot read an entry refuses the duplicate
+     * (503) here rather than one step later.
      */
     private Set<String> namesInUseLowerCase(String channelType) {
         Set<String> used = new HashSet<>();
         if (channelType == null) {
             return used;
         }
-        try {
-            var descriptors = documentDescriptorStore.readDescriptors(
-                    "ai.labs.channel", "", 0, IDescriptorStore.NO_LIMIT, false);
-            for (var descriptor : descriptors) {
-                try {
-                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
-                    if (resId == null || resId.getId() == null) {
-                        continue;
-                    }
-                    var existing = channelStore.read(resId.getId(), resId.getVersion());
-                    if (existing != null && existing.getName() != null
-                            && channelType.equalsIgnoreCase(existing.getChannelType())) {
-                        used.add(existing.getName().toLowerCase(Locale.ROOT));
-                    }
-                } catch (Exception e) {
-                    LOG.debugf("Skipping descriptor while collecting channel names: %s", e.getMessage());
-                }
+        forEachOtherIntegration(null, "name", existing -> {
+            if (existing.getName() != null && channelType.equalsIgnoreCase(existing.getChannelType())) {
+                used.add(existing.getName().toLowerCase(Locale.ROOT));
             }
-        } catch (Exception e) {
-            LOG.warn("Failed to collect channel names for the duplicate's name", e);
-        }
+        });
         return used;
     }
 

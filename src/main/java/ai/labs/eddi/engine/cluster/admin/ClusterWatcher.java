@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -33,14 +34,12 @@ import java.util.concurrent.TimeUnit;
  * console can show a lost node instead of silently dropping its card.
  * <p>
  * <b>Nodes.</b> Presence is compared every presence interval. A record that
- * vanished and has a leave marker for its boot was removed by a clean shutdown
- * ({@code node.left}); one that vanished without a marker had stopped being
- * written and expired — the node was killed, crashed or cut off from NATS
- * ({@code node.lost}). For about two intervals after this node's own NATS
- * connection returns nothing is judged lost. A record whose heartbeat is more
- * than two intervals old is {@code node.stale}. Every node makes the same
- * observations; their deterministic ids let the activity stream keep one of
- * each.
+ * disappeared while still fresh was deleted by a clean shutdown
+ * ({@code node.left}); one that expired had stopped being written — the node
+ * was killed, crashed or cut off from NATS ({@code node.lost}). A record this
+ * node has not seen rewritten for more than two intervals, on its own clock, is
+ * {@code node.stale}. Every node makes the same observations; their
+ * deterministic ids let the activity stream keep one of each.
  * <p>
  * <b>Degraded mode</b> on and off is this node's own observation, polled every
  * two seconds. Lease takeovers and dead letters come from listeners on the
@@ -178,12 +177,17 @@ public class ClusterWatcher implements ClusterStartable {
                     activity.record("node.joined", ClusterActivityLog.INFO, Map.of("nodeId", e.getKey(), "boot", boot),
                             "node.joined:" + e.getKey() + ":" + boot);
                 }
+                // Late is judged on this node's clock (how long ago it saw the record
+                // rewritten), never the writer's updatedAt against it: a member whose clock
+                // is skewed is not late. updatedAt only names the record that went stale,
+                // so every node's report of it collapses into one entry.
                 long updated = number(e.getValue().get("updatedAt"));
-                if (!grace && !self.equals(e.getKey()) && updated > 0 && now - updated > 2 * interval
+                OptionalLong age = self.equals(e.getKey()) ? OptionalLong.empty() : presence.get().heartbeatAgeMillis(e.getKey());
+                if (!grace && age.isPresent() && age.getAsLong() > 2 * interval
                         && !Long.valueOf(updated).equals(staleReported.get(e.getKey()))) {
                     staleReported.put(e.getKey(), updated);
                     activity.record("node.stale", ClusterActivityLog.WARNING,
-                            Map.of("nodeId", e.getKey(), "heartbeatAgeMs", now - updated), "node.stale:" + e.getKey() + ":" + updated);
+                            Map.of("nodeId", e.getKey(), "heartbeatAgeMs", age.getAsLong()), "node.stale:" + e.getKey() + ":" + updated);
                 }
             }
             if (grace) {

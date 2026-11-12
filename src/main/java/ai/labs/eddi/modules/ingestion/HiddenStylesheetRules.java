@@ -42,9 +42,21 @@ import java.util.Set;
  * treated as hidden. Both can only remove more than a browser would hide, never
  * less.</li>
  * </ul>
- * Rules inside {@code @media} and other at-blocks are skipped (they apply only
- * in some viewports, and responsive mail hides one of two copies of the same
- * content there); state pseudo-classes such as {@code :hover} are skipped,
+ * Rules inside an at-block that holds on every screen are read as if written at
+ * the top level, however deeply such blocks nest: {@code @layer},
+ * {@code @supports} (whatever it tests), and {@code @media} with no query or a
+ * query of type {@code all} or {@code screen} ({@code only} allowed) or
+ * {@code not} another type. Otherwise a hiding rule wrapped in
+ * {@code @media screen} would hide text from every reader and still reach the
+ * model. Rules inside every other at-block are skipped: a media query with a
+ * feature such as {@code (max-width:600px)} depends on the viewport, and
+ * responsive mail hides one copy of its content there and the other copy
+ * everywhere else, so applying it would remove both; {@code print} is not what
+ * a reader sees; and {@code @font-face} or {@code @keyframes} hold no
+ * selectors. A feature query that holds everywhere, such as
+ * {@code (min-width:0)}, is skipped with them: telling it apart from a
+ * responsive one would mean evaluating media features, so a hiding rule there
+ * still goes unread. State pseudo-classes such as {@code :hover} are skipped,
  * since the element is visible until hovered; and
  * {@code ::before}/{@code ::after} rules hide generated content, not the
  * element.
@@ -263,9 +275,10 @@ final class HiddenStylesheetRules {
     }
 
     /**
-     * Reads every top-level rule of a style block in one forward pass and indexes
-     * the selectors of those that hide. Comments are skipped, at-blocks skipped
-     * whole (nested braces counted), at-statements skipped to their {@code ;}.
+     * Reads every rule of a style block that applies on a screen in one forward
+     * pass and indexes the selectors of those that hide. Comments are skipped,
+     * at-statements skipped to their {@code ;}, and at-blocks either entered or
+     * skipped whole (nested braces counted) — see {@link #readAtRule}.
      */
     static void readRules(String css, Index index) {
         int length = css.length();
@@ -276,7 +289,7 @@ final class HiddenStylesheetRules {
                 int end = css.indexOf("*/", i + 2);
                 i = end < 0 ? length : end + 2;
             } else if (c == '@') {
-                i = skipAtRule(css, i);
+                i = readAtRule(css, i);
             } else if (c == '}' || Character.isWhitespace(c) || c == ';') {
                 i++;
             } else {
@@ -286,19 +299,26 @@ final class HiddenStylesheetRules {
     }
 
     /**
-     * Skips an at-statement or at-block starting at {@code start}; returns the
-     * index after it.
+     * Reads the at-rule starting at {@code start} and returns where the scan
+     * continues: after the {@code ;} of an at-statement, after the whole of an
+     * at-block that does not apply on a screen, and just inside one that does
+     * ({@link #appliesOnScreen}). An entered block's rules are then read like
+     * top-level ones, and its closing brace is skipped like a stray one, so nested
+     * blocks cost no recursion and no second pass.
      */
-    private static int skipAtRule(String css, int start) {
+    private static int readAtRule(String css, int start) {
         int length = css.length();
-        int i = start + 1;
+        int[] keywordEnd = new int[1];
+        String keyword = readName(css, start + 1, keywordEnd);
+        int i = keywordEnd[0];
         while (i < length) {
             char c = css.charAt(i);
             if (c == ';') {
                 return i + 1;
             }
             if (c == '{') {
-                return skipBlock(css, i);
+                String prelude = stripComments(css.substring(keywordEnd[0], i));
+                return appliesOnScreen(keyword, prelude) ? i + 1 : skipBlock(css, i);
             }
             if (c == '/' && i + 1 < length && css.charAt(i + 1) == '*') {
                 int end = css.indexOf("*/", i + 2);
@@ -308,6 +328,58 @@ final class HiddenStylesheetRules {
             i++;
         }
         return length;
+    }
+
+    /**
+     * Whether the rules of an at-block apply on every screen, given its lower-cased
+     * keyword and its prelude without comments. {@code @layer} only orders the
+     * cascade, and {@code @supports} is taken to hold whatever it tests: assuming
+     * so can only remove more than a browser would hide.
+     */
+    private static boolean appliesOnScreen(String keyword, String prelude) {
+        return switch (keyword) {
+            case "layer", "supports" -> true;
+            case "media" -> prelude.isBlank() || splitTopLevel(prelude).stream().anyMatch(HiddenStylesheetRules::isScreenQuery);
+            default -> false;
+        };
+    }
+
+    /**
+     * A media query that holds on any screen: {@code all} or {@code screen},
+     * optionally after {@code only}, or {@code not} followed by any other type
+     * ({@code not print}). A query with a feature in parentheses depends on the
+     * viewport or the device and does not count, nor does one this reader cannot
+     * parse. Words are read as identifiers, escapes decoded, so {@code scr\65 en}
+     * is {@code screen} here as it is to a browser.
+     */
+    private static boolean isScreenQuery(String query) {
+        List<String> words = new ArrayList<>(2);
+        int[] end = new int[1];
+        int i = 0;
+        while (i < query.length()) {
+            if (Character.isWhitespace(query.charAt(i))) {
+                i++;
+                continue;
+            }
+            String word = readName(query, i, end);
+            // Not an identifier — a "(", an "and", a stray token — or one word more
+            // than "only screen" has.
+            if (end[0] == i || words.size() == 2) {
+                return false;
+            }
+            words.add(word);
+            i = end[0];
+        }
+        if (words.isEmpty()) {
+            return false;
+        }
+        String type = words.getLast();
+        boolean screen = type.equals("all") || type.equals("screen");
+        return switch (words.size() == 2 ? words.getFirst() : "") {
+            case "", "only" -> screen;
+            case "not" -> !screen;
+            default -> false;
+        };
     }
 
     /**

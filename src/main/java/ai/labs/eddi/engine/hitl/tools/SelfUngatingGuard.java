@@ -9,8 +9,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -67,9 +65,9 @@ import java.util.regex.Pattern;
  * {@code toolApprovals} at all is refused, because it cannot be told apart from
  * a removal.</li>
  * </ol>
- * The URI tests are substring tests on the decoded, lower-cased URI,
- * deliberately loose in the same direction as the Manager's: a false positive
- * costs one refused approval, a false negative costs the gate.
+ * The URI tests are substring tests on the URI as {@link GuardText} decodes and
+ * lower-cases it, deliberately loose in the same direction as the Manager's: a
+ * false positive costs one refused approval, a false negative costs the gate.
  */
 public final class SelfUngatingGuard {
 
@@ -204,8 +202,8 @@ public final class SelfUngatingGuard {
             return null;
         }
         Protection p = protection != null ? protection : Protection.ofAgent(null);
-        String decodedUri = decodeLower(uri);
-        if (containsId(decodedUri, p.actingAgentId())) {
+        String decodedUri = GuardText.decodeLower(uri);
+        if (GuardText.containsId(decodedUri, p.actingAgentId())) {
             return OWN_AGENT_REASON;
         }
         if (containsAnyId(decodedUri, p.ownResourceIds())) {
@@ -468,7 +466,7 @@ public final class SelfUngatingGuard {
 
     /**
      * Adds the JSON pointer of every {@code key} member at any depth of
-     * {@code node}.
+     * {@code node}; a member holding JSON {@code null} is skipped.
      */
     static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
         if (node == null) {
@@ -602,8 +600,8 @@ public final class SelfUngatingGuard {
      */
     public static String refusalFromArguments(String rawArguments, Protection protection) {
         Protection p = protection != null ? protection : Protection.ofAgent(null);
-        String decoded = argumentHaystack(rawArguments);
-        if (containsId(decoded, p.actingAgentId())) {
+        String decoded = GuardText.haystack(rawArguments);
+        if (GuardText.containsId(decoded, p.actingAgentId())) {
             return OWN_AGENT_REASON;
         }
         if (containsAnyId(decoded, p.ownResourceIds())) {
@@ -627,111 +625,13 @@ public final class SelfUngatingGuard {
         return storedLlmReplacementRefusal(rawArguments, p.storedLlms());
     }
 
-    private static boolean containsId(String haystack, String id) {
-        return id != null && !id.isBlank() && haystack.contains(id.trim().toLowerCase(Locale.ROOT));
-    }
-
     private static boolean containsAnyId(String haystack, Set<String> ids) {
         for (String id : ids) {
-            if (containsId(haystack, id)) {
+            if (GuardText.containsId(haystack, id)) {
                 return true;
             }
         }
         return false;
-    }
-
-    /**
-     * How deep {@link #argumentHaystack} follows a string value that is itself JSON
-     * (an MCP {@code update_resource} carries the document as a JSON string).
-     */
-    private static final int MAX_NESTED_JSON_DEPTH = 4;
-    private static final char SEPARATOR = ' ';
-
-    /**
-     * What the argument test searches: the raw arguments percent-decoded, followed
-     * by every key and string value of the arguments <em>parsed as JSON</em>.
-     * <p>
-     * The raw text alone was not enough. A JSON escape is invisible to a substring
-     * test: the key {@code toolApprovals} with its first letter written as a JSON
-     * unicode escape (backslash, {@code u0074}) does not contain
-     * {@code toolapprovals}, yet every JSON parser downstream (the MCP server,
-     * EDDI's own store) reads it as exactly that key, and an id can be spelt the
-     * same way. Parsing undoes the escapes; a string value that is itself JSON is
-     * parsed again, a few levels deep, because a document carried as a string is
-     * unescaped once per level. Each parsed text is percent-decoded too, so an
-     * escape that hides a {@code %} sequence does not get through either. Arguments
-     * that are not JSON keep the raw test, unchanged.
-     */
-    static String argumentHaystack(String rawArguments) {
-        StringBuilder haystack = new StringBuilder(decodeLower(rawArguments));
-        appendParsedText(rawArguments, haystack, 0);
-        if (rawArguments != null) {
-            String percentDecoded = percentDecode(rawArguments);
-            if (!percentDecoded.equals(rawArguments)) {
-                appendParsedText(percentDecoded, haystack, 0);
-            }
-        }
-        return haystack.toString();
-    }
-
-    private static void appendParsedText(String text, StringBuilder haystack, int depth) {
-        if (text == null || depth > MAX_NESTED_JSON_DEPTH) {
-            return;
-        }
-        String trimmed = text.strip();
-        if (trimmed.isEmpty() || "{[\"".indexOf(trimmed.charAt(0)) < 0) {
-            return;
-        }
-        JsonNode tree;
-        try {
-            tree = MAPPER.readTree(trimmed);
-        } catch (JsonProcessingException e) {
-            return;
-        }
-        appendNode(tree, haystack, depth);
-    }
-
-    private static void appendNode(JsonNode node, StringBuilder haystack, int depth) {
-        if (node == null) {
-            return;
-        }
-        if (node.isObject()) {
-            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-            while (fields.hasNext()) {
-                Map.Entry<String, JsonNode> field = fields.next();
-                haystack.append(SEPARATOR).append(decodeLower(field.getKey()));
-                appendNode(field.getValue(), haystack, depth);
-            }
-        } else if (node.isArray()) {
-            for (JsonNode element : node) {
-                appendNode(element, haystack, depth);
-            }
-        } else if (node.isTextual()) {
-            String value = node.asText();
-            haystack.append(SEPARATOR).append(decodeLower(value));
-            appendParsedText(value, haystack, depth + 1);
-        }
-    }
-
-    private static String percentDecode(String value) {
-        try {
-            return URLDecoder.decode(value, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return value;
-        }
-    }
-
-    private static String decodeLower(String value) {
-        if (value == null) {
-            return "";
-        }
-        String decoded = value;
-        try {
-            decoded = URLDecoder.decode(value, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // A malformed escape is not a reason to stop checking — keep the raw form.
-        }
-        return decoded.toLowerCase(Locale.ROOT);
     }
 
     /** Whether {@code key} appears as an object key at any depth. */

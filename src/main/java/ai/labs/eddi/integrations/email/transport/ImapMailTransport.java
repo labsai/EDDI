@@ -272,11 +272,12 @@ public class ImapMailTransport implements MailTransport {
     }
 
     /** One open folder. */
-    static final class ImapSession implements MailboxSession {
+    static final class ImapSession extends UidFolderSession {
         private final String integrationId;
         private final IMAPStore store;
         private final IMAPFolder folder;
 
+        /** One open folder; its cursor is {@link ImapCursor}. */
         ImapSession(String integrationId, IMAPStore store, IMAPFolder folder) {
             this.integrationId = integrationId;
             this.store = store;

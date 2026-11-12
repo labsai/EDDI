@@ -1077,10 +1077,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     /**
-     * Every lease currently in the bucket whose key starts with {@code prefix}, at
-     * most {@code max}, with the node waiting for it where one left a marker.
+     * Every lease currently in the bucket, at most {@code max}, with the node
+     * waiting for it where one left a marker.
      */
-    public List<LeaseSnapshot> snapshot(String prefix, int max) {
+    public List<LeaseSnapshot> snapshot(int max) {
         List<ISharedKv.Entry> all = kv.entries("", Math.max(max, 1) * 2 + 16);
         Map<String, String> waitingByKey = new HashMap<>();
         for (ISharedKv.Entry e : all) {
@@ -1090,7 +1090,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
         List<LeaseSnapshot> leases = new ArrayList<>();
         for (ISharedKv.Entry e : all) {
-            if (e.key().startsWith(WAITER_PREFIX) || (prefix != null && !e.key().startsWith(prefix))) {
+            if (e.key().startsWith(WAITER_PREFIX)) {
                 continue;
             }
             if (leases.size() >= max) {

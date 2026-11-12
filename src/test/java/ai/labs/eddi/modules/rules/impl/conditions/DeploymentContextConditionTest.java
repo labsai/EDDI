@@ -5,8 +5,6 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -66,38 +64,6 @@ class DeploymentContextConditionTest {
     }
 
     @Test
-    void execute_tagMatchesPresent_success() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("high-risk", "internal"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
-
-        assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
-    void execute_tagMatchesMissing_fail() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("low-risk", "internal"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
-
-        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
-    void execute_tagMatchesNoTagsData_fail() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
-
-        when(currentStep.getLatestData("agent:tags")).thenReturn(null);
-
-        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
-    }
-
-    @Test
     void execute_noWhenConfigured_matchesAnyEnv() {
         doReturn("production").when(condition).resolveDeploymentEnv();
         condition.setConfigs(Map.of());
@@ -133,15 +99,33 @@ class DeploymentContextConditionTest {
         assertEquals("high-risk", result.get("tagMatches"));
     }
 
+    /**
+     * Agents carry no tags: nothing ever wrote the {@code agent:tags} key the
+     * condition read, so a rule with {@code tagMatches} could never fire —
+     * including a safety rule meant to force cautious behaviour in production. The
+     * ruleset is refused instead of saved as a rule that silently never matches.
+     */
     @Test
-    void execute_tagMatchesCaseInsensitive() {
-        doReturn("production").when(condition).resolveDeploymentEnv();
-        condition.setConfigs(Map.of("when", "production", "tagMatches", "HIGH-RISK"));
+    void validateConfiguration_tagMatches_isRefused() {
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
 
-        IData<List<String>> tagsData = new Data<>("agent:tags", List.of("high-risk"));
-        doReturn(tagsData).when(currentStep).getLatestData("agent:tags");
+        var thrown = assertThrows(IllegalArgumentException.class, () -> condition.validateConfiguration());
+        assertTrue(thrown.getMessage().contains("tagMatches"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("contextmatcher"), thrown.getMessage());
+    }
 
-        assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
+    @Test
+    void validateConfiguration_blankTagMatches_passes() {
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "  "));
+
+        assertDoesNotThrow(() -> condition.validateConfiguration());
+    }
+
+    @Test
+    void validateConfiguration_whenOnly_passes() {
+        condition.setConfigs(Map.of("when", "production"));
+
+        assertDoesNotThrow(() -> condition.validateConfiguration());
     }
 
     @Test

@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.hitl.model.OversightConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -1144,7 +1145,13 @@ public class AgentConfiguration {
      * {@code DreamService}, which resolves this block off the agent and runs the
      * cycle. {@link #getSchedule()} is the cron expression such a schedule should
      * use.
+     * <p>
+     * {@code batchSize} and {@code maxUsersPerRun} are ignored on input: they
+     * described a sweep over all users that was never built — a fire consolidates
+     * the one user its schedule names. Stored and imported configs that still carry
+     * them keep loading; they are not written back.
      */
+    @JsonIgnoreProperties({"batchSize", "maxUsersPerRun"})
     public static class DreamConfig {
         private boolean enabled = false;
         private String schedule = "0 3 * * *";
@@ -1171,8 +1178,6 @@ public class AgentConfiguration {
 
         /** USD price per 1M output tokens of {@link #llmModel}; see above. */
         private Double outputPricePer1M;
-        private int batchSize = 50;
-        private int maxUsersPerRun = 1000;
 
         /** Minimum entries in a group before summarization triggers. */
         private int summarizeMinEntries = 5;
@@ -1364,22 +1369,6 @@ public class AgentConfiguration {
 
         public void setOutputPricePer1M(Double outputPricePer1M) {
             this.outputPricePer1M = outputPricePer1M;
-        }
-
-        public int getBatchSize() {
-            return batchSize;
-        }
-
-        public void setBatchSize(int batchSize) {
-            this.batchSize = batchSize;
-        }
-
-        public int getMaxUsersPerRun() {
-            return maxUsersPerRun;
-        }
-
-        public void setMaxUsersPerRun(int maxUsersPerRun) {
-            this.maxUsersPerRun = maxUsersPerRun;
         }
 
         public int getSummarizeMinEntries() {
@@ -1825,6 +1814,26 @@ public class AgentConfiguration {
 
         public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
             this.approvalContext = approvalContext;
+        }
+
+        /**
+         * Strict plan binding: a human decision on this agent's pauses must carry the
+         * pause's {@code planHash} (from approval-status), or it is refused with a 400
+         * and the pause stays. Absent or {@code false} = a decision without the hash is
+         * accepted and logged, as clients that predate plan hashing send it. The
+         * deployment property {@code eddi.hitl.plan-hash.strict} turns it on for every
+         * agent. Automated decisions (timeouts) are never refused for it.
+         *
+         * @since 6.8.0
+         */
+        private Boolean requirePlanHash;
+
+        public Boolean getRequirePlanHash() {
+            return requirePlanHash;
+        }
+
+        public void setRequirePlanHash(Boolean requirePlanHash) {
+            this.requirePlanHash = requirePlanHash;
         }
 
         /**

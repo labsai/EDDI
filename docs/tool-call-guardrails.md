@@ -56,7 +56,7 @@ MCP tools are registered under the server's own tool name, without a server pref
 
 ## Types and actions
 
-Every built-in type runs on tool-call arguments: `regex-filter`, `pii-redaction`, `max-length`, `prompt-injection` (catches an injection payload echoed into a post), `judge`, `classifier`, `expression`, `json-object`, and `disclosure`. In the judge's and the classifier's `promptTemplate`, `{output}` is the screened field and `{input}` the user's last message; put the tool's name in the prompt text yourself.
+Every built-in type runs on tool-call arguments: `regex-filter`, `pii-redaction`, `max-length`, `prompt-injection` (catches an injection payload echoed into a post), `judge`, `classifier`, `expression`, `json-object`, and `disclosure`. In the judge's and the classifier's `promptTemplate`, `{output}` is the screened field and `{input}` the user's last message; put the tool's name in the prompt text yourself. Without a `promptTemplate` the classifier receives the same pair as a conversation — the user's last message, then the screened field as the assistant's turn — exactly as in the output phase.
 
 | Action | On the live path |
 | --- | --- |

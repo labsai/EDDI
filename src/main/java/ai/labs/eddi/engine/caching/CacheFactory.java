@@ -46,8 +46,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack and webhook event de-duplication, channel
-     * thread locks.
+     * paginated tool responses, Slack and webhook event de-duplication, channel thread locks,
+     * and knowledge-base ingestion statuses, which a poll may ask any node for.
      */
     static final Map<String, String> SHARED_BUCKETS = Map.of(
             "nonce-replay-protection", "NONCES",
@@ -58,7 +58,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
             "webhook-event-dedup", "DEDUP",
-            "channel-thread-locks", "CHANNEL");
+            "channel-thread-locks", "CHANNEL",
+            "rag-ingestion-status", "RAG_INGESTION");
 
     /**
      * Node-local copies of database state that the other nodes must drop when this
@@ -272,6 +273,12 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // Listed rather than left to the default so the sizing sits on record next
             // to the per-user caches above.
             Map.entry("tenantQuotas", 1_000L),
+
+            // RagIngestionService: a status and at most one warning per ingestion of
+            // the last hour, under two keys. The two caches this replaced held 10_000
+            // each; at the 1_000 default a busy hour would forget ingestions still
+            // being polled, and the poll would answer 404.
+            Map.entry("rag-ingestion-status", 20_000L),
 
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something
