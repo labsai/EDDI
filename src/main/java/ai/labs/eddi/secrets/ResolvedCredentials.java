@@ -34,11 +34,14 @@ import java.util.Set;
  * <b>Short values.</b> A value of {@link #MIN_LENGTH} characters or more is
  * replaced wherever it occurs. Replacing a shorter one everywhere would shred
  * unrelated text, so a value of {@link #MIN_SHORT_LENGTH} to
- * {@code MIN_LENGTH - 1} characters is instead looked for as a whole token, and
- * a text that carries one is withheld entirely ({@link #WITHHELD}). Values
- * shorter still are too unspecific to look for at all. Bounded; a value that
- * falls out was resolved long enough ago that the model holding it has
- * typically been rebuilt and recorded it again.
+ * {@code MIN_LENGTH - 1} characters is instead looked for anywhere in the text,
+ * joined to other characters or not, and a text that carries one is withheld
+ * entirely ({@link #WITHHELD}). Values under {@code MIN_SHORT_LENGTH} characters
+ * <em>cannot be covered</em> here: the set is process-wide, and withholding every
+ * error that contains some two- or three-character string would hide the cause
+ * of nearly every failure. Use credentials of 8 characters or more. Bounded; a
+ * value that falls out was resolved long enough ago that the model holding it
+ * has typically been rebuilt and recorded it again.
  */
 @ApplicationScoped
 public class ResolvedCredentials {
@@ -76,7 +79,7 @@ public class ResolvedCredentials {
 
     /**
      * {@code text} with every recorded plaintext replaced — or {@link #WITHHELD}
-     * when it carries a recorded short value as a whole token.
+     * when it carries a recorded short value anywhere.
      */
     public String scrub(String text) {
         if (text == null || text.isEmpty()) {
@@ -85,7 +88,7 @@ public class ResolvedCredentials {
         Set<String> known = plaintexts.asMap().keySet();
         String scrubbed = known.isEmpty() ? text : RequestRedactor.redactResolvedSecrets(text, Set.copyOf(known));
         for (String value : shortPlaintexts.asMap().keySet()) {
-            if (containsToken(scrubbed, value)) {
+            if (scrubbed.contains(value)) {
                 return WITHHELD;
             }
         }
@@ -95,25 +98,5 @@ public class ResolvedCredentials {
     /** {@link #scrub} for a caller built without this bean (unit tests). */
     public static String scrub(ResolvedCredentials credentials, String text) {
         return credentials == null ? text : credentials.scrub(text);
-    }
-
-    /**
-     * Whether {@code text} carries {@code value} not directly preceded or followed
-     * by a letter or digit — so a four-digit PIN is found in "pin 1234 rejected",
-     * not inside "build 912345".
-     */
-    public static boolean containsToken(String text, String value) {
-        if (text == null || value == null || value.isEmpty()) {
-            return false;
-        }
-        for (int at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + 1)) {
-            int end = at + value.length();
-            boolean leftClear = at == 0 || !Character.isLetterOrDigit(text.charAt(at - 1));
-            boolean rightClear = end == text.length() || !Character.isLetterOrDigit(text.charAt(end));
-            if (leftClear && rightClear) {
-                return true;
-            }
-        }
-        return false;
     }
 }

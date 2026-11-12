@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.model.StoreParameters;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
-import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -33,8 +32,8 @@ import java.util.Set;
  * but the credential; this is the second layer, for whatever a provider still
  * echoes: the literal value of each credential parameter, and every plaintext
  * the knowledge base's own vault references resolve to is removed by value,
- * then credential shapes are redacted. A credential too short to replace
- * everywhere withholds the whole message when it appears in it.
+ * then credential shapes are redacted. A configuration holding a credential too
+ * short to replace by value never has its provider text returned.
  * <p>
  * Resolving the references here releases nothing: the plaintexts are used only
  * to find and remove them, and the same references were resolved a moment ago
@@ -75,11 +74,14 @@ public class KnowledgeBaseFailureRedactor {
      * find the failure in the server log.
      * <p>
      * A credential of {@link #MIN_LITERAL_LENGTH} characters or more is replaced
-     * wherever it occurs. A shorter one ({@link #MIN_SHORT_LENGTH} or more — a
-     * seven-character database password, say) cannot be replaced everywhere without
-     * mangling ordinary text, so when the message carries it as a whole token the
-     * provider's text is not returned at all. Identity parameters ({@code user},
-     * {@code userName}) are not secrets on their own and take no part in that.
+     * wherever it occurs. A shorter one (a three- or seven-character database
+     * password, say) cannot be replaced everywhere without mangling ordinary text,
+     * nor found reliably — it may be echoed joined to other text — so a
+     * configuration with one never has its provider text returned: every failure
+     * becomes the generic message naming the exception class. Use a vault reference
+     * resolving to, or a literal of, 8 characters or more to get the provider's
+     * text back. Identity parameters ({@code user}, {@code userName}) are not
+     * secrets on their own and take no part in that.
      */
     public Redacted redactFailure(RagConfiguration config, Throwable failure) {
         return redact(config, failure == null ? null : failure.getMessage(), failure);
@@ -117,10 +119,11 @@ public class KnowledgeBaseFailureRedactor {
         if (!plaintexts.isEmpty() && SecretValueScrubber.scrubAll(scrubbed, plaintexts, SecretRedactionFilter.REDACTED) instanceof String s) {
             scrubbed = s;
         }
-        for (String value : shortPlaintexts) {
-            if (ResolvedCredentials.containsToken(scrubbed, value)) {
-                return new Redacted(withheld(failure), true);
-            }
+        if (!shortPlaintexts.isEmpty()) {
+            // Fail safe, without guessing how a provider might echo it: a credential too
+            // short to replace by value (any length under the minimum, joined to other
+            // text or not) means this configuration's provider text is never returned.
+            return new Redacted(withheld(failure), true);
         }
         scrubbed = SecretRedactionFilter.redact(scrubbed);
         return new Redacted(scrubbed, !scrubbed.equals(message));
@@ -183,7 +186,7 @@ public class KnowledgeBaseFailureRedactor {
     private static void sort(String value, boolean identity, Set<String> plaintexts, Set<String> shortPlaintexts) {
         if (value.length() >= MIN_LITERAL_LENGTH) {
             plaintexts.add(value);
-        } else if (!identity && value.length() >= MIN_SHORT_LENGTH) {
+        } else if (!identity && !value.isEmpty()) {
             shortPlaintexts.add(value);
         }
     }
@@ -199,6 +202,5 @@ public class KnowledgeBaseFailureRedactor {
     /** The shortest credential value replaced everywhere it occurs. */
     static final int MIN_LITERAL_LENGTH = 8;
 
-    /** The shortest credential value looked for as a whole token. */
-    static final int MIN_SHORT_LENGTH = 4;
+
 }

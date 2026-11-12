@@ -142,17 +142,17 @@ class ChatErrorCredentialScrubbingTest {
     }
 
     @Test
-    @DisplayName("a short credential is not replaced everywhere, but a text that repeats it is withheld whole")
+    @DisplayName("a short credential is not replaced everywhere, but a text that carries it anywhere is withheld whole")
     void shortCredentialWithholdsTheText() {
         var credentials = new ResolvedCredentials();
         String shortValue = "h".repeat(6);
         credentials.record(List.of(shortValue, "abc"));
 
         assertEquals(ResolvedCredentials.WITHHELD, credentials.scrub("rejected key " + shortValue + " for gateway"));
-        // Not as part of a longer word, and a text without it is unchanged.
-        assertEquals("prefix" + shortValue + "suffix", credentials.scrub("prefix" + shortValue + "suffix"));
+        // Joined to other letters or digits too.
+        assertEquals(ResolvedCredentials.WITHHELD, credentials.scrub("prefix" + shortValue + "42"));
         assertEquals("connection refused", credentials.scrub("connection refused"));
-        // Shorter than four characters is too unspecific to look for at all.
+        // Under four characters it cannot be covered on this process-wide path.
         assertEquals("abc is fine", credentials.scrub("abc is fine"));
         assertEquals("x", ResolvedCredentials.scrub(null, "x"));
     }

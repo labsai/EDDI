@@ -83,14 +83,16 @@ so the fallback stays usable.
 - The chat-error scrubber captures each plaintext where `ChatModelRegistry` substitutes its reference (each
   distinct reference resolved once, on its own), instead of resolving again or splitting the resolved text —
   a secret containing the separator, or two adjacent references, is captured as the separate secrets it is.
-- A credential of 4 to 7 characters, too short to replace everywhere, withholds the whole message when it
-  appears in it as a token: on the chat error paths (`ResolvedCredentials`) and in the knowledge-base failure
-  status and search errors (`KnowledgeBaseFailureRedactor`, which names the failure's class; the server log then
-  gets the redacted text, not the raw exception). Identity parameters (`user`, `userName`) take no part.
+- A credential shorter than 8 characters cannot be replaced everywhere. On the chat error paths
+  (`ResolvedCredentials`) a message containing one of 4 to 7 characters anywhere is withheld whole; under 4
+  characters cannot be covered there, the set being process-wide. A knowledge base with any credential
+  parameter shorter than 8 characters (not `user`/`userName`) never returns or stores its provider's failure
+  text: `KnowledgeBaseFailureRedactor` returns a generic message naming the exception class, and the log line
+  carries only the class and the knowledge base. Remedy: a vault reference or a credential of 8+ characters.
 - The save and deploy placement check also covers `classifier` and `judge` guardrail parameters, judged against
   the guardrail's own `provider`.
-- `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; shorter
-  ones withhold, as above).
+- `KnowledgeBaseFailureRedactor` also scrubs the literal values of credential parameters (8+ characters; a shorter
+  one withholds every failure text, as above).
 - The vault-tenant warning no longer logs the requested tenant value, and `ConfigReferenceGuard` trims the
   `tenantId` property as `SecretPropertyVault` does.
 - A merge import over a stored version that breaks the placement rule is refused before it writes, since the

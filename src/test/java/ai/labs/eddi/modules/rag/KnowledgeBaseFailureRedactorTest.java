@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,7 +57,7 @@ class KnowledgeBaseFailureRedactorTest {
         var config = new RagConfiguration();
         config.setName("kb");
         config.setEmbeddingProvider("openai");
-        config.setEmbeddingParameters(Map.of("apiKey", "k"));
+        config.setEmbeddingParameters(Map.of("apiKey", "${vault:embedding-key}"));
         config.setStoreParameters(Map.of("password", "${vault:store-password}"));
         return config;
     }
@@ -97,11 +98,44 @@ class KnowledgeBaseFailureRedactorTest {
         assertTrue(redacted.altered());
         assertFalse(redacted.text().contains(shortPassword), redacted.text());
         assertTrue(redacted.text().contains("IllegalStateException"), redacted.text());
-        // A failure that does not carry it is returned as it was — the user name, an
-        // identity rather than a secret, withholds nothing.
-        var unrelated = redactor.redactFailure(config, new IllegalStateException("database eddi does not exist"));
+        // A short user name, an identity rather than a secret, withholds nothing.
+        var identityOnly = knowledgeBase();
+        identityOnly.setStoreType("pgvector");
+        identityOnly.setStoreParameters(Map.of("user", "eddi", "password", "${vault:store-password}"));
+        var unrelated = redactor.redactFailure(identityOnly, new IllegalStateException("database eddi does not exist"));
         assertFalse(unrelated.altered());
         assertEquals("database eddi does not exist", unrelated.text());
+    }
+
+    @Test
+    @DisplayName("a 3-character password, and a 5-character one joined to an alphanumeric run, both withhold the provider's text")
+    void anyShortCredentialWithholdsEveryFailure() {
+        for (String password : List.of("x".repeat(3), "y".repeat(5))) {
+            var config = knowledgeBase();
+            config.setStoreType("pgvector");
+            config.setStoreParameters(Map.of("password", password));
+            // Echoed without a label, joined to other characters, or not echoed at all:
+            // the provider's text is never returned for this configuration.
+            for (String message : List.of("auth failed abc" + password + "123", "connection reset by peer")) {
+                var redacted = redactor.redactFailure(config, new IllegalStateException(message));
+                assertTrue(redacted.altered());
+                assertFalse(redacted.text().contains(password), redacted.text());
+                assertTrue(redacted.text().contains("IllegalStateException"), redacted.text());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("long and reference credentials only: the scrubbed provider text is returned")
+    void longCredentialsKeepTheProviderText() {
+        var config = knowledgeBase();
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("password", "${vault:store-password}"));
+
+        var redacted = redactor.redactFailure(config, new IllegalStateException("authentication failed for " + PLAINTEXT + " on host db"));
+
+        assertFalse(redacted.text().contains(PLAINTEXT), redacted.text());
+        assertTrue(redacted.text().contains("on host db"), redacted.text());
     }
 
     @Test
