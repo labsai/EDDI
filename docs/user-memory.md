@@ -301,6 +301,8 @@ The Dream service performs background maintenance on user memories:
 
 4. **Concurrent writes win.** A cycle reads the user's memories, then spends seconds in the LLM call before it writes. Every write it makes is therefore conditional on the memory being exactly as it was read — a compare-and-set on `updatedAt`, one atomic statement on MongoDB and PostgreSQL: a stale entry the conversation rewrote in the meantime is not pruned; a group any of whose originals changed during the LLM call is skipped untouched; an original rewritten after the consolidation was written is kept rather than deleted (the duplicate is reconciled by the next cycle). Each skip is counted as `conflictsSkipped` in the cycle's completion log line and on `eddi.dream.conflicts.skipped`. Earlier releases deleted and overwrote by id, so a fact the user stated during the cycle could be lost.
 
+A cycle never runs for a user under a GDPR Art. 18 processing restriction: the scheduled fire checks the restriction before it reads anything, skips the whole cycle (no prune, no consolidation, no LLM call) and completes successfully, so the schedule is not dead-lettered and consolidation resumes once the restriction is lifted. When the restriction status cannot be read, the fire fails and is retried. (Earlier releases ran the cycle regardless.)
+
 ### Scheduling a Dream Cycle
 
 Setting `dream.enabled: true` does not start anything on its own — it is the per-agent veto that is checked when a dream schedule fires. Dream runs through the regular cluster-aware schedule machinery, so a cycle only happens if you also create a `ScheduleConfiguration` that targets it:
