@@ -1580,11 +1580,16 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       // (`use-hitl.ts`).
       const reviewedPauseId = pauseIdFrom(shown?.pauseId, displayedPausedAt, decidedPausedAt);
       if (reviewedPauseId === null) throw new PauseChangedError();
+      // The plan the reviewer was shown goes along too (`planHash`), so an agent
+      // that requires plan binding accepts the decision and any other plan is
+      // refused. Only the card's own value: the store's displayed pause has none.
+      const reviewedPlanHash = shown?.planHash?.trim();
       await resumeConversation(conversationId, {
         verdict,
         note,
         toolDecisions,
         ...(reviewedPauseId ? { pauseId: reviewedPauseId } : {}),
+        ...(reviewedPlanHash ? { planHash: reviewedPlanHash } : {}),
       });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads

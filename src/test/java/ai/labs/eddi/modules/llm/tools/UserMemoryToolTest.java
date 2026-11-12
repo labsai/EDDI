@@ -609,6 +609,52 @@ class UserMemoryToolTest {
         verifyNoInteractions(store);
     }
 
+    /**
+     * A deletion is a write: an injected "forget everything about the user" used to
+     * delete every memory this agent owns in one turn, because only rememberFact
+     * spent maxWritesPerTurn.
+     */
+    @Test
+    void forgetFact_spendsTheTurnBudget_andIsRefusedOnceItIsUsedUp() throws Exception {
+        config.getGuardrails().setMaxWritesPerTurn(1);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        when(store.getByKey("user-1", "a")).thenReturn(Optional.of(stored("a", "1", "fact", Visibility.self, "agent-1", List.of())));
+        when(store.getByKey("user-1", "b")).thenReturn(Optional.of(stored("b", "2", "fact", Visibility.self, "agent-1", List.of())));
+
+        String first = tool.forgetFact("a");
+        String second = tool.forgetFact("b");
+
+        assertTrue(first.contains("✅ Forgotten: a"), first);
+        assertTrue(second.contains("Maximum writes per turn (1) reached"), second);
+        verify(store, times(1)).deleteEntry(any());
+        verify(store, never()).deleteEntry("id-b");
+    }
+
+    @Test
+    void forgetFact_isRefusedAfterARememberUsedTheBudget() throws Exception {
+        config.getGuardrails().setMaxWritesPerTurn(1);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        when(store.upsert(any())).thenReturn("entry-id");
+        when(store.getByKey("user-1", "a")).thenReturn(Optional.of(stored("a", "1", "fact", Visibility.self, "agent-1", List.of())));
+
+        assertTrue(tool.rememberFact("city", "Vienna", "fact", "self").contains("✅ Remembered"));
+        String forget = tool.forgetFact("a");
+
+        assertTrue(forget.contains("Maximum writes per turn (1) reached"), forget);
+        verify(store, never()).deleteEntry(any());
+    }
+
+    @Test
+    void forgetFact_ofAMissingKey_spendsNoBudget() throws Exception {
+        config.getGuardrails().setMaxWritesPerTurn(1);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        when(store.getByKey("user-1", "a")).thenReturn(Optional.of(stored("a", "1", "fact", Visibility.self, "agent-1", List.of())));
+
+        assertTrue(tool.forgetFact("missing").contains("No memory with key 'missing' found"));
+        assertTrue(tool.forgetFact("a").contains("✅ Forgotten: a"), "a miss deletes nothing and must not count");
+        verify(store).deleteEntry("id-a");
+    }
+
     @Test
     void searchMemory_shouldReturnMatchingEntries() throws Exception {
         var entries = List.of(new UserMemoryEntry("1", "user-1", "language", "English", "preference", Visibility.self, "agent-1", List.of(), "conv-1",

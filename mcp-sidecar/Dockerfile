@@ -15,7 +15,7 @@
 # TODO: re-pin after verifying the digest yourself; this one was current at the
 #       time of writing, not blessed.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/sparfenyuk/mcp-proxy@sha256:93fd47638ea9b5b017cf826f2c7ea4f3ce9d15e7984970de25a9b0aebef66189
+FROM ghcr.io/sparfenyuk/mcp-proxy@sha256:ecbe838e41b3bbfaccc009b234d34bc285b8bf4479d143454e5a35cf41f646b2
 
 # Pin the SERVER version too. `npx -y pkg` without one resolves *latest* at every
 # container start, which is a supply-chain change with no deploy behind it.

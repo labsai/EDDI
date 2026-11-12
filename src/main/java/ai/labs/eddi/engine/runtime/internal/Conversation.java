@@ -1570,6 +1570,10 @@ public class Conversation implements IConversation {
             persistRevisionCandidate(e);
         }
         conversationMemory.setHitlRevisionCandidate(null);
+        // Computed when the pause is committed (ConversationHitlService
+        // #populateHitlTimeoutBookmark), after the turn's secret scrub has rewritten
+        // the batch: a hash taken here would cover arguments the store never sees.
+        conversationMemory.setHitlPlanHash(null);
     }
 
     /**
@@ -1998,6 +2002,10 @@ public class Conversation implements IConversation {
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_note", decision.getNote()));
             if (decision.getDecidedBy() != null)
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_by", decision.getDecidedBy()));
+            // The plan this decision was admitted against, for the audit entries of the
+            // tasks the resume runs (LifecycleManager#buildAuditEntry reads it).
+            if (conversationMemory.getHitlPlanHash() != null)
+                conversationMemory.getCurrentStep().storeData(new Data<>(MemoryKeys.HITL_PLAN_HASH.key(), conversationMemory.getHitlPlanHash()));
 
             // Decision visibility (Phase 1b): make verdict accessible in templates
             // and behavior rules. ConversationOutput → {memory.current.hitlDecision},
@@ -2188,6 +2196,7 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
         conversationMemory.setHitlApprovalContext(null);
+        conversationMemory.setHitlPlanHash(null);
     }
 
     /**
