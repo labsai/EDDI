@@ -226,9 +226,10 @@ public class ChatModelRegistry {
      * on the provider, so a configuration carrying an allowed {@code baseUrl} and
      * an attacker's {@code endpoint} must not pass on the strength of the one it
      * does not use. A configuration with none still has a destination: the
-     * provider's own default endpoint, which {@link ILanguageModelBuilder#defaultEndpoint}
-     * names and which is checked the same way. The editor chooses the provider
-     * {@code type}, so a vendor's fixed host is an editor-chosen destination too.
+     * provider's own default endpoint, which
+     * {@link ILanguageModelBuilder#defaultEndpoint} names and which is checked the
+     * same way. The editor chooses the provider {@code type}, so a vendor's fixed
+     * host is an editor-chosen destination too.
      *
      * @param params
      *            the builder parameters with global variables resolved and vault

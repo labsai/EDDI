@@ -202,5 +202,4 @@ public class KnowledgeBaseFailureRedactor {
     /** The shortest credential value replaced everywhere it occurs. */
     static final int MIN_LITERAL_LENGTH = 8;
 
-
 }

@@ -36,12 +36,12 @@ import java.util.Set;
  * unrelated text, so a value of {@link #MIN_SHORT_LENGTH} to
  * {@code MIN_LENGTH - 1} characters is instead looked for anywhere in the text,
  * joined to other characters or not, and a text that carries one is withheld
- * entirely ({@link #WITHHELD}). Values under {@code MIN_SHORT_LENGTH} characters
- * <em>cannot be covered</em> here: the set is process-wide, and withholding every
- * error that contains some two- or three-character string would hide the cause
- * of nearly every failure. Use credentials of 8 characters or more. Bounded; a
- * value that falls out was resolved long enough ago that the model holding it
- * has typically been rebuilt and recorded it again.
+ * entirely ({@link #WITHHELD}). Values under {@code MIN_SHORT_LENGTH}
+ * characters <em>cannot be covered</em> here: the set is process-wide, and
+ * withholding every error that contains some two- or three-character string
+ * would hide the cause of nearly every failure. Use credentials of 8 characters
+ * or more. Bounded; a value that falls out was resolved long enough ago that
+ * the model holding it has typically been rebuilt and recorded it again.
  */
 @ApplicationScoped
 public class ResolvedCredentials {
