@@ -204,9 +204,10 @@ They are recomputed, never incremented:
    (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
    minute behind the clock, at most 10,000 pairs a pass; a window holding more
    is halved until one fits, and the watermark moves only past what was
-   marked. The one exception: a one-second window that still holds more than
-   10,000 pairs has only 10,000 of them marked, with a WARN, and the watermark
-   moves past it anyway, so the rest rely on their own marks). A row that reaches the store more than 30 seconds after its capture
+   marked. A one-second window that still holds more than 10,000 pairs is not
+   cut: all of its pairs are streamed and marked in chunks of 10,000, with a
+   WARN, so the watermark never passes a pair it did not mark — even when many
+   rows share one timestamp). A row that reaches the store more than 30 seconds after its capture
    time, which this scan may already be past, marks its days in the store
    **before** it is written, instead of on the five-second flush, so a node
    stopping between the write and the mark cannot lose it (a mark whose row then
@@ -251,7 +252,13 @@ user's, or a deleted conversation's, contribution to those counts stays until
 
 The views cache what they read from the stores for `eddi.health.cache-ttl`
 (60 s; 0 switches it off), keyed by the full query and per agent, never per
-caller — who may see what is decided before the cache is asked. The portfolio
+caller — who may see what is decided before the cache is asked. Loads are
+single-flight per key: when an entry is missing or expired, one caller runs the
+query and every concurrent caller of the same query waits for that result, so a
+Manager poll from several tabs or users cannot stampede the store. A failed or
+empty (`null`) load is not cached — the callers waiting on it see that one
+outcome, and the next caller retries. The portfolio's batch reads over many
+agents are shared the same way between identical requests. The portfolio
 counts every listed agent's traffic, now and in the baseline, in one pass over
 the turn rows (indexed by `(agentId, day)`).
 A change that alters how stored turns are counted (outcome mappings, later
@@ -294,7 +301,7 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/agents/{agentId}/health` | The report: every section with its measures, the baseline, the golden-suite check |
 | `GET` | `/agents/{agentId}/health/series` | One point per day per measure (`measure=` repeatable, 1–6), `groupBy=none\|version\|origin`, and the change markers of the period |
 | `GET` | `/agents/{agentId}/health/compare` | `from=<version>&to=<version>[&days=14]`: both sides' sections and per-measure `deltas` |
-| `GET` | `/health/agents` | The portfolio: every agent the caller may view, `sort=attention\|name\|traffic`, `limit` (≤ 500), `cursor`, plus `platformIncidents` |
+| `GET` | `/health/agents` | The portfolio: every agent the caller may view (at most 5,000; `agentsTruncated: true` when there are more), `sort=attention\|name\|traffic`, `limit` (default 100, ≤ 500), `cursor` (`nextCursor`, `null` on the last page), plus `platformIncidents` |
 
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
 ending today, or `from`/`to` (both, at most 90 days, not after today);
