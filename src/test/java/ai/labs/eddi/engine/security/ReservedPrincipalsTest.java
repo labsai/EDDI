@@ -66,6 +66,7 @@ class ReservedPrincipalsTest {
             Map.entry("c:", "hash input tag"),
             Map.entry("h:", "hash input tag"),
             Map.entry("h1:", "hash input tag"),
+            Map.entry("v1:", "HITL plan-hash version prefix (HitlPlanHash.VERSION_PREFIX), a digest, never a principal"),
             Map.entry("k:", "hash input tag"),
             Map.entry("u:", "hash input tag"),
             Map.entry("b:", "webhook signature digest tag"),
