@@ -924,7 +924,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `toolRepeatGuard` | object | Refuses a tool call that already failed identically with nothing succeeding since, instead of re-running it. **On by default**; `{"enabled": false}` turns it off. See [Repeated failing tool calls](#repeated-failing-tool-calls) | enabled |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
-| `toolResponseLimits`       | object   | Character limit on each single tool result, and what to do with a result over it. See [Tool Response Limits](#tool-response-limits) | (none) |
+| `toolResponseLimits`       | object   | Character limit on each single tool result, and what to do with a result over it. See [Tool Response Limits](#tool-response-limits) | 50,000 chars, `headTail` |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
@@ -1405,7 +1405,7 @@ An omitted whitelist therefore means the standard built-in tools plus user memor
 
 ### Tool response limits
 
-`toolResponseLimits` caps how much of one tool response reaches the model.
+`toolResponseLimits` caps how much of one tool response reaches the model. A task that sets no `toolResponseLimits` gets the defaults below — 50,000 characters, `headTail` — rather than no ceiling: a remote tool could otherwise return tens of megabytes into the prompt and the stored trace. Set `defaultMaxChars` to `0` to turn the cap off deliberately.
 
 | Field | Default | Meaning |
 | --- | --- | --- |

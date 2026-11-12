@@ -217,6 +217,13 @@ outruns scrubbing.
 
 Rotating a vault secret evicts cached MCP clients immediately, so the next call presents the new value.
 
+The client cache holds at most 256 clients (one per URL, credential and timeout)
+and drops one idle for 30 minutes, closing it after
+`eddi.mcp.client-cache.close-grace-ms` (default 2 minutes) so a call already
+running on it is not cut off. Clients run no background health-check ping. The
+`discover-tools` probe builds its client for the one listing and closes it — it
+never enters the cache.
+
 ### Network safety
 
 `mcpServerUrl` is an outbound URL chosen by the agent's author. SSRF validation of the
@@ -234,7 +241,7 @@ tool-description and schema size limits listed in the configuration reference.
 ## What is governed
 
 Everything an MCP server sends you is third-party text that lands in your model's
-context. Three layers apply, none of which you configure to get:
+context. Four layers apply, none of which you configure to get:
 
 1. **Tool descriptions** are directive-redacted and length-capped
    (`eddi.mcp.tool-description.max-chars`, default 1024) before they become part of
@@ -246,13 +253,29 @@ context. Three layers apply, none of which you configure to get:
    and the serialised schema is bounded per tool (`eddi.mcp.tool-schema.max-bytes`,
    default 32 KB — descriptions are stripped first, a schema still over the cap
    drops its tool) and per server (`eddi.mcp.tool-schema.max-bytes-per-server`,
-   default 512 KB). Each redaction, truncation or drop is counted in
+   default 512 KB, charged with each tool's name and description as well as its
+   schema, so a server of thousands of parameterless tools is not free). A server
+   contributes at most `eddi.mcp.tools.max-per-server` tools (default 128), and a
+   tool whose name is not 1–64 characters of `[A-Za-z0-9_.-]` is dropped. Each
+   redaction, truncation or drop is counted in
    `eddi_mcp_tool_schema_governed_total` (tag `outcome`) and named in a WARN.
 2. **Resource content and listings** (`exposeResources`) get the same treatment,
    plus an aggregate cap.
-3. **Tool results** are wrapped in a provenance delimiter naming the tool and its
+3. **Discovery itself is bounded.** A paginated `tools/list`, `resources/list` or
+   `resources/templates/list` stops after `eddi.mcp.list.max-pages` pages (default
+   20), `eddi.mcp.list.max-items` entries (2,000) or `eddi.mcp.list.deadline-ms`
+   (30 s), whichever comes first — a server that answers every page with a new
+   cursor would otherwise hold the thread and fill the heap before any of the
+   governance above ran. The discovery is then reported as a connection failure and
+   the server's client is dropped.
+4. **Tool results** are wrapped in a provenance delimiter naming the tool and its
    source and stating that the content is data, not instructions; directive-shaped
-   content in a result is redacted by default. Configure per LLM task:
+   content in a result is redacted by default. A result is also capped at
+   `toolResponseLimits` — 50,000 characters, `headTail`, when the task sets none.
+   A **rule-triggered** call's (`mcpCalls`) result has its directive-shaped content
+   redacted before it is stored in memory (`eddi.mcpcalls.result-screening.enabled`,
+   default on) but is not wrapped, because the stored value is data a designer
+   templates and an envelope would change its shape. Configure per LLM task:
 
 ```json
 "toolResultGuardrails": {
@@ -344,6 +367,8 @@ make every approval of a credentialed call fail its own re-check.
 | Tools vanish after a while | Circuit breaker: 3 failures in 60s opens it for a cooldown. Check the server. |
 | `Failed to connect to MCP server (…)` with no detail | Deliberate. The exception *message* routinely contains the resolved URL, and a URL with a templated credential in it is the credential. The full throwable is in the server log. |
 | Two servers, one tool missing | Name collision. First writer wins, loudly; use `toolsBlacklist` on the loser to make the choice explicit. |
+| A large server shows only its first 128 tools | `eddi.mcp.tools.max-per-server`. Raise it, or split the server. |
+| `MCP tools/list stopped: the server's listing ran more than 20 pages` | The server kept returning a pagination cursor. Fix the server, or raise `eddi.mcp.list.max-pages` if it really has that many pages. |
 | A rotated key still fails | Confirm the config uses `${vault:…}` and not a literal — a literal is not invalidated because nothing knows it changed. |
 
 ---
