@@ -444,9 +444,17 @@ public class GroupConversation {
      * type, so this is what lets a GDPR export mask a person's entries even after a
      * continuation, run under a configuration that changed since, has started a
      * member conversation for the same id. Copy-on-write for the reason the agent
-     * lists above are. Absent from documents written before it existed.
+     * lists above are.
+     * <p>
+     * {@code null} means <em>no record</em>: a document written before the field
+     * existed, whose human turns were never recorded. It stays null — recording
+     * into it later would make a partial history look complete — and the export
+     * then trusts no agent evidence for that discussion. A discussion created from
+     * now on starts with an empty list ({@link #startHumanMemberRecord}), which the
+     * persisted JSON keeps as {@code []} (only null is omitted), so an empty record
+     * and a missing one stay distinguishable on MongoDB and PostgreSQL alike.
      */
-    private List<String> humanMemberIds = new CopyOnWriteArrayList<>();
+    private List<String> humanMemberIds;
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     /**
@@ -1398,18 +1406,30 @@ public class GroupConversation {
         return humanMemberIds;
     }
 
+    /** Null keeps "no record" (a legacy document); see {@link #humanMemberIds}. */
     public void setHumanMemberIds(List<String> humanMemberIds) {
-        this.humanMemberIds = humanMemberIds != null
-                ? new CopyOnWriteArrayList<>(humanMemberIds)
-                : new CopyOnWriteArrayList<>();
+        this.humanMemberIds = humanMemberIds != null ? new CopyOnWriteArrayList<>(humanMemberIds) : null;
+    }
+
+    /**
+     * Starts this discussion's human-member record — called once, when the
+     * discussion is created. No-op on a record that already exists.
+     */
+    public void startHumanMemberRecord() {
+        if (humanMemberIds == null) {
+            humanMemberIds = new CopyOnWriteArrayList<>();
+        }
     }
 
     /**
      * Records {@code memberId} as having been a human member of this discussion.
+     * Nothing is recorded for a legacy discussion without a record: a partial
+     * record would pass for a complete one.
      */
     public void recordHumanMember(String memberId) {
-        if (memberId != null && !humanMemberIds.contains(memberId)) {
-            humanMemberIds.add(memberId);
+        List<String> record = humanMemberIds;
+        if (memberId != null && record != null && !record.contains(memberId)) {
+            record.add(memberId);
         }
     }
 

@@ -669,6 +669,7 @@ class MemberTurnExecutorTest {
     @Test
     void executeAgentTurn_humanMember_skippedInAutomatedContexts() throws Exception {
         var gc = new GroupConversation();
+        gc.startHumanMemberRecord();
         gc.setId("gc-1");
         gc.setGroupId("group-1");
         var human = new GroupMember("h-1", "Hannah", 1, null, MemberType.HUMAN);

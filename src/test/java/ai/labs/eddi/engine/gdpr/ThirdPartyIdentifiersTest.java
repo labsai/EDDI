@@ -26,6 +26,42 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 /** Masking of other people's identifiers in a data subject's export. */
 class ThirdPartyIdentifiersTest {
 
+    /** A discussion created by this version: it carries a human-member record. */
+    private static GroupConversation recorded() {
+        GroupConversation discussion = new GroupConversation();
+        discussion.startHumanMemberRecord();
+        return discussion;
+    }
+
+    @Test
+    @DisplayName("legacy: without a human-member record, agent evidence unmasks nothing")
+    void legacyDiscussionTrustsNoAgentEvidence() {
+        GroupConversation legacy = new GroupConversation();
+        List<TranscriptEntry> transcript = new ArrayList<>();
+        // a human turn written as an OPINION, which leaves no evidence of its own
+        transcript.add(entry("x", "Xena", TranscriptEntryType.OPINION, "agent-1"));
+        transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.CRITIQUE, "x"));
+        transcript.add(entry("owner", "Owner", TranscriptEntryType.HUMAN_INPUT, "x"));
+        transcript.add(entry(null, "System", TranscriptEntryType.ERROR, null));
+        legacy.setTranscript(transcript);
+        // a later continuation started a member conversation for x as an agent
+        legacy.getMemberConversationIds().put("x", "conv-x");
+        legacy.getMemberConversationIds().put("agent-1", "conv-a");
+        // recording into a legacy discussion does not turn it into a recorded one
+        legacy.recordHumanMember("someone");
+        assertNull(legacy.getHumanMemberIds());
+
+        List<TranscriptEntry> masked = ThirdPartyIdentifiers.transcriptFor(legacy, "owner");
+
+        assertEquals(OTHER_PERSON, masked.get(0).speakerAgentId());
+        assertEquals(OTHER_PERSON, masked.get(0).speakerDisplayName());
+        assertEquals(OTHER_PERSON, masked.get(1).targetAgentId());
+        assertEquals(OTHER_PERSON, masked.get(1).speakerAgentId(), "agents read [other person] in a legacy discussion");
+        assertEquals("owner", masked.get(2).speakerAgentId(), "the subject's own entries are kept");
+        assertEquals(OTHER_PERSON, masked.get(2).targetAgentId());
+        assertSame(legacy.getTranscript().get(3), masked.get(3));
+    }
+
     private static TranscriptEntry entry(String speaker, String name, TranscriptEntryType type, String target) {
         return new TranscriptEntry(speaker, name, "text", 0, "phase", type, Instant.EPOCH, null, target);
     }
@@ -44,7 +80,7 @@ class ThirdPartyIdentifiersTest {
     @Test
     @DisplayName("a discussion's other human members are masked in the transcript; agents and the subject are kept")
     void transcriptMasksOtherHumans() {
-        GroupConversation discussion = new GroupConversation();
+        GroupConversation discussion = recorded();
         discussion.setUserId("owner@example.com");
         List<TranscriptEntry> transcript = new ArrayList<>();
         transcript.add(entry("agent-1", "Analyst", TranscriptEntryType.OPINION, null));
@@ -82,7 +118,7 @@ class ThirdPartyIdentifiersTest {
     @Test
     @DisplayName("fail closed: with no configuration a skipped-only, non-address human is masked as speaker, name and target")
     void unknownIdsAreMaskedWithoutAConfiguration() {
-        GroupConversation discussion = new GroupConversation();
+        GroupConversation discussion = recorded();
         discussion.setUserId("owner");
         List<TranscriptEntry> transcript = new ArrayList<>();
         // never spoke, not pending, no address for an id, no configuration
@@ -106,7 +142,7 @@ class ThirdPartyIdentifiersTest {
     @Test
     @DisplayName("human evidence wins: a human skip, then a continuation that starts a member conversation for the same id")
     void humanEvidenceWinsOverALaterMemberConversation() {
-        GroupConversation discussion = new GroupConversation();
+        GroupConversation discussion = recorded();
         List<TranscriptEntry> transcript = new ArrayList<>();
         // round 1: x was a human member and timed out
         transcript.add(new TranscriptEntry("x", "Xena", null, 0, "p", TranscriptEntryType.SKIPPED, Instant.EPOCH,
@@ -132,7 +168,7 @@ class ThirdPartyIdentifiersTest {
     @Test
     @DisplayName("a human turn written with any entry type is masked once the discussion recorded the human member")
     void recordedHumanMemberIsMaskedWhateverTheEntryType() {
-        GroupConversation discussion = new GroupConversation();
+        GroupConversation discussion = recorded();
         discussion.setTranscript(List.of(entry("y", "Yuri", TranscriptEntryType.VOTE, null)));
         // the pause for y's turn records y; the marker is cleared once the turn is
         // answered
@@ -151,7 +187,7 @@ class ThirdPartyIdentifiersTest {
     @Test
     @DisplayName("only the discussion's own record makes an agent; a configured or persisted HUMAN is masked regardless")
     void onlyTheStoredRecordPlacesAgents() {
-        GroupConversation discussion = new GroupConversation();
+        GroupConversation discussion = recorded();
         List<TranscriptEntry> transcript = new ArrayList<>();
         transcript.add(entry("agent-2", "Recruit", TranscriptEntryType.OPINION, null));
         transcript.add(entry("dyn-human", "Dee", TranscriptEntryType.OPINION, null));

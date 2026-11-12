@@ -94,6 +94,7 @@ class GdprGroupDataTest {
 
     private static GroupConversation discussion(String id, String... memberConversationIds) {
         var gc = new GroupConversation();
+        gc.startHumanMemberRecord();
         gc.setId(id);
         gc.setGroupId("group-1");
         gc.setUserId(USER_ID);

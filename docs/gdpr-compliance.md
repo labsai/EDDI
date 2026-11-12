@@ -295,10 +295,13 @@ the discussion may be listed as an agent today. Human evidence wins over agent
 evidence in every entry: an id is masked throughout if the configuration lists it as
 human, the discussion recorded a human turn for it (paused for one or skipped one),
 or one of its entries is a human contribution or a timed-out human turn — even if a
-later continuation started a member conversation for the same id. Discussions stored
-before that record existed rely on the entries and the configuration alone. So an agent
-that never got a member conversation (one that was only ever skipped, say) reads
-`[other person]` too. What another person *wrote* in a discussion
+later continuation started a member conversation for the same id. So an agent that
+never got a member conversation (one that was only ever skipped, say) reads
+`[other person]` too. **Exports of discussions created before this version show their
+agents as `[other person]` as well:** those discussions carry no record of their human
+members, and a human turn written as an opinion or a vote left no other trace, so agent
+evidence is not trusted for them and every id except the subject's own (and
+`system:*`) is masked. What another person *wrote* in a discussion
 the subject started stays in the transcript; review it before handing the bundle over.
 (Earlier releases exported those identifiers as stored.)
 

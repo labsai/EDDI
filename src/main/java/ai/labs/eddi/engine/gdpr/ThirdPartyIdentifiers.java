@@ -92,10 +92,11 @@ public final class ThirdPartyIdentifiers {
      * entries is a {@code HUMAN_INPUT} or a human-turn {@code SKIPPED}. A
      * continuation, run under the configuration of its own day, may have started a
      * member conversation for an id that was a person earlier; that does not unmask
-     * the earlier entries. Discussions stored before {@code humanMemberIds} existed
-     * rely on the remaining evidence, so a human turn there that was written with
-     * another entry type is caught only if the configuration still lists the member
-     * as {@code HUMAN}.
+     * the earlier entries. A discussion stored before {@code humanMemberIds}
+     * existed has no such record ({@code null}), and there a human turn written
+     * with another entry type left no evidence at all — so for it agent evidence
+     * counts for nothing, and every id but the subject's own and the no-person
+     * markers is masked, agents included.
      * <p>
      * An agent that never got a member conversation (one that was only ever
      * skipped, say) is therefore masked as well: the bundle shows
@@ -148,6 +149,12 @@ public final class ThirdPartyIdentifiers {
             }
         }
         agents.removeAll(humans);
+        if (discussion.getHumanMemberIds() == null) {
+            // No human-member record: a discussion stored before the record existed,
+            // in which a human turn written as an OPINION or VOTE left no evidence. Agent
+            // evidence cannot rule a person out there, so it unmasks nothing.
+            agents.clear();
+        }
         List<TranscriptEntry> masked = new ArrayList<>(transcript.size());
         for (TranscriptEntry entry : transcript) {
             if (entry == null) {
