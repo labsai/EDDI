@@ -33,7 +33,8 @@ patches:
   # fetch). EDDI's own default is off so a self-hosted install can reach internal
   # APIs; a production deployment should not leave an agent config able to point
   # at loopback, the pod network or the node's metadata service. The allow-list
-  # keeps the Platform Operator's calls to EDDI's own API working; add the
+  # keeps the Platform Operator's calls to EDDI's own API (127.0.0.1:7070) and the
+  # reference agent's (localhost:7070, matched as exact host text) working; add the
   # internal hosts your httpcalls need (host or host:port, comma-separated), or
   # set the flag to "false" if every agent author is as trusted as you are.
   # See docs/security.md, "SSRF Protection".
@@ -46,7 +47,7 @@ patches:
         value: "true"
       - op: add
         path: /data/EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS
-        value: "127.0.0.1:7070"
+        value: "127.0.0.1:7070,localhost:7070"
   # Bump resource limits for production
   - target:
       kind: Deployment

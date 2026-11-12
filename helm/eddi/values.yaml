@@ -185,12 +185,16 @@ eddi:
     #                 exact, case-insensitive, no wildcards (a list or one
     #                 comma-separated string). The cloud-metadata check still
     #                 applies to them. The default keeps the Platform Operator's
-    #                 calls to EDDI's own API (127.0.0.1:7070, inside the pod);
+    #                 calls to EDDI's own API (127.0.0.1:7070, inside the pod) and the
+    #                 shipped rule-based reference agent, whose httpcalls target
+    #                 http://localhost:7070 — entries match the URL's host text
+    #                 exactly, so 127.0.0.1 does not admit localhost;
     #                 replace it only if you list that entry yourself.
     ssrfProtection:
       enabled: ""
       allowedHosts:
         - "127.0.0.1:7070"
+        - "localhost:7070"
 
   # OIDC / Keycloak authentication
   oidc:

@@ -585,8 +585,11 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `eddi.security.ssrfProtection.enabled` as `true` whenever `eddi.oidc.enabled` or
 > `ingress.enabled` is true (an install other people can reach) and as `false`
 > otherwise; set the value explicitly to override either way.
-> `eddi.security.ssrfProtection.allowedHosts` defaults to `127.0.0.1:7070`, which
-> keeps the Platform Operator's calls to EDDI's own API working — add your internal
+> `eddi.security.ssrfProtection.allowedHosts` defaults to `127.0.0.1:7070` and
+> `localhost:7070`: the allow-list compares the URL's host text exactly, so
+> `127.0.0.1` does not admit `localhost`, and the Platform Operator calls
+> `127.0.0.1:7070` while the shipped rule-based reference agent's httpCalls target
+> `http://localhost:7070`. Both entries keep those working — add your internal
 > API hosts to the list, because with protection on an httpCall to an in-cluster
 > Service name is refused. The `k8s/overlays/production` component sets the same
 > two properties. Docker Compose keeps the application default (service names are
@@ -1116,8 +1119,10 @@ which embeds the installer's functions. Every compose file and monitoring asset 
 and checked before any is moved into place, a mismatch or an unverifiable list stops the
 update with nothing changed, and an install pinned to a release (a version tag, or
 `latest` resolved to one) **refuses** to fall back to `main` when the lookup of the newest
-release fails — retry, name a version, or choose `main` on purpose with
-`EDDI_BRANCH=main eddi update`. The GCP provisioner
+release fails — retry, name a version, or choose `main` on purpose by setting
+`EDDI_BRANCH` to `main` for that one run: `EDDI_BRANCH=main eddi update` (bash),
+`set EDDI_BRANCH=main & eddi update` (Windows cmd; `eddi.cmd` reads the variable) or
+`$env:EDDI_BRANCH = 'main'; eddi update` (PowerShell). The GCP provisioner
 (`gcp/provision-vm.sh`) defaults `--eddi-branch` to `--eddi-version`'s tag or the
 newest stable release instead of `main`, falling back to `main` with a warning when the
 lookup fails; on the VM it downloads `install.sh` to a file and, for a release tag, compares
