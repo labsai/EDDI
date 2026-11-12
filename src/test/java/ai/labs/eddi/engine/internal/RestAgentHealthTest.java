@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.health.HealthAccess;
 import ai.labs.eddi.engine.health.HealthPortfolioService;
 import ai.labs.eddi.engine.health.HealthReportService;
 import ai.labs.eddi.engine.health.HealthReportService.Scope;
+import ai.labs.eddi.engine.health.report.HealthReports;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,6 +56,7 @@ class RestAgentHealthTest {
         portfolio = mock(HealthPortfolioService.class);
         when(reports.today()).thenReturn(TODAY);
         when(access.requireView("agent")).thenReturn("Support");
+        when(access.viewableAgents()).thenReturn(new HealthAccess.ViewableAgents(List.of(), false));
         rest = new RestAgentHealth(access, reports);
         portfolioRest = new RestHealthPortfolio(access, reports, portfolio);
     }
@@ -100,9 +103,24 @@ class RestAgentHealthTest {
         @DisplayName("the portfolio lists only what the access helper says the caller may view")
         void portfolioScope() {
             var agents = List.of(new HealthPortfolioService.AgentRef("a", "A"));
-            when(access.viewableAgents()).thenReturn(agents);
+            when(access.viewableAgents()).thenReturn(new HealthAccess.ViewableAgents(agents, false));
             portfolioRest.listAgentHealth(null, null, null, null, null);
             verify(portfolio).portfolio(eq(agents), any(), eq("attention"), eq(List.of()), eq(100), eq(0));
+        }
+
+        @Test
+        @DisplayName("the portfolio says when the caller may view more agents than it looks at")
+        void portfolioTruncated() {
+            var agents = List.of(new HealthPortfolioService.AgentRef("a", "A"));
+            when(portfolio.portfolio(any(), any(), anyString(), any(), anyInt(), anyInt()))
+                    .thenReturn(new HealthReports.Portfolio(List.of(), List.of(), "100"));
+            when(access.viewableAgents()).thenReturn(new HealthAccess.ViewableAgents(agents, true));
+            HealthReports.Portfolio page = portfolioRest.listAgentHealth(null, null, null, null, null);
+            assertTrue(page.agentsTruncated());
+            assertEquals("100", page.nextCursor());
+
+            when(access.viewableAgents()).thenReturn(new HealthAccess.ViewableAgents(agents, false));
+            assertFalse(portfolioRest.listAgentHealth(null, null, null, null, null).agentsTruncated());
         }
     }
 

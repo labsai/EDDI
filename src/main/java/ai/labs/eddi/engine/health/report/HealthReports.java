@@ -117,8 +117,20 @@ public final class HealthReports {
     public record PlatformIncident(String from, String to, String failureClass, int agents) {
     }
 
-    /** {@code GET /health/agents}. */
+    /**
+     * {@code GET /health/agents}. {@code nextCursor} is {@code null} on the last
+     * page; {@code agentsTruncated} says the caller may view more agents than one
+     * portfolio looks at ({@code HealthAccess.MAX_AGENTS}), so the agents past that
+     * cap are in no page and in no incident count.
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    public record Portfolio(List<PortfolioItem> items, List<PlatformIncident> platformIncidents, String nextCursor) {
+    public record Portfolio(List<PortfolioItem> items, List<PlatformIncident> platformIncidents, String nextCursor, boolean agentsTruncated) {
+        public Portfolio(List<PortfolioItem> items, List<PlatformIncident> platformIncidents, String nextCursor) {
+            this(items, platformIncidents, nextCursor, false);
+        }
+
+        public Portfolio withAgentsTruncated(boolean truncated) {
+            return new Portfolio(items, platformIncidents, nextCursor, truncated);
+        }
     }
 }

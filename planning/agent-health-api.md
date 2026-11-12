@@ -152,7 +152,8 @@ Query: `period` (default `7d`), `sort=attention|name|traffic` (default `attentio
       "platformIncident": false }
   ],
   "platformIncidents": [ { "from": "…", "to": "…", "failureClass": "RATE_LIMITED", "agents": 12 } ],
-  "nextCursor": null
+  "nextCursor": null,
+  "agentsTruncated": false
 }
 ```
 
@@ -276,6 +277,7 @@ What the H2b backend does where this contract leaves room, and its answers to §
 - **Apdex** names its threshold in `label` ("Response time (Apdex, T = 4 s)"); no new field. A period mixing T values is
   `value: null` with a hint.
 - **Portfolio `nextCursor`** is an offset into the order computed for each request (from cached numbers): an agent whose
-  numbers change between two pages can move, so a page may repeat or skip one.
+  numbers change between two pages can move, so a page may repeat or skip one. A portfolio looks at no more than 5,000
+  agents; `agentsTruncated: true` says the caller may view more, which are then in no page and no incident count.
 - **Markers**: at most 200, the newest (≤ 150 of the agent's, ≤ 50 deployment-wide); deployment-wide markers are coalesced
   per kind and hour and shown only to agents of their global-variable tenant.
