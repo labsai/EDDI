@@ -96,6 +96,30 @@ const RATING_MEASURES = new Set(["ratingScore", "ratingResponseRate", "replyThum
 const allNullSeries = (agentId: string, measureId: string): boolean =>
   NO_DAILY_VALUES.has(measureId) || (RATING_MEASURES.has(measureId) && agentId === HEALTH_AGENTS.restricted);
 
+/**
+ * The portfolio list (`GET /health/agents`) as the backend of a phase answers it. The default handlers use H3, where
+ * every status is null; `server.use(healthPortfolioHandler("H4"))` gives the statuses of the scenarios marked H4.
+ */
+export function healthPortfolioHandler(phase: "H3" | "H4") {
+  return http.get("*/health/agents", ({ request }) => {
+    const url = new URL(request.url);
+    const statuses = url.searchParams.getAll("status");
+    const all = portfolioFixture(phase);
+    const filtered = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
+    // `attention` is the fixture's order; `name` and `traffic` are sorted before paging, as the backend does.
+    const sort = url.searchParams.get("sort") ?? "attention";
+    const matching =
+      sort === "name"
+        ? [...filtered].sort((a, b) => a.agentName.localeCompare(b.agentName))
+        : sort === "traffic"
+          ? [...filtered].sort((a, b) => (b.sessions ?? -1) - (a.sessions ?? -1))
+          : filtered;
+    // Pages of three: the cursor is the index of the next item.
+    const at = Number(url.searchParams.get("cursor") ?? 0);
+    return HttpResponse.json({ ...all, items: matching.slice(at, at + 3), nextCursor: at + 3 < matching.length ? String(at + 3) : null });
+  });
+}
+
 /** Handlers for the operations the backend exposes (H2b, H3). They answer from fixtures. */
 export const healthHandlers = [
   http.get("*/agents/:agentId/health/series", ({ request, params }) => {
@@ -179,23 +203,7 @@ export const healthHandlers = [
     return HttpResponse.json({ ...healthFor(String(params.agentId)), ...periodFor(periodDays(new URL(request.url))) });
   }),
 
-  http.get("*/health/agents", ({ request }) => {
-    const url = new URL(request.url);
-    const statuses = url.searchParams.getAll("status");
-    const all = portfolioFixture();
-    const filtered = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
-    // `attention` is the fixture's order; `name` and `traffic` are sorted before paging, as the backend does.
-    const sort = url.searchParams.get("sort") ?? "attention";
-    const matching =
-      sort === "name"
-        ? [...filtered].sort((a, b) => a.agentName.localeCompare(b.agentName))
-        : sort === "traffic"
-          ? [...filtered].sort((a, b) => (b.sessions ?? -1) - (a.sessions ?? -1))
-          : filtered;
-    // Pages of three: the cursor is the index of the next item.
-    const at = Number(url.searchParams.get("cursor") ?? 0);
-    return HttpResponse.json({ ...all, items: matching.slice(at, at + 3), nextCursor: at + 3 < matching.length ? String(at + 3) : null });
-  }),
+  healthPortfolioHandler("H3"),
 ];
 
 /**

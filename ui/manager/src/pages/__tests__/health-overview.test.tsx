@@ -5,10 +5,12 @@ import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { portfolioFixture } from "@/test/mocks/health-fixtures";
+import { healthPortfolioHandler } from "@/test/mocks/health-handlers";
 import { HealthOverviewPage } from "../health-overview";
 
 describe("HealthOverviewPage", () => {
-  it("lists agents needs-me-first with their status, reason and key measures", async () => {
+  it("lists agents needs-me-first with their status, reason and key measures (H4)", async () => {
+    server.use(healthPortfolioHandler("H4"));
     renderWithProviders(<HealthOverviewPage />);
     const rows = await screen.findAllByTestId("health-overview-row");
     // The backend sorts by attention; the page keeps its order.
@@ -39,16 +41,19 @@ describe("HealthOverviewPage", () => {
     expect(screen.getAllByTestId("health-platform-incident")).toHaveLength(1);
   });
 
-  it("says so when the backend has no status yet", async () => {
+  it("says so when the backend has no status yet: by default (H3) no row has a status or a reason", async () => {
     renderWithProviders(<HealthOverviewPage />);
     await userEvent.click(await screen.findByTestId("health-overview-more"));
     await waitFor(() => expect(screen.getAllByTestId("health-overview-row")).toHaveLength(6));
-    const row = screen.getAllByTestId("health-overview-row").find((r) => r.getAttribute("data-agent-id") === "health-preh4")!;
-    expect(within(row).queryByTestId("health-status-badge")).toBeNull();
-    expect(within(row).getByTestId("health-row-no-status")).toBeInTheDocument();
+    for (const row of screen.getAllByTestId("health-overview-row")) {
+      expect(within(row).queryByTestId("health-status-badge")).toBeNull();
+      expect(within(row).getByTestId("health-row-no-status")).toBeInTheDocument();
+      expect(within(row).queryByTestId("health-row-reason")).toBeNull();
+    }
   });
 
-  it("filters by status", async () => {
+  it("filters by status (H4)", async () => {
+    server.use(healthPortfolioHandler("H4"));
     renderWithProviders(<HealthOverviewPage />);
     await screen.findAllByTestId("health-overview-row");
     await userEvent.click(screen.getByTestId("health-status-filter-WATCH"));
@@ -99,7 +104,7 @@ describe("HealthOverviewPage", () => {
     server.use(
       http.get("*/health/agents", ({ request }) => {
         const filtered = new URL(request.url).searchParams.has("status");
-        return HttpResponse.json({ items: filtered ? [] : portfolioFixture().items, platformIncidents: [], nextCursor: null });
+        return HttpResponse.json({ items: filtered ? [] : portfolioFixture("H4").items, platformIncidents: [], nextCursor: null });
       }),
     );
     renderWithProviders(<HealthOverviewPage />);

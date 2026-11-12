@@ -368,7 +368,17 @@ function item(agentId: string, agentName: string, partial: Partial<PortfolioItem
   };
 }
 
-export function portfolioFixture(): Portfolio {
+/**
+ * The portfolio as the backend sends it in a phase. H3 (the default, what the backend sends now): no agent has a
+ * status or a reason. H4: the scenarios' statuses and top reasons, for the badges and the status filter.
+ */
+export function portfolioFixture(phase: "H3" | "H4" = "H3"): Portfolio {
+  const portfolio = h4Portfolio();
+  if (phase === "H4") return portfolio;
+  return { ...portfolio, items: portfolio.items.map((i) => ({ ...i, status: null, topReason: null })) };
+}
+
+function h4Portfolio(): Portfolio {
   return {
     items: [
       item(HEALTH_AGENTS.attention, "Order Bot", { platformIncident: true }),

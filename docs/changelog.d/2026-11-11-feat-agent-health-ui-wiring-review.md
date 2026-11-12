@@ -69,6 +69,9 @@ The third round of review findings on PR #1390, each checked against the code an
 - **The profile editor waits for its refetch** (`profile-dialog.tsx`): a reopened dialog no longer starts its draft from
   the cached profile while the fresh one is on its way, so Save cannot overwrite a profile someone else saved in between.
   Test: "a reopened editor starts from the profile the server has now, not a cached one".
+- **The mocked portfolio is H3 by default:** `GET /health/agents` returns every agent with `status: null` and no top
+  reason, as the backend does until H4. `healthPortfolioHandler("H4")` gives the H4 scenarios' statuses, and the
+  overview tests of badges, reasons and the status filter use it explicitly.
 
 ### Design decisions
 
