@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
 
@@ -26,13 +26,11 @@ beforeEach(() => {
 /** Route the widget the way the app does: /chat/:environment/:agentId */
 function renderWidget() {
   return render(
-    <MemoryRouter initialEntries={["/chat/production/agent-1"]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider>
+      <ChatLocationProvider initialPath={"/chat/production/agent-1"}>
+        <ChatWidget />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 
@@ -504,13 +502,11 @@ describe("ChatWidget — recovering from a stuck conversation", () => {
 describe("ChatWidget — managed-agent route", () => {
   function renderManaged() {
     return render(
-      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
-        <ChatProvider>
-          <Routes>
-            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-          </Routes>
-        </ChatProvider>
-      </MemoryRouter>,
+      <ChatProvider>
+        <ChatLocationProvider initialPath={"/chat/managed/support/user-7"}>
+          <ChatWidget />
+        </ChatLocationProvider>
+      </ChatProvider>,
     );
   }
 
@@ -612,13 +608,11 @@ describe("ChatWidget — round-3 regressions", () => {
     }) as typeof fetch;
 
     render(
-      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
-        <ChatProvider>
-          <Routes>
-            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-          </Routes>
-        </ChatProvider>
-      </MemoryRouter>,
+      <ChatProvider>
+        <ChatLocationProvider initialPath={"/chat/managed/support/user-7"}>
+          <ChatWidget />
+        </ChatLocationProvider>
+      </ChatProvider>,
     );
 
     const fileInput = await screen.findByTestId("chat-file-input");
@@ -705,13 +699,11 @@ describe("ChatWidget — round-4 regressions", () => {
 
   function renderNonStreaming() {
     return render(
-      <MemoryRouter initialEntries={["/chat/production/agent-1?hideStreaming=true"]}>
-        <ChatProvider>
-          <Routes>
-            <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-          </Routes>
-        </ChatProvider>
-      </MemoryRouter>,
+      <ChatProvider>
+        <ChatLocationProvider initialPath={"/chat/production/agent-1?hideStreaming=true"}>
+          <ChatWidget />
+        </ChatLocationProvider>
+      </ChatProvider>,
     );
   }
 
@@ -1366,13 +1358,11 @@ describe("ChatWidget — conversation review notice", () => {
     }) as typeof fetch;
 
     render(
-      <MemoryRouter initialEntries={["/chat/managed/support/user-7"]}>
-        <ChatProvider>
-          <Routes>
-            <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-          </Routes>
-        </ChatProvider>
-      </MemoryRouter>,
+      <ChatProvider>
+        <ChatLocationProvider initialPath={"/chat/managed/support/user-7"}>
+          <ChatWidget />
+        </ChatLocationProvider>
+      </ChatProvider>,
     );
 
     expect(await screen.findByTestId("chat-review-notice")).toHaveTextContent("The support team may read this.");

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,6 +54,7 @@ class RemoteApiResourceSourceScrubbingTest {
     private static final String LIVE_TOKEN = "not-a-real-token-bbbbbbbb";
 
     private final Map<String, String> bodyByPath = new LinkedHashMap<>();
+    private final List<String> requestedPaths = new ArrayList<>();
     private HttpClient httpClient;
     private JsonSerialization jsonSerialization;
     private SecretScrubber secretScrubber;
@@ -66,6 +68,7 @@ class RemoteApiResourceSourceScrubbingTest {
         doAnswer(invocation -> {
             HttpRequest request = invocation.getArgument(0);
             String path = request.uri().getPath() + (request.uri().getQuery() == null ? "" : "?" + request.uri().getQuery());
+            requestedPaths.add(path);
             HttpResponse<String> response = mock(HttpResponse.class);
             when(response.statusCode()).thenReturn(200);
             // The most specific registered path wins, so a descriptor listing and a
@@ -116,6 +119,30 @@ class RemoteApiResourceSourceScrubbingTest {
         assertTrue(all.contains(ScrubbedSecrets.PLACEHOLDER),
                 "each secret is replaced by the placeholder the target's own value is put back into: " + all);
         assertTrue(all.contains("Help. {snippets.tone}"), "everything else is left as it was: " + all);
+    }
+
+    /**
+     * A document the scrubber cannot parse is refused, never passed on as it stands
+     * — and that refusal is remembered like a failed read, so a source naming the
+     * document from several steps is not asked for it again each time.
+     */
+    @Test
+    @DisplayName("a document the scrubber cannot parse is skipped, and not fetched again for the next step naming it")
+    void unscrubbableDocumentIsSkippedAndRememberedAsAFailure() throws Exception {
+        String llmPath = "/llmstore/llms/" + LLM_ID + "?version=1";
+        bodyByPath.put("/workflowstore/workflows/" + WORKFLOW_ID, """
+                {"workflowSteps":[
+                  {"type":"eddi://ai.labs.llm","config":{"uri":"eddi://ai.labs.llm/llmstore/llms/%1$s?version=1"}},
+                  {"type":"eddi://ai.labs.llm","config":{"uri":"eddi://ai.labs.llm/llmstore/llms/%1$s?version=1"}}
+                ]}""".formatted(LLM_ID));
+        bodyByPath.put("/llmstore/llms/" + LLM_ID, "<html>apiKey=" + LIVE_KEY + "</html>");
+
+        var source = source();
+        Map<String, ExtensionSourceData> extensions = source.readWorkflows().getFirst().extensions();
+
+        assertTrue(extensions.values().stream().noneMatch(extension -> extension.contentJson().contains(LIVE_KEY)),
+                "an unscrubbed document was passed on: " + extensions);
+        assertEquals(1, requestedPaths.stream().filter(llmPath::equals).count(), "requests sent: " + requestedPaths);
     }
 
     /**

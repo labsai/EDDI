@@ -748,13 +748,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         if (raw.startsWith(SSRF_REFUSAL_PREFIX) || raw.startsWith(SSRF_PRIVATE_PREFIX)) {
             // Not a network failure: EDDI's own SSRF protection refused the address
             // before any connection was attempted. With the protection on, a loopback or
-            // private self-URL can never work, and the model would otherwise be left to
-            // guess what "internal/local addresses" means for the platform's health.
+            // private self-URL works only if the operator allow-lists it (httpcalls have
+            // no self exception), and the model would otherwise be left to guess what
+            // "internal/local addresses" means for the platform's health.
             return SecretRedactionFilter.redact("EDDI refused to call " + attemptedTarget(targetServerUrl, apiCall)
                     + " because SSRF protection (eddi.security.ssrf-protection.enabled) blocks loopback, private and "
                     + "link-local addresses (" + stripUserInfo(raw) + "). No request was sent. The base URL configured for "
                     + "this tool (" + describeBase(targetServerUrl) + ") is such an address; with SSRF protection on, a tool "
-                    + "that calls EDDI itself needs a base URL (eddi.self.base-url) that passes the SSRF target policy.");
+                    + "that calls EDDI itself needs its host on eddi.security.ssrf-protection.allowed-hosts, or a base URL "
+                    + "(eddi.self.base-url) that passes the SSRF target policy.");
         }
         String connectFailure = connectFailureKind(e);
         if (connectFailure == null) {

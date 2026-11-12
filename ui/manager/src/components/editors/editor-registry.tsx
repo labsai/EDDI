@@ -107,27 +107,5 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   ),
 };
 
-/**
- * Maps EDDI extension type strings to resource slug identifiers.
- * Used by StudioEditorPanel to resolve pipeline stage types.
- */
-export const EXTENSION_TO_SLUG: Record<string, string> = {
-  "eddi://ai.labs.rules": "rules",
-  "eddi://ai.labs.behavior": "rules",
-  "eddi://ai.labs.apicalls": "apicalls",
-  "eddi://ai.labs.llm": "llm",
-  "eddi://ai.labs.output": "output",
-  "eddi://ai.labs.output.template": "output",
-  "eddi://ai.labs.property": "propertysetter",
-  "eddi://ai.labs.mcpcalls": "mcpcalls",
-  "eddi://ai.labs.dictionary": "dictionary",
-  "eddi://ai.labs.rag": "rag",
-  // The store's real extension is the singular `ai.labs.snippet`
-  // (IRestPromptSnippetStore); the plural is kept for documents written with it.
-  "eddi://ai.labs.snippet": "snippets",
-  "eddi://ai.labs.snippets": "snippets",
-  "eddi://ai.labs.parser": "parser",
-  // Not a pipeline step, but a resource type like the rest: lets a link by
-  // extension URI find the suite editor.
-  "eddi://ai.labs.testsuite": "testsuite",
-};
+// Step → slug resolution is NOT here: every screen resolves a workflow step
+// through getResourceSlugForStep in src/lib/api/extensions.ts.

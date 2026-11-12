@@ -77,4 +77,21 @@ public interface IApiCallExecutor {
      */
     default void rejectTemplatedAuthority(String targetDestination) {
     }
+
+    /**
+     * Refuses a target URL whose literal host the SSRF check {@link #execute}
+     * applies would refuse: a cloud instance-metadata address always, and, with
+     * {@code eddi.security.ssrf-protection.enabled=true}, a loopback, private or
+     * internal host that is not on
+     * {@code eddi.security.ssrf-protection.allowed-hosts}. Called at deploy time
+     * with the same decision logic, so the agent fails to deploy with a message
+     * naming the host and the fix instead of failing the first conversation. A
+     * templated or {@code ${vars:...}} host, and a host that does not resolve at
+     * deploy, are left to the check at execution.
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    default void rejectRefusedLiteralTarget(String targetDestination) {
+    }
 }

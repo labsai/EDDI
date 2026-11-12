@@ -1,0 +1,14 @@
+{
+  "behaviorGroups" : [ {
+    "behaviorRules" : [ {
+      "name" : "Send Message to LLM",
+      "actions" : [ "send_message" ],
+      "conditions" : [ {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*"
+        }
+      } ]
+    } ]
+  } ]
+}
