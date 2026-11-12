@@ -71,6 +71,8 @@ class ReservedPrincipalsTest {
             Map.entry("b:", "webhook signature digest tag"),
             Map.entry("t:", "webhook signature digest tag"),
             Map.entry("event:", "webhook event dedup fallback key"),
+            Map.entry("label:", "email processedAction value label:<name> (EmailProcessedAction), not a principal"),
+            Map.entry("move:", "email processedAction value move:<folder> (EmailProcessedAction), not a principal"),
             Map.entry("tool:", "tool quota counter name (ToolQuotaRules)"),
             Map.entry("sample:", "sampled-audit daily cap counter name (SampledAuditRecorder)"),
             Map.entry("suspended:", "gate refusal reason string (SuspendedGate.REASON_PREFIX)"),

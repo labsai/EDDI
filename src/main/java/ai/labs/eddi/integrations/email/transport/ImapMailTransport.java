@@ -255,7 +255,6 @@ public class ImapMailTransport implements MailTransport {
         }
     }
 
-    /** One open folder. */
     /**
      * Integrations already warned, per node, that their server takes no keywords /
      * has no MOVE — one WARN per integration, not one per poll.
@@ -272,11 +271,12 @@ public class ImapMailTransport implements MailTransport {
         return permanent != null && (permanent.contains(Flags.Flag.USER) || permanent.contains(PROCESSED_KEYWORD));
     }
 
-    static final class ImapSession implements MailboxSession {
+    static final class ImapSession extends UidFolderSession {
         private final String integrationId;
         private final IMAPStore store;
         private final IMAPFolder folder;
 
+        /** One open folder; its cursor is {@link ImapCursor}. */
         ImapSession(String integrationId, IMAPStore store, IMAPFolder folder) {
             this.integrationId = integrationId;
             this.store = store;
