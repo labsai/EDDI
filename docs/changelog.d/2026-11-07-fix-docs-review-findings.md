@@ -95,6 +95,8 @@ without a master key. It now says entries are signed only if `EDDI_AUDIT_HMAC_KE
 compliance check's logic was already right (it warns only when both keys are missing); its banner
 and its startup failure now say "neither … nor" and list both ways to enable signing.
 
+**Review follow-ups.** The four `ScheduleConfiguration` accessors for `tenantId` and `allowSelfScheduling` are now `@Deprecated(since = "6.8.0")` too, not just the fields. `CounterweightService.resolveInjection` lowercased with the default locale, so under a Turkish locale `"STRICT"` became `"strıct"` and the preset was silently skipped; it now uses `Locale.ROOT` on the already-normalised level (new test under `tr-TR`). The vault-disabled banner names the property `eddi.audit.hmac-key` and gives `EDDI_AUDIT_HMAC_KEY` as the env example.
+
 **Checked and left alone:**
 
 - `PostgresHealthCheck` does not mark readiness DOWN on the MongoDB default. Probed against the

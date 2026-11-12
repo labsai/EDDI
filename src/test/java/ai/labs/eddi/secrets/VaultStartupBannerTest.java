@@ -22,6 +22,7 @@ class VaultStartupBannerTest {
     @DisplayName("the disabled banner does not claim the audit ledger is unsigned")
     void disabledBannerNamesTheAuditKey() {
         assertFalse(VaultStartupBanner.DISABLED_BANNER.contains("will NOT have HMAC"), VaultStartupBanner.DISABLED_BANNER);
+        assertTrue(VaultStartupBanner.DISABLED_BANNER.contains("eddi.audit.hmac-key"), VaultStartupBanner.DISABLED_BANNER);
         assertTrue(VaultStartupBanner.DISABLED_BANNER.contains("EDDI_AUDIT_HMAC_KEY"), VaultStartupBanner.DISABLED_BANNER);
     }
 }

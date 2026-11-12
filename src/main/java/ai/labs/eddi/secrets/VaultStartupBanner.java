@@ -75,8 +75,8 @@ public final class VaultStartupBanner {
             |  What this means:                                                |
             |    * ${vault:...} secret references will NOT be resolved        |
             |    * API keys in configs are stored/transmitted as PLAINTEXT     |
-            |    * Audit entries are HMAC-signed only if EDDI_AUDIT_HMAC_KEY   |
-            |      is set                                                      |
+            |    * Audit entries are HMAC-signed only if eddi.audit.hmac-key   |
+            |      is set (e.g. env EDDI_AUDIT_HMAC_KEY)                       |
             |                                                                  |
             |  To enable, set the EDDI_VAULT_MASTER_KEY env variable.          |
             |  See docs for all configuration options:                         |

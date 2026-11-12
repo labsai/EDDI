@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -214,6 +215,24 @@ class CounterweightServiceTest {
 
         String result = service.apply("Base prompt", config, null);
         assertTrue(result.contains("BEHAVIORAL GUIDELINES"));
+    }
+
+    @Test
+    void apply_strictLevel_isAppliedUnderTurkishDefaultLocale() {
+        Locale previous = Locale.getDefault();
+        try {
+            // Default-locale lowercasing turns "STRICT" into "strıct" (dotless i)
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            var config = new CounterweightConfig();
+            config.setEnabled(true);
+            config.setLevel("STRICT");
+
+            String result = service.apply("Base prompt", config, null);
+            assertTrue(result.contains("STRICT MODE"), result);
+            assertEquals(1.0, meterRegistry.counter("eddi.counterweight.activation.count", "level", "strict").count());
+        } finally {
+            Locale.setDefault(previous);
+        }
     }
 
     @Test

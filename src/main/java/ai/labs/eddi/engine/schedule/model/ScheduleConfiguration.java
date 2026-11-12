@@ -245,10 +245,18 @@ public class ScheduleConfiguration {
         this.environment = environment;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public String getTenantId() {
         return tenantId;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public void setTenantId(String tenantId) {
         this.tenantId = tenantId;
     }
@@ -397,10 +405,18 @@ public class ScheduleConfiguration {
         this.maxCostPerFire = maxCostPerFire;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public boolean isAllowSelfScheduling() {
         return allowSelfScheduling;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public void setAllowSelfScheduling(boolean allowSelfScheduling) {
         this.allowSelfScheduling = allowSelfScheduling;
         this.allowSelfSchedulingProvided = true;

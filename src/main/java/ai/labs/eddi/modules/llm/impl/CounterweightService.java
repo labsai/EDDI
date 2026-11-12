@@ -150,7 +150,7 @@ public class CounterweightService {
             activationUnknownCounter.increment();
         }
 
-        String injection = resolveInjection(config, level, agentId);
+        String injection = resolveInjection(config, normalizedLevel, agentId);
         if (injection == null || injection.isBlank()) {
             if (knownLevel) {
                 activationNormalCounter.increment();
@@ -195,7 +195,7 @@ public class CounterweightService {
             return sb.toString().trim();
         }
 
-        return switch (level.toLowerCase()) {
+        return switch (level.toLowerCase(Locale.ROOT)) {
             case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK, agentId);
             case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK, agentId);
             default -> null; // normal = no injection
