@@ -4,14 +4,28 @@
  */
 package ai.labs.eddi.configs.descriptors.model;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author ginccc
  */
 public class DocumentDescriptor extends ResourceDescriptor {
+    /** See {@link #recordUnmodeledField}. */
+    private static final int MAX_RECORDED_UNMODELED_FIELDS = 100;
+
+    /**
+     * The {@link JsonProperty.Access#READ_ONLY} properties, which reach
+     * {@link #recordUnmodeledField} when a body carries them.
+     */
+    private static final Set<String> READ_ONLY_PROPERTIES = Set.of("callerLevel", "ownerName");
+
     private String name;
     private String description;
     private String originId; // resource ID from the exporting instance (for merge import)
@@ -31,6 +45,13 @@ public class DocumentDescriptor extends ResourceDescriptor {
     private String accessIndex;
     private String callerLevel;
     private String ownerName;
+
+    /**
+     * Keys a JSON body carried that this model does not declare — never serialised,
+     * never stored. See {@link #unmodeledFields()}.
+     */
+    @JsonIgnore
+    private transient Set<String> unmodeledFields;
 
     public String getName() {
         return name;
@@ -190,6 +211,43 @@ public class DocumentDescriptor extends ResourceDescriptor {
 
     public void setOwnerName(String ownerName) {
         this.ownerName = ownerName;
+    }
+
+    /**
+     * Records a key the JSON being read carried and this model does not declare.
+     * Only the key is kept: the value is dropped exactly as before, so a stored
+     * descriptor with legacy fields still loads unchanged. Capped, so a body made
+     * of nothing but unknown keys cannot grow it without bound.
+     */
+    @JsonAnySetter
+    void recordUnmodeledField(String key, Object ignoredValue) {
+        if (READ_ONLY_PROPERTIES.contains(key)) {
+            // Declared, but READ_ONLY: Jackson hands a read-only property to the any
+            // setter rather than dropping it. It is no unknown key — a client echoing a
+            // GET back carries it — and it is discarded exactly as before.
+            return;
+        }
+        if (unmodeledFields == null) {
+            unmodeledFields = new LinkedHashSet<>();
+        }
+        if (unmodeledFields.size() < MAX_RECORDED_UNMODELED_FIELDS) {
+            unmodeledFields.add(key);
+        }
+    }
+
+    /**
+     * The keys a deserialised body carried that this model does not declare, in the
+     * order they arrived; empty for a descriptor built in Java.
+     * <p>
+     * The REST layer reads JSON with unknown properties ignored, which is right for
+     * stored documents and wrong for a write: {@code PATCH
+     * /descriptorstore/descriptors/{id}} answered 204 to a body setting
+     * {@code resourceVisibility}, a name no client can set anything with. This is
+     * how that endpoint can tell such a body from one naming only what it applies.
+     * Not a getter, so it is never part of the wire or the stored document.
+     */
+    public Set<String> unmodeledFields() {
+        return unmodeledFields == null ? Set.of() : Collections.unmodifiableSet(unmodeledFields);
     }
 
     /** The parsed caller level, or {@code null} when unset or unrecognised. */
