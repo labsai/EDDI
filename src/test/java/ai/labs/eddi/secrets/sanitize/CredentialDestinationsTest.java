@@ -33,6 +33,8 @@ class CredentialDestinationsTest {
             // Gemini apiEndpoint; the OpenAI-compatible providers derive the base URL
             // from region.
             "baseUrl", "endpoint", "apiEndpoint", "region",
+            // The shared endpoint rule (EndpointParameters): LiteLLM-style apiBase.
+            "apiBase", "api_base",
             // The task's provider and the cascade / judge / consolidation / dream model.
             "type", "llmProvider",
             // RAG: embedding provider and parameters (EmbeddingModelFactory baseUrl and

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.secrets.sanitize;
 
+import ai.labs.eddi.utils.EndpointParameters;
+
 import java.net.URI;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -109,6 +111,11 @@ public final class CredentialDestinations {
      */
     public static boolean isDestinationField(String key, String sourceValue, String targetValue) {
         String normalized = key.toLowerCase(Locale.ROOT);
+        // Every key the shared endpoint rule knows (the LLM registry, the embedding
+        // factory and the conversation summary ask it too: apiBase, api_base, ...).
+        if (EndpointParameters.isEndpointKey(key)) {
+            return true;
+        }
         // Suffixes, not whole names: Vertex reads apiEndpoint, the vector stores
         // serverUrl, email smtpHost — a whole-name rule let an editor change
         // apiEndpoint beside a hidden key.

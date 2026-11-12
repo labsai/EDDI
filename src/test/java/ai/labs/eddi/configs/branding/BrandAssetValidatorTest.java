@@ -139,6 +139,41 @@ class BrandAssetValidatorTest {
             assertEquals(BrandingException.INVALID, refusal(BrandAssetSlot.LOGO, svg(body)), body);
         }
 
+        /**
+         * CSS decodes escapes in function names and at-keywords, so {@code u\72l(} is
+         * {@code url(} and {@code @\69mport} is {@code @import} to the browser.
+         * Presentation attributes are parsed as CSS too, and a CDATA section hides
+         * nothing from CSS.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {"<style>rect{background:u\\72l(http://tracker.example/p.png)}</style>",
+                "<style>@\\69mport \"http://tracker.example/x.css\";</style>", "<svg:style>rect{fill:\\75rl(//tracker.example/p)}</svg:style>",
+                "<style><![CDATA[rect{fill:u\\rl(//tracker.example/p)}]]></style>", "<rect style=\"fill:u\\72l(//tracker.example/p)\"/>",
+                "<rect STYLE='fill:u\\72l(//tracker.example/p)'/>", "<rect filter=\"u\\72l(//tracker.example/f.svg#a)\"/>",
+                "<rect\nfill=u\\72l(//tracker.example/p)/>"})
+        void cssEscapesAreRefused(String body) {
+            BrandingException e = assertThrows(BrandingException.class, () -> BrandAssetValidator.validate(BrandAssetSlot.LOGO, svg(body)),
+                    body);
+            assertTrue(e.getMessage().contains("backslash"), e.getMessage());
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"<style>rect{background-image:image-set(\"https://tracker.example/p.png\" 1x)}</style>",
+                "<rect style=\"background:-webkit-image-set('//tracker.example/p.png' 1x)\"/>"})
+        void imageSetIsRefused(String body) {
+            assertEquals(BrandingException.INVALID, refusal(BrandAssetSlot.LOGO, svg(body)), body);
+        }
+
+        @Test
+        void aBackslashInEditorMetadataIsRefusedWithTheWayOut() {
+            // Not CSS, but telling it apart from CSS would take a parser that agrees
+            // with the browser's on where every element ends; the refusal says how to
+            // export the file without it.
+            BrandingException e = assertThrows(BrandingException.class, () -> BrandAssetValidator.validate(BrandAssetSlot.LOGO,
+                    svg("<g inkscape:export-filename=\"C:\\art\\logo.png\"><rect/></g>")));
+            assertTrue(e.getMessage().contains("plain or optimized SVG"), e.getMessage());
+        }
+
         @Test
         void entityDeclarationsAreRefused() {
             String doc = "<?xml version=\"1.0\"?><!DOCTYPE svg [<!ENTITY x \"y\">]><svg xmlns=\"http://www.w3.org/2000/svg\">&x;</svg>";

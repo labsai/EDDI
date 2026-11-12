@@ -159,9 +159,11 @@ final class ScrubbedSecrets {
 
     /**
      * Whether this source object sends its requests to a different place than its
-     * target counterpart: a field naming a destination ({@code targetServerUrl},
-     * {@code baseUrl}, {@code url}, {@code endpoint}, {@code host}, or a
-     * {@code path} that is an absolute URL on either side) whose origin differs.
+     * target counterpart: a field naming a destination (any key
+     * {@link CredentialDestinations#isDestinationField} accepts, which includes
+     * every {@code EndpointParameters} endpoint key — {@code targetServerUrl},
+     * {@code baseUrl}, {@code apiEndpoint}, {@code host}, … — or a {@code path}
+     * that is an absolute URL on either side) whose origin differs.
      * <p>
      * A literal credential the target holds was authorised for the target's
      * destination; editors cannot read it back, which is the whole point of hiding
