@@ -55,10 +55,15 @@ jobs:
         run: |
           if [ -f metrics.json ]; then
             cat metrics.json
-            echo "docker_pulls=$(jq -r '.docker_pulls // 0' metrics.json)" >> "$GITHUB_OUTPUT"
-            echo "stars=$(jq -r '.stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
-            echo "forks=$(jq -r '.forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
-            echo "last_milestone=$(jq -r '.last_milestone // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            # metrics.json comes out of the Actions cache, which any run that can
+            # write a key with this prefix could have poisoned, so every field is
+            # coerced to a plain non-negative integer here: anything else becomes 0
+            # and cannot carry a newline (a second output) or shell syntax.
+            for key in docker_pulls stars forks last_milestone; do
+              value=$(jq -r --arg k "$key" '(.[$k] // 0) | (tonumber? // 0) | floor | if . < 0 then 0 else . end' metrics.json 2>/dev/null) || value=0
+              case "$value" in ''|*[!0-9]*) value=0 ;; esac
+              echo "${key}=${value}" >> "$GITHUB_OUTPUT"
+            done
             echo "has_data=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_data=false" >> "$GITHUB_OUTPUT"
@@ -208,10 +213,25 @@ jobs:
       # ── Compute deltas ──────────────────────────────────────
       - name: Compute deltas
         id: delta
+        # Through env, not spliced into the script, and checked to be plain digits
+        # before any arithmetic: the PREV_* values were read back from a cached file.
+        env:
+          PULLS: ${{ steps.docker.outputs.pulls }}
+          STARS: ${{ steps.github.outputs.stars }}
+          FORKS: ${{ steps.github.outputs.forks }}
+          PREV_PULLS: ${{ steps.prev.outputs.docker_pulls }}
+          PREV_STARS: ${{ steps.prev.outputs.stars }}
+          PREV_FORKS: ${{ steps.prev.outputs.forks }}
+          LAST_MS: ${{ steps.prev.outputs.last_milestone }}
         run: |
-          PULL_DIFF=$(( ${{ steps.docker.outputs.pulls }} - ${{ steps.prev.outputs.docker_pulls }} ))
-          STAR_DIFF=$(( ${{ steps.github.outputs.stars }} - ${{ steps.prev.outputs.stars }} ))
-          FORK_DIFF=$(( ${{ steps.github.outputs.forks }} - ${{ steps.prev.outputs.forks }} ))
+          for name in PULLS STARS FORKS PREV_PULLS PREV_STARS PREV_FORKS LAST_MS; do
+            case "${!name}" in
+              ''|*[!0-9]*) echo "::error::$name is not a plain number"; exit 1 ;;
+            esac
+          done
+          PULL_DIFF=$(( PULLS - PREV_PULLS ))
+          STAR_DIFF=$(( STARS - PREV_STARS ))
+          FORK_DIFF=$(( FORKS - PREV_FORKS ))
           echo "pull_diff=$PULL_DIFF" >> "$GITHUB_OUTPUT"
           echo "star_diff=$STAR_DIFF" >> "$GITHUB_OUTPUT"
           echo "fork_diff=$FORK_DIFF" >> "$GITHUB_OUTPUT"
@@ -224,8 +244,7 @@ jobs:
           fi
 
           # Milestone check (every 10,000 pulls)
-          CURRENT=${{ steps.docker.outputs.pulls }}
-          LAST_MS=${{ steps.prev.outputs.last_milestone }}
+          CURRENT=$PULLS
           CURRENT_MS=$(( CURRENT / 10000 * 10000 ))
           if [ "$CURRENT_MS" -gt "$LAST_MS" ] && [ "$LAST_MS" -ne 0 ]; then
             echo "milestone=$CURRENT_MS" >> "$GITHUB_OUTPUT"
