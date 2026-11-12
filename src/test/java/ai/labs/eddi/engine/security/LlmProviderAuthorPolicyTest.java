@@ -292,7 +292,10 @@ class LlmProviderAuthorPolicyTest {
         void untypedStepInheritsRestrictedProvider() {
             String stored = bedrockWithStep("");
             assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(bedrockWithStep("\"modelId\":\"m2\""), stored, "langchain"));
-            assertDoesNotThrow(() -> asEditor().requireMayAuthor(bedrockWithStep("\"temperature\":\"0.2\""), stored, "langchain"));
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(stored, stored, "langchain"));
+            // An id-less step is identified by its position and content, so even a
+            // non-pointing edit to it needs an administrator (the stricter rule).
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(bedrockWithStep("\"temperature\":\"0.2\""), stored, "langchain"));
         }
 
         private String openAiWithBedrockStep(String taskModel) {
@@ -368,6 +371,33 @@ class LlmProviderAuthorPolicyTest {
             // Without a privileged setting, duplicate ids are not the policy's concern.
             String plain = tasks(task0("a", "openai", "gpt"), task0("a", "openai", "gpt"));
             assertDoesNotThrow(() -> asEditor().requireMayAuthor(plain, null, "langchain"));
+        }
+    }
+
+    @Nested
+    @DisplayName("id-less elements")
+    class IdLessElements {
+
+        private String idless(String model, String log) {
+            return "{\"type\":\"openai\",\"parameters\":{\"modelName\":\"" + model + "\",\"logRequests\":\"" + log + "\"}}";
+        }
+
+        @Test
+        @DisplayName("removing an approved id-less task and shifting another into its slot does not carry the approval over")
+        void removeAndShiftRefused() {
+            // Position 0 is approved for logging; position 1 is another task.
+            String stored = "{\"tasks\":[" + idless("approved", "true") + "," + idless("other", "false") + "]}";
+            // Position 0 removed; the other task shifts into slot 0 with logging on.
+            String candidate = "{\"tasks\":[" + idless("other", "true") + "]}";
+
+            assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(candidate, stored, "langchain"));
+        }
+
+        @Test
+        @DisplayName("an unchanged id-less task keeps its approval")
+        void unchangedIdLessTaskPasses() {
+            String stored = "{\"tasks\":[" + idless("approved", "true") + "," + idless("other", "false") + "]}";
+            assertDoesNotThrow(() -> asEditor().requireMayAuthor(stored, stored, "langchain"));
         }
     }
 }

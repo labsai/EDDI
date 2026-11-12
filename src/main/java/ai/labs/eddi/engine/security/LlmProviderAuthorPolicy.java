@@ -16,9 +16,13 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -250,9 +254,30 @@ public class LlmProviderAuthorPolicy {
         }
     }
 
+    /**
+     * An array element's identity in a fact's path: its {@code id} where it has
+     * one. Without an id, its position <em>and</em> a digest of its whole content:
+     * position alone let an editor remove an approved id-less task and move another
+     * into its slot with the approved setting switched on. So an id-less element
+     * carries a privileged setting over only while it is unchanged — an unchanged
+     * save still passes; any edit to such an element needs an administrator.
+     */
     private static String elementKey(JsonNode element, int index) {
         JsonNode id = element != null && element.isObject() ? element.get("id") : null;
-        return id != null && id.isTextual() && !id.asText().isBlank() ? "id=" + id.asText().trim() : String.valueOf(index);
+        if (id != null && id.isTextual() && !id.asText().isBlank()) {
+            return "id=" + id.asText().trim();
+        }
+        return index + "#" + digest(element == null ? "" : element.toString());
+    }
+
+    private static String digest(String content) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash, 0, 12);
+        } catch (NoSuchAlgorithmException e) {
+            // Every JVM ships SHA-256; without it, an id-less element carries nothing.
+            return "undigested-" + System.identityHashCode(content);
+        }
     }
 
     /**
