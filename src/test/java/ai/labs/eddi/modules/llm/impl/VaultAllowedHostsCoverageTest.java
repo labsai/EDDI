@@ -126,13 +126,27 @@ class VaultAllowedHostsCoverageTest {
         }
 
         @Test
-        @DisplayName("no endpoint parameter means the vendor's own endpoint: nothing to check")
-        void vendorDefaultNotChecked() throws Exception {
+        @DisplayName("no endpoint parameter means the vendor's default endpoint, which is checked like a configured one")
+        void vendorDefaultIsChecked() throws Exception {
             var config = config("openai", Map.of("apiKey", REF));
 
-            var e = assertThrows(IllegalStateException.class, () -> factory.getOrCreate(config, EmbeddingInputType.QUERY));
-            assertEquals("resolved", e.getMessage());
-            verify(secretProvider, never()).getMetadata(any());
+            // Restricted to another host: the vendor's default is refused before
+            // resolution.
+            var refused = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.QUERY));
+            assertTrue(refused.getMessage().contains("api.openai.com"), refused.getMessage());
+            verify(secretResolver, never()).resolveSecrets(any());
+
+            // A list naming the vendor's host lets it through.
+            when(secretProvider.getMetadata(any(SecretReference.class)))
+                    .thenReturn(new SecretMetadata("default", "k", Instant.EPOCH, null, null, "cs", "d", List.of("*"), List.of("api.openai.com")));
+            var onList = assertThrows(IllegalStateException.class, () -> factory.getOrCreate(config, EmbeddingInputType.QUERY));
+            assertEquals("resolved", onList.getMessage());
+
+            // And so does a secret without allowedHosts, as before.
+            when(secretProvider.getMetadata(any(SecretReference.class)))
+                    .thenReturn(new SecretMetadata("default", "k", Instant.EPOCH, null, null, "cs", "d", List.of("*")));
+            var unrestricted = assertThrows(IllegalStateException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertEquals("resolved", unrestricted.getMessage());
         }
     }
 
