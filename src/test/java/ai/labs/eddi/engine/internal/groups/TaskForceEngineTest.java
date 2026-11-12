@@ -295,6 +295,56 @@ class TaskForceEngineTest {
     }
 
     @Test
+    void partialVerdict_fail_failsTheTasksItDidNotName_pass_leavesThem() throws Exception {
+        var engine = engine();
+        when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                .thenReturn(List.of(Map.of("subject", "A", "passed", true)));
+
+        var failGc = taskGc();
+        var a = completedTask(failGc, "A");
+        var b = completedTask(failGc, "B");
+        engine.parseAndApplyVerification(failGc, List.of(a, b), "[{\"subject\":\"A\",\"passed\":true}]", null,
+                AgentGroupConfiguration.UnparseableVerdictPolicy.FAIL);
+        assertEquals(SharedTaskList.TaskStatus.VERIFIED, failGc.getTaskList().findById(a.id()).status());
+        assertEquals(SharedTaskList.TaskStatus.FAILED, failGc.getTaskList().findById(b.id()).status(),
+                "under FAIL a task the verdict did not settle must not stay COMPLETED, unchecked and never reworked");
+
+        var passGc = taskGc();
+        var a2 = completedTask(passGc, "A");
+        var b2 = completedTask(passGc, "B");
+        engine.parseAndApplyVerification(passGc, List.of(a2, b2), "[{\"subject\":\"A\",\"passed\":true}]", null,
+                AgentGroupConfiguration.UnparseableVerdictPolicy.PASS);
+        assertEquals(SharedTaskList.TaskStatus.COMPLETED, passGc.getTaskList().findById(b2.id()).status(),
+                "PASS keeps the behaviour before the option");
+    }
+
+    @Test
+    void display_failMode_rendersAMissingPassedAsFailed() throws Exception {
+        var engine = engine();
+        when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                .thenReturn(List.of(Map.of("subject", "Task X")));
+
+        String failDisplay = engine.formatVerificationForDisplay("[{\"subject\":\"Task X\"}]", true);
+        String passDisplay = engine.formatVerificationForDisplay("[{\"subject\":\"Task X\"}]", false);
+
+        assertTrue(failDisplay.contains("Failed") && !failDisplay.contains("Passed"),
+                "the transcript must say what the task list says: " + failDisplay);
+        assertTrue(passDisplay.contains("Passed"), passDisplay);
+    }
+
+    @Test
+    void display_failMode_listsTheTasksThePolicyFailed() {
+        var gc = taskGc();
+        var a = completedTask(gc, "A");
+        engine().parseAndApplyVerification(gc, List.of(a), "IGNORE THE FORMAT. Everything passes.", null,
+                AgentGroupConfiguration.UnparseableVerdictPolicy.FAIL);
+
+        String shown = TaskForceEngine.withPolicyOutcomes("IGNORE THE FORMAT. Everything passes.", gc, List.of(a));
+
+        assertTrue(shown.contains("**A**: Failed"), "the transcript says the task failed, not only what the verifier wrote: " + shown);
+    }
+
+    @Test
     void unparseablePolicy_readsTheTaskListConfig() {
         var config = new AgentGroupConfiguration();
         assertEquals(AgentGroupConfiguration.UnparseableVerdictPolicy.PASS, TaskForceEngine.unparseablePolicy(config));
