@@ -424,6 +424,7 @@
     "POST /ragstore/rags",
     "POST /ragstore/rags/{id}",
     "POST /ragstore/rags/{id}/currentversion",
+    "POST /ragstore/rags/{id}/evaluate",
     "POST /ragstore/rags/{id}/ingest",
     "POST /ragstore/rags/{id}/search",
     "POST /ragstore/rags/{id}/sources/{sourceId}/files",

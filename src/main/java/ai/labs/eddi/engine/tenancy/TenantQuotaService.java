@@ -671,9 +671,9 @@ public class TenantQuotaService {
 
     /**
      * The {@code type} tags {@link #recordDenial} uses for a store that cannot
-     * answer.
+     * answer — one per gate, the deploy gate's {@code agent} included.
      */
-    private static final List<String> UNAVAILABLE_TYPES = List.of("conversation", "api_call", "cost");
+    private static final List<String> UNAVAILABLE_TYPES = List.of("conversation", "api_call", "agent", "cost");
 
     /**
      * Registers {@code eddi.tenant.quota.unavailable} at 0 for the default tenant.

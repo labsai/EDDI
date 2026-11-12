@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -87,7 +86,7 @@ class ApiCallExecutorHostTemplateTest {
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         var realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), new TemplatingEngine(realEngine),
+        prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(realEngine),
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
 
         memory = mock(IConversationMemory.class);

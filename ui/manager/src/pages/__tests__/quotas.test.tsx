@@ -201,6 +201,44 @@ describe("QuotasPage", () => {
     });
   });
 
+  it("keeps an edit made while the save was in flight, and stays dirty", async () => {
+    // The success handler used to replace the form with the server's reply and
+    // clear the dirty flag, so a value typed during the PUT vanished silently
+    // and the unsaved-changes guard stopped protecting it.
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        await held;
+        return HttpResponse.json(body);
+      }),
+    );
+    renderQuotas();
+    const conversations = await screen.findByTestId("quota-max-conversations");
+    await user.clear(conversations);
+    await user.type(conversations, "1000");
+    await user.click(screen.getByTestId("quotas-save"));
+    await waitFor(() => expect(body).not.toBeNull());
+
+    const agents = screen.getByTestId("quota-max-agents");
+    await user.clear(agents);
+    await user.type(agents, "42");
+    release();
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Quota saved"));
+    expect(body!.maxConversationsPerDay).toBe(1000);
+    expect(body!.maxAgentsPerTenant).toBe(100);
+    expect(agents).toHaveValue(42);
+    expect(conversations).toHaveValue(1000);
+    expect(screen.getByTestId("quotas-dirty-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("quotas-save")).toBeEnabled();
+  });
+
   it("treats a cleared limit as unlimited (-1), not as a limit of 0", async () => {
     const user = userEvent.setup();
     let body: Record<string, unknown> | null = null;

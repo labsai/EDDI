@@ -96,6 +96,15 @@ export interface HitlDecision {
    */
   pauseId?: string;
   /**
+   * The plan this decision was made for (`ApprovalStatusSummary.planHash`): the
+   * tool names and canonicalized arguments of a tool pause, the pending actions
+   * of a rule pause, the work under review of a group pause. A backend that knows
+   * the field refuses a decision for another plan with 409, and an agent with
+   * `hitlConfig.requirePlanHash` refuses a decision without it with 400; an older
+   * backend ignores it. See `lib/hitl-pause-binding.ts`.
+   */
+  planHash?: string;
+  /**
    * APPROVED only: the final answer in place of the model's draft — a RULE pause
    * whose `pauseDetails.editableAnswer` is present (agents with
    * `hitlConfig.review.allowAnswerEdits`), or a group SYNTHESIS phase.
@@ -311,6 +320,12 @@ export interface ApprovalStatusSummary {
    * not paused. Absent on a backend that predates decision binding.
    */
   pauseId?: string;
+  /**
+   * The hash of exactly what the pause would let run (`v1:` + 64 hex digits), to
+   * send back as `HitlDecision.planHash`. `""` when not paused, or for a pause
+   * committed before plan hashing; absent on a backend that predates it.
+   */
+  planHash?: string;
 }
 
 // ── Config types ──────────────────────────────────────────────────
