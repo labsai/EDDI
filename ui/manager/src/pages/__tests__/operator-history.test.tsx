@@ -144,6 +144,68 @@ describe("OperatorPage — conversation history", () => {
   });
 
   /**
+   * The list orders by the same recency the tab's restore picks by
+   * (`conversationRecency`): a row that was never modified counts by when it
+   * was created, so the restore and the list's first row cannot disagree.
+   */
+  it("ranks a never-modified conversation by its creation time, as the restore does", async () => {
+    const createdOnly = { ...descriptor("conv-created-only", 0), createdOn: 8000, lastModifiedOn: undefined };
+    server.use(
+      http.get("*/conversationstore/conversations", () =>
+        HttpResponse.json([descriptor("conv-modified", 5000), createdOnly]),
+      ),
+      http.get("*/conversationstore/conversations/simple/conv-modified", () =>
+        HttpResponse.json(transcript("the modified one", "modified answer")),
+      ),
+      http.get("*/conversationstore/conversations/simple/conv-created-only", () =>
+        HttpResponse.json(transcript("the created one", "created answer")),
+      ),
+    );
+
+    renderWithProviders(<OperatorPage />);
+    await userEvent.click(await screen.findByTestId("operator-tab-history"));
+
+    const list = await screen.findByTestId("operator-history-list");
+    await within(list).findByText("the created one");
+    const rows = within(list).getAllByRole("button");
+    expect(rows[0]).toHaveAttribute("data-testid", "operator-conversation-conv-created-only");
+    expect(useOperatorChatStore.getState().conversationId).toBe("conv-created-only");
+  });
+
+  /**
+   * An admin's listing holds every user's conversations; the operator is used
+   * by admins. The History list showed (and opened) other admins'
+   * investigations, and the restore on mount resumed the newest of them.
+   */
+  it("lists and restores only the caller's own conversations", async () => {
+    const mineFlags: Array<string | null> = [];
+    server.use(
+      http.get("*/conversationstore/conversations", ({ request }) => {
+        const mine = new URL(request.url).searchParams.get("mine");
+        mineFlags.push(mine);
+        const own = descriptor("conv-own", 1000);
+        return HttpResponse.json(mine === "true" ? [own] : [descriptor("conv-other-admin", 9000), own]);
+      }),
+      http.get("*/conversationstore/conversations/simple/conv-own", () =>
+        HttpResponse.json(transcript("my investigation", "my answer")),
+      ),
+      http.get("*/conversationstore/conversations/simple/conv-other-admin", () =>
+        HttpResponse.json(transcript("another admin's investigation", "their answer")),
+      ),
+    );
+
+    renderWithProviders(<OperatorPage />);
+    await userEvent.click(await screen.findByTestId("operator-tab-history"));
+
+    const list = await screen.findByTestId("operator-history-list");
+    expect(await within(list).findByText("my investigation")).toBeInTheDocument();
+    expect(within(list).queryByTestId("operator-conversation-conv-other-admin")).not.toBeInTheDocument();
+    expect(useOperatorChatStore.getState().conversationId).toBe("conv-own");
+    expect(mineFlags.length).toBeGreaterThan(0);
+    expect(mineFlags.every((mine) => mine === "true")).toBe(true);
+  });
+
+  /**
    * The newest conversation is deliberately NOT the one clicked.
    *
    * With a single-entry fixture the mount restore had already rendered that

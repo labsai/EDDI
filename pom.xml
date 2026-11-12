@@ -32,7 +32,7 @@
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
         <failsafe-plugin.version>3.6.1</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <quarkus-mcp-server.version>2.0.3</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>2.0.4</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
@@ -84,18 +84,18 @@
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
-                <version>33.7.2-jre</version>
+                <version>33.8.0-jre</version>
             </dependency>
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.199</version>
+                <version>4.8.200</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
                 <groupId>com.hubspot.jinjava</groupId>
                 <artifactId>jinjava</artifactId>
-                <version>2.8.4</version>
+                <version>2.8.5</version>
             </dependency>
             <!-- Override jackson-core to fix GHSA-r7wm-3cxj-wff9 (async parser DoS, <2.22.1).
                  Managed transitively by the Quarkus BOM at 2.22.0. Trivy blocks the image
@@ -403,7 +403,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.23.2</version>
+            <version>1.24.1</version>
         </dependency>
         <!-- Mail core (engine/mail): MIME parsing and rendering, and later the
              IMAP/SMTP clients, which take their sockets from
@@ -433,7 +433,7 @@
         <dependency>
             <groupId>dnsjava</groupId>
             <artifactId>dnsjava</artifactId>
-            <version>3.6.5</version>
+            <version>3.7.1</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -598,7 +598,7 @@
         <dependency>
             <groupId>com.icegreen</groupId>
             <artifactId>greenmail</artifactId>
-            <version>2.1.14</version>
+            <version>2.1.15</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -733,7 +733,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.3</version>
+                <version>3.7.0</version>
                 <executions>
                     <execution>
                         <id>ban-jackson3</id>
@@ -915,7 +915,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.15</version>
+                <version>0.8.16</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
                      Excludes CDI bootstrap wiring, external integration adapters,
                      REST client libraries, and import/export services that require
@@ -927,10 +927,13 @@
                         <exclude>**/bootstrap/**</exclude>
                         <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
-                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
-                             cannot be tested without live API keys. -->
-                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- The two LLM provider builders whose clients cannot be built offline:
+                             Vertex needs GCP credentials and OCI an ~/.oci/config. The rest of
+                             the builder package (parameter catalog, value parsing, the bounded
+                             HTTP client, every other provider) is unit-tested against
+                             langchain4j's real request mapping and counts towards the gate. -->
+                        <exclude>**/llm/impl/builder/VertexGeminiLanguageModelBuilder*</exclude>
+                        <exclude>**/llm/impl/builder/OracleGenAiLanguageModelBuilder*</exclude>
                         <!-- Slack integration adapter: requires live Slack webhook API,
                              not testable without external service -->
                         <exclude>**/integrations/slack/**</exclude>
@@ -1317,7 +1320,7 @@
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>license-maven-plugin</artifactId>
-                        <version>2.7.1</version>
+                        <version>2.8.0</version>
                         <executions>
                             <!-- Generate THIRD-PARTY.txt listing all deps + their licenses -->
                             <execution>

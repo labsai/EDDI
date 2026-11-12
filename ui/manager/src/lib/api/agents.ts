@@ -226,8 +226,6 @@ export interface DreamConfig {
   llmProvider?: string;
   llmModel?: string;
   maxCostPerRun?: number;
-  batchSize?: number;
-  maxUsersPerRun?: number;
 }
 
 // Wave 6 — Session Management

@@ -459,4 +459,6 @@ Always use v6 canonical URIs in new configs:
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
 
+`docs/agent-configs/google-workspace-tools/` is the LLM-agent counterpart: a `PER_USER` OAuth connection under `connections/` and two httpcalls configurations used as LLM tools, each with an `argumentSchema`. It is the worked example for `${connection:…}` headers and for building a value Gmail wants base64url-encoded with `{encoder:base64Url(...)}` — see [Google Workspace](google-workspace.md).
+
 **For contributors:** two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".

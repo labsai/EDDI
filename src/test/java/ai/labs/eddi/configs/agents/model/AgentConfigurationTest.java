@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.model;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -274,8 +275,25 @@ class AgentConfigurationTest {
             assertEquals("anthropic", dc.getLlmProvider());
             assertEquals("claude-sonnet-4-6", dc.getLlmModel());
             assertEquals(0.50, dc.getMaxCostPerRun());
-            assertEquals(50, dc.getBatchSize());
-            assertEquals(1000, dc.getMaxUsersPerRun());
+        }
+
+        /**
+         * {@code batchSize} and {@code maxUsersPerRun} described a sweep over all users
+         * that was never built: a dream fire consolidates exactly the one user its
+         * schedule names. They are no longer modelled, but a stored agent or an
+         * imported ZIP that still carries them must keep deserializing — through a
+         * strict mapper too, which is what a REST write uses.
+         */
+        @Test
+        void legacyBatchFieldsStillDeserializeAndAreNoLongerWritten() throws Exception {
+            var mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+
+            var dc = mapper.readValue("{\"enabled\":true,\"batchSize\":25,\"maxUsersPerRun\":10}", AgentConfiguration.DreamConfig.class);
+
+            assertTrue(dc.isEnabled());
+            String json = mapper.writeValueAsString(dc);
+            assertFalse(json.contains("batchSize"), json);
+            assertFalse(json.contains("maxUsersPerRun"), json);
         }
 
         @Test
@@ -290,8 +308,6 @@ class AgentConfigurationTest {
             dc.setLlmProvider("openai");
             dc.setLlmModel("gpt-4o");
             dc.setMaxCostPerRun(10.0);
-            dc.setBatchSize(100);
-            dc.setMaxUsersPerRun(500);
             assertTrue(dc.isEnabled());
             assertEquals(10.0, dc.getMaxCostPerRun());
         }

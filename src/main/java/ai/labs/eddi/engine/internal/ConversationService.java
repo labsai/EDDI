@@ -357,6 +357,16 @@ public class ConversationService implements IConversationService, UserErasurePar
     boolean captureDeadLetterInput = true;
 
     /**
+     * Strict plan binding for the whole deployment: a human HITL decision on a
+     * pause that has a plan hash must carry it ({@code HitlPlanBinding}). Off by
+     * default so clients that predate plan hashing keep working; an agent can still
+     * require it for itself with {@code hitlConfig.requirePlanHash}. Field-injected
+     * with its default for the directly constructed tests.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /**
      * Turns this node runs at once, queued or executing; one more is refused with
      * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
      * pool no longer bounds them — this does, and it is what keeps memory per
