@@ -217,6 +217,20 @@ class BoundedLogStoreTest {
         }
 
         @Test
+        void anEntryCapturedBeforeTheMarkButDeliveredAfterItReachesTheLiveTailPseudonymised() {
+            List<LogEntry> delivered = new ArrayList<>();
+            store.addListener(delivered::add);
+            // captured (and published under the lock) before the erasure ...
+            LogEntry raw = entryOf("alice", "INFO");
+            // ... the erasure marks the user ...
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
+            // ... and only then does the delivery to the listeners run
+            store.notifyListeners(raw);
+
+            assertEquals(List.of("gdpr-erased:k1:abc"), delivered.stream().map(LogEntry::userId).toList());
+        }
+
+        @Test
         void anErasureOnAnotherNodeMatchesByHash() {
             store.publish(entryOf("alice", "INFO"));
 

@@ -513,10 +513,20 @@ public class BoundedLogStore {
             lock.writeLock().unlock();
         }
 
-        // Notify SSE listeners (non-blocking)
+        notifyListeners(published);
+    }
+
+    /**
+     * Hands {@code entry} to every SSE listener (non-blocking), scrubbed again
+     * immediately before each call: listeners run after the write lock is released,
+     * so an erasure can mark the entry's user between the add and the delivery, and
+     * the live tail must not deliver the raw id after the erasure returned.
+     * {@link #scrub} is a single emptiness check while no mark is held.
+     */
+    void notifyListeners(LogEntry entry) {
         for (Consumer<LogEntry> listener : listeners.values()) {
             try {
-                listener.accept(published);
+                listener.accept(scrub(entry));
             } catch (Exception _) {
                 // Don't let a bad listener break logging
             }
