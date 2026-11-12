@@ -52,7 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
-> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters`, `logBuffer` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -107,6 +107,12 @@ principal, not a user: erasing or exporting it is refused with 400.
    queued — do not land raw after step 14. In cluster mode every replica that
    answers the stop does the same before it replies, so its late entries are
    pseudonymised and redacted too; see [Clustering](clustering.md#residual-limitations).
+   The in-memory log store is treated the same way (step `logBuffer`): the user id
+   is replaced in the ring buffer the log endpoints serve and in the entries still
+   waiting for the database writer, and for an hour in new log entries of that
+   user, so a queued entry cannot reach the database behind step 13 with the raw
+   id. On the erasing node the replacement is the same keyed pseudonym step 13
+   writes; a replica that hears of the erasure by hash writes `gdpr-erased`.
 1. User memories — **permanently deleted**
 2. Binary attachments of the user's conversations — **permanently deleted**. This
    includes the files shared in the user's group discussions (stored under the group
@@ -158,7 +164,8 @@ principal, not a user: erasing or exporting it is refused with 400.
     principal), the **email ledger** (HITL notification rows and conversation-mode
     reply rows addressed to the person, and inbound mail rows sent by them — matched
     through the user id when it is an address or an `email:<integrationId>:<address>`
-    identity, and the email the user directory recorded; it runs before the
+    identity, and the email the user directory recorded when the identity provider
+    marked it verified (`email_verified`); it runs before the
     directory is erased), the **email suppression list** (the addresses a reply
     bounced from permanently, stored as hashes, matched the same way — erasure
     deletes the entry rather than keeping a hash to honour "never mail me again":
@@ -173,7 +180,23 @@ principal, not a user: erasing or exporting it is refused with 400.
     `email-anon:` identities of unauthenticated senders hold no memory and are not
     linked to an address. All of it is
     **permanently deleted**. Each reports under its own step name
-    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`)
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`).
+    **An unverified directory email is not used.** Its address is whatever the account
+    holder typed into their identity-provider profile, so matching on it let one
+    user's erasure delete — and their export disclose — the ledger and suppression
+    rows of somebody else's address. Such an address is skipped, and the compliance
+    entry of the erasure or export says so (below); handle that address as its own
+    request, naming it as the user id. The `email:<integrationId>:<address>`
+    identities need no such check: an email integration mints one only for a sender
+    whose mail passed DKIM-aligned authentication, and the address expansion runs
+    only for an id the operator named.
+    The `GDPR_ERASURE` and `GDPR_EXPORT` entries in the audit ledger record the basis
+    on which the email participants matched, as `emailLedgerBasis`: how many
+    addresses (`emailAddresses`), where each came from (`emailAddressSources`:
+    `userId`, `emailIdentity`, `directoryVerified`) and whether an unverified
+    directory email was skipped (`unverifiedDirectoryEmailSkipped`) — never the
+    addresses themselves. The field is absent when nothing was matched by address,
+    and entries written by earlier releases do not have it
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
@@ -230,6 +253,17 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   revision history; capped at 1,000, `sharedArtifactsTruncated`). The attachment
   metadata above includes the discussions' files and those of their member
   conversations. A store that fails is named in `failedCategories`
+
+**Other people's identifiers are masked** (Art. 15(4)). A record reached by the
+subject's id can name someone else, and the bundle keeps the fact that another
+person was involved but not who: their id becomes `[other person]`. That covers the
+approver (`decidedBy`) of a decision in the subject's conversation, the owner
+(`userId`) of a conversation the subject decided in, the reviewer (`reviewedBy`) of an
+audit sample, and the other human members of a group discussion the subject started
+(speaker and target id and display name in `transcript`). The subject's own id, agent
+ids and `system:*` principals are kept. What another person *wrote* in a discussion
+the subject started stays in the transcript; review it before handing the bundle over.
+(Earlier releases exported those identifiers as stored.)
 
 > **Check `complete` before handing the bundle to the data subject.** The endpoint
 > answers **200** only when the bundle covers everything EDDI holds on the user,
@@ -292,6 +326,10 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 **What happens when restricted:**
 - New conversation creation is blocked → returns **403 Forbidden**
 - Message processing (`say`) is blocked → returns **403 Forbidden**
+- Scheduled [Dream](user-memory.md#dream-consolidation) cycles for the user are
+  skipped: no prune, no consolidation, no LLM call over their memories. The fire
+  completes, so the schedule resumes once the restriction is lifted; a restriction
+  status that cannot be read fails the fire, which is retried
 - Existing data is preserved (not deleted)
 - Restriction status is stored as a user memory entry under the reserved key
   `_gdpr_processing_restricted` (category `gdpr`). Keys starting with `_gdpr_` are

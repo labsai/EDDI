@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.model.LogEntry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,6 +45,74 @@ class BoundedLogStoreTest {
     private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
         return new LogEntry(System.currentTimeMillis(), level, "test.Logger", message, "production", agentId, 1, conversationId, "user-1",
                 "test-host-abcd");
+    }
+
+    // ==================== GDPR erasure ====================
+
+    @Nested
+    class Erasure {
+
+        private LogEntry entryOf(String userId, String level) {
+            return new LogEntry(System.currentTimeMillis(), level, "test.Logger", "m", "production", "agent-1", 1, "conv-1", userId,
+                    "test-host-abcd");
+        }
+
+        @Test
+        void erasureRewritesTheBufferedEntriesOfTheUserOnly() {
+            store.publish(entryOf("alice", "INFO"));
+            store.publish(entryOf("bob", "INFO"));
+            store.publish(entryOf("alice", "WARN"));
+
+            assertEquals(2, store.markUserErased("alice", "gdpr-erased:k1:abc"));
+
+            List<String> users = store.getEntries(null, null, null, 10).stream().map(LogEntry::userId).toList();
+            assertEquals(List.of("gdpr-erased:k1:abc", "bob", "gdpr-erased:k1:abc"), users);
+        }
+
+        @Test
+        void entriesLoggedAfterTheErasureCarryThePseudonym() {
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals("gdpr-erased:k1:abc", store.getEntries(null, null, null, 10).getFirst().userId());
+        }
+
+        @Test
+        void entriesQueuedForTheDatabaseBeforeTheErasureLeaveWithThePseudonym() {
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.publish(entryOf("alice", "WARN"));
+            dbStore.publish(entryOf("bob", "WARN"));
+
+            dbStore.markUserErased("alice", "gdpr-erased:k1:abc");
+            dbStore.flushToDb();
+
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            ArgumentCaptor<List<LogEntry>> captor = (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
+            verify(databaseLogs).addLogsBatch(captor.capture());
+            List<LogEntry> flushed = captor.getValue();
+            assertEquals(List.of("gdpr-erased:k1:abc", "bob"), flushed.stream().map(LogEntry::userId).toList());
+        }
+
+        @Test
+        void anErasureOnAnotherNodeMatchesByHash() {
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals(1, store.markUserErasedHash(KvKeys.sha256("alice")));
+
+            assertEquals(BoundedLogStore.REMOTE_ERASURE_MARKER, store.getEntries(null, null, null, 10).getFirst().userId());
+        }
+
+        @Test
+        void theParticipantMarksTheUserWithTheKeyedPseudonym() {
+            GdprPseudonymizer pseudonymizer = mock(GdprPseudonymizer.class);
+            when(pseudonymizer.pseudonymFor("alice")).thenReturn("gdpr-erased:k1:abc");
+            var participant = new LogBufferErasureParticipant(store, pseudonymizer);
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals(0, participant.stopInFlightWork("alice"), "no work is signalled");
+            assertEquals("logBuffer", participant.erasureStepName());
+            assertEquals("gdpr-erased:k1:abc", store.getEntries(null, null, null, 10).getFirst().userId());
+        }
     }
 
     // ==================== Ring Buffer ====================

@@ -162,7 +162,11 @@ than that many days, on MongoDB (`logs` collection) and PostgreSQL
 it. Each run adds what it deleted to `eddi_logs_db_retention_deleted_total`.
 
 Persisted entries carry the user id of the turn that produced them, and a GDPR
-erasure only pseudonymizes that id — the message text stays. If a retention
+erasure only pseudonymizes that id — the message text stays. The same erasure
+also rewrites the id in the in-memory ring buffer and in the entries still
+waiting for the database writer, on every replica the cluster stop reaches, and
+for an hour afterwards in new entries of that user (a replica that heard of the
+erasure only by hash writes `gdpr-erased`). If a retention
 policy applies to your deployment, this is the setting that enforces it for the
 logs. (Earlier releases described this retention as configurable without any
 code that applied it.)

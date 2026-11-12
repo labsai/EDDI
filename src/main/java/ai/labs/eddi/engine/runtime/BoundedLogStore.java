@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.model.LogEntry;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
@@ -13,6 +14,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -267,9 +270,122 @@ public class BoundedLogStore {
     }
 
     /**
+     * How long after a GDPR erasure this node keeps replacing the erased user's id
+     * in new log entries — the window in which work the erasure cancelled is still
+     * unwinding and logging. The same hour the audit ledger uses.
+     */
+    static final Duration ERASED_USER_REWRITE_WINDOW = Duration.ofHours(1);
+
+    /**
+     * Replacement on a node that hears of an erasure only by hash (cluster mode):
+     * it cannot compute the keyed pseudonym, which needs the raw id.
+     */
+    static final String REMOTE_ERASURE_MARKER = "gdpr-erased";
+
+    /** Raw user id erased on this node → its pseudonym and until when. */
+    private final Map<String, Erasure> erasedUsers = new ConcurrentHashMap<>();
+
+    /** {@code KvKeys.sha256(userId)} of a user erased on another node. */
+    private final Map<String, Erasure> erasedUserHashes = new ConcurrentHashMap<>();
+
+    private record Erasure(String replacement, Instant until) {
+    }
+
+    /**
+     * GDPR Art. 17 on this node: replaces {@code userId} with {@code pseudonym} in
+     * every entry the ring buffer holds (served by the log REST endpoint and the
+     * MCP log tools) and in every entry still waiting for the database writer, and
+     * for {@link #ERASED_USER_REWRITE_WINDOW} in every entry logged from now on.
+     * <p>
+     * The erasure pseudonymises the persisted logs once; entries still queued at
+     * that moment, and entries cancelled work logs while it unwinds, used to reach
+     * the database afterwards with the raw id, and the ring buffer kept serving it
+     * until it was pushed out.
+     *
+     * @return how many buffered entries were rewritten
+     */
+    public int markUserErased(String userId, String pseudonym) {
+        if (userId == null || pseudonym == null) {
+            return 0;
+        }
+        erasedUsers.put(userId, new Erasure(pseudonym, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
+        return rewriteBuffer();
+    }
+
+    /**
+     * As {@link #markUserErased} for an erasure that started on another node, which
+     * names the user only by {@code KvKeys.sha256(userId)}. The id is replaced by
+     * {@value #REMOTE_ERASURE_MARKER}.
+     */
+    public int markUserErasedHash(String userIdHash) {
+        if (userIdHash == null || userIdHash.isBlank()) {
+            return 0;
+        }
+        erasedUserHashes.put(userIdHash, new Erasure(REMOTE_ERASURE_MARKER, Instant.now().plus(ERASED_USER_REWRITE_WINDOW)));
+        return rewriteBuffer();
+    }
+
+    /**
+     * Returns once a database flush that is running has finished. A batch drained
+     * before the mark went up still carries the raw id; the erasure pseudonymises
+     * the persisted logs after this step, so that batch must be in the store by
+     * then. Every flush that starts later scrubs its entries itself.
+     */
+    synchronized void awaitInFlightFlush() {
+        // intentionally empty: acquiring the monitor is the wait
+    }
+
+    private int rewriteBuffer() {
+        awaitInFlightFlush();
+        Instant now = Instant.now();
+        erasedUsers.values().removeIf(erasure -> erasure.until().isBefore(now));
+        erasedUserHashes.values().removeIf(erasure -> erasure.until().isBefore(now));
+        int rewritten = 0;
+        lock.writeLock().lock();
+        try {
+            List<LogEntry> kept = new ArrayList<>(buffer.size());
+            for (LogEntry entry : buffer) {
+                LogEntry scrubbed = scrub(entry);
+                if (scrubbed != entry) {
+                    rewritten++;
+                }
+                kept.add(scrubbed);
+            }
+            if (rewritten > 0) {
+                buffer.clear();
+                buffer.addAll(kept);
+            }
+        } finally {
+            lock.writeLock().unlock();
+        }
+        return rewritten;
+    }
+
+    /**
+     * The entry with an erased user's id replaced, or the same instance when it
+     * names no erased user. Queued entries pass through here on their way to the
+     * database, so the queue needs no rewrite of its own.
+     */
+    LogEntry scrub(LogEntry entry) {
+        if (entry == null || entry.userId() == null || erasedUsers.isEmpty() && erasedUserHashes.isEmpty()) {
+            return entry;
+        }
+        Erasure erasure = erasedUsers.get(entry.userId());
+        if (erasure == null && !erasedUserHashes.isEmpty()) {
+            erasure = erasedUserHashes.get(KvKeys.sha256(entry.userId()));
+        }
+        if (erasure == null || erasure.until().isBefore(Instant.now())) {
+            return entry;
+        }
+        return new LogEntry(entry.timestamp(), entry.level(), entry.loggerName(), entry.message(), entry.environment(), entry.agentId(),
+                entry.agentVersion(), entry.conversationId(), erasure.replacement(), entry.instanceId());
+    }
+
+    /**
      * Publish a log entry to the ring buffer and notify listeners.
      */
     public void publish(LogEntry entry) {
+        entry = scrub(entry);
         // Add to ring buffer
         lock.writeLock().lock();
         try {
@@ -355,8 +471,11 @@ public class BoundedLogStore {
 
     /**
      * Flush pending log entries to the database in a single batch.
+     * <p>
+     * Synchronized so {@link #awaitInFlightFlush} can wait for a batch that was
+     * drained before an erasure marked its user and may still be committing.
      */
-    void flushToDb() {
+    synchronized void flushToDb() {
         if (dbQueue.isEmpty())
             return;
 
@@ -376,7 +495,8 @@ public class BoundedLogStore {
             LogEntry entry;
             while (batch.size() < FLUSH_BATCH_SIZE && remaining > 0 && (entry = dbQueue.poll()) != null) {
                 dbQueued.decrementAndGet();
-                batch.add(entry);
+                // Queued before an erasure of its user: leaves with the pseudonym.
+                batch.add(scrub(entry));
                 remaining--;
             }
             if (batch.isEmpty()) {
