@@ -844,26 +844,22 @@ function Step-Ports {
 
 # -- Compose file management ------------------------------
 
-# Monitoring support files, in the order they are fetched. Single source of truth:
-# Get-ComposeFiles downloads these at install time, and Install-CliWrapper emits the
-# file-type ones into the generated wrapper so `eddi update` refreshes them too.
-#
-# This list must stay in step with every file-type bind mount in
-# docker-compose.monitoring.yml. When a bind-mount source is missing Docker creates
-# a *directory* at that path, which either silently drops the dashboard or fails the
-# mount outright depending on what the grafana-data volume already holds — and the
-# first case leaves a stale directory inside the volume that keeps failing the mount
-# even after the file is restored.
-$script:MonitoringFiles = @(
-    "docs/monitoring/prometheus.yml",
-    "docs/monitoring/eddi-alerts.yml",
-    "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
-    "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-    "docs/monitoring/eddi-grafana-dashboard.json",
-    "docs/monitoring/eddi-operations-dashboard.json",
-    "docs/monitoring/eddi-full-metrics-dashboard.json",
-    "docs/monitoring/eddi-cluster-dashboard.json"
-)
+# The monitoring files a release needs are the ones ITS docker-compose.monitoring.yml
+# bind-mounts as regular files, read from that file after it was fetched and verified
+# (an older release does not mount a dashboard a newer one added, so a fixed list would
+# make it uninstallable). Every mounted file stays required: when a bind-mount source
+# is missing Docker creates a *directory* at that path, which either silently drops the
+# dashboard or fails the mount outright. Paths that are absolute or contain `..` are
+# skipped. eddi-fetch.ps1 embeds this function, so `eddi update` reads the same way.
+function Get-MonitoringAssets([string]$ComposePath) {
+    $found = [System.Collections.Generic.SortedSet[string]]::new()
+    foreach ($match in [regex]::Matches((Get-Content -LiteralPath $ComposePath -Raw), '\./(docs/monitoring/[A-Za-z0-9._/-]+\.(?:json|ya?ml))')) {
+        $rel = $match.Groups[1].Value
+        if ($rel -match '(^|/)\.\.(/|$)' -or $rel.StartsWith('/')) { continue }
+        [void]$found.Add($rel)
+    }
+    return @($found)
+}
 
 # -- Release checksums ------------------------------------
 #
@@ -1070,7 +1066,12 @@ function Get-ComposeFiles {
     if ($WithMonitoring) {
         Write-Information -MessageData ""
         Write-Information -MessageData "  Downloading monitoring configuration..."
-        foreach ($mf in $script:MonitoringFiles) {
+        $monitoringComposePath = Join-Path -Path $EddiDir -ChildPath "docker-compose.monitoring.yml"
+        $monitoringAssets = Get-MonitoringAssets $monitoringComposePath
+        if ($monitoringAssets.Count -eq 0) {
+            Write-Fail "docker-compose.monitoring.yml from '$EddiBranch' mounts no monitoring files, which cannot be right. Not continuing with a half-configured monitoring stack."
+        }
+        foreach ($mf in $monitoringAssets) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
             $mfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $mf } else { "" }
             $mfDir = Split-Path -Path $mfTarget -Parent
@@ -1096,9 +1097,8 @@ function Get-ComposeFiles {
                     # missing one dashboard. Same reasoning as the Keycloak realm
                     # below.
                     #
-                    # This list must stay in step with every file-type bind mount in
-                    # docker-compose.monitoring.yml. Adding a dashboard there without
-                    # adding it here breaks -WithMonitoring outright.
+                    # The list is read from the selected ref's docker-compose.monitoring.yml,
+                    # so it is by construction every file-type bind mount of that release.
                     # Only the EMPTY directory Docker leaves behind after a failed
                     # bind mount is removed, and only non-recursively: the installer
                     # does not own a directory with contents, and an existing FILE is
@@ -1844,11 +1844,8 @@ function Install-CliWrapper {
     param()
     $cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
 
-    # Individual files only — a directory mount cannot be fetched as a unit, but the
-    # files inside grafana-provisioning/* can be and are, which keeps the provisioning
-    # config current too. Emitted into the wrapper as a space-separated batch list so
-    # 'eddi update' needs no parsing of the compose file at runtime.
-    $monAssets = ($script:MonitoringFiles | Where-Object { $_ -match '\.(json|ya?ml)$' }) -join ' '
+    # The monitoring assets are NOT listed here: eddi-fetch.ps1 reads them out of the
+    # monitoring compose file of the ref being fetched (Get-MonitoringAssets).
 
     $cliContent = @"
 @echo off
@@ -2018,17 +2015,16 @@ for %%F in (%COMPOSE_FILES%) do (
 )
 if defined MON_COMPOSE (
     for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
-    set FETCH_ITEMS=!FETCH_ITEMS! "::assets::"
-    for %%A in ($monAssets) do (
-        set "REL=%%A"
-        set "RELWIN=!REL:/=\!"
-        set FETCH_ITEMS=!FETCH_ITEMS! "%%A|!MON_DIR!!RELWIN!"
-    )
+    rem no trailing backslash: it would escape the closing quote of the argument
+    if "!MON_DIR:~-1!"=="\" set "MON_DIR=!MON_DIR:~0,-1!"
+    rem the helper reads the asset list out of the fetched monitoring compose file
+    set FETCH_ITEMS=!FETCH_ITEMS! "::monitoring::!MON_DIR!"
 )
 echo Fetching and verifying...
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" !FETCH_ITEMS!
 if "!errorlevel!"=="3" goto update_assets_missing
 if "!errorlevel!"=="4" goto update_rollback_failed
+if "!errorlevel!"=="5" goto update_backup_present
 if errorlevel 1 goto update_refused
 
 if defined PERSIST_REF (
@@ -2093,6 +2089,13 @@ echo Aborting before restart. The files listed above could not be downloaded
 echo ^(compose files and the monitoring files they bind-mount are all required^).
 echo Nothing was replaced or recorded and the running stack was left untouched.
 echo Re-run once GitHub is reachable, or re-run the install script.
+exit /b 1
+
+:update_backup_present
+echo.
+echo UPDATE NOT STARTED: an earlier update left original files as ^<name^>.eddi-old ^(see above^).
+echo Replacing files now would overwrite them. Move each .eddi-old file back over its file
+echo ^(or delete it if you no longer need it^), then run eddi update again. Nothing was changed.
 exit /b 1
 
 :update_rollback_failed
@@ -2181,10 +2184,29 @@ $staged = @()
 $missing = @()
 $inAssets = $false
 $script:rollbackFailed = $false
+$script:backupBlocked = $false
+$list = [System.Collections.ArrayList]@($Item)
 try {
     Initialize-ReleaseChecksums
-    foreach ($entry in $Item) {
+    for ($i = 0; $i -lt $list.Count; $i++) {
+        $entry = $list[$i]
         if ($entry -eq '::assets::') { $inAssets = $true; continue }
+        if ($entry.StartsWith('::monitoring::')) {
+            # Required assets = the regular files the monitoring compose of THIS ref mounts:
+            # its fetched (staged) copy, or the installed one when it is not being updated.
+            $monDir = $entry.Substring('::monitoring::'.Length)
+            $monCompose = $null
+            foreach ($s in $staged) { if ($s[2] -eq 'docker-compose.monitoring.yml') { $monCompose = $s[0] } }
+            if (-not $monCompose) { $monCompose = Join-Path -Path $monDir -ChildPath 'docker-compose.monitoring.yml' }
+            if (-not (Test-Path -LiteralPath $monCompose -PathType Leaf)) { throw "no monitoring compose file to read the assets from" }
+            $derived = Get-MonitoringAssets $monCompose
+            if ($derived.Count -eq 0) { throw "the monitoring compose file mounts no files" }
+            foreach ($rel in $derived) {
+                [void]$list.Add($rel + '|' + (Join-Path -Path $monDir -ChildPath ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))
+            }
+            $inAssets = $true
+            continue
+        }
         $rel, $target = $entry -split '\|', 2
         if (-not $rel -or -not $target) { continue }
         $Assets = $inAssets
@@ -2218,6 +2240,15 @@ try {
         }
     }
     if ($missing.Count -gt 0) { throw "monitoring assets missing" }
+    # An earlier failed rollback leaves an original as <name>.eddi-old; moving the current
+    # file onto that path would destroy it. Refuse BEFORE anything is touched.
+    $blocking = @($staged | Where-Object { Test-Path -LiteralPath "$($_[1]).eddi-old" } | ForEach-Object { "$($_[1]).eddi-old" })
+    if ($blocking.Count -gt 0) {
+        Write-Host "  Not starting: these backups from an earlier failed update exist and must not be overwritten:"
+        foreach ($b in $blocking) { Write-Host "    $b" }
+        $script:backupBlocked = $true
+        throw "recovery backups present"
+    }
     # Every item passed. A DIRECTORY where an asset belongs is what Docker leaves
     # behind after a failed mount; only an EMPTY one is removed (non-recursive, so a
     # directory with content throws and ends the update with nothing replaced yet).
@@ -2273,10 +2304,10 @@ catch {
 finally {
     foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
 }
-if ($failed) { if ($script:rollbackFailed) { exit 4 } elseif ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
+if ($failed) { if ($script:rollbackFailed) { exit 4 } elseif ($script:backupBlocked) { exit 5 } elseif ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
 exit 0
 '@
-    $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum') | ForEach-Object {
+    $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum', 'Get-MonitoringAssets') | ForEach-Object {
             "function $_ {" + [Environment]::NewLine + (Get-Command -Name $_ -CommandType Function).ScriptBlock.ToString() + [Environment]::NewLine + "}"
         }) -join ([Environment]::NewLine + [Environment]::NewLine)
     ($fetchHead, $fetchFunctions, $fetchMain) -join ([Environment]::NewLine + [Environment]::NewLine) | Set-Content -Path $fetchPath -Encoding UTF8

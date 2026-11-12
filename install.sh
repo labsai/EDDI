@@ -1161,16 +1161,23 @@ resolve_compose_files() {
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
     echo -e "  ${DIM}Downloading monitoring configuration...${RESET}"
-    local monitoring_files=(
-      "docs/monitoring/prometheus.yml"
-      "docs/monitoring/eddi-alerts.yml"
-      "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
-      "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
-      "docs/monitoring/eddi-grafana-dashboard.json"
-      "docs/monitoring/eddi-operations-dashboard.json"
-      "docs/monitoring/eddi-full-metrics-dashboard.json"
-      "docs/monitoring/eddi-cluster-dashboard.json"
-    )
+    # The required files are the ones the SELECTED ref's docker-compose.monitoring.yml
+    # bind-mounts as regular files (just fetched and verified above), not a fixed
+    # list: an older release does not mount a dashboard a newer one added, and
+    # requiring it would make that release uninstallable. Every file the compose
+    # file DOES mount stays required. Read with grep/sed only (no eval, no word
+    # splitting of file content); a path with `..` is refused, and the pattern
+    # cannot produce an absolute one.
+    local monitoring_files=() mf_line
+    while IFS= read -r mf_line; do
+      case "$mf_line" in
+        ""|*..*|/*) continue ;;
+      esac
+      monitoring_files+=("$mf_line")
+    done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$EDDI_DIR/docker-compose.monitoring.yml" | sed 's|^\./||' | sort -u)
+    if [[ ${#monitoring_files[@]} -eq 0 ]]; then
+      fail "docker-compose.monitoring.yml from '${EDDI_BRANCH}' mounts no monitoring files, which cannot be right.\n     Not continuing with a half-configured monitoring stack."
+    fi
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
       local mf_dir
@@ -1200,9 +1207,8 @@ resolve_compose_files() {
           # reasoning as the Keycloak realm below; a half-built monitoring stack
           # is not better than a refusal to build one.
           #
-          # This list must therefore stay in step with every file-type bind
-          # mount in docker-compose.monitoring.yml. Adding a dashboard there
-          # without adding it here breaks --with-monitoring outright.
+          # The list is read from the selected ref's docker-compose.monitoring.yml, so
+          # it is by construction every file-type bind mount of that release.
           # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
           # previous run's failed mount left behind, and `rm -f` cannot remove
           # one. Under `set -e` that turns this cleanup into the script's exit
@@ -2968,15 +2974,22 @@ case "${1:-help}" in
       fi
     fi
 
-    # Every group passed: replace.
+    # Every group passed. FIRST clear what is in the way of an asset: Docker leaves a
+    # DIRECTORY at a bind-mount path whose source was missing, and `rm -f` cannot
+    # remove one (`-rf`). This comes before the first replacement so that a failure
+    # here (set -e) stops the update with every file still as it was.
+    for t in ${asset_targets[@]+"${asset_targets[@]}"}; do
+      if [[ -d "$t" ]]; then
+        if ! rm -rf "$t"; then
+          _discard_staged
+          echo "Aborting: ${t} is a directory that could not be removed. Nothing was changed; remove it by hand and retry." >&2
+          exit 1
+        fi
+      fi
+    done
+    # Then replace.
     for s in ${staged[@]+"${staged[@]}"}; do mv -f "${s}.tmp" "$s"; done
     for t in ${asset_targets[@]+"${asset_targets[@]}"}; do
-      # -rf, not -f: what is in the way is most likely a DIRECTORY left behind by
-      # an earlier failed mount, and `rm -f` cannot remove one. Done only now,
-      # after the replacement was downloaded and verified.
-      if [[ -d "$t" ]]; then
-        rm -rf "$t"
-      fi
       mv -f "${t}.tmp" "$t"
       echo "  Updated ${t#"${compose_dir}"/}"
     done

@@ -110,6 +110,15 @@ the compose bind mounts); `eddi update --local` keeps the checkout's `docker-com
 when the ref does not carry it (the only optional file); the PowerShell `EDDI_BRANCH` example
 restores the previous value; the 120 s update wait recomputes the time left for each probe.
 
+Fifth round: the required monitoring assets are no longer a fixed list (which made an older
+release such as 6.5.0 uninstallable once the cluster dashboard was added). Fresh installs and
+`eddi update`, on both platforms, read them from the selected ref's own
+`docker-compose.monitoring.yml` after it was fetched and verified; every regular file it mounts
+stays required, `..` and absolute paths are ignored. `eddi-fetch.ps1` refuses to start (exit 5,
+its own `eddi.cmd` message) while a `<name>.eddi-old` from a failed rollback exists, so it can
+no longer overwrite the preserved original. In `eddi update` (bash) a directory at an asset path
+is removed before the first replacement.
+
 ### Not changed
 
 `io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform

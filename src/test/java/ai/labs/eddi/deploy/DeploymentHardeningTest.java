@@ -265,7 +265,7 @@ class DeploymentHardeningTest {
             assertTrue(cmd.contains("goto update_refused"));
             // One call stages compose files and assets; the ref is recorded only after it
             // succeeded.
-            assertTrue(cmd.contains("\"::assets::\""), "the assets must travel in the same call as the compose files");
+            assertTrue(cmd.contains("\"::monitoring::"), "the assets are read by the same helper call as the compose files");
             assertFalse(cmd.contains("-Assets"), "a second helper call would replace the compose files before the assets pass");
             assertTrue(cmd.indexOf("eddi-fetch.ps1\" -Ref") < cmd.indexOf("if defined PERSIST_REF ("),
                     "the recorded ref may only change after the files are in place");
@@ -314,31 +314,67 @@ class DeploymentHardeningTest {
         }
 
         @Test
-        @DisplayName("install.sh, install.ps1 and the monitoring compose file agree on the monitoring assets")
-        void monitoringAssetListsAgree() throws IOException {
-            Pattern mount = Pattern.compile("\\./(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))(?=:)");
-            Set<String> mounted = new TreeSet<>();
+        @DisplayName("the required monitoring assets are read from the selected ref's compose file, not from a fixed list")
+        void monitoringAssetsComeFromTheSelectedComposeFile() throws IOException {
+            // No static list is left in either installer, or in the generated wrapper.
+            String sh = read("install.sh");
+            String ps = read("install.ps1");
+            assertFalse(sh.contains("\"docs/monitoring/eddi-grafana-dashboard.json\""),
+                    "a fixed list would require a file an older release does not have");
+            assertFalse(ps.contains("$script:MonitoringFiles"));
+            assertFalse(ps.contains("$monAssets"));
+            assertTrue(sh.contains("\"$EDDI_DIR/docker-compose.monitoring.yml\" | sed 's|^\\./||' | sort -u"));
+            assertTrue(ps.contains("function Get-MonitoringAssets"));
+            assertTrue(ps.contains("'Get-MonitoringAssets')"), "eddi-fetch.ps1 must embed the same reader");
+            assertTrue(ps.contains("\"::monitoring::!MON_DIR!\""));
+            // The reader's pattern, applied to the real compose file, yields every file
+            // mount
+            // (the cluster dashboard included) and nothing else; applied to an older
+            // release's
+            // compose text it does not yield a dashboard that release does not mount.
+            Pattern mount = Pattern.compile("\\./(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))");
+            assertTrue(sh.contains("[A-Za-z0-9._/-]+\\.(json|ya?ml)") && ps.contains("[A-Za-z0-9._/-]+\\.(?:json|ya?ml)"));
+            Set<String> current = new TreeSet<>();
             Matcher matcher = mount.matcher(read("docker-compose.monitoring.yml"));
             while (matcher.find()) {
-                mounted.add(matcher.group(1));
+                current.add(matcher.group(1));
             }
-            assertFalse(mounted.isEmpty());
-            assertTrue(mounted.contains("docs/monitoring/eddi-cluster-dashboard.json"));
-            Pattern quoted = Pattern.compile("\"(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))\"");
-            Set<String> shell = new TreeSet<>();
-            Set<String> powershell = new TreeSet<>();
-            String sh = between(read("install.sh"), "local monitoring_files=(", ")\n");
-            matcher = quoted.matcher(sh);
+            assertTrue(current.contains("docs/monitoring/eddi-cluster-dashboard.json"));
+            assertTrue(current.contains("docs/monitoring/prometheus.yml"));
+            assertFalse(current.stream().anyMatch(path -> path.endsWith("datasources") || path.endsWith("dashboards")),
+                    "directory mounts are not downloaded");
+            Set<String> older = new TreeSet<>();
+            matcher = mount.matcher(
+                    "      - ./docs/monitoring/prometheus.yml:/etc/p.yml:ro\n      - ./docs/monitoring/grafana-provisioning/datasources:/etc/ds:ro\n");
             while (matcher.find()) {
-                shell.add(matcher.group(1));
+                older.add(matcher.group(1));
             }
-            String ps = between(read("install.ps1"), "$script:MonitoringFiles = @(", "\n)");
-            matcher = quoted.matcher(ps);
-            while (matcher.find()) {
-                powershell.add(matcher.group(1));
-            }
-            assertEquals(shell, powershell, "install.sh and install.ps1 fetch different monitoring files");
-            assertTrue(shell.containsAll(mounted), "a bind-mounted file is missing from the installers: " + mounted);
+            assertEquals(Set.of("docs/monitoring/prometheus.yml"), older);
+            // Untrusted content: a path with .. or an absolute one is skipped.
+            assertTrue(sh.contains("\"\"|*..*|/*) continue ;;"));
+            assertTrue(ps.contains("-match '(^|/)\\.\\.(/|$)' -or $rel.StartsWith('/')"));
+        }
+
+        @Test
+        @DisplayName("an update is refused while backups from a failed rollback exist, and a directory in the way goes first")
+        void recoveryBackupsAreNeverOverwritten() throws IOException {
+            String ps = read("install.ps1");
+            String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
+            int guard = helper.indexOf("recovery backups present");
+            assertTrue(guard > 0 && guard < helper.indexOf("$backup = \"$($s[1]).eddi-old\""),
+                    "the check must run before any file is set aside");
+            assertTrue(helper.contains("$script:backupBlocked = $true") && helper.contains("exit 5"));
+            String cmd = between(ps, ":cmd_update", ":cmd_uninstall");
+            assertTrue(cmd.contains("if \"!errorlevel!\"==\"5\" goto update_backup_present") && cmd.contains(":update_backup_present"));
+
+            String sh = read("install.sh");
+            String update = between(sh, "    # Every group passed. FIRST clear what is in the way", "    # Record the version and ref");
+            assertTrue(update.indexOf("rm -rf \"$t\"") < update.indexOf("mv -f \"${s}.tmp\" \"$s\""),
+                    "a directory at an asset path is removed before the first replacement");
+            // The PowerShell twin already removes (empty) directories before its first
+            // Move-Item.
+            assertTrue(helper.indexOf("Remove-Item -LiteralPath $s[1] -Force") < helper
+                    .indexOf("Move-Item -LiteralPath $s[1] -Destination $backup -Force"));
         }
 
         @Test
