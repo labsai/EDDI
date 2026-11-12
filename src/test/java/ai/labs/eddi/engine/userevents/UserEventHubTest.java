@@ -16,8 +16,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -319,6 +325,129 @@ class UserEventHubTest {
             hub.open(user("bob"), new RecordingSink());
             assertEquals(1, counter(UserEventHub.METER_REJECTED, "reason", UserEventHub.REJECT_USER_LIMIT));
             assertEquals(3, hub.connectionCount());
+        }
+
+        @Test
+        @DisplayName("with authorization off, the shared anonymous bucket is not held to the per-user cap")
+        void anonymousBucketExemptFromPerUserCap() throws Exception {
+            var hub = hub(false, 2, 100, 64);
+            for (int i = 0; i < 5; i++) {
+                hub.open(new UserEventHub.Subscriber(null, true, true, List.of(), 0), new RecordingSink());
+            }
+            assertEquals(5, hub.connectionCount());
+            assertEquals(0, counter(UserEventHub.METER_REJECTED, "reason", UserEventHub.REJECT_USER_LIMIT));
+        }
+
+        @Test
+        @DisplayName("an authenticated user stays held to the per-user cap while anonymous callers are admitted")
+        void authenticatedStillCappedBesideAnonymous() throws Exception {
+            var hub = hub(true, 2, 100, 64);
+            for (int i = 0; i < 4; i++) {
+                hub.open(new UserEventHub.Subscriber(null, false, false, List.of(), 0), new RecordingSink());
+            }
+            hub.open(user("alice"), new RecordingSink());
+            hub.open(user("alice"), new RecordingSink());
+
+            var refused = assertThrows(UserEventHub.Refused.class, () -> hub.open(user("alice"), new RecordingSink()));
+            assertEquals(UserEventHub.REJECT_USER_LIMIT, refused.reason());
+            assertEquals(6, hub.connectionCount());
+        }
+
+        @Test
+        @DisplayName("the node cap still bounds the anonymous bucket")
+        void nodeCapBoundsAnonymous() throws Exception {
+            var hub = hub(false, 1, 2, 64);
+            var anonymous = new UserEventHub.Subscriber(null, true, true, List.of(), 0);
+            hub.open(anonymous, new RecordingSink());
+            hub.open(anonymous, new RecordingSink());
+
+            var refused = assertThrows(UserEventHub.Refused.class, () -> hub.open(anonymous, new RecordingSink()));
+            assertEquals(UserEventHub.REJECT_NODE_LIMIT, refused.reason());
+        }
+
+        @Test
+        @DisplayName("a user at the cap whose clients went away can reconnect: dead streams are swept first")
+        void deadStreamsDoNotHoldTheCap() throws Exception {
+            var hub = hub(true, 2, 100, 64);
+            var gone = new RecordingSink();
+            var alsoGone = new RecordingSink();
+            hub.open(user("alice"), gone);
+            hub.open(user("alice"), alsoGone);
+            gone.closed = true; // the client disconnected; no write or heartbeat has noticed
+            alsoGone.closed = true;
+
+            hub.open(user("alice"), new RecordingSink());
+            assertEquals(1, hub.connectionCount("alice"));
+            assertEquals(1, hub.connectionCount());
+            assertEquals(0, counter(UserEventHub.METER_REJECTED, "reason", UserEventHub.REJECT_USER_LIMIT));
+        }
+
+        @Test
+        @DisplayName("a user at the cap with only live streams is still refused")
+        void liveStreamsHoldTheCap() throws Exception {
+            var hub = hub(true, 2, 100, 64);
+            hub.open(user("alice"), new RecordingSink());
+            hub.open(user("alice"), new RecordingSink());
+
+            assertThrows(UserEventHub.Refused.class, () -> hub.open(user("alice"), new RecordingSink()));
+            assertEquals(2, hub.connectionCount("alice"));
+        }
+
+        @Test
+        @DisplayName("the sweep frees only dead slots and frees a node slot as well")
+        void sweepAtNodeCap() throws Exception {
+            var hub = hub(true, 8, 2, 64);
+            var gone = new RecordingSink();
+            hub.open(user("alice"), gone);
+            hub.open(user("bob"), new RecordingSink());
+            gone.closed = true;
+
+            hub.open(user("alice"), new RecordingSink());
+            assertEquals(2, hub.connectionCount());
+            assertThrows(UserEventHub.Refused.class, () -> hub.open(user("carol"), new RecordingSink()));
+        }
+
+        @Test
+        @DisplayName("concurrent opens at one below the cap admit exactly one")
+        void concurrentOpensAtCap() throws Exception {
+            int cap = 4;
+            var hub = hub(true, cap, 100, 64);
+            var gone = new RecordingSink();
+            hub.open(user("alice"), gone);
+            for (int i = 1; i < cap - 1; i++) {
+                hub.open(user("alice"), new RecordingSink());
+            }
+            gone.closed = true; // cap - 1 registered, one of them dead: two slots really free
+            hub.open(user("alice"), new RecordingSink()); // now at cap with one dead
+
+            int threads = 16;
+            var start = new CountDownLatch(1);
+            var admitted = new AtomicInteger();
+            var pool = Executors.newFixedThreadPool(threads);
+            try {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < threads; i++) {
+                    futures.add(pool.submit(() -> {
+                        start.await();
+                        try {
+                            hub.open(user("alice"), new RecordingSink());
+                            admitted.incrementAndGet();
+                        } catch (UserEventHub.Refused expected) {
+                            // at the cap
+                        }
+                        return null;
+                    }));
+                }
+                start.countDown();
+                for (Future<?> future : futures) {
+                    future.get(10, TimeUnit.SECONDS);
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertEquals(1, admitted.get());
+            assertEquals(cap, hub.connectionCount("alice"));
+            assertEquals(cap, hub.connectionCount());
         }
 
         @Test

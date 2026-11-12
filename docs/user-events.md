@@ -49,7 +49,7 @@ Scoping is decided **on the server, for every connection, at fan-out**:
 
 **Authorization on:** an anonymous caller gets `401`. Every role (`eddi-user` included) may open a stream; what arrives is scoped as above.
 
-**Authorization off** (`authorization.enabled=false`, development only — `AuthStartupGuard` refuses it in production): every caller is treated as the owner and an administrator, as on every other endpoint, so all connections share one anonymous bucket and receive every event. The per-user cap then applies to that one bucket, i.e. to the whole node.
+**Authorization off** (`authorization.enabled=false`, development only — `AuthStartupGuard` refuses it in production): every caller is treated as the owner and an administrator, as on every other endpoint, so all connections share one anonymous bucket and receive every event. That bucket is exempt from `max-connections-per-user` — a per-user cap on it would cap every caller of the deployment at once — and only `max-connections` bounds it.
 
 ## Clients
 
@@ -84,11 +84,11 @@ The read-only pause notice in a chat (Manager and Workforce) also says by when a
 
 | Property | Default | What it bounds |
 |---|---|---|
-| `eddi.user-events.max-connections-per-user` | `8` | Streams one principal may hold on one node; the next gets `429` with `Retry-After: 30` |
+| `eddi.user-events.max-connections-per-user` | `8` | Live streams one principal may hold on one node; the next gets `429` with `Retry-After: 30`. Before refusing, the user's streams whose client has already gone are dropped, so a reload is not refused by its own dead tabs. Not applied with authorization off (one shared anonymous bucket) |
 | `eddi.user-events.max-connections` | `10000` | Streams on one node, all users together |
 | `eddi.user-events.buffer-size` | `64` | Frames written to a stream but not yet acknowledged; a client further behind is closed as a slow consumer and reconnects |
 | `eddi.user-events.dispatch-queue-size` | `10000` | Events waiting for fan-out on one node; past it an event is dropped and counted |
-| `eddi.user-events.heartbeat-interval` | `20s` | Keep-alive interval, and how soon a closed tab's slot is freed |
+| `eddi.user-events.heartbeat-interval` | `20s` | Keep-alive interval, and how soon a vanished client is noticed when nothing else is written to it (a stream opened at a cap frees a closed tab's slot at once) |
 | `eddi.user-events.max-connection-age` | `1h` | Longest a stream stays open before the client must reconnect |
 | `eddi.user-events.enabled` | `true` | `false` answers `404` and raises no events |
 
