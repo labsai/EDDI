@@ -81,8 +81,11 @@ public class McpAdminTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAdminTools.class);
 
-    /** The page {@code list_schedules} asks REST for. */
-    private static final int SCHEDULE_LIST_LIMIT = 100;
+    /**
+     * {@code list_schedules} page size when the caller gives none, and its ceiling.
+     */
+    private static final int SCHEDULE_LIST_DEFAULT_LIMIT = 100;
+    private static final int SCHEDULE_LIST_MAX_LIMIT = 500;
 
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
@@ -1086,14 +1089,23 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "list_schedules", description = "List scheduled Agent triggers, newest first, up to " + SCHEDULE_LIST_LIMIT + ". "
+    @Tool(name = "list_schedules", description = "List scheduled Agent triggers, newest first, a page at a time. "
             + "Returns schedules with name, type, agent, cron/interval, status, next fire time, and fire count; "
-            + "truncated=true when the limit was reached (filter by agentId to see the rest). Optionally filter by agentId.")
-    public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId) {
+            + "truncated=true when more schedules exist beyond the page (call again with offset=nextOffset). Optionally filter by agentId.")
+    public String listSchedules(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId,
+                                @ToolArg(description = "Schedules to skip, default 0", required = false) Integer offset,
+                                @ToolArg(description = "Page size, default " + SCHEDULE_LIST_DEFAULT_LIMIT + ", max "
+                                        + SCHEDULE_LIST_MAX_LIMIT, required = false) Integer limit) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         try {
             String agentFilter = agentId != null && !agentId.isBlank() ? agentId : null;
-            List<ScheduleConfiguration> schedules = scheduleStore.readAllSchedules(agentFilter, SCHEDULE_LIST_LIMIT, 0);
+            int pageSize = limit == null ? SCHEDULE_LIST_DEFAULT_LIMIT : Math.max(1, Math.min(limit, SCHEDULE_LIST_MAX_LIMIT));
+            int pageOffset = offset == null ? 0 : Math.max(0, offset);
+            // One row more than the page: its presence is the only proof that more exist,
+            // so a page that is exactly full and last is not reported as truncated.
+            List<ScheduleConfiguration> fetched = scheduleStore.readAllSchedules(agentFilter, pageSize + 1, pageOffset);
+            boolean truncated = fetched.size() > pageSize;
+            List<ScheduleConfiguration> schedules = truncated ? fetched.subList(0, pageSize) : fetched;
 
             var items = new ArrayList<Map<String, Object>>();
             for (var s : schedules) {
@@ -1122,8 +1134,10 @@ public class McpAdminTools {
 
             var result = new LinkedHashMap<String, Object>();
             result.put("count", items.size());
-            // REST's paging rule: only a full page may have more behind it.
-            result.put("truncated", items.size() >= SCHEDULE_LIST_LIMIT);
+            result.put("truncated", truncated);
+            if (truncated) {
+                result.put("nextOffset", pageOffset + pageSize);
+            }
             result.put("schedules", items);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {

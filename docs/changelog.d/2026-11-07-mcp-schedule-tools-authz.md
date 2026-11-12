@@ -39,8 +39,9 @@ failed (HTTP 409)") and maps 504 to `errorCode: TIMEOUT`.
   argument no longer defaults to `UTC` itself.
 - A `heartbeatIntervalSeconds` makes a schedule a heartbeat even with `triggerType: CRON`,
   as over REST. An unknown `triggerType` is refused with `invalid_schedule`.
-- `list_schedules` with an `agentId` is capped at 100 like the unfiltered listing, and both
-  report `truncated: true` on a full page. `cronDescription` now also describes heartbeats.
+- `list_schedules` is paged: new `offset` (default 0) and `limit` (default 100, max 500)
+  arguments. It fetches one row more than the page, so `truncated: true` (with `nextOffset`)
+  is reported only when more schedules really exist; an exactly-full last page is not truncated. `cronDescription` now also describes heartbeats.
 - `delete_schedule` on an id that does not exist succeeds, as `DELETE` does over REST.
 
 **Files:** [`McpAdminTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpAdminTools.java),

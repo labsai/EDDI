@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -195,12 +196,20 @@ class McpScheduleToolsTest {
     @DisplayName("list_schedules")
     class ListSchedules {
 
-        @Test
-        @DisplayName("asks REST for the first 100 of the agent's schedules and shapes each")
-        void firstPage() throws Exception {
-            when(rest.readAllSchedules("agent-1", 100, 0)).thenReturn(List.of(schedule("s-1")));
+        private List<ScheduleConfiguration> pageOf(int n) {
+            var page = new ArrayList<ScheduleConfiguration>();
+            for (int i = 0; i < n; i++) {
+                page.add(schedule("s-" + i));
+            }
+            return page;
+        }
 
-            JsonNode result = json(tools.listSchedules("agent-1"));
+        @Test
+        @DisplayName("asks REST for one row more than the first 100 of the agent's schedules and shapes each")
+        void firstPage() throws Exception {
+            when(rest.readAllSchedules("agent-1", 101, 0)).thenReturn(List.of(schedule("s-1")));
+
+            JsonNode result = json(tools.listSchedules("agent-1", null, null));
 
             assertEquals(1, result.path("count").asInt());
             assertFalse(result.path("truncated").asBoolean());
@@ -211,18 +220,46 @@ class McpScheduleToolsTest {
         }
 
         @Test
-        @DisplayName("a full page says it may be truncated")
-        void fullPage() throws Exception {
-            var page = new ArrayList<ScheduleConfiguration>();
-            for (int i = 0; i < 100; i++) {
-                page.add(schedule("s-" + i));
-            }
-            when(rest.readAllSchedules(null, 100, 0)).thenReturn(page);
+        @DisplayName("exactly a full page and nothing more is not truncated")
+        void exactlyFullPage() throws Exception {
+            when(rest.readAllSchedules(null, 101, 0)).thenReturn(pageOf(100));
 
-            JsonNode result = json(tools.listSchedules(null));
+            JsonNode result = json(tools.listSchedules(null, null, null));
 
             assertEquals(100, result.path("count").asInt());
-            assertTrue(result.path("truncated").asBoolean());
+            assertFalse(result.path("truncated").asBoolean());
+            assertTrue(result.path("nextOffset").isMissingNode());
+        }
+
+        @Test
+        @DisplayName("a full page plus one is truncated, trimmed to the page, and the rest is reachable by offset")
+        void fullPagePlusOne() throws Exception {
+            when(rest.readAllSchedules(null, 101, 0)).thenReturn(pageOf(101));
+            when(rest.readAllSchedules(null, 101, 100)).thenReturn(List.of(schedule("s-last")));
+
+            JsonNode first = json(tools.listSchedules(null, null, null));
+            assertEquals(100, first.path("count").asInt());
+            assertTrue(first.path("truncated").asBoolean());
+            assertEquals(100, first.path("nextOffset").asInt());
+
+            JsonNode second = json(tools.listSchedules(null, first.path("nextOffset").asInt(), null));
+            assertEquals(1, second.path("count").asInt());
+            assertEquals("s-last", second.path("schedules").get(0).path("scheduleId").asText());
+            assertFalse(second.path("truncated").asBoolean());
+        }
+
+        @Test
+        @DisplayName("limit and offset are clamped: too big, zero, negative")
+        void clamping() throws Exception {
+            when(rest.readAllSchedules(null, 501, 0)).thenReturn(List.of());
+            when(rest.readAllSchedules(null, 2, 0)).thenReturn(List.of());
+
+            tools.listSchedules(null, -5, 100000);
+            tools.listSchedules(null, null, 0);
+            tools.listSchedules(null, null, -3);
+
+            verify(rest).readAllSchedules(null, 501, 0);
+            verify(rest, times(2)).readAllSchedules(null, 2, 0);
         }
     }
 
