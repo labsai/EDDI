@@ -305,10 +305,13 @@ most sessions and are not mapped yet.
 
 The save is refused (400 naming the field) for an unknown outcome, a reserved
 action that cannot be mapped, an empty or overlong action name, more than 100
-mappings, or a window of an unknown origin or outside 1–720 hours. A ZIP import
-or a sync runs the same checks and is refused with the same 400 — a `create`
-or `merge` import before it writes anything (no `healthConfig` that a save
-accepted is refused). An agent
+mappings, or a window of an unknown origin or outside 1–720 hours. A `create`
+or `merge` ZIP import runs the same checks before it writes anything, snippets
+and connections included, and is refused with the same 400. An `upgrade` import
+or a sync checks only when it updates the agent, after its workflows and
+extensions are written: the request then fails with a generic error, not a 400,
+and what was written stays. No `healthConfig` that a save accepted is refused
+either way. An agent
 stored without them — written by hand, say — is read leniently: an invalid
 entry is ignored.
 

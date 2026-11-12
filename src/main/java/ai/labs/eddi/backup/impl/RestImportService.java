@@ -859,6 +859,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         unzipArchive(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
 
+        // The agent's own checks run before the first write of any kind. Snippets and
+        // connections are global and live the moment they are written, so an archive
+        // refused afterwards would already have changed what running conversations use.
+        validateAgentFiles(Paths.get(targetDirPath));
+
         // Import snippets (global resources, not workflow-embedded). They are
         // recorded on the transaction like everything else — a snippet this import
         // created is just as much an orphan as a workflow when a later resource
@@ -887,18 +892,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
 
-                // Reject an invalid HITL config BEFORE importing workflows —
-                // otherwise the store-level validation only fires at agent
-                // creation, after all extensions already landed (partial
-                // import), and surfaced as a 500 instead of a 400.
-                HitlConfigValidation.validate(agentConfig.getHitlConfig());
-                AgentStore.validateContinuation(agentConfig);
-                // The save-time health checks too: a new agent is created through the store
-                // directly, so without this an import stored a healthConfig the REST save
-                // refuses (a merge's updateAgent refused it, but only after the workflows
-                // had landed). The field shipped together with its validator, so this
-                // refuses only what no save ever accepted, never an earlier export.
-                HealthConfigValidator.validate(agentConfig);
+                // Validated before anything was written: validateAgentFiles, above.
 
                 // Each distinct workflow once. The first pass repoints every occurrence of
                 // a URI, so a repeated one used to be imported again for nothing — a full
@@ -969,6 +963,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Nothing was imported. Answering 200 with an empty resourceUri is how a
         // whole class of broken archives went unnoticed.
         throw noAgentFileFound();
+    }
+
+    /**
+     * Refuses an archive whose agent a save would refuse, before the import writes
+     * anything. An invalid HITL config, continuation or {@code healthConfig} used
+     * to be caught only when the agent was created, after its workflows, extensions
+     * and the global snippets and connections had landed, and surfaced as a 500
+     * rather than a 400. The health checks refuse only what no save ever accepted,
+     * never an earlier export: the field shipped together with its validator.
+     */
+    private void validateAgentFiles(Path archiveRoot) throws IOException {
+        for (var agentFilePath : singleAgentFileIn(archiveRoot)) {
+            String agentFileString = normalizeVaultReferences(normalizeLegacyUris(readFile(agentFilePath)));
+            AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+            HitlConfigValidation.validate(agentConfig.getHitlConfig());
+            AgentStore.validateContinuation(agentConfig);
+            HealthConfigValidator.validate(agentConfig);
+        }
     }
 
     /**
