@@ -861,7 +861,8 @@ $script:MonitoringFiles = @(
     "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
     "docs/monitoring/eddi-grafana-dashboard.json",
     "docs/monitoring/eddi-operations-dashboard.json",
-    "docs/monitoring/eddi-full-metrics-dashboard.json"
+    "docs/monitoring/eddi-full-metrics-dashboard.json",
+    "docs/monitoring/eddi-cluster-dashboard.json"
 )
 
 # -- Release checksums ------------------------------------
@@ -1223,6 +1224,14 @@ EDDI_VERSION=$EddiVersion
 # the file is still empty. Windows: the file is created empty, then its ACL is
 # restricted exactly as Protect-SensitiveFile does.
 function Initialize-SensitiveFile([string]$SecurePath) {
+    if (Test-Path -LiteralPath $SecurePath -PathType Leaf) {
+        # A re-run: restrict the EXISTING file first and empty it only once that worked. On
+        # Windows, write access and the right to change the ACL are separate; emptying first
+        # and failing to protect would leave an empty .env and lose the vault master key.
+        Protect-SensitiveFile $SecurePath
+        [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+        return
+    }
     if (-not $IsWindows -and $null -ne $IsWindows) {
         & install -m 600 /dev/null $SecurePath 2>$null
         if ($LASTEXITCODE -ne 0) {
@@ -2019,6 +2028,7 @@ if defined MON_COMPOSE (
 echo Fetching and verifying...
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" !FETCH_ITEMS!
 if "!errorlevel!"=="3" goto update_assets_missing
+if "!errorlevel!"=="4" goto update_rollback_failed
 if errorlevel 1 goto update_refused
 
 if defined PERSIST_REF (
@@ -2083,6 +2093,14 @@ echo Aborting before restart. The files listed above could not be downloaded
 echo ^(compose files and the monitoring files they bind-mount are all required^).
 echo Nothing was replaced or recorded and the running stack was left untouched.
 echo Re-run once GitHub is reachable, or re-run the install script.
+exit /b 1
+
+:update_rollback_failed
+echo.
+echo UPDATE FAILED AND COULD NOT BE ROLLED BACK. Some files were replaced and the files listed
+echo above could not be restored; their originals are kept next to them as ^<name^>.eddi-old.
+echo The recorded version and ref were NOT changed. Do not start the stack until you have
+echo moved each .eddi-old file back over its file, then run eddi update again.
 exit /b 1
 
 :update_refused
@@ -2162,6 +2180,7 @@ function Write-Fail($msg) { [Console]::Error.WriteLine($msg); throw $msg }
 $staged = @()
 $missing = @()
 $inAssets = $false
+$script:rollbackFailed = $false
 try {
     Initialize-ReleaseChecksums
     foreach ($entry in $Item) {
@@ -2184,9 +2203,16 @@ try {
             $staged += , @($temporary, $target, $rel, $Assets)
         }
         else {
-            # Every item is REQUIRED: keeping an old file while the new ref is recorded
-            # would run the new image with old files. Nothing is replaced or recorded.
             Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+            # The -Local overlay is the checkout's own file: a ref that predates it does not
+            # carry it, and the checkout copy is not one of the compose files that must match
+            # the image, so it stays.
+            if ($rel -eq 'docker-compose.local.yml' -and (Test-Path -LiteralPath $target -PathType Leaf)) {
+                Write-Host "  $rel : not in this ref, keeping the checkout copy"
+                continue
+            }
+            # Every other item is REQUIRED: keeping an old file while the new ref is recorded
+            # would run the new image with old files. Nothing is replaced or recorded.
             Write-Host "  $rel : FAILED, could not be downloaded"
             $missing += $rel
         }
@@ -2217,12 +2243,27 @@ try {
         $staged = @()
     }
     catch {
+        # Restore in reverse order, and REPORT every restore that fails: a backup that
+        # could not be put back is kept (<name>.eddi-old) and named, never claimed restored.
+        $rollbackErrors = @()
         [Array]::Reverse($moved)
         foreach ($m in $moved) {
-            if ($m[1] -and (Test-Path -LiteralPath $m[1])) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction SilentlyContinue }
-            elseif (-not $m[1]) { Remove-Item -LiteralPath $m[0] -Force -ErrorAction SilentlyContinue }
+            try {
+                if ($m[1] -and (Test-Path -LiteralPath $m[1])) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction Stop }
+                elseif (-not $m[1]) { Remove-Item -LiteralPath $m[0] -Force -ErrorAction Stop }
+            }
+            catch {
+                $rollbackErrors += "$($m[0])" + $(if ($m[1]) { " (the original is kept at $($m[1]))" } else { " (a new file that could not be removed)" })
+            }
         }
-        Write-Host "  A file could not be replaced; every file already replaced was restored."
+        if ($rollbackErrors.Count -gt 0) {
+            Write-Host "  ROLLBACK FAILED. These files could NOT be restored and are left in an inconsistent state:"
+            foreach ($e in $rollbackErrors) { Write-Host "    $e" }
+            $script:rollbackFailed = $true
+        }
+        else {
+            Write-Host "  A file could not be replaced; every file already replaced was restored."
+        }
         throw
     }
 }
@@ -2232,7 +2273,7 @@ catch {
 finally {
     foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
 }
-if ($failed) { if ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
+if ($failed) { if ($script:rollbackFailed) { exit 4 } elseif ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
 exit 0
 '@
     $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum') | ForEach-Object {
