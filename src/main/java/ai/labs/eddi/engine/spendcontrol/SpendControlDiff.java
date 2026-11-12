@@ -32,7 +32,9 @@ import java.util.Objects;
  * <li>a <b>new</b> entry is loosening while the policy in force refuses
  * unpriced calls — a price admits calls that are refused today — and otherwise
  * unless its lowest price of every kind is at least the highest price of every
- * existing entry whose pattern could match the same model;</li>
+ * existing entry of the same provider (or of provider {@code *}): a call is
+ * priced by its reported name before its requested name, so a new entry can
+ * take over a call whatever the two patterns look like;</li>
  * <li>a <b>changed</b> entry is stricter only if no price goes down, no price
  * is cleared, and the long-context threshold only moves down over a tier that
  * costs at least the base price;</li>
@@ -117,14 +119,14 @@ public final class SpendControlDiff {
         }
         double[] lowest = lowest(added);
         for (ModelPriceEntry other : existing) {
-            if (!mayMatchSameModel(added, other)) {
+            if (!mayPriceSameCall(added, other)) {
                 continue;
             }
             double[] highest = highest(other);
             for (int kind = 0; kind < KINDS.length; kind++) {
                 if (lowest[kind] < highest[kind]) {
                     loosening.add(text + " (" + KINDS[kind] + " " + lowest[kind] + " is below the " + highest[kind] + " of "
-                            + label(other) + ", which may price the same models today)");
+                            + label(other) + ", which may price the same calls today)");
                     return;
                 }
             }
@@ -282,66 +284,20 @@ public final class SpendControlDiff {
     }
 
     /**
-     * Whether some model name could be matched by both entries. Exact names and two
-     * prefix (or two suffix) patterns are decided; every other pair is assumed to
-     * overlap.
+     * Whether both entries could price one call — decided on the provider alone,
+     * never on the model patterns. A call is priced by the name the provider
+     * reported first and the requested name second
+     * ({@code ModelPriceMatcher#match(String, String, String)}), and the two names
+     * can be unrelated (a dated snapshot, an Azure deployment, an OpenRouter
+     * route). So a new entry that matches no name an existing entry matches can
+     * still take over a call that entry prices today: the call's reported name,
+     * unpriced so far, now matches the new entry first. The same provider, or
+     * provider {@code *} on either side, is enough.
      */
-    static boolean mayMatchSameModel(ModelPriceEntry a, ModelPriceEntry b) {
+    static boolean mayPriceSameCall(ModelPriceEntry a, ModelPriceEntry b) {
         String pa = lower(a.provider());
         String pb = lower(b.provider());
-        if (!(pa.equals(pb) || "*".equals(pa) || "*".equals(pb))) {
-            return false;
-        }
-        return patternsOverlap(lower(a.model()), lower(b.model()));
-    }
-
-    static boolean patternsOverlap(String a, String b) {
-        boolean aLead = a.startsWith("*");
-        boolean aTrail = a.length() > 1 && a.endsWith("*") || "*".equals(a);
-        boolean bLead = b.startsWith("*");
-        boolean bTrail = b.length() > 1 && b.endsWith("*") || "*".equals(b);
-        String aLit = strip(a);
-        String bLit = strip(b);
-        if (!aLead && !aTrail) {
-            return matches(b, aLit);
-        }
-        if (!bLead && !bTrail) {
-            return matches(a, bLit);
-        }
-        if (!aLead && !bLead) {
-            return aLit.startsWith(bLit) || bLit.startsWith(aLit);
-        }
-        if (!aTrail && !bTrail) {
-            return aLit.endsWith(bLit) || bLit.endsWith(aLit);
-        }
-        return true;
-    }
-
-    private static boolean matches(String pattern, String name) {
-        boolean lead = pattern.startsWith("*");
-        boolean trail = pattern.length() > 1 && pattern.endsWith("*") || "*".equals(pattern);
-        String literal = strip(pattern);
-        if (lead && trail) {
-            return name.contains(literal);
-        }
-        if (lead) {
-            return name.endsWith(literal);
-        }
-        if (trail) {
-            return name.startsWith(literal);
-        }
-        return name.equals(literal);
-    }
-
-    private static String strip(String pattern) {
-        String s = pattern;
-        if (s.startsWith("*")) {
-            s = s.substring(1);
-        }
-        if (s.endsWith("*")) {
-            s = s.substring(0, s.length() - 1);
-        }
-        return s;
+        return pa.equals(pb) || "*".equals(pa) || "*".equals(pb);
     }
 
     /** The catalog's uniqueness key: provider and model, case-insensitively. */

@@ -13,9 +13,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -149,13 +153,89 @@ class SpendControlDiffTest {
             assertFalse(result.loosens());
         }
 
+        static Stream<Arguments> additions() {
+            var gpt4o = entry("openai", "gpt-4o", 2.5, 10.0);
+            var tiered = new ModelPriceEntry("openai", "gpt-4o", 2.5, 10.0, null, null, new LongContextTier(128_000L, 5.0, 20.0, null, null), null,
+                    SRC, null);
+            return Stream.of(
+                    // shape, existing, added, policy in force, loosens
+                    Arguments.of("another provider, any price", List.of(gpt4o), entry("anthropic", "claude-x", 0.1, 0.1), UnpricedPolicy.ALLOW,
+                            false),
+                    Arguments.of("same provider, at least every price there", List.of(gpt4o), entry("openai", "o9", 2.5, 10.0), UnpricedPolicy.ALLOW,
+                            false),
+                    Arguments.of("exact name cheaper than the wildcard pricing it", List.of(entry("openai", "gpt-4o*", 2.5, 10.0)),
+                            entry("openai", "gpt-4o-mini", 0.15, 0.6), UnpricedPolicy.ALLOW, true),
+                    // the reported name (a dated snapshot) is matched before the requested one,
+                    // so this cheap entry takes over calls gpt-4o prices today
+                    Arguments.of("unrelated pattern of the same provider, cheaper", List.of(gpt4o), entry("openai", "gpt-4o-2024*", 0.01, 0.01),
+                            UnpricedPolicy.ALLOW, true),
+                    Arguments.of("unrelated exact name of the same provider, cheaper", List.of(gpt4o),
+                            entry("openai", "my-azure-deployment", 0.01, 20.0),
+                            UnpricedPolicy.ALLOW, true),
+                    Arguments.of("provider * cheaper than a provider's entry", List.of(gpt4o), entry("*", "*", 0.0, 0.0), UnpricedPolicy.ALLOW, true),
+                    Arguments.of("provider entry cheaper than a provider-* entry", List.of(entry("*", "*", 5.0, 20.0)),
+                            entry("openai", "o9", 4.0, 30.0),
+                            UnpricedPolicy.ALLOW, true),
+                    Arguments.of("between the base and the dearer long-context tier of an entry", List.of(tiered),
+                            entry("openai", "gpt-4o*", 3.0, 15.0),
+                            UnpricedPolicy.ALLOW, true),
+                    Arguments.of("its own long-context tier cheaper than an entry",
+                            List.of(gpt4o),
+                            new ModelPriceEntry("openai", "gpt-4o*", 3.0, 12.0, null, null, new LongContextTier(1_000L, 1.0, 12.0, null, null),
+                                    null, SRC, null),
+                            UnpricedPolicy.ALLOW, true),
+                    Arguments.of("an explicit cache price below an entry's (input) cache price", List.of(gpt4o),
+                            new ModelPriceEntry("openai", "gpt-4o*", 3.0, 12.0, 0.3, null, null, null, SRC, null), UnpricedPolicy.ALLOW, true),
+                    Arguments.of("an entry without prices next to a priced one", List.of(gpt4o), entry("openai", "gpt-4o*", null, null),
+                            UnpricedPolicy.ALLOW,
+                            true),
+                    Arguments.of("the first entry of an empty catalog", List.of(), entry("openai", "o9", 0.1, 0.1), UnpricedPolicy.ALLOW, false),
+                    Arguments.of("any price while unpriced calls are refused", List.of(), entry("openai", "o9", 100.0, 100.0), UnpricedPolicy.REFUSE,
+                            true),
+                    Arguments.of("any price while unpriced budgeted calls are refused", List.of(gpt4o), entry("anthropic", "c", 100.0, 100.0),
+                            UnpricedPolicy.REFUSE_WHEN_BUDGETED, true));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("additions")
+        @DisplayName("a new entry")
+        void added(String shape, List<ModelPriceEntry> existing, ModelPriceEntry added, UnpricedPolicy policy, boolean loosens) {
+            var before = catalog(UnpricedPolicy.ALLOW, existing.toArray(ModelPriceEntry[]::new));
+            List<ModelPriceEntry> next = new ArrayList<>(existing);
+            next.add(added);
+            var result = SpendControlDiff.compareCatalogs(before, catalog(UnpricedPolicy.ALLOW, next.toArray(ModelPriceEntry[]::new)), policy);
+            assertEquals(1, result.changes().size(), shape);
+            assertTrue(result.changes().get(0).startsWith("added "), shape);
+            assertEquals(loosens, result.loosens(), shape + ": " + result.loosening());
+        }
+
+        @Test
+        @DisplayName("a key differing only by case is a change of that entry, not an addition")
+        void caseOnly() {
+            var before = catalog(UnpricedPolicy.REFUSE, entry("openai", "gpt-4o", 2.5, 10.0));
+            var after = catalog(UnpricedPolicy.REFUSE, entry("OpenAI", "GPT-4O", 3.0, 12.0));
+            var result = SpendControlDiff.compareCatalogs(before, after, UnpricedPolicy.REFUSE);
+            assertEquals(1, result.changes().size());
+            assertTrue(result.changes().get(0).startsWith("changed "), result.changes().toString());
+            assertFalse(result.loosens());
+        }
+
+        @Test
+        @DisplayName("removing an entry and adding a dearer one under another name still loosens")
+        void removeAndAdd() {
+            var before = catalog(UnpricedPolicy.ALLOW, entry("openai", "gpt-4o", 2.5, 10.0));
+            var after = catalog(UnpricedPolicy.ALLOW, entry("openai", "gpt-4o*", 5.0, 20.0));
+            var result = diff(before, after);
+            assertEquals(2, result.changes().size());
+            assertTrue(result.loosening().stream().anyMatch(l -> l.startsWith("removed ")), result.loosening().toString());
+        }
+
         @ParameterizedTest
-        @CsvSource({"gpt-4o,gpt-4o,true", "gpt-4o,gpt-4o-mini,false", "gpt-4o*,gpt-4o-mini,true", "gpt-4o*,claude*,false",
-                "gpt-4o*,gpt*,true", "*-mini,*o-mini,true", "*-mini,*-max,false", "gpt*,*mini,true", "*,x,true"})
-        @DisplayName("pattern overlap")
-        void overlap(String a, String b, boolean expected) {
-            assertEquals(expected, SpendControlDiff.patternsOverlap(a, b));
-            assertEquals(expected, SpendControlDiff.patternsOverlap(b, a));
+        @CsvSource({"openai,openai,true", "OpenAI,openai,true", "openai,anthropic,false", "*,anthropic,true", "openai,*,true"})
+        @DisplayName("two entries may price one call when the provider matches, whatever their models")
+        void sameCall(String a, String b, boolean expected) {
+            assertEquals(expected, SpendControlDiff.mayPriceSameCall(entry(a, "x", 1.0, 1.0), entry(b, "y*", 1.0, 1.0)));
+            assertEquals(expected, SpendControlDiff.mayPriceSameCall(entry(b, "y*", 1.0, 1.0), entry(a, "x", 1.0, 1.0)));
         }
     }
 
