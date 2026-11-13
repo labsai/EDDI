@@ -6,6 +6,8 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import ai.labs.eddi.integrations.openai.model.TokenUsage;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -217,6 +219,41 @@ class OpenAiSseWriterTest {
             writer.content("b");
             writer.finish("stop");
         }, "a disconnected client is routine; it must not raise once per token");
+        assertTrue(writer.isBroken(), "the bridge reads this to cancel the turn nobody is reading");
+    }
+
+    @Test
+    void healthyStream_isNotBroken() {
+        var writer = writer();
+        writer.content("a");
+        writer.finish("stop");
+
+        assertFalse(writer.isBroken());
+    }
+
+    @Test
+    void unserializableChunk_isDropped_butIsNotMistakenForADisconnect() {
+        // JsonProcessingException is an IOException: caught together with the write
+        // failures, it latched the stream as broken — and a broken stream now
+        // cancels the turn.
+        var failingOnce = new ObjectMapper() {
+            private boolean failed;
+
+            @Override
+            public byte[] writeValueAsBytes(Object value) throws JsonProcessingException {
+                if (!failed) {
+                    failed = true;
+                    throw new JsonMappingException(null, "cannot serialize");
+                }
+                return super.writeValueAsBytes(value);
+            }
+        };
+        var writer = new OpenAiSseWriter(out, failingOnce, ID, MODEL, CREATED, false);
+
+        writer.content("kept");
+
+        assertFalse(writer.isBroken(), "a bad payload is not a vanished client");
+        assertTrue(body().contains("\"content\":\"kept\""), "the stream goes on after the dropped chunk: " + body());
     }
 
     @Test

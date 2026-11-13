@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
@@ -32,6 +33,7 @@ import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -144,6 +146,23 @@ public class OpenAiConversationBridge {
     static final String AGENT_FAILED_MESSAGE = "The agent failed to process the message.";
     static final String BUSY_NOTICE = "The conversation is busy with another turn or is no longer active. Please retry.";
 
+    /**
+     * Audit actor of a turn cancelled because its stream's client went away — the
+     * value the native {@code /agents/{id}/stream} endpoint records for the same
+     * event.
+     */
+    static final String CANCELLED_BY_CLIENT_DISCONNECT = "system:client-disconnect";
+
+    /**
+     * Audit actor of a streamed turn cancelled because the request timed out
+     * ({@code eddi.openai-compat.request-timeout-seconds}) and the client was
+     * answered with an error event.
+     */
+    static final String CANCELLED_BY_REQUEST_TIMEOUT = "system:openai-request-timeout";
+
+    /** {@code outcome} tag of a stream whose client disconnected mid-turn. */
+    static final String OUTCOME_CLIENT_GONE = "client_gone";
+
     private final IConversationService conversationService;
     private final IUserConversationStore userConversationStore;
     /**
@@ -165,6 +184,24 @@ public class OpenAiConversationBridge {
     private Timer turnTimer;
 
     private final ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * Whether a streamed turn nobody is reading any more is cancelled — the same
+     * switch, and the same trade-off, as the native {@code /stream} endpoint
+     * ({@code eddi.streaming.cancel-on-client-disconnect}, default {@code true}).
+     * <p>
+     * On, a client that disconnects (Open WebUI's stop button, a closed tab) or a
+     * stream that hits the request timeout stops the turn at its next boundary: no
+     * further model round and no further tool call starts, so the rest of the
+     * completion is not paid for. A cancelled turn is discarded, not saved — the
+     * conversation settles on {@code EXECUTION_INTERRUPTED} and the next message
+     * runs a fresh turn. Off, the turn finishes and persists even though nobody
+     * receives it. Field-injected with the shipped default so directly constructed
+     * unit tests keep it.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.streaming.cancel-on-client-disconnect", defaultValue = "true")
+    boolean cancelOnClientDisconnect = true;
 
     @Inject
     public OpenAiConversationBridge(IConversationService conversationService,
@@ -663,6 +700,7 @@ public class OpenAiConversationBridge {
      */
     SimpleConversationMemorySnapshot sendAndWait(String conversationId, InputData inputData) throws Exception {
         var future = new CompletableFuture<SimpleConversationMemorySnapshot>();
+        stampCallerGivesUp(inputData);
 
         // returnDetailed=true: the filtered snapshot keeps only input, actions,
         // output and quick replies, which drops the audit:token_usage entry the
@@ -686,18 +724,44 @@ public class OpenAiConversationBridge {
                                 && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
                         future.complete(stillAwaiting ? SKIPPED_STILL_AWAITING : SKIPPED_NOT_ACTIVE);
                     }
+
+                    @Override
+                    public void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
+                        // Still queued when this request's timeout passed, so never run.
+                        // Normally the wait below has answered 504 already; when its timer
+                        // is late this is the answer, and it is the timeout, not "busy".
+                        future.completeExceptionally(requestTimedOut());
+                    }
                 });
 
         try {
             return future.get(config.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            throw OpenAiApiException.timeout("The agent did not respond within "
-                    + config.getRequestTimeoutSeconds() + " seconds.");
+            throw requestTimedOut();
         } catch (InterruptedException e) {
             // Restore the flag before unwinding: swallowing it leaves the worker
             // thread looking healthy to the pool while its shutdown signal is gone.
             Thread.currentThread().interrupt();
             throw OpenAiApiException.serverError(null, "The request was interrupted before the agent replied.");
+        }
+    }
+
+    /** The 504 a request gets when its turn did not finish in time. */
+    private OpenAiApiException requestTimedOut() {
+        return OpenAiApiException.timeout("The agent did not respond within "
+                + config.getRequestTimeoutSeconds() + " seconds.");
+    }
+
+    /**
+     * Stamp when this request stops waiting, so a turn still queued behind another
+     * turn of the same conversation by then is dropped unrun instead of running for
+     * a caller that already has its timeout — the stamp the native REST say sets
+     * ({@code InputData#setCallerGivesUpAtEpochMs}).
+     */
+    private void stampCallerGivesUp(InputData inputData) {
+        if (inputData != null && config.getRequestTimeoutSeconds() > 0) {
+            inputData.setCallerGivesUpAtEpochMs(System.currentTimeMillis()
+                    + TimeUnit.SECONDS.toMillis(config.getRequestTimeoutSeconds()));
         }
     }
 
@@ -817,6 +881,115 @@ public class OpenAiConversationBridge {
     }
 
     /**
+     * Cancels a streamed turn nobody is reading any more — once, and only while
+     * that turn is the one executing.
+     * <p>
+     * A stream is <em>abandoned</em> when a write to its client fails (the client
+     * disconnected) or when it hit the request timeout (the client already has its
+     * error and {@code [DONE]}). The cancel is the native {@code /stream}
+     * endpoint's: {@code cancelConversation(CANCEL_GRACEFUL)}, which raises the
+     * turn's cooperative-cancel flag. The pipeline checks it before every lifecycle
+     * task, every tool-loop model round and every tool call, so no further model
+     * round and no further tool call starts. A tool call already running is never
+     * interrupted — the flag is only read between calls — and the model call in
+     * progress runs to its end, its tokens dropped by the writer. The cancelled
+     * turn is discarded rather than stored: the conversation settles on
+     * {@code EXECUTION_INTERRUPTED}, from which the next message runs a fresh turn.
+     * <p>
+     * Three guards keep the cancel to this turn:
+     * <ul>
+     * <li><b>Only once the turn runs.</b> A turn still queued behind another turn
+     * of the same conversation has not registered as in flight, and the cancel
+     * would stop that other turn. A queued turn is left to the caller-gives-up
+     * stamp, which drops it unrun; if it starts in between, its first task start is
+     * the signal, and the cancel follows then.</li>
+     * <li><b>Never after a terminal callback.</b> Once {@code onComplete},
+     * {@code onSkipped} or {@code onError} fired, the turn is over — and a turn
+     * that paused for approval must not have its pending approval cancelled by a
+     * write that failed while reporting the pause.</li>
+     * <li><b>At most one request</b>, however many tokens arrive after the client
+     * left.</li>
+     * </ul>
+     * Skipped when {@code eddi.streaming.cancel-on-client-disconnect} is off: the
+     * turn then finishes and persists, as on {@code /stream}.
+     */
+    final class StreamAbandonment {
+        private final String conversationId;
+        private String abandonedBy;
+        private boolean running;
+        private boolean settled;
+        private boolean cancelRequested;
+
+        StreamAbandonment(String conversationId) {
+            this.conversationId = conversationId;
+        }
+
+        /** The turn is executing: any callback but a terminal one proves it. */
+        void running() {
+            String cancelAs;
+            synchronized (this) {
+                running = true;
+                cancelAs = claimCancel();
+            }
+            cancel(cancelAs);
+        }
+
+        /** A terminal callback fired: there is nothing left to stop. */
+        synchronized void settled() {
+            settled = true;
+        }
+
+        /**
+         * Nobody reads this stream any more; {@code actor} is recorded as who cancelled
+         * the turn.
+         */
+        void abandon(String actor) {
+            String cancelAs;
+            synchronized (this) {
+                if (abandonedBy == null) {
+                    abandonedBy = actor;
+                }
+                cancelAs = claimCancel();
+            }
+            cancel(cancelAs);
+        }
+
+        /** The actor to cancel as, claimed at most once; {@code null} for none. */
+        private String claimCancel() {
+            if (abandonedBy == null || !running || settled || cancelRequested) {
+                return null;
+            }
+            cancelRequested = true;
+            return abandonedBy;
+        }
+
+        /**
+         * Outside the lock: the cancel reads and writes the store, and must not hold up
+         * a callback thread that only wants to record a terminal state.
+         */
+        private void cancel(String actor) {
+            if (actor == null) {
+                return;
+            }
+            String safeConversationId = sanitize(conversationId);
+            if (!cancelOnClientDisconnect) {
+                LOGGER.infof("OpenAI-adapter stream of conversation %s abandoned (%s) — letting the turn finish and persist "
+                        + "(eddi.streaming.cancel-on-client-disconnect=false)", safeConversationId, actor);
+                return;
+            }
+            LOGGER.infof("OpenAI-adapter stream of conversation %s abandoned (%s) — cancelling the in-flight turn; "
+                    + "its output is discarded and the conversation settles on EXECUTION_INTERRUPTED",
+                    safeConversationId, actor);
+            try {
+                conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL, actor);
+            } catch (Exception e) {
+                LOGGER.warnf("Could not cancel conversation %s after its stream was abandoned: %s", safeConversationId,
+                        e.getMessage());
+            }
+        }
+    }
+
+    /**
      * Run one streaming turn, writing OpenAI chunks through {@code writer}.
      * <p>
      * <b>Token reconciliation.</b> Not every agent streams tokens: {@code LlmTask}
@@ -849,14 +1022,18 @@ public class OpenAiConversationBridge {
         // client would see content after [DONE]. This latch is completed by
         // whichever terminal callback fires, and awaited before unwinding.
         var finished = new CompletableFuture<Void>();
+        var abandonment = new StreamAbandonment(turn.conversationId());
         try {
+            stampCallerGivesUp(turn.inputData());
             // returnDetailed=true for the same reason as the sync path — see
             // sendAndWait.
             conversationService.sayStreaming(turn.conversationId(), true, true, Collections.emptyList(),
                     turn.inputData(), new IConversationService.StreamingResponseHandler() {
                         @Override
                         public void onTaskStart(TaskId taskId, String taskType, int index) {
-                            // Pipeline progress is not part of the OpenAI protocol.
+                            // Pipeline progress is not part of the OpenAI protocol — but it is
+                            // the proof that THIS turn is the one executing, not still queued.
+                            abandonment.running();
                         }
 
                         @Override
@@ -867,12 +1044,21 @@ public class OpenAiConversationBridge {
 
                         @Override
                         public void onToken(String token) {
+                            abandonment.running();
                             anyToken.set(true);
                             writer.content(token);
+                            if (writer.isBroken()) {
+                                // The client is gone: cancel the turn and stop waiting for it.
+                                // Nothing more this request could write would reach anyone.
+                                outcomeTag.compareAndSet("ok", OUTCOME_CLIENT_GONE);
+                                abandonment.abandon(CANCELLED_BY_CLIENT_DISCONNECT);
+                                finished.complete(null);
+                            }
                         }
 
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            abandonment.settled();
                             try {
                                 if (snapshot != null && snapshot.getConversationState() == ConversationState.ERROR) {
                                     // A failed turn also reaches onError; whichever comes
@@ -909,6 +1095,7 @@ public class OpenAiConversationBridge {
 
                         @Override
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            abandonment.settled();
                             try {
                                 boolean stillAwaiting = snapshot != null
                                         && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
@@ -929,6 +1116,7 @@ public class OpenAiConversationBridge {
 
                         @Override
                         public void onError(Throwable error) {
+                            abandonment.settled();
                             try {
                                 // Logged, not sent: a raw exception message can carry hosts,
                                 // URLs or paths, and this reaches a caller holding only the
@@ -951,8 +1139,10 @@ public class OpenAiConversationBridge {
             finished.get(config.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             outcomeTag.set("timeout");
-            writer.error(OpenAiApiException.timeout("The agent did not respond within "
-                    + config.getRequestTimeoutSeconds() + " seconds.").toErrorResponse());
+            writer.error(requestTimedOut().toErrorResponse());
+            // The client has its error and [DONE]; the turn's output can no longer
+            // reach it. A turn still queued is dropped by the caller-gives-up stamp.
+            abandonment.abandon(CANCELLED_BY_REQUEST_TIMEOUT);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             outcomeTag.set("error");
@@ -971,7 +1161,9 @@ public class OpenAiConversationBridge {
             // Belt and braces: the handler terminates on every documented path,
             // but an undocumented one must not leave the client waiting forever.
             if (!writer.isFinished()) {
-                outcomeTag.set("error");
+                if (!OUTCOME_CLIENT_GONE.equals(outcomeTag.get())) {
+                    outcomeTag.set("error");
+                }
                 writer.error(OpenAiApiException.serverError(null, "The agent ended the turn without a result.")
                         .toErrorResponse());
             }
