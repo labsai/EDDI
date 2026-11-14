@@ -307,6 +307,26 @@ class InputParserMatchingTest {
             assertTrue(DictionaryUtilities.extractExpressions(raw, false, false, 0.6).getFirst().getExpressions().toString().contains("bfp"));
         }
 
+        /**
+         * "bok flight" is a fragment of both phrases, equally; "please now" is a better
+         * fragment of the second only. Keeping just each phrase's best fragment hid
+         * that the first position is contested, and the first phrase was emitted for
+         * it.
+         */
+        @Test
+        @DisplayName("a phrase's better fragment elsewhere does not hide an ambiguity")
+        void ambiguityIsJudgedOnEveryFragment() throws Exception {
+            List<IDictionary> dictionaries = List.of(phrases("book flight thanks soon", "thanks", "book flight please now", "please"));
+            var correction = new DamerauLevenshteinCorrection(1, true);
+            correction.init(dictionaries);
+            var config = partial(true);
+            config.setMinMatchingAccuracy(0.2);
+
+            List<RawSolution> raw = parser(config, dictionaries, List.of(correction)).parse("bok flight x please now", "en", List.of());
+
+            assertEquals("please", DictionaryUtilities.extractExpressions(raw, false, false, 0.2).getFirst().getExpressions().toString());
+        }
+
         @Test
         @DisplayName("a full match still wins over a fragment")
         void fullMatchWins() throws Exception {

@@ -83,6 +83,8 @@ applies its length bound before lower-casing each dictionary word.
   alternatives and matches.
 - From the fourth review: every occurrence of a phrase or fragment is judged against the threshold — a
   below-threshold first occurrence no longer hides a qualifying one later in the input.
+- From the fifth review: the ambiguity check for fragments sees every qualifying fragment of every phrase,
+  so a phrase's better fragment elsewhere no longer hides that its fragment at one position is contested.
 
 **Files:** [`InputParser.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/InputParser.java),
 [`IterationCounter.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/matches/IterationCounter.java),
