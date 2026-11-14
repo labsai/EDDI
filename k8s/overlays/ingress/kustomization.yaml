@@ -13,3 +13,4 @@ kind: Component
 
 resources:
   - ingress.yaml
+  - ingress-networkpolicy.yaml

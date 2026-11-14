@@ -172,15 +172,33 @@ class AutoApproveCopilotPolicyTest {
                 "src/main/java/ai/labs/eddi/connections/ConnectionParameterGuard.java",
                 "src/main/resources/application.properties",
                 "src/main/java/ai/labs/eddi/engine/hitl/HitlAccessGuard.java",
-                "src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java");
-        List<String> ordinaryPaths = List.of(
-                "src/main/java/ai/labs/eddi/engine/Foo.java", "src/main/resources/application-test.properties",
-                "src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java",
+                "src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java",
+                // The rest of the trust boundary and the tests that grade it.
+                "src/main/java/ai/labs/eddi/modules/llm/tools/UrlValidationUtils.java",
+                "src/main/java/ai/labs/eddi/integrations/slack/SlackEventsResource.java",
+                "src/main/java/ai/labs/eddi/engine/mail/MailSender.java",
+                "src/main/java/ai/labs/eddi/engine/hitl/HitlService.java",
+                "src/main/java/ai/labs/eddi/engine/internal/ConversationHitlService.java",
+                "src/main/java/ai/labs/eddi/modules/templating/RuntimeTemplateEngineFactory.java",
+                "src/main/java/ai/labs/eddi/engine/api/IRestAgentEngine.java",
+                "src/main/java/ai/labs/eddi/engine/mcp/McpAgentTools.java",
+                "src/main/java/ai/labs/eddi/backup/IRestImportService.java",
+                "src/main/resources/application-test.properties", "src/main/resources/META-INF/resources/index.html",
+                "src/test/java/ai/labs/eddi/FooTest.java",
                 "src/test/java/ai/labs/eddi/engine/security/CallerIdentityResolverTest.java",
+                "ui/manager/src/lib/operator/system-prompt.ts", "ui/manager/src/lib/operator/tool-scopes.ts",
+                "ui/manager/index.html", "ui/chat/chat.html", "ui/manager/.ds-sync/package.json",
+                "docs-site/astro.config.mjs", "docker/cluster/nginx.conf", ".env.example",
+                ".claude/skills/ship-pr/SKILL.md", ".cursor/rules/eddi.mdc", "AGENTS.md", "CLAUDE.md",
+                "integrations/claude-plugin/README.md", "docs/monitoring/prometheus.yml");
+        List<String> ordinaryPaths = List.of(
+                "src/main/java/ai/labs/eddi/engine/Foo.java",
+                "src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java",
+                "src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java",
                 "docs/changelog.d/2026-10-02-x.md", "docs/docker-compose-guide.md", "README.md",
                 "ui/manager/src/App.tsx", "ui/manager/src/lib/package.json", "ui/chat/src/main.tsx",
-                "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java",
-                "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts");
+                "ui/manager/src/lib/utils.ts", "ui/manager/src/pages/index.html.tsx",
+                "scriptsx/run.sh", "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts");
 
         List<String> inputs = new ArrayList<>(protectedPaths);
         inputs.addAll(ordinaryPaths);

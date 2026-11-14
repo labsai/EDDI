@@ -1053,6 +1053,11 @@ load_release_checksums() {
     return 0
   fi
   if ! sha256_of /dev/null &>/dev/null; then
+    # Same rule as `eddi update`: a release that publishes a signed SHA256SUMS is
+    # refused, not installed unchecked, when nothing can hash the downloads.
+    if release_is_signed "$EDDI_BRANCH"; then
+      fail "Release ${EDDI_BRANCH} publishes SHA256SUMS, but neither sha256sum nor shasum is installed to check the downloads against it.\n     Nothing was downloaded. Install one of them and retry."
+    fi
     warn "Neither sha256sum nor shasum is installed — downloaded files are not checksum-verified."
     return 0
   fi
@@ -1156,15 +1161,23 @@ resolve_compose_files() {
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
     echo -e "  ${DIM}Downloading monitoring configuration...${RESET}"
-    local monitoring_files=(
-      "docs/monitoring/prometheus.yml"
-      "docs/monitoring/eddi-alerts.yml"
-      "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
-      "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
-      "docs/monitoring/eddi-grafana-dashboard.json"
-      "docs/monitoring/eddi-operations-dashboard.json"
-      "docs/monitoring/eddi-full-metrics-dashboard.json"
-    )
+    # The required files are the ones the SELECTED ref's docker-compose.monitoring.yml
+    # bind-mounts as regular files (just fetched and verified above), not a fixed
+    # list: an older release does not mount a dashboard a newer one added, and
+    # requiring it would make that release uninstallable. Every file the compose
+    # file DOES mount stays required. Read with grep/sed only (no eval, no word
+    # splitting of file content); a path with `..` is refused, and the pattern
+    # cannot produce an absolute one.
+    local monitoring_files=() mf_line
+    while IFS= read -r mf_line; do
+      case "$mf_line" in
+        ""|*..*|/*) continue ;;
+      esac
+      monitoring_files+=("$mf_line")
+    done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$EDDI_DIR/docker-compose.monitoring.yml" | sed 's|^\./||' | sort -u)
+    if [[ ${#monitoring_files[@]} -eq 0 ]]; then
+      fail "docker-compose.monitoring.yml from '${EDDI_BRANCH}' mounts no monitoring files, which cannot be right.\n     Not continuing with a half-configured monitoring stack."
+    fi
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
       local mf_dir
@@ -1194,9 +1207,8 @@ resolve_compose_files() {
           # reasoning as the Keycloak realm below; a half-built monitoring stack
           # is not better than a refusal to build one.
           #
-          # This list must therefore stay in step with every file-type bind
-          # mount in docker-compose.monitoring.yml. Adding a dashboard there
-          # without adding it here breaks --with-monitoring outright.
+          # The list is read from the selected ref's docker-compose.monitoring.yml, so
+          # it is by construction every file-type bind mount of that release.
           # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
           # previous run's failed mount left behind, and `rm -f` cannot remove
           # one. Under `set -e` that turns this cleanup into the script's exit
@@ -2616,6 +2628,111 @@ _set_kv() {
   cat "$tmp" > "$file"
   rm -f "$tmp"
 }
+# ── Release verification (what `eddi update` shares with the installer) ──
+# Same rules as load_release_checksums / verify_download in install.sh: a file
+# fetched at a release tag is compared with that release's SHA256SUMS, and the
+# list's cosign signature is verified when cosign is installed — the certificate
+# must name the EDDI release workflow at THIS tag. A moved tag or a swapped
+# compose file (which runs with the vault key and the database credentials) is
+# refused, not installed. Keep FIRST_SIGNED_RELEASE in step with install.sh.
+RELEASE_SIGNER_IDENTITY_PREFIX="https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+FIRST_SIGNED_RELEASE="6.6.0"
+RELEASE_SIGNER_ISSUER="https://token.actions.githubusercontent.com"
+# Bare assignment on purpose: InstallerReleaseRefTest extracts the installer's own
+# functions with a sed range that starts at the line RELEASE_CHECKSUMS="" and must
+# not find a second start here.
+RELEASE_CHECKSUMS=
+_sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+_release_is_signed() {
+  local a b c x y z
+  IFS=. read -r a b c <<<"${1%%-*}"
+  IFS=. read -r x y z <<<"$FIRST_SIGNED_RELEASE"
+  (( a > x || (a == x && (b > y || (b == y && c >= z))) ))
+}
+_is_release_tag() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; }
+# _load_release_checksums: fetches and (with cosign) verifies the SHA256SUMS of
+# EDDI_BRANCH into RELEASE_CHECKSUMS. Exits when a release that must carry a
+# signed list does not, or when the signature does not verify.
+_load_release_checksums() {
+  RELEASE_CHECKSUMS=""
+  if ! _is_release_tag "$EDDI_BRANCH"; then
+    echo "WARNING: '${EDDI_BRANCH}' is not a release: there are no checksums to verify its files against (TLS only)." >&2
+    return 0
+  fi
+  if ! _sha256_of /dev/null >/dev/null 2>&1; then
+    # From the first signed release on, every release publishes a SHA256SUMS, so
+    # being unable to hash is a refusal, not a warning (cosign or not).
+    if _release_is_signed "$EDDI_BRANCH"; then
+      echo "Release ${EDDI_BRANCH} publishes SHA256SUMS but neither sha256sum nor shasum is installed to check against it. Nothing was changed; install one of them and retry." >&2
+      exit 1
+    fi
+    echo "WARNING: neither sha256sum nor shasum is installed; downloaded files are not checksum-verified." >&2
+    return 0
+  fi
+  local sums bundle
+  sums=$(mktemp "${TMPDIR:-/tmp}/eddi-sums.XXXXXX")
+  if curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS" -o "$sums" 2>/dev/null \
+      && [[ -s "$sums" ]]; then
+    if command -v cosign >/dev/null 2>&1; then
+      bundle=$(mktemp "${TMPDIR:-/tmp}/eddi-sums-bundle.XXXXXX")
+      if ! curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS.sigstore.json" -o "$bundle" 2>/dev/null \
+          || [[ ! -s "$bundle" ]]; then
+        rm -f "$bundle"
+        if _release_is_signed "$EDDI_BRANCH"; then
+          rm -f "$sums"
+          echo "Release ${EDDI_BRANCH} should carry SHA256SUMS.sigstore.json but it could not be fetched. Nothing was changed; retry later." >&2
+          exit 1
+        fi
+        echo "WARNING: release ${EDDI_BRANCH} predates signed checksums; its SHA256SUMS is used unsigned." >&2
+      elif cosign verify-blob --bundle "$bundle" \
+          --certificate-identity "${RELEASE_SIGNER_IDENTITY_PREFIX}${EDDI_BRANCH}" \
+          --certificate-oidc-issuer "$RELEASE_SIGNER_ISSUER" \
+          "$sums" >/dev/null 2>&1; then
+        rm -f "$bundle"
+        echo "SHA256SUMS signature verified for release ${EDDI_BRANCH}."
+      else
+        rm -f "$bundle" "$sums"
+        echo "The SHA256SUMS of release ${EDDI_BRANCH} is not signed by the EDDI release workflow at that tag (cosign verify-blob failed). Nothing was changed; retry later, and report it if it persists." >&2
+        exit 1
+      fi
+    else
+      echo "WARNING: cosign is not installed; the SHA256SUMS of release ${EDDI_BRANCH} is used without checking its signature." >&2
+    fi
+    RELEASE_CHECKSUMS="$sums"
+  else
+    rm -f "$sums"
+    if _release_is_signed "$EDDI_BRANCH"; then
+      echo "Release ${EDDI_BRANCH} should publish SHA256SUMS but it could not be fetched. Nothing was changed; retry later." >&2
+      exit 1
+    fi
+    echo "WARNING: release ${EDDI_BRANCH} publishes no SHA256SUMS; downloaded files are verified by TLS only." >&2
+  fi
+}
+# _verify_download <repository path> <file>: 0 when the file matches the release's
+# list (or there is nothing to check against), 1 on a mismatch.
+_verify_download() {
+  local rel="$1" file="$2" expected actual
+  [[ -n "$RELEASE_CHECKSUMS" ]] || return 0
+  expected=$(awk -v f="$rel" '$2 == f || $2 == "*" f { print $1; exit }' "$RELEASE_CHECKSUMS")
+  if [[ -z "$expected" ]]; then
+    echo "WARNING: ${rel} is not listed in the SHA256SUMS of release ${EDDI_BRANCH}; not verified." >&2
+    return 0
+  fi
+  actual=$(_sha256_of "$file") || return 0
+  if [[ "$actual" != "$expected" ]]; then
+    echo "Checksum mismatch for ${rel} from release ${EDDI_BRANCH} (expected ${expected}, got ${actual}). It was not installed." >&2
+    return 1
+  fi
+  return 0
+}
 EDDI_BRANCH_FROM_ENV="${EDDI_BRANCH:-}"
 EDDI_BRANCH_SOURCE=$(_cfg EDDI_BRANCH_SOURCE || true)
 EDDI_BRANCH="${EDDI_BRANCH:-$(_cfg EDDI_BRANCH || true)}"
@@ -2687,8 +2804,9 @@ case "${1:-help}" in
         echo "Invalid --eddi-version: $NEW_VERSION (expected an image tag such as 6.5.0 or latest)" >&2
         exit 1
       fi
-      echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
-      _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
+      # Recorded in .env only AFTER the compose files below are verified and in
+      # place: a refused update must leave the recorded tag and ref as they were.
+      echo "Will pin EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE} once the new files are verified..."
     fi
 
     # Fetch the compose files from the git ref that matches the image about to be
@@ -2717,6 +2835,18 @@ case "${1:-help}" in
       EDDI_BRANCH="$LATEST_TAG"
       EDDI_BRANCH_SOURCE="latest-release"
     else
+      # An install that tracks releases must not slide onto `main` because one
+      # API call failed: `main` has no SHA256SUMS, so its compose files (which run
+      # with the vault key and the database credentials) would be unverified, and
+      # they can be newer than the image. Refuse; an operator who wants `main`
+      # says so: EDDI_BRANCH=main eddi update
+      if [[ "$EDDI_BRANCH_SOURCE" == "version" || "$EDDI_BRANCH_SOURCE" == "latest-release" ]] \
+          || _is_release_tag "$EDDI_BRANCH"; then
+        echo "Could not look up the newest EDDI release, and this install is pinned to a release (${EDDI_BRANCH})." >&2
+        echo "Not falling back to 'main': its compose files are not checksum-verified. Nothing was changed." >&2
+        echo "Retry later, or name the release: eddi update --eddi-version=<version>. To use main on purpose: EDDI_BRANCH=main eddi update" >&2
+        exit 1
+      fi
       EDDI_BRANCH="main"
       EDDI_BRANCH_SOURCE="fallback-main"
       echo "WARNING: could not look up the newest EDDI release; refreshing compose files from 'main'," >&2
@@ -2727,25 +2857,152 @@ case "${1:-help}" in
       exit 1
     fi
     COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
-    # Persist so `eddi start`/`restart`/`update` know which ref the files are from.
-    _set_kv EDDI_BRANCH "$EDDI_BRANCH" "$CONFIG_FILE"
-    _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
+    # The ref is persisted (for `eddi start`/`restart`/`update`) only after the
+    # files from it are verified and in place; see below.
     echo "Compose files from: ${EDDI_BRANCH} (${EDDI_BRANCH_SOURCE})"
 
+    # Same checks as a fresh install: the list is fetched (and, with cosign,
+    # its signature verified) before anything is downloaded, every file is
+    # compared with it, and nothing is moved into place until ALL of them passed.
+    _load_release_checksums
+
     echo "Refreshing compose files from GitHub..."
+    staged=()
     for f in "${COMPOSE_FILE_LIST[@]}"; do
       local_name=$(basename "$f")
       download_url="${COMPOSE_BASE_URL}/${local_name}"
       tmp_file="${f}.tmp"
-      echo -n "  Updating ${local_name}... "
+      echo -n "  Fetching ${local_name}... "
       if curl -fsSL "${download_url}" -o "$tmp_file" 2>/dev/null && [[ -s "$tmp_file" ]]; then
-        mv -f "$tmp_file" "$f"
+        if ! _verify_download "$local_name" "$tmp_file"; then
+          echo "❌"
+          rm -f "$tmp_file"
+          for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+          echo "Aborting: nothing was changed." >&2
+          exit 1
+        fi
+        staged+=("$f")
         echo "✅"
       else
+        # The --local overlay is the checkout's own file. A release ref that predates it
+        # does not carry it, and it is not one of the compose files that must match the
+        # image, so keep the checkout copy instead of refusing the update.
+        if [[ "$local_name" == "docker-compose.local.yml" && -s "$f" ]]; then
+          rm -f "$tmp_file"
+          echo "kept the checkout copy (not in this ref)"
+          continue
+        fi
+        # Every other compose file is REQUIRED: keeping the old one and recording the new
+        # version would start the new image with an old compose file. A file that
+        # cannot be fetched refuses the whole update; nothing is replaced or recorded.
+        echo "❌"
         rm -f "$tmp_file"
-        echo "⚠️  (keeping existing file)"
+        for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+        echo "Aborting: ${local_name} could not be downloaded from ${EDDI_BRANCH}. Nothing was changed (no file, version or ref was replaced or recorded). Retry once GitHub is reachable." >&2
+        exit 1
       fi
     done
+    # Everything below is STAGED first: the compose files above (verified, still
+    # as <file>.tmp) and the monitoring assets they bind-mount. Nothing is replaced
+    # until BOTH groups passed, so a refused asset cannot leave new compose files
+    # beside old or missing assets.
+    _discard_staged() {
+      for s in ${staged[@]+"${staged[@]}"}; do rm -f "${s}.tmp"; done
+      for s in ${asset_targets[@]+"${asset_targets[@]}"}; do rm -f "${s}.tmp"; done
+    }
+
+    # Refreshing the compose files can introduce new file-type bind mounts. When a
+    # bind-mount source is missing Docker creates a *directory* at that path, which
+    # either silently drops the dashboard or fails the mount outright depending on
+    # what the grafana-data volume already holds, so any monitoring asset added
+    # upstream has to be on disk BEFORE `up -d`. The list is read out of the NEW
+    # (staged) monitoring compose file, so the next asset added to
+    # docker-compose.monitoring.yml needs no change to this wrapper. Only file-type
+    # mounts are fetched; the grafana-provisioning/* mounts are directories.
+    monitoring_compose=""
+    for f in "${COMPOSE_FILE_LIST[@]}"; do
+      if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
+        monitoring_compose="$f"
+      fi
+    done
+    asset_targets=()
+    if [[ -n "$monitoring_compose" ]]; then
+      asset_source="${monitoring_compose}.tmp"
+      [[ -f "$asset_source" ]] || asset_source="$monitoring_compose"
+    fi
+
+    if [[ -n "$monitoring_compose" && -f "$asset_source" ]]; then
+      echo ""
+      echo "Fetching monitoring assets..."
+      compose_dir=$(cd "$(dirname "$monitoring_compose")" && pwd)
+      missing_assets=""
+      while read -r rel_path; do
+        [[ -n "$rel_path" ]] || continue
+        asset="${rel_path#./}"
+        target="${compose_dir}/${asset}"
+        mkdir -p "$(dirname "$target")"
+        tmp_asset="${target}.tmp"
+        echo -n "  Fetching ${asset}... "
+        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
+          asset_targets+=("$target")
+          if ! _verify_download "$asset" "$tmp_asset"; then
+            echo "❌"
+            _discard_staged
+            echo "Aborting: nothing was changed (no compose file, asset, version or ref was replaced)." >&2
+            exit 1
+          fi
+          echo "✅"
+        else
+          # Required too, even when an older copy is on disk: the new compose file
+          # may mount a changed asset, and the recorded version must match the files.
+          rm -f "$tmp_asset"
+          echo "❌"
+          missing_assets="${missing_assets} ${asset}"
+        fi
+      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$asset_source" | sort -u || true)
+
+      if [[ -n "$missing_assets" ]]; then
+        _discard_staged
+        echo ""
+        echo "Aborting before anything was replaced. These files are bind-mounted by" >&2
+        echo "docker-compose.monitoring.yml and could not be downloaded:" >&2
+        for a in $missing_assets; do echo "  - $a" >&2; done
+        echo "Starting now would leave Grafana unable to mount them, so the" >&2
+        echo "running stack and every installed file were left untouched. Re-run once" >&2
+        echo "GitHub is reachable, or re-run the install script." >&2
+        exit 1
+      fi
+    fi
+
+    # Every group passed. FIRST clear what is in the way of an asset: Docker leaves a
+    # DIRECTORY at a bind-mount path whose source was missing, and `rm -f` cannot
+    # remove one (`-rf`). This comes before the first replacement so that a failure
+    # here (set -e) stops the update with every file still as it was.
+    for t in ${asset_targets[@]+"${asset_targets[@]}"}; do
+      if [[ -d "$t" ]]; then
+        if ! rm -rf "$t"; then
+          _discard_staged
+          echo "Aborting: ${t} is a directory that could not be removed. Nothing was changed; remove it by hand and retry." >&2
+          exit 1
+        fi
+      fi
+    done
+    # Then replace.
+    for s in ${staged[@]+"${staged[@]}"}; do mv -f "${s}.tmp" "$s"; done
+    for t in ${asset_targets[@]+"${asset_targets[@]}"}; do
+      mv -f "${t}.tmp" "$t"
+      echo "  Updated ${t#"${compose_dir}"/}"
+    done
+
+    # Record the version and ref the files now in place belong to. Reached only when
+    # every compose file and asset was fetched, verified and replaced: a file that
+    # cannot be downloaded aborts above, so these always match what is on disk.
+    if [[ -n "$NEW_VERSION" ]]; then
+      echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
+      _set_kv EDDI_VERSION "$NEW_VERSION" "$ENV_FILE"
+    fi
+    _set_kv EDDI_BRANCH "$EDDI_BRANCH" "$CONFIG_FILE"
+    _set_kv EDDI_BRANCH_SOURCE "$EDDI_BRANCH_SOURCE" "$CONFIG_FILE"
 
     # An install from before docker-compose.postgres-only.yml required
     # POSTGRES_PASSWORD has none in .env, and its data volume was initialised with
@@ -2762,70 +3019,6 @@ case "${1:-help}" in
           break
         fi
       done
-    fi
-
-    # Refreshing the compose files above can introduce new file-type bind
-    # mounts. When a bind-mount source is missing Docker creates a *directory*
-    # at that path, which either silently drops the dashboard or fails the mount
-    # outright depending on what the grafana-data volume already holds — and in
-    # the first case leaves a stale directory inside the volume that keeps
-    # failing the mount even after the host file is restored. So any monitoring
-    # asset added upstream has to be on disk BEFORE `up -d`: refreshing the
-    # compose files on their own is what breaks a previously working Grafana.
-    #
-    # The list is read out of the refreshed compose file instead of hardcoded
-    # here, so the next asset added to docker-compose.monitoring.yml needs no
-    # change to this wrapper. Only file-type mounts are fetched; the
-    # grafana-provisioning/* mounts are directories, which cannot be downloaded
-    # and do not fail the mount when their contents are stale.
-    monitoring_compose=""
-    for f in "${COMPOSE_FILE_LIST[@]}"; do
-      if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
-        monitoring_compose="$f"
-      fi
-    done
-
-    if [[ -n "$monitoring_compose" && -f "$monitoring_compose" ]]; then
-      echo ""
-      echo "Refreshing monitoring assets..."
-      compose_dir=$(cd "$(dirname "$monitoring_compose")" && pwd)
-      missing_assets=""
-      while read -r rel_path; do
-        [[ -n "$rel_path" ]] || continue
-        asset="${rel_path#./}"
-        target="${compose_dir}/${asset}"
-        mkdir -p "$(dirname "$target")"
-        # -rf, not -f: what is in the way is most likely a DIRECTORY left behind
-        # by an earlier failed mount, and `rm -f` cannot remove one.
-        if [[ -d "$target" ]]; then
-          rm -rf "$target"
-        fi
-        tmp_asset="${target}.tmp"
-        echo -n "  Updating ${asset}... "
-        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
-          mv -f "$tmp_asset" "$target"
-          echo "✅"
-        elif [[ -f "$target" ]]; then
-          rm -f "$tmp_asset"
-          echo "⚠️  (keeping existing file)"
-        else
-          rm -f "$tmp_asset"
-          echo "❌"
-          missing_assets="${missing_assets} ${asset}"
-        fi
-      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$monitoring_compose" | sort -u || true)
-
-      if [[ -n "$missing_assets" ]]; then
-        echo ""
-        echo "Aborting before restart. These files are bind-mounted by" >&2
-        echo "docker-compose.monitoring.yml but are not on disk and could not be" >&2
-        echo "downloaded:" >&2
-        for a in $missing_assets; do echo "  - $a" >&2; done
-        echo "Starting now would leave Grafana unable to mount them, so the" >&2
-        echo "running stack has been left untouched. Re-run once GitHub is" >&2
-        echo "reachable, or re-run the install script." >&2
-        exit 1
-      fi
     fi
 
     echo ""

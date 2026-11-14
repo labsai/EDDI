@@ -402,6 +402,26 @@ function Test-PortOwnedByProject([int]$Port) {
     }
 }
 
+# $true when Docker (the trusted source) reports a RUNNING container of THIS
+# installation's compose project for $Service publishing $Port. The installer sends
+# stored admin passwords to a local port; checking the daemon first means a different
+# local process squatting on a stopped service's port is not handed them, nor is a
+# same-named service of another compose project. Answers $false when the daemon
+# cannot be asked: the credentials are then withheld, not guessed at. Same contract
+# as compose_service_running in install.sh.
+function Test-ComposeServiceRunning([string]$Service, [int]$Port) {
+    try {
+        $project = Get-ComposeProjectName
+        # The name reaches cmd.exe below; Compose itself only accepts this alphabet.
+        if ($project -notmatch '^[a-z0-9][a-z0-9_-]*$' -or $Service -notmatch '^[a-z0-9_-]+$' -or $Port -le 0) { return $false }
+        $ids = cmd /c "docker ps -q --filter label=com.docker.compose.project=$project --filter label=com.docker.compose.service=$Service --filter publish=$Port --filter status=running 2>nul"
+        return -not [string]::IsNullOrWhiteSpace(($ids | Out-String))
+    }
+    catch {
+        return $false
+    }
+}
+
 # Resolve one host port that the selected compose files publish. The wizard used
 # to look at EDDI's own 7070/7443 and nothing else, so every other published
 # port -- MongoDB 27017, Keycloak 8180, Grafana 3000, Prometheus 9090, Jaeger --
@@ -824,25 +844,22 @@ function Step-Ports {
 
 # -- Compose file management ------------------------------
 
-# Monitoring support files, in the order they are fetched. Single source of truth:
-# Get-ComposeFiles downloads these at install time, and Install-CliWrapper emits the
-# file-type ones into the generated wrapper so `eddi update` refreshes them too.
-#
-# This list must stay in step with every file-type bind mount in
-# docker-compose.monitoring.yml. When a bind-mount source is missing Docker creates
-# a *directory* at that path, which either silently drops the dashboard or fails the
-# mount outright depending on what the grafana-data volume already holds — and the
-# first case leaves a stale directory inside the volume that keeps failing the mount
-# even after the file is restored.
-$script:MonitoringFiles = @(
-    "docs/monitoring/prometheus.yml",
-    "docs/monitoring/eddi-alerts.yml",
-    "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
-    "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
-    "docs/monitoring/eddi-grafana-dashboard.json",
-    "docs/monitoring/eddi-operations-dashboard.json",
-    "docs/monitoring/eddi-full-metrics-dashboard.json"
-)
+# The monitoring files a release needs are the ones ITS docker-compose.monitoring.yml
+# bind-mounts as regular files, read from that file after it was fetched and verified
+# (an older release does not mount a dashboard a newer one added, so a fixed list would
+# make it uninstallable). Every mounted file stays required: when a bind-mount source
+# is missing Docker creates a *directory* at that path, which either silently drops the
+# dashboard or fails the mount outright. Paths that are absolute or contain `..` are
+# skipped. eddi-fetch.ps1 embeds this function, so `eddi update` reads the same way.
+function Get-MonitoringAssets([string]$ComposePath) {
+    $found = [System.Collections.Generic.SortedSet[string]]::new()
+    foreach ($match in [regex]::Matches((Get-Content -LiteralPath $ComposePath -Raw), '\./(docs/monitoring/[A-Za-z0-9._/-]+\.(?:json|ya?ml))')) {
+        $rel = $match.Groups[1].Value
+        if ($rel -match '(^|/)\.\.(/|$)' -or $rel.StartsWith('/')) { continue }
+        [void]$found.Add($rel)
+    }
+    return @($found)
+}
 
 # -- Release checksums ------------------------------------
 #
@@ -1049,7 +1066,12 @@ function Get-ComposeFiles {
     if ($WithMonitoring) {
         Write-Information -MessageData ""
         Write-Information -MessageData "  Downloading monitoring configuration..."
-        foreach ($mf in $script:MonitoringFiles) {
+        $monitoringComposePath = Join-Path -Path $EddiDir -ChildPath "docker-compose.monitoring.yml"
+        $monitoringAssets = Get-MonitoringAssets $monitoringComposePath
+        if ($monitoringAssets.Count -eq 0) {
+            Write-Fail "docker-compose.monitoring.yml from '$EddiBranch' mounts no monitoring files, which cannot be right. Not continuing with a half-configured monitoring stack."
+        }
+        foreach ($mf in $monitoringAssets) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
             $mfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $mf } else { "" }
             $mfDir = Split-Path -Path $mfTarget -Parent
@@ -1075,9 +1097,8 @@ function Get-ComposeFiles {
                     # missing one dashboard. Same reasoning as the Keycloak realm
                     # below.
                     #
-                    # This list must stay in step with every file-type bind mount in
-                    # docker-compose.monitoring.yml. Adding a dashboard there without
-                    # adding it here breaks -WithMonitoring outright.
+                    # The list is read from the selected ref's docker-compose.monitoring.yml,
+                    # so it is by construction every file-type bind mount of that release.
                     # Only the EMPTY directory Docker leaves behind after a failed
                     # bind mount is removed, and only non-recursively: the installer
                     # does not own a directory with contents, and an existing FILE is
@@ -1122,6 +1143,11 @@ function Get-ComposeFiles {
 
     # Save config for CLI wrapper (vault key NOT stored here -- it's in .env only)
     $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
+    # Both sensitive files exist owner-only BEFORE a byte is written (as install.sh
+    # does with `install -m 600`): written under the default umask and chmod-ed
+    # afterwards, the vault master key sat world/group-readable on a multi-user
+    # Linux or macOS host for the length of the run.
+    Initialize-SensitiveFile $configPath
     @"
 COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
@@ -1144,6 +1170,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
 EDDI_VERSION=$EddiVersion
 "@
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
+    Initialize-SensitiveFile $envPath
     $envContent | Set-Content -Path $envPath
 
     # Host ports for the containers the selected compose files publish. Only the
@@ -1191,12 +1218,47 @@ EDDI_VERSION=$EddiVersion
     }
 }
 
+# Creates (or empties) a file that is owner-only from the start, so a secret
+# written to it afterwards is never readable by anyone else, not even briefly.
+# pwsh on Linux/macOS: `install -m 600`, falling back to create + chmod 600 while
+# the file is still empty. Windows: the file is created empty, then its ACL is
+# restricted exactly as Protect-SensitiveFile does.
+function Initialize-SensitiveFile([string]$SecurePath) {
+    if (Test-Path -LiteralPath $SecurePath -PathType Leaf) {
+        # A re-run: restrict the EXISTING file first and empty it only once that worked. On
+        # Windows, write access and the right to change the ACL are separate; emptying first
+        # and failing to protect would leave an empty .env and lose the vault master key.
+        Protect-SensitiveFile $SecurePath
+        [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+        return
+    }
+    if (-not $IsWindows -and $null -ne $IsWindows) {
+        & install -m 600 /dev/null $SecurePath 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+            & chmod 600 $SecurePath 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Fail "Could not restrict $SecurePath to its owner (chmod 600 failed). It will hold the vault master key and admin passwords, so the install stops here. Use an install directory on a filesystem that supports POSIX permissions."
+            }
+        }
+        return
+    }
+    [System.IO.File]::WriteAllBytes($SecurePath, [byte[]]@())
+    Protect-SensitiveFile $SecurePath
+}
+
 # Owner-only access to a file holding secrets. On Windows: drop the broad
 # Users/Everyone/Authenticated Users entries, keep SYSTEM and Administrators,
 # give the current user full control. Elsewhere (pwsh on Linux/macOS): chmod 600.
 function Protect-SensitiveFile([string]$SecurePath) {
     if (-not $IsWindows -and $null -ne $IsWindows) {
         & chmod 600 $SecurePath 2>$null
+        # A mount without POSIX modes (some network and Windows-backed shares) accepts
+        # the call and changes nothing, or refuses it: either way the file would stay
+        # readable by others, and it holds the vault key and the admin passwords.
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Could not restrict $SecurePath to its owner (chmod 600 failed). It holds the vault master key and admin passwords, so the install stops here. Use an install directory on a filesystem that supports POSIX permissions."
+        }
         return
     }
     try {
@@ -1337,6 +1399,10 @@ function Wait-ForReady {
 # when it first creates the master realm — so it is tried next and, when it
 # works, rotated to KC_BOOTSTRAP_ADMIN_PASSWORD so .env tells the truth.
 function Connect-KeycloakAdmin([string]$KcBase) {
+    if (-not (Test-ComposeServiceRunning "keycloak" ([uri]$KcBase).Port)) {
+        Write-Warn "No running keycloak container found -- not sending Keycloak admin credentials to $KcBase."
+        return $null
+    }
     $tokenUri = "$KcBase/realms/master/protocol/openid-connect/token"
     $user = if ($KeycloakAdminUser) { $KeycloakAdminUser } else { "admin" }
     try {
@@ -1375,7 +1441,10 @@ function Set-FirstLoginPassword {
     param()
     if (-not $WithAuth) { return }
     if (-not $PSCmdlet.ShouldProcess("Keycloak realm eddi", "Set first-login passwords")) { return }
-    $kcBase = "http://localhost:$KeycloakPort"
+    # 127.0.0.1, the address the ports are published on, not "localhost": that name
+    # can resolve to ::1 first, where a listener of another local user would hold
+    # the same port number.
+    $kcBase = "http://127.0.0.1:$KeycloakPort"
     $token = Connect-KeycloakAdmin $kcBase
     if (-not $token) {
         if ($KcAdminPasswordGenerated) {
@@ -1479,13 +1548,14 @@ function Repair-RunningStack {
         else {
             if (-not $script:KeycloakAdminSecret) { $script:KeycloakAdminSecret = Get-StackPassword }
             $script:KcAdminRotated = $false
-            $kcBase = "http://localhost:$($script:KeycloakPort)"
+            $kcBase = "http://127.0.0.1:$($script:KeycloakPort)"
             Connect-KeycloakAdmin $kcBase | Out-Null
             # Record the password only once Keycloak demonstrably accepts it: a
             # legacy admin/admin login whose rotation failed must not leave a
             # value in .env that nothing answers to.
             $accepted = $false
             try {
+                if (-not (Test-ComposeServiceRunning "keycloak" ([uri]$kcBase).Port)) { throw "no running keycloak container" }
                 $probe = @{ client_id = "admin-cli"; grant_type = "password"; username = $script:KeycloakAdminUser; password = $script:KeycloakAdminSecret }
                 $accepted = [bool](Invoke-RestMethod -Method Post -Uri "$kcBase/realms/master/protocol/openid-connect/token" -Body $probe -TimeoutSec 10 -ErrorAction Stop).access_token
             } catch {
@@ -1549,7 +1619,11 @@ function Update-LegacyGrafanaLogin {
     param()
     if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
     if (-not $PSCmdlet.ShouldProcess("Grafana", "Replace the legacy admin/admin login")) { return }
-    $gBase = "http://localhost:$GrafanaPort"
+    $gBase = "http://127.0.0.1:$GrafanaPort"
+    if (-not (Test-ComposeServiceRunning "grafana" ([uri]$gBase).Port)) {
+        Write-Warn "No running grafana container found -- not sending Grafana credentials to $gBase."
+        return
+    }
     $legacyAuth = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$(Get-GrafanaAdminUser):admin")) }
     try {
         Invoke-RestMethod -Uri "$gBase/api/user" -Headers $legacyAuth -TimeoutSec 10 -ErrorAction Stop | Out-Null
@@ -1598,7 +1672,11 @@ function Confirm-GrafanaLogin {
     param()
     if (-not $WithMonitoring -or -not $GrafanaAdminSecret -or $GrafanaAdminSecret -eq "admin") { return }
     if (-not $PSCmdlet.ShouldProcess("Grafana", "Confirm the admin login in .env")) { return }
-    $gBase = "http://localhost:$GrafanaPort"
+    $gBase = "http://127.0.0.1:$GrafanaPort"
+    if (-not (Test-ComposeServiceRunning "grafana" ([uri]$gBase).Port)) {
+        Write-Warn "No running grafana container found -- not sending Grafana credentials to $gBase."
+        return
+    }
     $up = $false
     for ($waited = 0; $waited -le 60; $waited += 2) {
         try {
@@ -1673,8 +1751,7 @@ function Write-Success {
         if ($toFile -and ($FirstLogins | Where-Object { $_.Secret })) {
             # Replaced, not appended to: an earlier run's one-time password is
             # used up or superseded.
-            Set-Content -Path $secretsFile -Value $null
-            Protect-SensitiveFile $secretsFile
+            Initialize-SensitiveFile $secretsFile
         }
         foreach ($entry in $FirstLogins) {
             if (-not $entry.Secret) {
@@ -1767,11 +1844,8 @@ function Install-CliWrapper {
     param()
     $cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
 
-    # Individual files only — a directory mount cannot be fetched as a unit, but the
-    # files inside grafana-provisioning/* can be and are, which keeps the provisioning
-    # config current too. Emitted into the wrapper as a space-separated batch list so
-    # 'eddi update' needs no parsing of the compose file at runtime.
-    $monAssets = ($script:MonitoringFiles | Where-Object { $_ -match '\.(json|ya?ml)$' }) -join ' '
+    # The monitoring assets are NOT listed here: eddi-fetch.ps1 reads them out of the
+    # monitoring compose file of the ref being fetched (Get-MonitoringAssets).
 
     $cliContent = @"
 @echo off
@@ -1801,6 +1875,13 @@ for /f "usebackq tokens=1,* delims==" %%A in ("%CONFIG_FILE%") do (
 set "BRANCH_FROM_ENV="
 if defined EDDI_BRANCH (set "BRANCH_FROM_ENV=1") else (
     if defined CFG_BRANCH (set "EDDI_BRANCH=!CFG_BRANCH!") else (set "EDDI_BRANCH=main")
+)
+rem A value set as `set EDDI_BRANCH=main & eddi update` (unquoted) carries a trailing space:
+rem trim it, or the ref check below rejects it.
+:trim_branch
+if defined EDDI_BRANCH if "!EDDI_BRANCH:~-1!"==" " (
+    set "EDDI_BRANCH=!EDDI_BRANCH:~0,-1!"
+    goto trim_branch
 )
 call :check_ref || exit /b 1
 set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
@@ -1884,6 +1965,20 @@ if defined LATEST_TAG (
     set "EDDI_BRANCH=!LATEST_TAG!"
     set "CFG_SOURCE=latest-release"
 ) else (
+    rem An install that tracks releases must not slide onto main because one API call
+    rem failed: main has no SHA256SUMS, so its compose files, which run with the vault
+    rem key and the database credentials, would be unverified. Refuse instead.
+    rem An operator who wants main on purpose says so: set "EDDI_BRANCH=main" ^& eddi update
+    set "PINNED="
+    if /i "!CFG_SOURCE!"=="version" set "PINNED=1"
+    if /i "!CFG_SOURCE!"=="latest-release" set "PINNED=1"
+    if "!EDDI_BRANCH:~0,1!" GEQ "0" if "!EDDI_BRANCH:~0,1!" LEQ "9" set "PINNED=1"
+    if defined PINNED (
+        echo Could not look up the newest EDDI release, and this install is pinned to release !EDDI_BRANCH!.
+        echo Not falling back to main: its compose files are not checksum-verified. Nothing was changed.
+        echo Retry later, or run: set "EDDI_BRANCH=main" ^& eddi update ^& set "EDDI_BRANCH="
+        exit /b 1
+    )
     set "EDDI_BRANCH=main"
     set "CFG_SOURCE=fallback-main"
     echo Warning: could not look up the newest EDDI release; refreshing compose files from main,
@@ -1892,23 +1987,52 @@ if defined LATEST_TAG (
 :update_ref_set
 call :check_ref || exit /b 1
 set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
-rem Persist so start/restart/update know which ref the files came from.
-findstr /v /b /c:"EDDI_BRANCH=" /c:"EDDI_BRANCH_SOURCE=" "%CONFIG_FILE%" > "%CONFIG_FILE%.tmp"
->> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH=!EDDI_BRANCH!
->> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH_SOURCE=!CFG_SOURCE!
-type "%CONFIG_FILE%.tmp" > "%CONFIG_FILE%"
-del "%CONFIG_FILE%.tmp" >nul 2>nul
+rem The ref is persisted for start/restart/update only AFTER the files from it were
+rem verified and moved into place (see below): a refused update must leave the
+rem recorded ref as it was.
+set "PERSIST_REF=1"
 :update_ref_done
 echo Compose files from: !EDDI_BRANCH!
 echo Refreshing compose files from GitHub...
+rem The files are checked against the SHA256SUMS of the release, and the list's cosign
+rem signature when cosign is installed, exactly as install.ps1 does for a fresh install:
+rem eddi-fetch.ps1 (written next to this file) does the download and the check. It gets
+rem the compose files AND the monitoring assets in ONE call and moves nothing into place
+rem unless every one of them passed.
+if not exist "%EDDI_DIR%\eddi-fetch.ps1" (
+    echo eddi-fetch.ps1 is missing from %EDDI_DIR%: re-run install.ps1 to restore it. Nothing was changed.
+    exit /b 1
+)
+set "FETCH_ITEMS="
+for %%F in (%COMPOSE_FILES%) do set FETCH_ITEMS=!FETCH_ITEMS! "%%~nxF|%%~fF"
+rem The monitoring assets have to be on disk BEFORE the containers are recreated:
+rem Docker creates a directory at a missing bind-mount path, which either silently
+rem drops the dashboard or fails the mount depending on the grafana-data volume's
+rem contents. (No backticks in this here-string: PowerShell would eat them.)
+set "MON_COMPOSE="
 for %%F in (%COMPOSE_FILES%) do (
-    for %%N in (%%~nxF) do (
-        echo   Updating %%N...
-        curl -fsSL "%COMPOSE_BASE_URL%/%%N" -o "%%F.tmp" 2>nul && move /y "%%F.tmp" "%%F" >nul 2>nul || (
-            del "%%F.tmp" 2>nul
-            echo   Warning: could not update %%N, keeping existing file
-        )
-    )
+    if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
+)
+if defined MON_COMPOSE (
+    for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
+    rem no trailing backslash: it would escape the closing quote of the argument
+    if "!MON_DIR:~-1!"=="\" set "MON_DIR=!MON_DIR:~0,-1!"
+    rem the helper reads the asset list out of the fetched monitoring compose file
+    set FETCH_ITEMS=!FETCH_ITEMS! "::monitoring::!MON_DIR!"
+)
+echo Fetching and verifying...
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%EDDI_DIR%\eddi-fetch.ps1" -Ref "!EDDI_BRANCH!" -BaseUrl "%COMPOSE_BASE_URL%" !FETCH_ITEMS!
+if "!errorlevel!"=="3" goto update_assets_missing
+if "!errorlevel!"=="4" goto update_rollback_failed
+if "!errorlevel!"=="5" goto update_backup_present
+if errorlevel 1 goto update_refused
+
+if defined PERSIST_REF (
+    findstr /v /b /c:"EDDI_BRANCH=" /c:"EDDI_BRANCH_SOURCE=" "%CONFIG_FILE%" > "%CONFIG_FILE%.tmp"
+    >> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH=!EDDI_BRANCH!
+    >> "%CONFIG_FILE%.tmp" echo EDDI_BRANCH_SOURCE=!CFG_SOURCE!
+    type "%CONFIG_FILE%.tmp" > "%CONFIG_FILE%"
+    del "%CONFIG_FILE%.tmp" >nul 2>nul
 )
 
 rem An install from before docker-compose.postgres-only.yml required POSTGRES_PASSWORD
@@ -1924,26 +2048,6 @@ if defined NEED_PG (
         echo       database volume still accepts it. Rotate it when convenient.
     )
 )
-
-rem Refreshing the compose files above can introduce new file-type bind mounts, so
-rem the monitoring assets have to be on disk BEFORE the containers are recreated.
-rem Refreshing compose on its own is what breaks a previously working Grafana:
-rem Docker creates a directory at the missing mount path, which either silently
-rem drops the dashboard or fails the mount outright depending on the grafana-data
-rem volume's contents. (No backticks in this here-string: PowerShell would eat
-rem them as escape characters.)
-set "MISSING_ASSETS="
-set "MON_COMPOSE="
-for %%F in (%COMPOSE_FILES%) do (
-    if /i "%%~nxF"=="docker-compose.monitoring.yml" set "MON_COMPOSE=%%F"
-)
-if defined MON_COMPOSE (
-    echo.
-    echo Refreshing monitoring assets...
-    for %%F in ("!MON_COMPOSE!") do set "MON_DIR=%%~dpF"
-    for %%A in ($monAssets) do call :refresh_asset "%%A"
-)
-if defined MISSING_ASSETS goto update_assets_missing
 
 echo.
 echo Pulling latest images...
@@ -1979,40 +2083,35 @@ exit /b 0
 echo Invalid EDDI_BRANCH: !EDDI_BRANCH!
 exit /b 1
 
-:refresh_asset
-set "REL=%~1"
-set "RELWIN=!REL:/=\!"
-set "TGT=!MON_DIR!!RELWIN!"
-for %%X in ("!TGT!") do set "TGTDIR=%%~dpX"
-if not exist "!TGTDIR!" mkdir "!TGTDIR!" >nul 2>nul
-rem rmdir, not del: what is in the way is most likely a DIRECTORY left behind by an
-rem earlier failed mount, and del cannot remove one.
-if exist "!TGT!\" rmdir /s /q "!TGT!" >nul 2>nul
-curl -fsSL "%COMPOSE_BASE_URL%/!REL!" -o "!TGT!.tmp" 2>nul
-set "ASSET_OK="
-if exist "!TGT!.tmp" for %%S in ("!TGT!.tmp") do if %%~zS GTR 0 set "ASSET_OK=1"
-if defined ASSET_OK (
-    move /y "!TGT!.tmp" "!TGT!" >nul 2>nul
-    echo   Updating !REL!... ok
-) else (
-    del "!TGT!.tmp" 2>nul
-    if exist "!TGT!" (
-        echo   Updating !REL!... warning: keeping existing file
-    ) else (
-        echo   Updating !REL!... FAILED
-        set "MISSING_ASSETS=!MISSING_ASSETS! !REL!"
-    )
-)
-goto :eof
-
 :update_assets_missing
 echo.
-echo Aborting before restart. These files are bind-mounted by
-echo docker-compose.monitoring.yml but are not on disk and could not be downloaded:
-for %%A in (!MISSING_ASSETS!) do echo   - %%A
-echo Starting now would leave Grafana unable to mount them, so the running stack
-echo has been left untouched. Re-run once GitHub is reachable, or re-run the
-echo install script.
+echo Aborting before restart. The files listed above could not be downloaded
+echo ^(compose files and the monitoring files they bind-mount are all required^).
+echo Nothing was replaced or recorded and the running stack was left untouched.
+echo Re-run once GitHub is reachable, or re-run the install script.
+exit /b 1
+
+:update_backup_present
+echo.
+echo UPDATE NOT STARTED: an earlier update left original files as ^<name^>.eddi-old ^(see above^).
+echo Replacing files now would overwrite them. Move each .eddi-old file back over its file
+echo ^(or delete it if you no longer need it^), then run eddi update again. Nothing was changed.
+exit /b 1
+
+:update_rollback_failed
+echo.
+echo UPDATE FAILED AND COULD NOT BE ROLLED BACK. Some files were replaced and the files listed
+echo above could not be restored; their originals are kept next to them as ^<name^>.eddi-old.
+echo The recorded version and ref were NOT changed. Do not start the stack until you have
+echo moved each .eddi-old file back over its file, then run eddi update again.
+exit /b 1
+
+:update_refused
+echo.
+echo Update refused: a downloaded file failed verification against the release checksums,
+echo the checksums could not be verified, or a file could not be replaced, see above.
+echo Nothing was replaced ^(files moved before a failure were restored^) and the running
+echo stack was left untouched. Retry later; if it persists, report it.
 exit /b 1
 
 :cmd_uninstall
@@ -2050,6 +2149,168 @@ echo   uninstall   Remove EDDI and all data
 goto :eof
 "@
     $cliContent | Set-Content -Path $cliPath -Encoding ASCII
+
+    # `eddi update` downloads and verifies through this script rather than through
+    # curl: it reuses the installer's own functions (the text of the three below is
+    # copied in, so the check cannot drift from the fresh-install one) and so
+    # compares every file with the cosign-verified SHA256SUMS of the release.
+    # Exit codes: 0 done, 2 refused (a mismatch or an unverifiable list), 3 a
+    # monitoring asset that is not on disk could not be downloaded.
+    $fetchPath = Join-Path -Path $EddiDir -ChildPath "eddi-fetch.ps1"
+    $fetchHead = @'
+# Written by install.ps1 -- used by `eddi update`. Do not edit.
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$Ref,
+    [Parameter(Mandatory)][string]$BaseUrl,
+    [Parameter(ValueFromRemainingArguments)][string[]]$Item
+)
+$ErrorActionPreference = 'Stop'
+$EddiBranch = $Ref
+$script:ReleaseChecksums = $null
+$script:ReleaseChecksumsLoaded = $false
+$script:ReleaseSignerIdentityPrefix = "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+$script:FirstSignedRelease = [version]"6.6.0"
+$script:ReleaseSignerIssuer = "https://token.actions.githubusercontent.com"
+function Write-Warn($msg) { Write-Warning -Message $msg }
+function Write-Fail($msg) { [Console]::Error.WriteLine($msg); throw $msg }
+'@
+    $fetchMain = @'
+
+# Items before the `::assets::` marker are compose files, the rest monitoring assets
+# that must be on disk before the containers are recreated. EVERYTHING is staged and
+# verified first; nothing is replaced unless every item passed.
+$staged = @()
+$missing = @()
+$inAssets = $false
+$script:rollbackFailed = $false
+$script:backupBlocked = $false
+$list = [System.Collections.ArrayList]@($Item)
+try {
+    Initialize-ReleaseChecksums
+    for ($i = 0; $i -lt $list.Count; $i++) {
+        $entry = $list[$i]
+        if ($entry -eq '::assets::') { $inAssets = $true; continue }
+        if ($entry.StartsWith('::monitoring::')) {
+            # Required assets = the regular files the monitoring compose of THIS ref mounts:
+            # its fetched (staged) copy, or the installed one when it is not being updated.
+            $monDir = $entry.Substring('::monitoring::'.Length)
+            $monCompose = $null
+            foreach ($s in $staged) { if ($s[2] -eq 'docker-compose.monitoring.yml') { $monCompose = $s[0] } }
+            if (-not $monCompose) { $monCompose = Join-Path -Path $monDir -ChildPath 'docker-compose.monitoring.yml' }
+            if (-not (Test-Path -LiteralPath $monCompose -PathType Leaf)) { throw "no monitoring compose file to read the assets from" }
+            $derived = Get-MonitoringAssets $monCompose
+            if ($derived.Count -eq 0) { throw "the monitoring compose file mounts no files" }
+            foreach ($rel in $derived) {
+                [void]$list.Add($rel + '|' + (Join-Path -Path $monDir -ChildPath ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))
+            }
+            $inAssets = $true
+            continue
+        }
+        $rel, $target = $entry -split '\|', 2
+        if (-not $rel -or -not $target) { continue }
+        $Assets = $inAssets
+        if ($Assets) {
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+        }
+        $temporary = "$target.download"
+        $downloaded = $false
+        try {
+            Invoke-WebRequest -Uri "$BaseUrl/$rel" -OutFile $temporary -UseBasicParsing -ErrorAction Stop
+            $downloaded = (Test-Path -LiteralPath $temporary) -and ((Get-Item -LiteralPath $temporary).Length -gt 0)
+        }
+        catch { $downloaded = $false }
+        if ($downloaded) {
+            Confirm-DownloadChecksum -RelativePath $rel -Path $temporary
+            $staged += , @($temporary, $target, $rel, $Assets)
+        }
+        else {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+            # The -Local overlay is the checkout's own file: a ref that predates it does not
+            # carry it, and the checkout copy is not one of the compose files that must match
+            # the image, so it stays.
+            if ($rel -eq 'docker-compose.local.yml' -and (Test-Path -LiteralPath $target -PathType Leaf)) {
+                Write-Host "  $rel : not in this ref, keeping the checkout copy"
+                continue
+            }
+            # Every other item is REQUIRED: keeping an old file while the new ref is recorded
+            # would run the new image with old files. Nothing is replaced or recorded.
+            Write-Host "  $rel : FAILED, could not be downloaded"
+            $missing += $rel
+        }
+    }
+    if ($missing.Count -gt 0) { throw "monitoring assets missing" }
+    # An earlier failed rollback leaves an original as <name>.eddi-old; moving the current
+    # file onto that path would destroy it. Refuse BEFORE anything is touched.
+    $blocking = @($staged | Where-Object { Test-Path -LiteralPath "$($_[1]).eddi-old" } | ForEach-Object { "$($_[1]).eddi-old" })
+    if ($blocking.Count -gt 0) {
+        Write-Host "  Not starting: these backups from an earlier failed update exist and must not be overwritten:"
+        foreach ($b in $blocking) { Write-Host "    $b" }
+        $script:backupBlocked = $true
+        throw "recovery backups present"
+    }
+    # Every item passed. A DIRECTORY where an asset belongs is what Docker leaves
+    # behind after a failed mount; only an EMPTY one is removed (non-recursive, so a
+    # directory with content throws and ends the update with nothing replaced yet).
+    foreach ($s in $staged) {
+        if ($s[3] -and (Test-Path -LiteralPath $s[1] -PathType Container)) { Remove-Item -LiteralPath $s[1] -Force }
+    }
+    # Replace with ROLLBACK: each existing file is set aside as <name>.eddi-old before its
+    # replacement is moved in, and every one is put back if any move fails, so the
+    # update is all-or-nothing even when a later Move-Item (locked file, full disk) fails.
+    $moved = @()
+    try {
+        foreach ($s in $staged) {
+            $backup = $null
+            if (Test-Path -LiteralPath $s[1] -PathType Leaf) {
+                $backup = "$($s[1]).eddi-old"
+                Move-Item -LiteralPath $s[1] -Destination $backup -Force
+            }
+            $moved += , @($s[1], $backup)
+            Move-Item -LiteralPath $s[0] -Destination $s[1] -Force
+            Write-Host "  Updated $($s[2])"
+        }
+        foreach ($m in $moved) { if ($m[1]) { Remove-Item -LiteralPath $m[1] -Force -ErrorAction SilentlyContinue } }
+        $staged = @()
+    }
+    catch {
+        # Restore in reverse order, and REPORT every restore that fails: a backup that
+        # could not be put back is kept (<name>.eddi-old) and named, never claimed restored.
+        $rollbackErrors = @()
+        [Array]::Reverse($moved)
+        foreach ($m in $moved) {
+            try {
+                if ($m[1] -and (Test-Path -LiteralPath $m[1])) { Move-Item -LiteralPath $m[1] -Destination $m[0] -Force -ErrorAction Stop }
+                elseif (-not $m[1]) { Remove-Item -LiteralPath $m[0] -Force -ErrorAction Stop }
+            }
+            catch {
+                $rollbackErrors += "$($m[0])" + $(if ($m[1]) { " (the original is kept at $($m[1]))" } else { " (a new file that could not be removed)" })
+            }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            Write-Host "  ROLLBACK FAILED. These files could NOT be restored and are left in an inconsistent state:"
+            foreach ($e in $rollbackErrors) { Write-Host "    $e" }
+            $script:rollbackFailed = $true
+        }
+        else {
+            Write-Host "  A file could not be replaced; every file already replaced was restored."
+        }
+        throw
+    }
+}
+catch {
+    $failed = $true
+}
+finally {
+    foreach ($s in $staged) { Remove-Item -LiteralPath $s[0] -Force -ErrorAction SilentlyContinue }
+}
+if ($failed) { if ($script:rollbackFailed) { exit 4 } elseif ($script:backupBlocked) { exit 5 } elseif ($missing.Count -gt 0) { exit 3 } else { exit 2 } }
+exit 0
+'@
+    $fetchFunctions = (@('Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum', 'Get-MonitoringAssets') | ForEach-Object {
+            "function $_ {" + [Environment]::NewLine + (Get-Command -Name $_ -CommandType Function).ScriptBlock.ToString() + [Environment]::NewLine + "}"
+        }) -join ([Environment]::NewLine + [Environment]::NewLine)
+    ($fetchHead, $fetchFunctions, $fetchMain) -join ([Environment]::NewLine + [Environment]::NewLine) | Set-Content -Path $fetchPath -Encoding UTF8
 
     # Add to user PATH if not already there (use exact boundary match).
     # SetEnvironmentVariable is a .NET call, so -WhatIf does not cover it the way

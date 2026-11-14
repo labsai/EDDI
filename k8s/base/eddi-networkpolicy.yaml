@@ -1,0 +1,44 @@
+# NetworkPolicy — who may open a connection to the EDDI pod.
+#
+# The base ships with authentication OFF (see eddi-configmap.yaml), and an
+# unauthenticated EDDI treats every caller as an administrator. Without this
+# policy that caller is any pod in the cluster, in any namespace. This one
+# admits only the pods of EDDI's own namespace on the HTTP port, which is what a
+# same-namespace Keycloak, Prometheus or sidecar needs; anything else (a
+# controller in another namespace, another team's workload) is dropped.
+#
+# What it does NOT do:
+#   - It is enforced only where the cluster's CNI enforces NetworkPolicy (Calico,
+#     Cilium, Antrea, ...). On kindnet, flannel without a policy engine or a
+#     default minikube it is silently inert.
+#   - Every pod in the namespace is still an administrator. Keep other
+#     workloads out of it, or turn authentication on (k8s/overlays/auth).
+#   - It restricts ingress only. Egress is the production component's job.
+#
+# `kubectl port-forward` and kubelet probes do not traverse pod networking and
+# are unaffected. The ingress component adds the controller's namespace to the
+# allow list (k8s/overlays/ingress/ingress-networkpolicy.yaml); NetworkPolicies
+# are additive, so it only widens what this one admits.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eddi-ingress
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: eddi
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+  ingress:
+    # A bare podSelector means "every pod in this policy's own namespace", so it
+    # follows kustomize's `namespace:` transformer.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 7070

@@ -22,6 +22,7 @@ set -euo pipefail
 NAMESPACE="${EDDI_NAMESPACE:-eddi}"
 AUTO=false
 FORCE=false
+SHOW_KEY=false
 VAULT_KEY=""
 
 # Colors
@@ -41,6 +42,7 @@ for arg in "$@"; do
   case "$arg" in
     --auto)       AUTO=true ;;
     --force)      FORCE=true ;;
+    --show-key)   SHOW_KEY=true ;;
     --key=*)      VAULT_KEY="${arg#*=}" ;;
     --namespace=*) NAMESPACE="${arg#*=}" ;;
     --help|-h)
@@ -52,6 +54,9 @@ for arg in "$@"; do
       echo "  --auto                  Auto-generate key, no prompts"
       echo "  --force                 Replace an existing eddi-secrets (DESTROYS the current"
       echo "                          master key — everything encrypted with it is then lost)"
+      echo "  --show-key              Print the generated key on stdout. Off by default: the key"
+      echo "                          then lives only in the Secret (read it back with kubectl),"
+      echo "                          so it cannot end up in a CI log, a tee or a script(1) capture"
       echo "  --key=<key>             Use a specific vault key (min 16 chars)"
       echo "  --namespace=<ns>        Kubernetes namespace (default: eddi)"
       echo ""
@@ -236,14 +241,26 @@ echo -e "${GREEN}✅${RESET}"
 # was printed for a Secret that was never made. If a dry-run mode is ever added
 # here, gate this block on the create having happened.
 echo ""
-echo -e "  ${YELLOW}┌─ 🔑 Vault Master Key ──────────────────────────────┐${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${BOLD}${VAULT_KEY}${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${DIM}⚠️  Save this key! If lost, encrypted secrets${RESET}"
-echo -e "  ${YELLOW}│${RESET}  ${DIM}   (API keys) are UNRECOVERABLE.${RESET}"
-echo -e "  ${YELLOW}│                                                    │${RESET}"
-echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
+# The key is printed only on request (--show-key). A terminal test on stdout is not
+# enough: `tee`, `script(1)` and CI runners that allocate a pty all give a "terminal"
+# whose output is kept, and the vault master key would sit in that log. By default
+# it lives in the Secret only, and the Secret is named instead.
+if [[ "$SHOW_KEY" == "true" ]]; then
+  echo -e "  ${YELLOW}┌─ 🔑 Vault Master Key ──────────────────────────────┐${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${BOLD}${VAULT_KEY}${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${DIM}⚠️  Save this key! If lost, encrypted secrets${RESET}"
+  echo -e "  ${YELLOW}│${RESET}  ${DIM}   (API keys) are UNRECOVERABLE.${RESET}"
+  echo -e "  ${YELLOW}│                                                    │${RESET}"
+  echo -e "  ${YELLOW}└────────────────────────────────────────────────────┘${RESET}"
+else
+  echo "  Vault master key: NOT printed (pass --show-key to print it, e.g. when you are at a terminal that keeps no log)."
+  echo "  It is stored in Secret eddi-secrets in namespace ${NAMESPACE}, key application-secrets.properties."
+  echo "  Back it up from a terminal:"
+  echo "    kubectl get secret eddi-secrets -n ${NAMESPACE} -o jsonpath='{.data.application-secrets\.properties}' | base64 -d"
+  echo "  If lost, encrypted secrets (API keys) are UNRECOVERABLE."
+fi
 echo ""
 echo -e "  Secret created in namespace: ${CYAN}${NAMESPACE}${RESET}"
 echo ""

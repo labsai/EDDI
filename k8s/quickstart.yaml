@@ -59,7 +59,17 @@
 # ⚠️  EVALUATION ONLY. This one-file MongoDB runs WITHOUT authentication; the
 # NetworkPolicy below admits only the EDDI pod to it, which is a control only
 # where the cluster's CNI enforces NetworkPolicy. For anything that holds real
-# data use k8s/overlays/mongodb (authenticated) or the Helm chart.
+# data use k8s/overlays/mongodb (authenticated) or the Helm chart. (That overlay
+# needs a mongodb-secrets Secret, an init container and a second connection-string
+# file, so it is not folded into this one-file install.)
+#
+# ⚠️  EDDI ITSELF IS UNAUTHENTICATED TOO (see the ConfigMap below): whoever can
+# open a connection to the eddi Service is an administrator. The eddi-ingress
+# NetworkPolicy below narrows that to the pods of this namespace, but it is only
+# enforced where the cluster's CNI enforces NetworkPolicy (Calico, Cilium,
+# Antrea, ...); on kindnet or a stock minikube it does nothing and every pod in
+# the cluster reaches EDDI. Do not run other workloads in the eddi namespace, and
+# do not add an Ingress or LoadBalancer, until you have turned authentication on.
 #
 # ─────────────────────────────────────────────────────────────
 
@@ -109,6 +119,9 @@ data:
   # add an identity provider — k8s/overlays/auth does exactly that (see
   # docs/kubernetes.md, "Authentication (Keycloak)"). Do it BEFORE anything
   # but you can reach the Service.
+  #
+  # The eddi-ingress NetworkPolicy further down admits only pods of this
+  # namespace, but it takes effect only where the CNI enforces NetworkPolicy.
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
   EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
@@ -252,6 +265,36 @@ spec:
       ports:
         - protocol: TCP
           port: 27017
+
+---
+# --- EDDI NetworkPolicy ---
+# The one-file install has authentication off, so this is the only thing between
+# EDDI and the rest of the cluster: only pods of this namespace may reach port
+# 7070 (a bare podSelector = the policy's own namespace). Every pod admitted is
+# an unauthenticated administrator. Inert unless the CNI enforces NetworkPolicy.
+# `kubectl port-forward` and kubelet probes are unaffected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eddi-ingress
+  namespace: eddi
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: eddi
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 7070
 
 ---
 # --- EDDI Service ---

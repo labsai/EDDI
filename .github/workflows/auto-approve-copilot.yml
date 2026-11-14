@@ -172,6 +172,35 @@ jobs:
               'src/main/java/ai/labs/eddi/connections/**',
               'src/main/resources/application.properties',
               '**/*Guard*.java',
+              // The rest of the trust boundary, and what the gates are written
+              // against. Each of these can switch a control off or hide that it
+              // did while every check stays green: the URL validator beside the
+              // SSRF client, every inbound integration (Slack, e-mail, webhooks,
+              // OpenAI-compatible, channels), outbound mail, the human-approval
+              // gates, the template engine (the runtime sandbox), the public REST
+              // and MCP surface, export/import, the shipped resources and
+              // defaults, and the tests themselves (an @Disabled or a loosened
+              // assertion turns a red job green).
+              'src/main/java/ai/labs/eddi/modules/llm/tools/UrlValidationUtils.java',
+              'src/main/java/ai/labs/eddi/integrations/**',
+              'src/main/java/ai/labs/eddi/engine/mail/**',
+              'src/main/java/ai/labs/eddi/engine/hitl/**',
+              'src/main/java/ai/labs/eddi/engine/internal/ConversationHitlService.java',
+              'src/main/java/ai/labs/eddi/modules/templating/**',
+              'src/main/java/ai/labs/eddi/engine/api/**',
+              'src/main/java/ai/labs/eddi/engine/mcp/**',
+              'src/main/java/ai/labs/eddi/backup/**',
+              'src/main/resources/**',
+              'src/test/**',
+              // The Platform Operator (its prompt and its endpoint allow-list), the
+              // HTML entry points that carry the Content-Security-Policy, and the
+              // design-system sync package.
+              'ui/*/src/lib/operator/**', 'ui/*/*.html', 'ui/manager/.ds-sync/package.json',
+              // Docs build, container and compose helpers, the env reference, and the
+              // instructions AI assistants are loaded with.
+              'docs-site/**', 'docker/**', '.env.example',
+              '.claude/**', '.cursor/**', 'AGENTS.md', 'CLAUDE.md',
+              'integrations/claude-plugin/**', 'docs/monitoring/**',
             ];
             function globToRegExp(glob) {
               let re = '';

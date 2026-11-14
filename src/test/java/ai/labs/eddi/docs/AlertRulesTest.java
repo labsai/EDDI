@@ -227,12 +227,26 @@ class AlertRulesTest {
         assertTrue(mounts.contains("./docs/monitoring/eddi-alerts.yml:/etc/prometheus/eddi-alerts.yml:ro"),
                 "docker-compose.monitoring.yml must mount the rules where rule_files expects them: " + mounts);
 
-        // Both installers download every file the overlay bind-mounts; a missing
-        // source makes Docker create a DIRECTORY there and Prometheus refuses to start.
-        for (String installer : List.of("install.sh", "install.ps1")) {
-            assertTrue(read(repoRoot().resolve(installer)).contains("\"docs/monitoring/eddi-alerts.yml\""),
-                    installer + " must download docs/monitoring/eddi-alerts.yml for --with-monitoring");
+        // Both installers download every regular file the SELECTED ref's overlay
+        // bind-mounts (they read the list out of that compose file instead of
+        // naming files); a missing source makes Docker create a DIRECTORY there and
+        // Prometheus refuses to start. So the guarantee is two facts: the overlay
+        // mounts the rules file as a regular file, and the installers derive their
+        // download list from the compose mounts with exactly this extraction.
+        Pattern fileMount = Pattern.compile("\\./(docs/monitoring/[A-Za-z0-9._/-]+\\.(?:json|ya?ml))");
+        Set<String> derived = new TreeSet<>();
+        Matcher mounted = fileMount.matcher(read(repoRoot().resolve(COMPOSE)));
+        while (mounted.find()) {
+            derived.add(mounted.group(1));
         }
+        assertTrue(derived.contains("docs/monitoring/eddi-alerts.yml"),
+                "the derivation must pick the rules file up from the compose mounts: " + derived);
+        assertTrue(read(repoRoot().resolve("install.sh")).contains("[A-Za-z0-9._/-]+\\.(json|ya?ml)")
+                && read(repoRoot().resolve("install.sh")).contains("docker-compose.monitoring.yml\" | sed 's|^\\./||'"),
+                "install.sh must derive the monitoring downloads from the compose file's mounts");
+        assertTrue(read(repoRoot().resolve("install.ps1")).contains("[A-Za-z0-9._/-]+\\.(?:json|ya?ml)")
+                && read(repoRoot().resolve("install.ps1")).contains("Get-MonitoringAssets $monitoringComposePath"),
+                "install.ps1 must derive the monitoring downloads from the compose file's mounts");
         assertTrue(read(repoRoot().resolve(RULE_TESTS)).contains("eddi-alerts.yml"),
                 RULE_TESTS + " must test the shipped rule file");
     }

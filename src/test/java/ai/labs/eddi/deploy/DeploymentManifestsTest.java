@@ -799,9 +799,16 @@ class DeploymentManifestsTest {
                             + "enough for a second installer to create the Secret and have this run destroy "
                             + "it without --force and without a word. The delete belongs to --force alone; "
                             + "AlreadyExists is what makes the normal path safe. " + absent);
-            assertTrue(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_SH + " created the Secret but never printed the key. It is generated in "
-                            + "the script and stored nowhere else; unprinted, it is unrecoverable. " + absent);
+            // The run is captured, so stdout is not a terminal: the key is withheld (it
+            // would land in a CI log) and the Secret that holds it is named instead.
+            assertTrue(absent.generatedKey().length() >= 16, "the stub did not capture the generated key. " + absent);
+            assertFalse(absent.output().contains(absent.generatedKey()),
+                    CREATE_SECRETS_SH + " printed the vault master key itself without being asked "
+                            + "(--show-key), which is how it ended up in CI logs. " + absent);
+            assertFalse(absent.output().contains("Save this key"), absent.toString());
+            assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
+                    CREATE_SECRETS_SH + " withheld the key without saying where it is: unprinted and "
+                            + "unlocated, it is unrecoverable. " + absent);
         }
 
         /**
@@ -810,6 +817,42 @@ class DeploymentManifestsTest {
          * still deletes. Run against a cluster that HAS a Secret, which is the only
          * situation rotation is for.
          */
+        @Test
+        @DisplayName("the batch kubectl stub captures the key from a path that contains spaces")
+        void batchStubKeepsSpacesInTheKeyPath() throws Exception {
+            assumeTrue(WINDOWS, "the batch stub only exists on Windows");
+            Path stubDirectory = kubectlStub("pwsh", true);
+            Path spaced = Files.createDirectories(Path.of("target", "kubectl stub with spaces")).toAbsolutePath();
+            Path properties = spaced.resolve("application secrets.properties");
+            Files.writeString(properties, "eddi.vault.master-key=spaced-path-key-0123456789\n", StandardCharsets.UTF_8);
+            Path log = freshLog("batch-spaces");
+            ProcessBuilder builder = new ProcessBuilder(stubDirectory.resolve("kubectl.cmd").toAbsolutePath().toString(),
+                    "create", "secret", "generic", "eddi-secrets", "--namespace=eddi-stub",
+                    "--from-file=application-secrets.properties=" + properties);
+            builder.redirectErrorStream(true);
+            builder.environment().put("KUBECTL_LOG", log.toAbsolutePath().toString());
+            builder.environment().put("KUBECTL_STUB_MODE", "notfound");
+            Process process = builder.start();
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(process.waitFor(2, TimeUnit.MINUTES), output);
+            Path key = Path.of(log.toAbsolutePath() + ".key");
+            assertTrue(Files.exists(key), "the stub lost a key path with spaces; it printed: " + output);
+            assertTrue(Files.readString(key, StandardCharsets.UTF_8).contains("spaced-path-key-0123456789"));
+        }
+
+        @Test
+        @DisplayName("the generators print the key only when --show-key / -ShowKey asks for it")
+        void generatorsPrintTheKeyOnlyOnRequest() throws Exception {
+            GeneratorRun shell = runShellGeneratorShowingKey();
+            assertEquals(0, shell.exitCode(), shell.toString());
+            assertTrue(shell.generatedKey().length() >= 16 && shell.output().contains(shell.generatedKey()),
+                    CREATE_SECRETS_SH + " --show-key must print the key it installed. " + shell);
+            GeneratorRun powerShell = runPowerShellGeneratorShowingKey();
+            assertEquals(0, powerShell.exitCode(), powerShell.toString());
+            assertTrue(powerShell.generatedKey().length() >= 16 && powerShell.output().contains(powerShell.generatedKey()),
+                    CREATE_SECRETS_PS1 + " -ShowKey must print the key it installed. " + powerShell);
+        }
+
         @Test
         @DisplayName("create-secrets.sh deletes only on the explicit --force rotation")
         void shellGeneratorDeletesOnlyWhenForced() throws Exception {
@@ -875,8 +918,15 @@ class DeploymentManifestsTest {
                             + "the strength of a probe that had already returned — the same destructive race "
                             + "as the shell script, and the two are documented as equivalent. The delete "
                             + "belongs to -Force alone. " + absent);
-            assertTrue(absent.output().contains("Save this key"),
-                    CREATE_SECRETS_PS1 + " created the Secret but never printed the key. " + absent);
+            // The run is captured, so output is redirected: the key is withheld (it would
+            // land in a log) and the Secret that holds it is named instead.
+            assertTrue(absent.generatedKey().length() >= 16, "the stub did not capture the generated key. " + absent);
+            assertFalse(absent.output().contains(absent.generatedKey()),
+                    CREATE_SECRETS_PS1 + " printed the vault master key itself without being asked "
+                            + "(-ShowKey), which is how it ended up in logs. " + absent);
+            assertFalse(absent.output().contains("Save this key"), absent.toString());
+            assertTrue(absent.output().contains("NOT printed") && absent.output().contains("application-secrets.properties"),
+                    CREATE_SECRETS_PS1 + " withheld the key without saying where it is. " + absent);
         }
 
         @Test
@@ -3314,7 +3364,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.14.1";
+        private static final String EXPECTED_CHART_VERSION = "2.15.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -5079,7 +5129,7 @@ class DeploymentManifestsTest {
      * the part no source-text assertion can reach — which kubectl calls it actually
      * made, in order.
      */
-    private record GeneratorRun(int exitCode, String output, List<String> kubectlCalls) {
+    private record GeneratorRun(int exitCode, String output, List<String> kubectlCalls, String generatedKey) {
 
         boolean issued(String call) {
             return kubectlCalls.stream().anyMatch(issued -> issued.startsWith(call));
@@ -5103,6 +5153,31 @@ class DeploymentManifestsTest {
 
     private static GeneratorRun runShellGenerator(String stubMode) throws IOException, InterruptedException {
         return runShellGenerator(stubMode, false);
+    }
+
+    /** The opt-in path: {@code --show-key} prints the key. */
+    private static GeneratorRun runShellGeneratorShowingKey() throws IOException, InterruptedException {
+        Path bash = locateBash();
+        assumeTrue(bash != null, "no non-WSL bash available to run " + CREATE_SECRETS_SH);
+        Path stubDirectory = kubectlStub("sh", false);
+        Path log = freshLog("sh-showkey");
+        String command = "cd \"" + slashed(stubDirectory) + "\" && chmod +x kubectl && "
+                + "PATH=\"$PWD:$PATH\" bash \"" + slashed(CREATE_SECRETS_SH.toAbsolutePath())
+                + "\" --auto --show-key --namespace=eddi-stub";
+        return execute(List.of(bash.toString(), "-c", command), log,
+                Map.of("KUBECTL_STUB_MODE", "notfound", "KUBECTL_LOG", slashed(log)));
+    }
+
+    private static GeneratorRun runPowerShellGeneratorShowingKey() throws IOException, InterruptedException {
+        Path pwsh = locateOnPath(WINDOWS ? "pwsh.exe" : "pwsh");
+        assumeTrue(pwsh != null, "no PowerShell 7 available to run " + CREATE_SECRETS_PS1);
+        Path stubDirectory = kubectlStub("pwsh", WINDOWS);
+        Path log = freshLog("pwsh-showkey");
+        List<String> command = List.of(pwsh.toString(), "-NoProfile", "-NonInteractive", "-File",
+                CREATE_SECRETS_PS1.toAbsolutePath().toString(), "-Auto", "-ShowKey", "-Namespace", "eddi-stub");
+        return execute(command, log, Map.of("KUBECTL_STUB_MODE", "notfound",
+                "KUBECTL_LOG", log.toAbsolutePath().toString(),
+                "PATH", stubDirectory.toAbsolutePath() + File.pathSeparator + System.getenv("PATH")));
     }
 
     private static GeneratorRun runShellGenerator(String stubMode, boolean force)
@@ -5173,7 +5248,21 @@ class DeploymentManifestsTest {
         List<String> calls = Files.exists(log)
                 ? Files.readAllLines(log, StandardCharsets.UTF_8).stream().map(String::strip).toList()
                 : List.of();
-        return new GeneratorRun(process.exitValue(), output, calls);
+        // The kubectl stub copies the properties file handed to `create secret` beside
+        // the log, so the key the script generated is known to the test.
+        Path keyFile = Path.of(log.toAbsolutePath() + ".key");
+        String key = "";
+        if (Files.exists(keyFile)) {
+            key = Files.readString(keyFile, StandardCharsets.UTF_8).strip().replaceFirst("^eddi\\.vault\\.master-key=", "");
+        }
+        // A run that created the Secret must have handed the stub a readable key file:
+        // a
+        // stub that lost the path would make every "output does not contain the key"
+        // assertion pass vacuously.
+        if (calls.stream().anyMatch(call -> call.startsWith("create secret generic eddi-secrets")) && key.length() < 16) {
+            throw new AssertionError("the kubectl stub did not capture the generated key (path lost?). " + calls + "\n" + output);
+        }
+        return new GeneratorRun(process.exitValue(), output, calls, key);
     }
 
     /**
@@ -5197,7 +5286,18 @@ class DeploymentManifestsTest {
         if (batch) {
             Files.writeString(directory.resolve("kubectl.cmd"), """
                     @echo off
+                    setlocal EnableDelayedExpansion
                     >>"%KUBECTL_LOG%" echo %*
+                    echo %*| "%SystemRoot%\\System32\\find.exe" "create secret generic eddi-secrets" >nul
+                    if not errorlevel 1 (
+                      rem take everything after "application-secrets.properties=" from the WHOLE
+                      rem argument list: a path with spaces must survive (for %%A would split it)
+                      set ALL=%*
+                      set "REST=!ALL:*application-secrets.properties=!"
+                      set "KEYPATH=!REST:~1!"
+                      set "KEYPATH=!KEYPATH:"=!"
+                      copy /y "!KEYPATH!" "%KUBECTL_LOG%.key" >nul
+                    )
                     echo %*| "%SystemRoot%\\System32\\find.exe" "get secret eddi-secrets" >nul
                     if errorlevel 1 goto ok
                     if "%KUBECTL_STUB_MODE%"=="exists" goto exists
@@ -5226,6 +5326,11 @@ class DeploymentManifestsTest {
                 #!/usr/bin/env bash
                 echo "$*" >> "$KUBECTL_LOG"
                 case "$*" in
+                  "create secret generic eddi-secrets"*)
+                    # the last argument is --from-file=application-secrets.properties=<path>
+                    last="${@: -1}"
+                    cp "${last#--from-file=application-secrets.properties=}" "$KUBECTL_LOG.key" 2>/dev/null
+                    ;;
                   "get secret eddi-secrets"*)
                     case "$KUBECTL_STUB_MODE" in
                       exists)
@@ -5256,6 +5361,8 @@ class DeploymentManifestsTest {
     private static Path freshLog(String name) throws IOException {
         Path log = Files.createDirectories(Path.of("target", "kubectl-stub")).resolve(name + ".log");
         Files.deleteIfExists(log);
+        // The captured key of an earlier run must not satisfy this run's capture check.
+        Files.deleteIfExists(Path.of(log.toAbsolutePath() + ".key"));
         return log;
     }
 
