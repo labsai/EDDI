@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceRefusals;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -237,7 +238,9 @@ public class RestSpaceResources implements IRestSpaceResources {
         }
         String trimmed = space.trim();
         if (!accessGuard.callerSpaces().spaces().contains(trimmed)) {
-            throw new ForbiddenException("You are not a member of that space.");
+            // Still fail-closed and exact. The message no longer claims non-membership:
+            // most often the id is the caller's own, sent without URL encoding.
+            throw new ForbiddenException(SpaceRefusals.unknownSpaceParameter(trimmed));
         }
         return SpaceTenants.tenantFor(trimmed);
     }

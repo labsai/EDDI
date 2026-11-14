@@ -7,6 +7,7 @@ package ai.labs.eddi.datastore.postgres;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.*;
 
 import javax.sql.DataSource;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
@@ -356,9 +358,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
-            // never the lease-steal clause.
-            boolean claimed = store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
+            // A fresh PENDING row is claimed via the PENDING clause, never the
+            // lease-steal clause.
+            boolean claimed = store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5));
             assertTrue(claimed);
 
             var found = store.readSchedule(id);
@@ -375,11 +377,11 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            // A PAST leaseExpiry (5 min ago) means the second claim cannot steal the
-            // fresh lease: node-1's claimed_at ≈ now is NOT <= leaseExpiry.
-            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            // node-1's claim is seconds old against a 5-minute lease, so node-2 cannot
+            // steal it.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             // Second claim should fail — already CLAIMED with a still-valid lease
-            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Duration.ofMinutes(5)));
         }
 
         @Test
@@ -389,14 +391,12 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            // node-1 claims at a fixed instant T; its lease (claimed_at) is anchored at T.
-            Instant t = Instant.now().minus(10, ChronoUnit.MINUTES);
-            assertTrue(store.tryClaim(id, "node-1", t, t.minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             assertEquals("node-1", store.readSchedule(id).getClaimedBy());
 
-            // node-2 polls with a leaseExpiry AFTER node-1's claimed_at (T) — lease
-            // considered expired, so the CLAIMED row is stolen.
-            assertTrue(store.tryClaim(id, "node-2", Instant.now(), t.plusSeconds(1)),
+            // claimed_at is written by the database's clock, so a lease cannot be
+            // backdated from here; a zero lease has expired the moment it was taken.
+            assertTrue(store.tryClaim(id, "node-2", Instant.now(), Duration.ZERO),
                     "an expired-lease CLAIMED schedule must be reclaimable");
             var found = store.readSchedule(id);
             assertEquals(FireStatus.CLAIMED, found.getFireStatus());
@@ -410,20 +410,69 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
 
-            // leaseExpiry BEFORE node-1's fresh claimed_at → lease still valid → no steal.
-            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)),
+            // node-1's claim is seconds old against a 5-minute lease → still valid → no
+            // steal.
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Duration.ofMinutes(5)),
                     "a still-valid lease must not be stolen");
             assertEquals("node-1", store.readSchedule(id).getClaimedBy(), "node-1 keeps its valid lease");
+        }
+
+        /**
+         * A poll batch is read once and claimed row by row. If another instance
+         * claimed, fired and re-armed a row in between, that row is PENDING again with
+         * a future nextFire; a claim on state alone took it and fired the same slot a
+         * second time, under a new fireId.
+         */
+        @Test
+        @DisplayName("tryClaim does NOT claim a row another instance fired and re-armed since this poll read it")
+        void claimRequiresTheRowToStillBeDue() throws Exception {
+            var config = createCronSchedule("Rearmed", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
+            String id = store.createSchedule(config);
+            Instant pollTime = Instant.now();
+
+            assertTrue(store.tryClaim(id, "node-1", pollTime, Duration.ofMinutes(5)));
+            store.markCompleted(id, IScheduleStore.fireIdOf(id, pollTime), Instant.now().plus(1, ChronoUnit.HOURS));
+
+            assertFalse(store.tryClaim(id, "node-2", pollTime, Duration.ofMinutes(5)),
+                    "a re-armed row is not due any more and must not fire twice");
+            assertEquals(FireStatus.PENDING, store.readSchedule(id).getFireStatus());
+
+            // A manual fire may fire before the due time, so its claim has no due check.
+            assertTrue(store.tryClaimAnyTime(id, "operator", Instant.now(), Duration.ofMinutes(5)),
+                    "Fire now must still be able to fire a schedule that is not due yet");
+            assertEquals("operator", store.readSchedule(id).getClaimedBy());
+        }
+
+        /**
+         * claimedAt is written by one instance and compared by another. Judged on the
+         * claimers' own clocks, an instance whose clock runs ahead by more than the
+         * lease took a live claim and fired a duplicate.
+         */
+        @Test
+        @DisplayName("tryClaim does NOT steal a live lease from an instance whose clock runs ahead")
+        void skewedClockDoesNotStealLiveClaim() throws Exception {
+            var config = createCronSchedule("Skew", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
+            String id = store.createSchedule(config);
+
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(10)));
+
+            Instant fastClock = Instant.now().plus(11, ChronoUnit.MINUTES);
+            assertFalse(store.tryClaim(id, "node-2", fastClock, Duration.ofMinutes(10)),
+                    "a claim one second old must not be stealable because another node's clock is fast");
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy());
         }
 
         @Test
         @DisplayName("markCompleted with nextFire — resets to PENDING + reschedules")
         void markCompletedWithReschedule() throws Exception {
             var config = createCronSchedule("S", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
 
             Instant nextFire = Instant.now().plus(1, ChronoUnit.DAYS);
             store.markCompleted(id, nextFire);
@@ -440,8 +489,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         @DisplayName("markCompleted without nextFire — disables schedule")
         void markCompletedOneShot() throws Exception {
             var config = createCronSchedule("OneShot", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
 
             store.markCompleted(id, null);
 
@@ -454,8 +504,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         @DisplayName("markFailed — sets FAILED + increments failCount")
         void markFailed() throws Exception {
             var config = createCronSchedule("S", "a", "t");
+            config.setNextFire(Instant.now().minus(1, ChronoUnit.MINUTES));
             String id = store.createSchedule(config);
-            store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
 
             Instant retry = Instant.now().plus(5, ChronoUnit.MINUTES);
             store.markFailed(id, retry);
@@ -525,7 +576,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
 
             List<ScheduleConfiguration> dueList = store.findDueSchedules(
                     Instant.now(),
-                    Instant.now().minus(30, ChronoUnit.MINUTES),
+                    Duration.ofMinutes(30),
                     3);
 
             assertEquals(1, dueList.size());
@@ -676,7 +727,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         /** Claim and complete it as the poller does for a fired one-shot. */
         private String usedUp(String name) throws Exception {
             String id = oneShot(name);
-            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Duration.ofMinutes(5)));
             store.markCompleted(id, null);
             return id;
         }
@@ -691,10 +742,10 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             String pending = oneShot(NAME);
 
             String claimed = oneShot(NAME);
-            assertTrue(store.tryClaim(claimed, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(claimed, "node-1", Instant.now(), Duration.ofMinutes(5)));
 
             String deadLettered = oneShot(NAME);
-            assertTrue(store.tryClaim(deadLettered, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(deadLettered, "node-1", Instant.now(), Duration.ofMinutes(5)));
             store.markDeadLettered(deadLettered);
 
             // Fired and completed, then switched off by an undeploy: only the reason
@@ -705,7 +756,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             // Fired once as a recurring schedule, then disabled by hand: it keeps its next
             // fire.
             String handDisabled = oneShot(NAME);
-            assertTrue(store.tryClaim(handDisabled, "node-1", Instant.now(), Instant.now().minus(5, ChronoUnit.MINUTES)));
+            assertTrue(store.tryClaim(handDisabled, "node-1", Instant.now(), Duration.ofMinutes(5)));
             store.markCompleted(handDisabled, Instant.now().plusSeconds(3600));
             store.setScheduleEnabled(handDisabled, false, null);
 
