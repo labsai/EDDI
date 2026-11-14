@@ -565,8 +565,9 @@ public class HitlEmailNotifier {
      * unkeyed hash beside the recipient's domain would allow. Only when a
      * deployment has neither a key nor a salt does the pseudonymizer fall back to
      * an unsalted SHA-256 (see its class comment), and then that guarantee does not
-     * hold. It is the same token GDPR erasure writes for that identifier, so both
-     * name one person alike.
+     * hold. It is the same token email replies and refused-mail audits write for
+     * that address; GDPR erasure pseudonymises a user id rather than a bare
+     * address, so its token for the same person differs.
      */
     String recipientPseudonym(String recipient) {
         return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));
