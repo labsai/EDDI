@@ -110,6 +110,25 @@ class InputParserMatchingTest {
 
             assertEquals("code", DictionaryUtilities.extractExpressions(raw, false, false, 0.8).getFirst().getExpressions().toString());
         }
+
+        /**
+         * The first occurrence ("bok flight", via a 0.5 correction) is below the
+         * threshold; the search used to stop there instead of finding the exact one
+         * after it.
+         */
+        @Test
+        @DisplayName("a later occurrence is found when an earlier one is below minMatchingAccuracy")
+        void laterOccurrenceQualifies() throws Exception {
+            List<IDictionary> dictionaries = List.of(phrases("book flight", "book_flight"));
+            var correction = new DamerauLevenshteinCorrection(1, true);
+            correction.init(dictionaries);
+            var config = new IInputParser.Config();
+            config.setMinMatchingAccuracy(0.8);
+
+            List<RawSolution> raw = parser(config, dictionaries, List.of(correction)).parse("bok flight book flight", "en", List.of());
+
+            assertTrue(DictionaryUtilities.extractExpressions(raw, false, false, 0.8).getFirst().getExpressions().toString().contains("book_flight"));
+        }
     }
 
     /**
@@ -267,6 +286,25 @@ class InputParserMatchingTest {
             var raw = parser(config, List.of(phrases("good morning", "greeting"), words), List.of()).parse("good", "en", List.of());
 
             assertEquals("affirmative", DictionaryUtilities.extractExpressions(raw, false, false, 0.8).getFirst().getExpressions().toString());
+        }
+
+        /**
+         * Two fragments of "book flight please": "bok flight" (accuracy 2/3 × 0.5) and
+         * the exact "book flight" (2/3). Only the first longest one used to be judged,
+         * and its rejection hid the qualifying one.
+         */
+        @Test
+        @DisplayName("a qualifying fragment is found when an earlier, equally long one is below minMatchingAccuracy")
+        void laterFragmentQualifies() throws Exception {
+            List<IDictionary> dictionaries = List.of(phrases("book flight please", "bfp"));
+            var correction = new DamerauLevenshteinCorrection(1, true);
+            correction.init(dictionaries);
+            var config = partial(true);
+            config.setMinMatchingAccuracy(0.6);
+
+            List<RawSolution> raw = parser(config, dictionaries, List.of(correction)).parse("bok flight book flight", "en", List.of());
+
+            assertTrue(DictionaryUtilities.extractExpressions(raw, false, false, 0.6).getFirst().getExpressions().toString().contains("bfp"));
         }
 
         @Test

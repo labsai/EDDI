@@ -81,6 +81,8 @@ applies its length bound before lower-casing each dictionary word.
   examples share one embedding space; an unsupported `embeddingProvider` fails the deployment; a parser that
   replaces an earlier result on the same step (`appendExpressions: false`) clears its confidence,
   alternatives and matches.
+- From the fourth review: every occurrence of a phrase or fragment is judged against the threshold — a
+  below-threshold first occurrence no longer hides a qualifying one later in the input.
 
 **Files:** [`InputParser.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/InputParser.java),
 [`IterationCounter.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/matches/IterationCounter.java),

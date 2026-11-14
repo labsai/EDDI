@@ -438,20 +438,26 @@ public class InputParser implements IInputParser {
      */
     private List<IDictionary.IFoundWord> lookForMatch(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase) {
         var words = convert(foundWords);
-        int startOfMatch = Collections.indexOfSubList(words, phrase.getWords());
-        if (startOfMatch < 0) {
-            return foundWords;
+        List<IDictionary.IWord> phraseWords = phrase.getWords();
+        // the first occurrence that meets the threshold: an occurrence below it
+        // contributes no expressions, and taking it would rank an empty reading above
+        // one that does — but a later occurrence of the phrase may still qualify
+        for (int from = 0; from + phraseWords.size() <= words.size(); from++) {
+            int found = Collections.indexOfSubList(words.subList(from, words.size()), phraseWords);
+            if (found < 0) {
+                break;
+            }
+            int startOfMatch = from + found;
+            int endOfMatch = startOfMatch + phraseWords.size();
+            List<IDictionary.IFoundWord> constituents = foundWords.subList(startOfMatch, endOfMatch);
+            double accuracy = MatchQuality.lowestAccuracy(constituents);
+            if (accurateEnough(accuracy)) {
+                var foundPhrase = new FoundPhrase(phrase, MatchQuality.anyCorrected(constituents), accuracy);
+                return replaceRange(foundWords, startOfMatch, endOfMatch, foundPhrase);
+            }
+            from = startOfMatch;
         }
-        int endOfMatch = startOfMatch + phrase.getWords().size();
-        List<IDictionary.IFoundWord> constituents = foundWords.subList(startOfMatch, endOfMatch);
-        double accuracy = MatchQuality.lowestAccuracy(constituents);
-        if (!accurateEnough(accuracy)) {
-            // A phrase below the threshold contributes no expressions: taking it would
-            // rank an empty reading above one that does.
-            return foundWords;
-        }
-        var foundPhrase = new FoundPhrase(phrase, MatchQuality.anyCorrected(constituents), accuracy);
-        return replaceRange(foundWords, startOfMatch, endOfMatch, foundPhrase);
+        return foundWords;
     }
 
     private static List<IDictionary.IFoundWord> replaceRange(List<IDictionary.IFoundWord> foundWords, int start, int end,
@@ -496,11 +502,7 @@ public class InputParser implements IInputParser {
             List<PartialMatch> qualifying = new ArrayList<>();
             for (IDictionary.IPhrase phrase : candidatePhrases) {
                 PartialMatch candidate = longestFragment(current, phrase, ambiguousStarts);
-                // Judged by its final accuracy (coverage included): a fragment below
-                // minMatchingAccuracy yields no expressions, and as a PARTLY reading it
-                // would still outrank the token's ordinary word reading.
-                if (candidate != null && candidate.coverage() >= config.getMinPartialPhraseCoverage()
-                        && accurateEnough(fragmentAccuracy(current, candidate))) {
+                if (candidate != null) {
                     qualifying.add(candidate);
                 }
             }
@@ -538,17 +540,25 @@ public class InputParser implements IInputParser {
 
     /**
      * The longest run of consecutive phrase-word matches in {@code foundWords} that
-     * equals a run of consecutive words of {@code phrase} and does not start at one
-     * of {@code excludedStarts}; {@code null} if none.
+     * equals a run of consecutive words of {@code phrase}, does not start at one of
+     * {@code excludedStarts} and qualifies — covers at least
+     * {@link Config#getMinPartialPhraseCoverage()} of the phrase and, judged by its
+     * final accuracy (coverage included), meets {@code minMatchingAccuracy}; of
+     * equally long ones the most accurate. {@code null} if none qualifies.
+     * <p>
+     * Every occurrence is judged, not only the first longest one: a fragment below
+     * the threshold yields no expressions (and as a PARTLY reading would still
+     * outrank the token's ordinary word reading), but an exact occurrence later in
+     * the input may qualify.
      */
-    private static PartialMatch longestFragment(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase,
-                                                Set<IDictionary.IFoundWord> excludedStarts) {
+    private PartialMatch longestFragment(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase,
+                                         Set<IDictionary.IFoundWord> excludedStarts) {
         List<IDictionary.IWord> phraseWords = phrase.getWords();
         if (phraseWords.isEmpty()) {
             return null;
         }
-        int bestStart = -1;
-        int bestLength = 0;
+        PartialMatch best = null;
+        double bestAccuracy = -1;
         for (int i = 0; i < foundWords.size(); i++) {
             if (excludedStarts.contains(foundWords.get(i))) {
                 continue;
@@ -558,17 +568,22 @@ public class InputParser implements IInputParser {
                 while (i + k < foundWords.size() && j + k < phraseWords.size() && isPhraseWord(foundWords.get(i + k))
                         && phraseWords.get(j + k).equals(foundWords.get(i + k).getFoundWord())) {
                     k++;
-                }
-                if (k > bestLength) {
-                    bestLength = k;
-                    bestStart = i;
+                    var candidate = new PartialMatch(phrase, i, k, (double) k / phraseWords.size());
+                    if (candidate.coverage() < config.getMinPartialPhraseCoverage()) {
+                        continue;
+                    }
+                    double accuracy = fragmentAccuracy(foundWords, candidate);
+                    if (!accurateEnough(accuracy)) {
+                        continue;
+                    }
+                    if (best == null || k > best.length() || (k == best.length() && accuracy > bestAccuracy)) {
+                        best = candidate;
+                        bestAccuracy = accuracy;
+                    }
                 }
             }
         }
-        if (bestLength == 0) {
-            return null;
-        }
-        return new PartialMatch(phrase, bestStart, bestLength, (double) bestLength / phraseWords.size());
+        return best;
     }
 
     private static boolean isPhraseWord(IDictionary.IFoundWord foundWord) {
