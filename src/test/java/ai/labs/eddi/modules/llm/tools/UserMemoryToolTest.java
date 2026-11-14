@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -345,6 +346,74 @@ class UserMemoryToolTest {
         assertTrue(result.contains("color = blue"));
     }
 
+    /**
+     * Re-stating a contested value is the user confirming it; skipping the write as
+     * "unchanged" would leave the contest standing forever.
+     */
+    @Test
+    void rememberFact_reStatingAContestedValue_isAWrite() throws Exception {
+        var contested = stored("lang", "German", "preference", Visibility.self, "agent-1", List.of())
+                .withAssessment(UserMemoryEntry.Assessment.CONTESTED, null);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(contested));
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        String result = tool.rememberFact("lang", "German", "preference", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store).upsert(argThat(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED));
+    }
+
+    /**
+     * The tool writes the store directly and leaves the conversation property as it
+     * was, so end-of-turn persistence never lifts a contested key it wrote. The
+     * tool reports the write itself, so the conversation's contestedMemories marker
+     * drops the key the user just confirmed.
+     */
+    @Test
+    void rememberFact_reportsTheKeyItWrote_soTheContestedMarkerCanBeLifted() throws Exception {
+        List<String> written = new ArrayList<>();
+        var reporting = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, () -> false, null, written::add);
+        var contested = stored("lang", "German", "preference", Visibility.self, "agent-1", List.of())
+                .withAssessment(UserMemoryEntry.Assessment.CONTESTED, null);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(contested));
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        assertTrue(reporting.rememberFact(" lang ", "German", "preference", "self").contains("✅ Remembered"));
+
+        assertEquals(List.of("lang"), written);
+    }
+
+    /** No write, no report: an unchanged re-save or a refusal confirms nothing. */
+    @Test
+    void rememberFact_reportsNothingWhenItWroteNothing() throws Exception {
+        List<String> written = new ArrayList<>();
+        var reporting = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, () -> false, null, written::add);
+        when(store.getAllEntries("user-1")).thenReturn(List.of(stored("lang", "German", "preference", Visibility.self, "agent-1", List.of())));
+
+        assertTrue(reporting.rememberFact("lang", "German", "preference", "self").contains("Already remembered"));
+        assertTrue(reporting.rememberFact("lang", "French", "preference", "global").contains("not permitted"));
+
+        assertTrue(written.isEmpty(), written.toString());
+    }
+
+    @Test
+    void recallMemories_marksContestedAndSupersededEntries() throws Exception {
+        Instant now = Instant.now();
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "lang", "German", "fact", Visibility.self, "agent-1", List.of(), null, true, 0, now, now,
+                        UserMemoryEntry.Assessment.CONTESTED, null),
+                new UserMemoryEntry("2", "user-1", "city", "Graz", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now,
+                        UserMemoryEntry.Assessment.SUPERSEDED, "3"),
+                new UserMemoryEntry("3", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now, now));
+        when(store.getVisibleEntries("user-1", "agent-1", List.of(), "most_recent", 50)).thenReturn(entries);
+
+        String[] lines = tool.recallMemories().split("\n");
+
+        assertTrue(lines[0].startsWith("• lang = German [fact, self] (contested"), lines[0]);
+        assertTrue(lines[1].startsWith("• city = Graz [fact, self] (superseded"), lines[1]);
+        assertEquals("• color = teal [fact, self]", lines[2], "an accepted entry reads exactly as before");
+    }
+
     @Test
     void recallMemories_shouldReturnEmptyMessage() throws Exception {
         when(store.getVisibleEntries("user-1", "agent-1", List.of(), "most_recent", 50)).thenReturn(List.of());
@@ -424,6 +493,141 @@ class UserMemoryToolTest {
 
         assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
         verify(store).deleteEntry("entry-g");
+    }
+
+    private static UserMemoryEntry version(String id, String value, Visibility visibility, String owner, List<String> groups, String supersededBy,
+                                           Instant at) {
+        return new UserMemoryEntry(id, "user-1", "tz", value, "fact", visibility, owner, groups, "conv-0", false, 0, at, at,
+                supersededBy != null ? UserMemoryEntry.Assessment.SUPERSEDED : UserMemoryEntry.Assessment.ACCEPTED, supersededBy);
+    }
+
+    /**
+     * Forgetting the newest version of a fact that superseded older ones: the
+     * superseded versions go too, along the whole chain — otherwise the loader
+     * serves the older value again once it is the reader's only entry for the key.
+     * Another agent's version in the chain, and an entry under another key, stay.
+     */
+    @Test
+    void forgetFact_deletesEverySupersededVersionOfTheFact() throws Exception {
+        var groupTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of("g1"), config);
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var newest = version("v3", "JST", Visibility.global, "agent-1", List.of(), null, t.plusSeconds(30));
+        var middle = version("v2", "PST", Visibility.self, "agent-1", List.of(), "v3", t.plusSeconds(20));
+        var oldest = version("v1", "CET", Visibility.group, "agent-1", List.of("g1"), "v2", t.plusSeconds(10));
+        var foreign = version("f1", "EST", Visibility.self, "agent-2", List.of(), "v3", t);
+        var otherKey = new UserMemoryEntry("k1", "user-1", "city", "Graz", "fact", Visibility.self, "agent-1", List.of(), "conv-0", false, 0, t, t,
+                UserMemoryEntry.Assessment.SUPERSEDED, "v3");
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(newest));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(oldest, foreign, otherKey, middle, newest));
+        when(store.deleteEntryIfUnchanged(any(), any())).thenReturn(true);
+
+        assertTrue(groupTool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v3");
+        verify(store).deleteEntryIfUnchanged("v2", middle.updatedAt());
+        verify(store).deleteEntryIfUnchanged("v1", oldest.updatedAt());
+        verify(store, never()).deleteEntryIfUnchanged(eq("f1"), any());
+        verify(store, never()).deleteEntryIfUnchanged(eq("k1"), any());
+        verify(store, never()).deleteEntry("f1");
+        verify(store, never()).deleteEntry("k1");
+    }
+
+    /**
+     * The store's first match can be the superseded version: forgetting it also
+     * removes the newer one that replaced it, unless that one is another agent's.
+     */
+    @Test
+    void forgetFact_ofASupersededVersionAlsoDeletesItsOwnReplacement() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var replacement = version("v2", "JST", Visibility.global, "agent-1", List.of(), null, t.plusSeconds(20));
+        var superseded = version("v1", "CET", Visibility.self, "agent-1", List.of(), "v2", t);
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(superseded));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(superseded, replacement));
+        when(store.deleteEntryIfUnchanged(any(), any())).thenReturn(true);
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v1");
+        verify(store).deleteEntryIfUnchanged("v2", replacement.updatedAt());
+    }
+
+    @Test
+    void forgetFact_leavesAnotherAgentsGlobalReplacementAlone() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var foreignReplacement = version("g2", "JST", Visibility.global, "agent-2", List.of(), null, t.plusSeconds(20));
+        var superseded = version("v1", "CET", Visibility.self, "agent-1", List.of(), "g2", t);
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(superseded));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(superseded, foreignReplacement));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+
+        verify(store).deleteEntry("v1");
+        verify(store, never()).deleteEntry("g2");
+        verify(store, never()).deleteEntryIfUnchanged(eq("g2"), any());
+    }
+
+    /**
+     * The linked versions go before the forgotten entry, farthest first: each
+     * delete is its own statement, so whatever a failure part way leaves is the
+     * forgotten entry and a chain still linked to it, which a retry walks again.
+     * Deleting the entry first left older versions with their replacement gone —
+     * the loader served one again, and a retry from it could not reach the rest.
+     */
+    @Test
+    void forgetFact_deletesTheLinkedVersionsFarthestFirst_andTheForgottenEntryLast() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var newest = version("v3", "JST", Visibility.self, "agent-1", List.of(), null, t.plusSeconds(30));
+        var middle = version("v2", "PST", Visibility.self, "agent-1", List.of(), "v3", t.plusSeconds(20));
+        var oldest = version("v1", "CET", Visibility.self, "agent-1", List.of(), "v2", t.plusSeconds(10));
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(newest));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(newest, middle, oldest));
+        when(store.deleteEntryIfUnchanged(any(), any())).thenReturn(true);
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+
+        InOrder order = inOrder(store);
+        order.verify(store).deleteEntryIfUnchanged("v1", oldest.updatedAt());
+        order.verify(store).deleteEntryIfUnchanged("v2", middle.updatedAt());
+        order.verify(store).deleteEntry("v3");
+    }
+
+    /** A chain read that fails deletes nothing: the newest version stays, whole. */
+    @Test
+    void forgetFact_whenTheChainCannotBeRead_keepsTheForgottenEntry() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var newest = version("v2", "JST", Visibility.self, "agent-1", List.of(), null, t.plusSeconds(20));
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(newest));
+        when(store.getAllEntries("user-1")).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        String result = tool.forgetFact("tz");
+
+        assertTrue(result.contains("❌ Failed to forget memory"), result);
+        verify(store, never()).deleteEntry(any());
+        verify(store, never()).deleteEntryIfUnchanged(any(), any());
+    }
+
+    /**
+     * A delete failing part way: the entry and the versions still linked to it
+     * remain, and the retry walks from it to every one of them.
+     */
+    @Test
+    void forgetFact_failingPartWay_leavesAChainARetryCompletes() throws Exception {
+        Instant t = Instant.parse("2026-01-01T00:00:00Z");
+        var newest = version("v3", "JST", Visibility.self, "agent-1", List.of(), null, t.plusSeconds(30));
+        var middle = version("v2", "PST", Visibility.self, "agent-1", List.of(), "v3", t.plusSeconds(20));
+        var oldest = version("v1", "CET", Visibility.self, "agent-1", List.of(), "v2", t.plusSeconds(10));
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(newest));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(newest, middle, oldest), List.of(newest, middle));
+        when(store.deleteEntryIfUnchanged("v1", oldest.updatedAt())).thenReturn(true);
+        when(store.deleteEntryIfUnchanged("v2", middle.updatedAt())).thenThrow(new IResourceStore.ResourceStoreException("down"))
+                .thenReturn(true);
+
+        assertTrue(tool.forgetFact("tz").contains("❌ Failed to forget memory"));
+        verify(store, never()).deleteEntry("v3");
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store, times(2)).deleteEntryIfUnchanged("v2", middle.updatedAt());
+        verify(store).deleteEntry("v3");
     }
 
     /**
