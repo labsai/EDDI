@@ -145,7 +145,7 @@ export function formatUsd(value: number): string {
  * runtime default. Guarded for a non-DOM environment so this module keeps
  * working outside the browser.
  */
-function activeLocale(): string | undefined {
+export function activeLocale(): string | undefined {
   if (typeof document === "undefined") return undefined;
   return document.documentElement.lang || undefined;
 }
