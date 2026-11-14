@@ -12,9 +12,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 
 /**
  * One outbound request, before {@link OutboundHttp} applies its policies.
@@ -27,11 +25,6 @@ import java.util.TreeSet;
  *            the target
  * @param headers
  *            request headers, case-insensitive by name
- * @param callerDerivedHeaders
- *            names (lower case) of headers whose values came from the signed-in
- *            caller — a {@code ${caller:token}} may sit in any header, so these
- *            are stripped on a cross-origin redirect along with the fixed
- *            {@link OutboundHttp#SENSITIVE_HEADERS}
  * @param body
  *            the body; {@link RequestBody#EMPTY} for none
  * @param timeoutOverride
@@ -47,7 +40,7 @@ import java.util.TreeSet;
  *            check
  */
 public record OutboundRequest(Profile profile, String method, URI uri, Map<String, List<String>> headers,
-        Set<String> callerDerivedHeaders, RequestBody body, Duration timeoutOverride, RedirectPolicy redirectOverride,
+        RequestBody body, Duration timeoutOverride, RedirectPolicy redirectOverride,
         SsrfPolicy ssrfOverride, TargetValidator hopValidator) {
 
     public OutboundRequest {
@@ -56,7 +49,6 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
         Objects.requireNonNull(uri, "uri");
         method = method.toUpperCase(Locale.ROOT);
         headers = caseInsensitiveCopy(headers);
-        callerDerivedHeaders = lowerCaseCopy(callerDerivedHeaders);
         body = body == null ? RequestBody.EMPTY : body;
         if (timeoutOverride != null && (timeoutOverride.isNegative() || timeoutOverride.isZero())) {
             throw new IllegalArgumentException("timeout must be positive, was " + timeoutOverride);
@@ -85,22 +77,11 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
         return Collections.unmodifiableMap(copy);
     }
 
-    private static Set<String> lowerCaseCopy(Set<String> names) {
-        TreeSet<String> copy = new TreeSet<>();
-        if (names != null) {
-            for (String name : names) {
-                copy.add(name.toLowerCase(Locale.ROOT));
-            }
-        }
-        return Collections.unmodifiableSet(copy);
-    }
-
     public static final class Builder {
         private final Profile profile;
         private final URI uri;
         private String method = "GET";
         private final TreeMap<String, List<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        private final Set<String> callerDerived = new TreeSet<>();
         private RequestBody body = RequestBody.EMPTY;
         private Duration timeout;
         private RedirectPolicy redirects;
@@ -129,15 +110,6 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
             return this;
         }
 
-        /**
-         * Adds a header whose value came from the signed-in caller — never sent to
-         * another origin on a redirect.
-         */
-        public Builder callerDerivedHeader(String name, String value) {
-            callerDerived.add(name);
-            return header(name, value);
-        }
-
         public Builder timeout(Duration timeout) {
             this.timeout = timeout;
             return this;
@@ -159,7 +131,7 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
         }
 
         public OutboundRequest build() {
-            return new OutboundRequest(profile, method, uri, headers, callerDerived, body, timeout, redirects, ssrf,
+            return new OutboundRequest(profile, method, uri, headers, body, timeout, redirects, ssrf,
                     hopValidator);
         }
     }

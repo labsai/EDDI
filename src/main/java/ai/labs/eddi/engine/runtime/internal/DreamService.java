@@ -49,8 +49,10 @@ import java.util.stream.Collectors;
  * <ol>
  * <li><b>Prune stale</b> — remove entries not accessed in N days (zero LLM
  * cost)</li>
- * <li><b>Detect contradictions</b> — find conflicting entries (future:
- * LLM-driven)</li>
+ * <li><b>Detect contradictions</b> — find conflicting entries and, as
+ * {@code contradictionResolution} says, flag them {@code CONTESTED} or retire
+ * the older as {@code SUPERSEDED} — never deleting one (see
+ * {@link UserMemoryContradictions})</li>
  * <li><b>Summarize interactions</b> — compress related entries via LLM
  * consolidation</li>
  * </ol>
@@ -156,6 +158,9 @@ public class DreamService {
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
     private Counter contradictionsFoundCounter;
+    private Counter contradictionsContestedCounter;
+    private Counter contradictionsSupersededCounter;
+    private Counter contradictionsClearedCounter;
     private Counter entriesSummarizedCounter;
     private Counter cyclesFailedCounter;
     private Counter summarizationFailedCounter;
@@ -180,6 +185,9 @@ public class DreamService {
         usersProcessedCounter = meterRegistry.counter("eddi.dream.users.processed");
         entriesPrunedCounter = meterRegistry.counter("eddi.dream.entries.pruned");
         contradictionsFoundCounter = meterRegistry.counter("eddi.dream.contradictions.found");
+        contradictionsContestedCounter = meterRegistry.counter("eddi.dream.contradictions.contested");
+        contradictionsSupersededCounter = meterRegistry.counter("eddi.dream.contradictions.superseded");
+        contradictionsClearedCounter = meterRegistry.counter("eddi.dream.contradictions.cleared");
         entriesSummarizedCounter = meterRegistry.counter("eddi.dream.entries.summarized");
         cyclesFailedCounter = meterRegistry.counter("eddi.dream.cycles.failed");
         summarizationFailedCounter = meterRegistry.counter("eddi.dream.summarization.failed");
@@ -370,20 +378,28 @@ public class DreamService {
             }
             List<UserMemoryEntry> currentEntries = pruned > 0 ? scopeToOwningAgent(userEntries, agentId, dreamConfig) : allEntries;
 
-            // 2. Detect contradictions (read-only — does not modify entries). Unlike
-            // pruning and summarization, detection may look past this agent's own
-            // entries: the contradiction that matters most is the one the docs lead
-            // with — agent A stored "English", agent B stored "German" — and the
-            // ownership scope made it undetectable by default. Reading is safe here
-            // because nothing is changed and no foreign value is logged or sent
-            // anywhere; only keys this agent itself holds are considered.
+            // 2. Detect contradictions. Unlike pruning and summarization, detection may
+            // look past this agent's own entries: the contradiction that matters most
+            // is the one the docs lead with — agent A stored "English", agent B stored
+            // "German" — and the ownership scope made it undetectable by default.
+            // Reading is safe because no foreign value is logged or sent anywhere, and
+            // only keys this agent itself holds are considered. Resolution WRITES only
+            // inside the agent-scoped set, exactly like pruning.
             if (dreamConfig.isDetectContradictions()) {
-                contradictions = detectContradictions(userId, userEntries, agentId, dreamConfig.isCrossAgentMaintenance());
+                var outcome = resolveContradictions(userId, userEntries, currentEntries, agentId, dreamConfig, conflicts);
+                contradictions = outcome.found();
+                if (outcome.written() > 0) {
+                    userEntries = userMemoryStore.getAllEntries(userId);
+                    currentEntries = scopeToOwningAgent(userEntries, agentId, dreamConfig);
+                }
             }
 
-            // 3. Summarize interactions (LLM-driven consolidation)
+            // 3. Summarize interactions (LLM-driven consolidation). Contested and
+            // superseded entries are held back: merging a disputed value into a summary
+            // would pick a winner after all, and consolidating a superseded one would
+            // bring the retired value back.
             if (dreamConfig.isSummarizeInteractions()) {
-                var outcome = summarizeInteractions(userId, currentEntries, dreamConfig, conflicts);
+                var outcome = summarizeInteractions(userId, acceptedOnly(currentEntries), dreamConfig, conflicts);
                 summarized = outcome.entriesReduced();
                 estimatedCost = outcome.estimatedCostUsd();
                 summarizationError = outcome.error();
@@ -452,45 +468,99 @@ public class DreamService {
     }
 
     /**
-     * Detect contradictory entries: the same key holding different values. V1 is
-     * key-based; semantic (LLM) detection is future work.
+     * Outcome of the contradiction phase.
+     *
+     * @param found
+     *            contradictions detected (adjacent same-key pairs that disagree)
+     * @param written
+     *            assessments this cycle wrote — non-zero means the entries changed
+     *            and later phases must re-read them
+     */
+    record ContradictionOutcome(int found, int written) {
+    }
+
+    /**
+     * Detect contradictory entries — the same key holding different values — and
+     * resolve them as {@code contradictionResolution} says. Key-based; semantic
+     * (LLM) detection is future work.
      * <p>
      * Only keys the firing agent itself holds are considered unless
-     * {@code crossAgent} — so agent A's cycle reports A's "language" disagreeing
-     * with B's, but never a disagreement between B and C that A has no stake in.
-     * Values are logged at DEBUG only: another agent's {@code self} memory is not
-     * this cycle's to write into an INFO log.
+     * {@code crossAgentMaintenance} — so agent A's cycle reports A's "language"
+     * disagreeing with B's, but never a disagreement between B and C that A has no
+     * stake in. Assessments are written only onto {@code writable}, the same
+     * agent-scoped set pruning works on: by default A flags its own entry, not B's.
+     * Each write is a compare-and-set on {@code updatedAt}; one that loses to a
+     * concurrent write counts as a conflict. Values are logged at DEBUG only:
+     * another agent's {@code self} memory is not this cycle's to write into an INFO
+     * log.
      */
-    private int detectContradictions(String userId, List<UserMemoryEntry> entries, String agentId, boolean crossAgent) {
-        Map<String, List<UserMemoryEntry>> byKey = entries.stream()
-                .filter(e -> e.key() != null)
-                .collect(Collectors.groupingBy(UserMemoryEntry::key, LinkedHashMap::new, Collectors.toList()));
-        int contradictions = 0;
+    private ContradictionOutcome resolveContradictions(String userId, List<UserMemoryEntry> entries, List<UserMemoryEntry> writable,
+                                                       String agentId, AgentConfiguration.DreamConfig dreamConfig, AtomicInteger conflicts) {
+        var resolution = contradictionResolution(dreamConfig, agentId);
+        Set<String> writableIds = writable.stream().map(UserMemoryEntry::id).filter(Objects::nonNull).collect(Collectors.toSet());
+        var plan = UserMemoryContradictions.plan(entries, writableIds, agentId, dreamConfig.isCrossAgentMaintenance(), resolution);
 
-        for (var keyGroup : byKey.entrySet()) {
-            List<UserMemoryEntry> sameKey = keyGroup.getValue();
-            if (sameKey.size() < 2) {
-                continue;
-            }
-            if (!crossAgent && sameKey.stream().noneMatch(e -> agentId != null && agentId.equals(e.sourceAgentId()))) {
-                continue;
-            }
-            UserMemoryEntry previous = null;
-            for (UserMemoryEntry entry : sameKey) {
-                if (previous != null && !Objects.equals(previous.value(), entry.value())) {
-                    contradictions++;
-                    contradictionsFoundCounter.increment();
-                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s' between agents '%s' (%s) and '%s' (%s)",
-                            LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(previous.sourceAgentId()),
-                            previous.visibility(), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility());
-                    LOGGER.debugf("[DREAM] Contradiction values for key='%s': '%s' vs '%s'", LogSanitizer.sanitize(entry.key()), previous.value(),
-                            entry.value());
+        for (var contradiction : plan.contradictions()) {
+            UserMemoryEntry previous = contradiction.previous();
+            UserMemoryEntry entry = contradiction.entry();
+            contradictionsFoundCounter.increment();
+            LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s' between agents '%s' (%s) and '%s' (%s)",
+                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(previous.sourceAgentId()),
+                    previous.visibility(), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility());
+            LOGGER.debugf("[DREAM] Contradiction values for key='%s': '%s' vs '%s'", LogSanitizer.sanitize(entry.key()), previous.value(),
+                    entry.value());
+        }
+
+        int written = 0;
+        for (var change : plan.changes()) {
+            UserMemoryEntry entry = change.entry();
+            try {
+                if (!userMemoryStore.setAssessmentIfUnchanged(entry.id(), change.assessment(), change.supersededBy(), entry.updatedAt())) {
+                    recordConflict(conflicts, userId, "entry '" + LogSanitizer.sanitize(entry.key())
+                            + "' was written after this cycle read it; not marked " + change.assessment());
+                    continue;
                 }
-                previous = entry;
+                written++;
+                switch (change.assessment()) {
+                    case CONTESTED -> contradictionsContestedCounter.increment();
+                    case SUPERSEDED -> contradictionsSupersededCounter.increment();
+                    case ACCEPTED -> contradictionsClearedCounter.increment();
+                }
+                LOGGER.infof("[DREAM] Memory '%s' of user='%s' (agent '%s', %s) is now %s%s", LogSanitizer.sanitize(entry.key()),
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility(), change.assessment(),
+                        change.supersededBy() != null ? " (superseded by entry '" + LogSanitizer.sanitize(change.supersededBy()) + "')" : "");
+            } catch (Exception e) {
+                LOGGER.warnf("[DREAM] Failed to mark memory '%s' of user '%s' %s: %s", LogSanitizer.sanitize(entry.key()),
+                        LogSanitizer.sanitize(userId), change.assessment(), e.getMessage());
             }
         }
 
-        return contradictions;
+        return new ContradictionOutcome(plan.contradictions().size(), written);
+    }
+
+    /**
+     * The configured strategy; an unknown value is warned about and treated as the
+     * default, {@code keep_newest} — a typo must not start rewriting memories under
+     * a strategy nobody chose, and must not stop detection either.
+     */
+    private static UserMemoryContradictions.Resolution contradictionResolution(AgentConfiguration.DreamConfig dreamConfig, String agentId) {
+        String configured = dreamConfig.getContradictionResolution();
+        var resolution = UserMemoryContradictions.Resolution.fromConfig(configured);
+        if (resolution == null) {
+            LOGGER.warnf("[DREAM] Agent '%s' sets userMemoryConfig.dream.contradictionResolution='%s', which is not one of [%s]; "
+                    + "using '%s' (detect and log only).", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(configured),
+                    UserMemoryContradictions.Resolution.allowedValues(), UserMemoryContradictions.Resolution.KEEP_NEWEST.configValue());
+            return UserMemoryContradictions.Resolution.KEEP_NEWEST;
+        }
+        return resolution;
+    }
+
+    /** The entries no contradiction holds back from consolidation. */
+    private static List<UserMemoryEntry> acceptedOnly(List<UserMemoryEntry> entries) {
+        if (entries.stream().allMatch(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED)) {
+            return entries;
+        }
+        return entries.stream().filter(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED).toList();
     }
 
     /**
