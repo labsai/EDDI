@@ -58,6 +58,18 @@ public class SafeHttpPageFetcher implements PageFetcher {
                 .ssrf(SsrfPolicy.STRICT)
                 .header(HEADER_USER_AGENT, command.userAgent())
                 .header(HEADER_ACCEPT, ACCEPT_HTML);
+        if (command.redirectAllowed() != null) {
+            // Added to the STRICT policy's hop check, not in place of it: the SSRF check
+            // and
+            // the connected-peer check of each hop stay, and the crawl's scope is checked
+            // too, so a hop out of scope is refused before it is requested.
+            var allowed = command.redirectAllowed();
+            builder.additionalHopCheck(hop -> {
+                if (!allowed.test(hop)) {
+                    throw new IllegalArgumentException("Redirect leaves the crawl's scope");
+                }
+            });
+        }
         if (command.timeout() != null && !command.timeout().isZero() && !command.timeout().isNegative()) {
             builder.timeout(command.timeout());
         }

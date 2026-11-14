@@ -347,10 +347,17 @@ public class AttachmentForwarder {
                 && capabilityService.supportsVision(provider, model, visionOverride)
                 && capabilityService.supportsImageUrl(provider, model)) {
             try {
+                // The same check as the download path: http(s) only, no private,
+                // loopback or metadata host. The provider fetches this URL, and a
+                // file:, data: or internal URL has no business leaving the deployment.
+                validateUrl(att.getUrl());
                 return ImageContent.from(URI.create(att.getUrl()));
             } catch (Exception e) {
                 errors.add("Image '" + name + "' URL could not be attached: " + e.getMessage());
-                return null;
+                // Told to the model as the download path tells it, so it does not answer
+                // about an image it never received. Generic: the refusal's detail stays
+                // in the error record.
+                return TextContent.from("Image '" + name + "' could not be attached and was not sent.");
             }
         }
 

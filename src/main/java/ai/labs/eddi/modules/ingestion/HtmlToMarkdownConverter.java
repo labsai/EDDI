@@ -8,6 +8,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -756,8 +757,14 @@ public class HtmlToMarkdownConverter {
         }
 
         href = resolveUrl(href, walk.baseUrl);
+        if (href == null) {
+            // A javascript:, data: or otherwise unusable destination: the visible text
+            // stays, the attribute — text no reader of the page ever saw — does not.
+            output.append(text);
+            return;
+        }
         if (text.equals(href)) {
-            output.append("<").append(href).append(">");
+            output.append("<").append(href.replace("<", "%3C").replace(">", "%3E")).append(">");
         } else {
             output.append("[").append(escapeMarkdown(text)).append("](").append(asDestination(href)).append(")");
         }
@@ -809,7 +816,15 @@ public class HtmlToMarkdownConverter {
         if (src.isBlank() || alt.isBlank()) {
             return;
         }
-        output.append("![").append(escapeMarkdown(alt.trim())).append("](").append(resolveUrl(src, walk.baseUrl)).append(")");
+        String destination = resolveUrl(src, walk.baseUrl);
+        if (destination == null) {
+            // The alt text is what an image contributes; an unusable source adds nothing.
+            output.append(escapeMarkdown(alt.trim()));
+            return;
+        }
+        // Through asDestination like a link's: a ')' in a raw src closed the image
+        // early and spilled the rest of the attribute into the chunk as text.
+        output.append("![").append(escapeMarkdown(alt.trim())).append("](").append(asDestination(destination)).append(")");
     }
 
     private void appendInline(StringBuilder output, Element element, Walk walk, int depth) {
@@ -833,18 +848,85 @@ public class HtmlToMarkdownConverter {
         output.append(wrapper).append(text.trim()).append(wrapper);
     }
 
+    /**
+     * Longest link or image destination kept; anything longer is not a citation.
+     */
+    static final int MAX_DESTINATION_LENGTH = 2048;
+
+    /**
+     * A link or image destination fit for a RAG chunk: an {@code http},
+     * {@code https} or {@code mailto} URL after resolution against the base, at
+     * most {@value #MAX_DESTINATION_LENGTH} characters — or null. A
+     * {@code javascript:} or {@code data:} URL, a relative one with no base to
+     * resolve it against, and arbitrary text hidden in the attribute used to reach
+     * the chunk, and from there the model's context.
+     */
     private String resolveUrl(String url, String baseUrl) {
-        if (url == null || baseUrl == null) {
-            return url;
+        if (url == null) {
+            return null;
         }
-        if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("//")) {
-            return url;
+        String trimmed = url.trim();
+        if (trimmed.isEmpty() || trimmed.length() > MAX_DESTINATION_LENGTH) {
+            return null;
+        }
+        if (hasControlCharacter(trimmed)) {
+            // CommonMark forbids a line ending in any destination, angle brackets
+            // included: one ended the link early and spilled the rest of the attribute
+            // into the chunk.
+            return null;
+        }
+        String resolved;
+        if (hasSafeScheme(trimmed)) {
+            resolved = trimmed;
+        } else if (baseUrl == null) {
+            // No base (an uploaded file): a relative link stays relative, as the
+            // extractor promises — but only a real relative reference, never prose
+            // or a javascript:/data: URL hidden in the attribute.
+            return isSafeRelativeReference(trimmed) ? trimmed : null;
+        } else {
+            try {
+                resolved = new URI(baseUrl).resolve(trimmed).toString();
+            } catch (URISyntaxException | IllegalArgumentException e) {
+                return null;
+            }
+        }
+        return hasSafeScheme(resolved) && resolved.length() <= MAX_DESTINATION_LENGTH ? resolved : null;
+    }
+
+    /**
+     * A relative reference kept as written when there is no base to resolve it
+     * against: it parses as a URI with no scheme and no authority (so neither
+     * {@code javascript:} nor {@code //host}), holds no whitespace — attribute
+     * prose has spaces, a path does not — and no {@code <}, {@code >} or backslash.
+     */
+    static boolean isSafeRelativeReference(String reference) {
+        for (int i = 0; i < reference.length(); i++) {
+            char c = reference.charAt(i);
+            if (Character.isWhitespace(c) || Character.isISOControl(c) || c == '<' || c == '>' || c == '\\') {
+                return false;
+            }
         }
         try {
-            return new URI(baseUrl).resolve(url).toString();
-        } catch (URISyntaxException | IllegalArgumentException e) {
-            return url;
+            URI uri = new URI(reference);
+            return uri.getScheme() == null && uri.getRawAuthority() == null;
+        } catch (URISyntaxException e) {
+            return false;
         }
+    }
+
+    private static boolean hasControlCharacter(String url) {
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isISOControl(c) || c == ' ' || c == ' ') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSafeScheme(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("mailto:");
     }
 
     private String normalizeWhitespace(String text) {

@@ -96,6 +96,21 @@ class OversightSupportTest {
         }
 
         @Test
+        @DisplayName("an approved tool call may not decide a paused conversation: resume, group approve and human-input are refused")
+        void decisionPaths() {
+            for (String uri : List.of("http://127.0.0.1:7070/agents/c2/resume", "/agents/c2/resume/stream", "/agents/c2/resume?x=1",
+                    "/groups/g1/conversations/gc1/approve", "/groups/g1/conversations/gc1/approve/stream",
+                    "/groups/g1/conversations/gc1/human-input", "/agents/a/b/resume", "/agents/c2/resume;v=1",
+                    // a matrix value whose encoded slash was decoded still names the decision
+                    "/groups/g1/conversations/gc1/approve;x=/zzz", "/agents/c2/resume;x=/zzz")) {
+                assertEquals(OversightWriteGuard.DECISION_API_REASON, refusal(uri, null, null), uri);
+            }
+            assertNull(refusal("/agents/c2/approval-status", null, null));
+            assertNull(refusal("/agents/c2/resumex", null, null));
+            assertNull(refusal("/groups/g1/conversations/gc1/followup", null, null));
+        }
+
+        @Test
         @DisplayName("without an agent-store target, a lookup or a body there is nothing to compare")
         void nothingToCompare() {
             assertNull(OversightWriteGuard.refusal("/agentstore/agents/" + ID, "{}", null, stored(STORED)));

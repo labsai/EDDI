@@ -7,11 +7,14 @@ package ai.labs.eddi.modules.ingestion.crawl;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * URL canonicalization for crawling.
@@ -114,7 +117,8 @@ public final class CrawlUrls {
         }
         String trimmed = stripFragment(url.trim());
         try {
-            URI uri = parseTolerantly(trimmed).normalize();
+            URI parsed = parseTolerantly(trimmed);
+            URI uri = parsed.normalize();
             String scheme = uri.getScheme() == null ? null : uri.getScheme().toLowerCase(Locale.ROOT);
             String host = uri.getHost() == null ? null : uri.getHost().toLowerCase(Locale.ROOT);
             if (scheme == null || host == null) {
@@ -126,7 +130,12 @@ public final class CrawlUrls {
                 port = -1;
             }
 
-            String path = foldIndexFile(uri.getRawPath() == null ? "" : uri.getRawPath());
+            // The path the server serves, not URI.normalize()'s: normalize() resolves a
+            // literal ".." against "%2e", so /docs/%2e/../private read as /docs/private
+            // while a server decoding %2e serves /private.
+            String served = parsed.getRawPath() == null || parsed.getRawPath().isEmpty() ? null : canonicalRawPath(parsed.getRawPath());
+            String rawPath = served != null ? served : uri.getRawPath() == null ? "" : uri.getRawPath();
+            String path = foldIndexFile(rawPath);
             // The root is stripped too, so "https://host/" and "https://host" are one
             // document rather than two copies of a site's front page.
             if (path.endsWith("/")) {
@@ -192,8 +201,27 @@ public final class CrawlUrls {
         }
     }
 
-    /** Path of a URL, defaulting to {@code /}. */
+    /**
+     * Path of a URL, decoded, defaulting to {@code /} — the path the server will
+     * serve: {@link #canonicalRawPath canonical}, then percent-decoded. Null when
+     * the path is ambiguous (an encoded {@code /} or {@code \}), which a scope
+     * check must treat as out of scope.
+     */
     public static String path(String url) {
+        return decodedPath(url, false);
+    }
+
+    /**
+     * {@link #path(String)} with every segment's {@code ;} parameters dropped, as
+     * Tomcat drops them before mapping a request: {@code /private;x=1/secret} is
+     * served as {@code /private/secret}. Scope, exclude and robots decisions read
+     * both forms, so neither spelling slips past a rule.
+     */
+    public static String pathWithoutParameters(String url) {
+        return decodedPath(url, true);
+    }
+
+    private static String decodedPath(String url, boolean stripParameters) {
         try {
             URI uri = new URI(url);
             // Without a host there is no site-relative path to reason about; a bare
@@ -201,11 +229,113 @@ public final class CrawlUrls {
             if (uri.getHost() == null) {
                 return "/";
             }
-            String path = uri.getPath();
+            String raw = canonicalRawPath(uri.getRawPath(), stripParameters);
+            if (raw == null) {
+                return null;
+            }
+            String path = new URI("http://h" + raw).getPath();
             return path == null || path.isEmpty() ? "/" : path;
         } catch (URISyntaxException | NullPointerException e) {
             return "/";
         }
+    }
+
+    /**
+     * An encoded separator: whether a server splits on it differs from one to the
+     * next.
+     */
+    private static final Pattern ENCODED_SEPARATOR = Pattern.compile("%(?:2[fF]|5[cC])");
+
+    /** An encoded dot, which servers decode before resolving dot segments. */
+    private static final Pattern ENCODED_DOT = Pattern.compile("%2[eE]");
+
+    /**
+     * The one path every scope, exclude and robots decision reads, still
+     * percent-encoded: encoded dots decoded and dot segments removed, as nginx,
+     * Apache and Tomcat do before serving. {@code URI.normalize()} collapses only a
+     * literal {@code ..}, while {@code URI.getPath()} decodes {@code %2e%2e} into
+     * one — so {@code /docs/%2e%2e/users/evil} passed a {@code /docs/} prefix,
+     * missed an exclude of {@code /users/**} and a {@code Disallow: /users/}, and
+     * was served as {@code /users/evil}. A segment that is a dot segment before a
+     * {@code ;} parameter ({@code ..;}) counts too, as Tomcat reads it.
+     *
+     * @return the canonical raw path, {@code /} for an empty one, or null when it
+     *         holds an encoded {@code /} or {@code \}
+     */
+    static String canonicalRawPath(String rawPath) {
+        return canonicalRawPath(rawPath, false);
+    }
+
+    /**
+     * {@link #canonicalRawPath(String)}, with each segment's {@code ;} parameters
+     * dropped when {@code stripParameters}.
+     */
+    static String canonicalRawPath(String rawPath, boolean stripParameters) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        if (ENCODED_SEPARATOR.matcher(rawPath).find()) {
+            return null;
+        }
+        String decoded = ENCODED_DOT.matcher(rawPath).replaceAll(".");
+        String[] segments = decoded.split("/", -1);
+        Deque<String> kept = new ArrayDeque<>();
+        boolean absolute = decoded.startsWith("/");
+        for (int i = absolute ? 1 : 0; i < segments.length; i++) {
+            String segment = segments[i];
+            int parameters = segment.indexOf(';');
+            String name = parameters >= 0 ? segment.substring(0, parameters) : segment;
+            boolean last = i == segments.length - 1;
+            if (segment.isEmpty() && !last) {
+                // Adjacent slashes are one, as nginx and Apache merge them by default:
+                // kept, an empty segment absorbed the next "..", so /docs//%2e%2e/private
+                // read as /docs/private while the server served /private.
+                continue;
+            }
+            if (".".equals(name)) {
+                if (last) {
+                    kept.addLast("");
+                }
+            } else if ("..".equals(name)) {
+                kept.pollLast();
+                if (last) {
+                    kept.addLast("");
+                }
+            } else {
+                kept.addLast(stripParameters ? name : segment);
+            }
+        }
+        return "/" + String.join("/", kept);
+    }
+
+    /**
+     * Whether {@code candidate} is on the seed's scheme and port. An https seed
+     * does not accept {@code http://} or {@code :8443} links on its host, which are
+     * other servers. The one exception is the upgrade of an http seed to https on
+     * the default port, which is where nearly every http site redirects.
+     */
+    public static boolean isSameSchemeAndPort(String candidate, String seed) {
+        try {
+            URI c = new URI(candidate);
+            URI s = new URI(seed);
+            String cScheme = c.getScheme() == null ? "" : c.getScheme().toLowerCase(Locale.ROOT);
+            String sScheme = s.getScheme() == null ? "" : s.getScheme().toLowerCase(Locale.ROOT);
+            int cPort = effectivePort(cScheme, c.getPort());
+            int sPort = effectivePort(sScheme, s.getPort());
+            if (cScheme.equals(sScheme) && cPort == sPort) {
+                return true;
+            }
+            return "http".equals(sScheme) && sPort == 80 && "https".equals(cScheme) && cPort == 443;
+        } catch (URISyntaxException | NullPointerException e) {
+            return false;
+        }
+    }
+
+    private static int effectivePort(String scheme, int port) {
+        if (port >= 0) {
+            return port;
+        }
+        return "https".equals(scheme) ? 443 : "http".equals(scheme) ? 80 : -1;
     }
 
     /**
@@ -221,12 +351,28 @@ public final class CrawlUrls {
      * is what gets an installation's traffic blocked.
      */
     public static String pathAndQuery(String url) {
+        return rawPathAndQuery(url, false);
+    }
+
+    /**
+     * {@link #pathAndQuery(String)} with each segment's {@code ;} parameters
+     * dropped — the second reading a robots rule is matched against.
+     */
+    public static String pathAndQueryWithoutParameters(String url) {
+        return rawPathAndQuery(url, true);
+    }
+
+    private static String rawPathAndQuery(String url, boolean stripParameters) {
         try {
             URI uri = parseTolerantly(url);
             if (uri.getHost() == null) {
                 return "/";
             }
             String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+            // The same canonical path the scope checks read, still encoded; an
+            // ambiguous one is kept as written (such a URL is never in scope).
+            String canonical = canonicalRawPath(path, stripParameters);
+            path = canonical == null ? path : canonical;
             String query = uri.getRawQuery();
             return query == null || query.isEmpty() ? path : path + "?" + query;
         } catch (URISyntaxException | NullPointerException e) {

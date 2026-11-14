@@ -9,6 +9,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.tracing.TracePropagation;
@@ -169,6 +170,35 @@ public class McpToolProviderManager {
      */
     @Inject
     TracePropagation tracePropagation;
+
+    /**
+     * Decides which MCP servers are this deployment, so every request to one of
+     * them carries the agent-call marker whatever its credential — static key,
+     * connection or none — and not only one carrying {@code ${caller:token}}.
+     * Field-injected and null-tolerant like {@link #tracePropagation}: without it,
+     * loopback is marked.
+     */
+    @Inject
+    AgentCallMarker agentCallMarker;
+
+    /**
+     * {@code headers} plus the agent-call marker when {@code url} is this
+     * deployment.
+     */
+    Map<String, String> withAgentCallMarker(Map<String, String> headers, String url) {
+        URI target;
+        try {
+            target = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return headers;
+        }
+        if (!AgentCallMarker.targetsSelf(agentCallMarker, target)) {
+            return headers;
+        }
+        Map<String, String> marked = new LinkedHashMap<>(headers);
+        marked.put(AgentCallMarker.HEADER, AgentCallMarker.VALUE);
+        return marked;
+    }
 
     /**
      * Count an MCP discovery outcome.
@@ -1278,12 +1308,12 @@ public class McpToolProviderManager {
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
             transportBuilder.customHeaders(
-                    callContext -> withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext),
-                            callContext));
+                    callContext -> withAgentCallMarker(withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound,
+                            callContext), callContext), config.getUrl()));
         } else {
             // No credential configured: the server decides whether it needs one.
             // The trace context still goes out, mirrored from params._meta.
-            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
+            transportBuilder.customHeaders(callContext -> withAgentCallMarker(withTraceHeaders(Map.of(), callContext), config.getUrl()));
         }
 
         return transportBuilder.build();
@@ -1461,6 +1491,11 @@ public class McpToolProviderManager {
             return Map.of();
         }
         String resolved = callerIdentityResolver.resolveValue(configuredKey, URI.create(config.getUrl()));
+        if (CallerIdentityResolver.containsTokenReference(configuredKey)) {
+            // The caller's token was released, which happens only towards this
+            // deployment: mark the request as an agent's, as an httpcall carrying it is.
+            return Map.of("Authorization", withBearerPrefix(resolved), AgentCallMarker.HEADER, AgentCallMarker.VALUE);
+        }
         return Map.of("Authorization", withBearerPrefix(resolved));
     }
 

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.invocation.InvocationContext;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentity;
@@ -21,6 +22,7 @@ import org.mockito.Mock;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -231,6 +233,34 @@ class McpToolProviderManagerAdditionalTest {
         void toolCallCarriesTheCaller() throws Exception {
             context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
             assertEquals("Bearer alice-token", headersFor(callerBoundServer(), toolCall()).get("Authorization"));
+        }
+
+        @Test
+        @DisplayName("a tool call that carries the caller's token is marked as an agent's call")
+        void toolCallCarryingTheTokenIsMarked() throws Exception {
+            context.bind(new CallerIdentity("alice-token", "alice", "https://eddi.example:443"));
+            assertEquals(AgentCallMarker.VALUE, headersFor(callerBoundServer(), toolCall()).get(AgentCallMarker.HEADER));
+        }
+
+        @Test
+        @DisplayName("a request to this deployment is marked whatever the credential: static key, connection or none")
+        void selfTargetIsMarkedWhateverTheCredential() {
+            // An agent holding a static or connection credential with the HITL role must
+            // not reach this deployment's decision tools unmarked: McpHitlTools refuses a
+            // marked resume / approve / human-input with AGENT_ORIGINATED.
+            var manager = new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(context, true), context,
+                    false, 1024, 300000L);
+            manager.agentCallMarker = new AgentCallMarker(Set.of("eddi.example"));
+
+            Map<String, String> staticKey = manager.withAgentCallMarker(Map.of("Authorization", "Bearer static"), "https://eddi.example:443/mcp");
+            assertEquals(AgentCallMarker.VALUE, staticKey.get(AgentCallMarker.HEADER));
+            assertEquals("Bearer static", staticKey.get("Authorization"));
+            assertEquals(AgentCallMarker.VALUE, manager.withAgentCallMarker(Map.of(), "http://127.0.0.1:7070/mcp").get(AgentCallMarker.HEADER));
+            assertNull(manager.withAgentCallMarker(Map.of("Authorization", "Bearer static"), "https://mcp.third-party.example/mcp")
+                    .get(AgentCallMarker.HEADER), "a third-party server gets no EDDI header");
+            manager.agentCallMarker = null;
+            assertNull(manager.withAgentCallMarker(Map.of(), "https://eddi.example/mcp").get(AgentCallMarker.HEADER),
+                    "without the bean only loopback is marked");
         }
 
         @Test

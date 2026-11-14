@@ -544,6 +544,17 @@ class OutboundHttpTest {
             assertFalse(OutboundHttp.positiveDnsCacheDisabled("30", "0"), "the security property wins");
             assertFalse(OutboundHttp.positiveDnsCacheDisabled("x", null));
         }
+
+        @Test
+        @DisplayName("the proxy warning fires only when a proxy and SSRF protection are both on")
+        void proxyWithSsrfDetection() {
+            var proxy = new OutboundSettings.ProxySettings("proxy.corp", 3128, List.of(), null);
+            var withProxy = new OutboundSettings(OutboundSettings.defaults(Duration.ofSeconds(5)).engine(),
+                    OutboundSettings.defaults(Duration.ofSeconds(5)).profiles(), proxy);
+            assertTrue(OutboundHttp.proxyResolvesTargets(withProxy, true), "the proxy resolves the target, not EDDI's check");
+            assertFalse(OutboundHttp.proxyResolvesTargets(withProxy, false));
+            assertFalse(OutboundHttp.proxyResolvesTargets(OutboundSettings.defaults(Duration.ofSeconds(5)), true), "no proxy");
+        }
     }
 
     @Nested

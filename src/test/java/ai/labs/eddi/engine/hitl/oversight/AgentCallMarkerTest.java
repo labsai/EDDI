@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.hitl.oversight;
 
 import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.SelfUrlResolver;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
@@ -56,6 +58,41 @@ class AgentCallMarkerTest {
 
         assertTrue(resolverMarker.targetsSelf(URI.create("https://chat.acme.io/hitl/samples/s1")));
         assertFalse(resolverMarker.targetsSelf(URI.create("https://other.acme.io/hitl/samples/s1")));
+    }
+
+    @Test
+    @DisplayName("the origin the turn's caller addressed counts — the public hostname no self setting names")
+    @SuppressWarnings("unchecked")
+    void callerOrigin() {
+        CallerIdentityContext context = new CallerIdentityContext(null, null);
+        Instance<CallerIdentityContext> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(context);
+        var callerMarker = new AgentCallMarker(null, instance, Optional.empty());
+        URI publicName = URI.create("https://chat.public.example/agents/c2/resume");
+
+        assertFalse(callerMarker.targetsSelf(publicName), "no caller bound");
+        context.bind(new CallerIdentity("approver-token", "approver", "https://chat.public.example:443"));
+        try {
+            assertTrue(callerMarker.targetsSelf(publicName));
+            assertFalse(callerMarker.targetsSelf(URI.create("http://chat.public.example/agents/c2/resume")), "another scheme");
+            assertFalse(callerMarker.targetsSelf(URI.create("https://chat.public.example:8443/x")), "another port");
+            assertFalse(callerMarker.targetsSelf(URI.create("https://api.example.com/x")));
+        } finally {
+            context.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("a request carrying the released caller token is marked whatever its target")
+    void callerTokenReleased() {
+        IRequest request = mock(IRequest.class);
+        AgentCallMarker.apply(marker, request, URI.create("https://chat.public.example/agents/c2/resume"), true);
+        verify(request).setHttpHeader(AgentCallMarker.HEADER, AgentCallMarker.VALUE);
+
+        IRequest unreleased = mock(IRequest.class);
+        AgentCallMarker.apply(marker, unreleased, URI.create("https://chat.public.example/agents/c2/resume"), false);
+        verify(unreleased, never()).setHttpHeader(any(), any());
     }
 
     @Test

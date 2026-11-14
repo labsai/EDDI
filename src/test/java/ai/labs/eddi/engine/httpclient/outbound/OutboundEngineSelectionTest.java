@@ -16,6 +16,7 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -184,6 +185,33 @@ class OutboundEngineSelectionTest {
 
             assertSame(ConnectedPeers.STRICT, engine.hops.get(0).peerCheck());
             assertNull(engine.hops.get(1).peerCheck());
+        }
+
+        @Test
+        @DisplayName("an additional hop check keeps the policy's check and the redirect hops' peer check")
+        void additionalHopCheckKeepsThePeerCheck() throws Exception {
+            // The crawler's scope check is one: it must narrow the hop, never lift the
+            // connected-peer check that closes the DNS-rebinding window on Vert.x.
+            engine.respond(302, Map.of("Location", List.of("https://other.example.com/next")), new byte[0]).respond(200, "");
+            List<String> checked = new ArrayList<>();
+
+            send(OutboundRequest.get(Profile.DEFAULT, URI.create("https://api.example.com/")).ssrf(SsrfPolicy.STRICT)
+                    .additionalHopCheck(checked::add).build());
+
+            assertSame(ConnectedPeers.STRICT, engine.hops.get(1).peerCheck(), "the hop keeps the strict peer check");
+            assertTrue(checked.contains("https://other.example.com/next"), checked.toString());
+        }
+
+        @Test
+        @DisplayName("an additional hop check refuses a hop before it is sent")
+        void additionalHopCheckRefuses() {
+            engine.respond(302, Map.of("Location", List.of("https://other.example.com/next")), new byte[0]).respond(200, "");
+            assertThrows(OutboundBlockedException.class,
+                    () -> send(OutboundRequest.get(Profile.DEFAULT, URI.create("https://api.example.com/")).ssrf(SsrfPolicy.STRICT)
+                            .additionalHopCheck(url -> {
+                                throw new IllegalArgumentException("out of scope");
+                            }).build()));
+            assertEquals(1, engine.hops.size(), "the refused hop is never sent");
         }
     }
 

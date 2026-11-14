@@ -222,7 +222,7 @@ public class WebCrawler {
                 continue;
             }
             if (request.politeness().respectRobots()
-                    && !candidateRobots.isAllowed(CrawlUrls.pathAndQuery(candidate.fetchUrl()))) {
+                    && !robotsAllow(candidateRobots, candidate.fetchUrl())) {
                 counters.skipped++;
                 frontier.releaseDeferred(candidate.canonicalId());
                 continue;
@@ -285,7 +285,11 @@ public class WebCrawler {
                 request.limits().requestTimeout(),
                 conditional.etag(),
                 conditional.lastModified(),
-                request.limits().maxBytesPerPage());
+                request.limits().maxBytesPerPage(),
+                // Each redirect hop is held to the scope before it is requested: the scope
+                // check of the final URL below only discards the page, after the fetch.
+                // The hop as it will be requested, not a normalized copy of it.
+                hop -> isInScope(CrawlUrls.stripFragment(hop), seedHost, request, excludes));
 
         FetchedPage page;
         try {
@@ -523,7 +527,7 @@ public class WebCrawler {
         if (sitemapQueue.isEmpty() && robotsUrl != null) {
             String conventional = resolve(robotsUrl, "/sitemap.xml");
             if (conventional != null && (!request.politeness().respectRobots()
-                    || robots.isAllowed(CrawlUrls.pathAndQuery(conventional)))
+                    || robotsAllow(robots, conventional))
                     && sitemapsSeen.add(conventional)) {
                 sitemapQueue.add(conventional);
             }
@@ -640,12 +644,29 @@ public class WebCrawler {
             if (!CrawlUrls.isSameSite(host, seedHost, request.scope().includeSubdomains())) {
                 return false;
             }
+            // The host alone let an https seed follow http:// and :8443 links on it.
+            if (!CrawlUrls.isSameSchemeAndPort(url, request.seedUrl())) {
+                return false;
+            }
         }
+        // One canonical path for the prefix and the excludes (robots reads its encoded
+        // form): dot segments, encoded ones included, already resolved.
         String path = CrawlUrls.path(url);
-        if (!CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())) {
+        // Both readings of a path with ;parameters: as written, and as Tomcat serves it
+        // with them dropped. In scope only when both are; excluded when either is.
+        String withoutParameters = CrawlUrls.pathWithoutParameters(url);
+        if (path == null || withoutParameters == null || !CrawlUrls.isUnderPathPrefix(path, request.scope().pathPrefix())
+                || !CrawlUrls.isUnderPathPrefix(withoutParameters, request.scope().pathPrefix())) {
             return false;
         }
-        return !UrlPattern.anyMatches(excludes, path);
+        return !UrlPattern.anyMatches(excludes, path) && !UrlPattern.anyMatches(excludes, withoutParameters);
+    }
+
+    /**
+     * Whether robots.txt allows both readings of the URL's path (see isInScope).
+     */
+    private static boolean robotsAllow(RobotsPolicy robots, String url) {
+        return robots.isAllowed(CrawlUrls.pathAndQuery(url)) && robots.isAllowed(CrawlUrls.pathAndQueryWithoutParameters(url));
     }
 
     /**
