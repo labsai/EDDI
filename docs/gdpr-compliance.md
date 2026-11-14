@@ -222,7 +222,9 @@ curl https://your-eddi-instance/admin/gdpr/{userId}/export \
 The export is a structured, machine-readable JSON bundle of these categories — not
 yet every category EDDI erases; what it leaves out is named in `omittedCategories`
 (see the note below):
-- All persistent user memories
+- All persistent user memories, each with its Dream `assessment` (`ACCEPTED`, `CONTESTED` or
+  `SUPERSEDED`) and, for a superseded one, the `supersededBy` id — Dream never deletes a
+  contradicted memory, so the export holds every conflicting value it ever kept
 - Conversation outputs (the chat history as recorded in the conversation outputs). Conversation properties, step data and checkpoints are **not** exported
 - All managed conversation mappings (intent→conversation bindings)
 - Audit processing records: conversation id, agent id, task type, duration, LLM detail and timestamp (capped at 10,000 entries; the prompt input, output and tool calls of the entry are not included)

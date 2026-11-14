@@ -116,6 +116,17 @@ class AgentDeploymentManagementRetryTest {
 
     private void deployed(DeploymentInfo... infos) throws Exception {
         when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(infos));
+        // The registry holds what a sweep confirmed READY, so it stays tracked. A mock
+        // of its own per row: agent's status answers are consumed in sequence.
+        List<IAgent> served = new ArrayList<>();
+        for (DeploymentInfo info : infos) {
+            IAgent registered = mock(IAgent.class);
+            when(registered.getAgentId()).thenReturn(info.getAgentId());
+            when(registered.getAgentVersion()).thenReturn(info.getAgentVersion());
+            when(registered.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+            served.add(registered);
+        }
+        when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(served);
     }
 
     private static DeploymentInfo info(String agentId, int version) {

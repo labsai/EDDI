@@ -196,7 +196,7 @@ class ConversationStepRunnerHealthHookTest {
     void alertsOffHealthOn() {
         dispatcher = new AlertDispatcher(mock(AlertEngine.class), new AlertMetrics(new SimpleMeterRegistry()), new AlertSettings(false, 5,
                 Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2), Duration.ofDays(90), Duration.ofSeconds(10),
-                Optional.empty()));
+                Optional.empty(), 50));
         doAnswer(inv -> {
             dispatcher.onTurnOutcome(inv.getArgument(0));
             return null;

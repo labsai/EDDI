@@ -1156,6 +1156,10 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   `dynamicOrigin` names this discussion, leaves agents marked for another one
   alone, and only **undeploys** — never deletes — an agent with no marker (one
   created before markers existed, or never created by `create_sub_agent`).
+- An undeploy by either of them is a real undeploy, as over REST: the agent's
+  `production` deployment records are marked undeployed, so neither the
+  deployment sweep nor a restart brings it back, and in a cluster every node
+  undeploys it.
 - `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
 - `converse_with_agent` continues only a conversation owned by the same user the
   calling conversation belongs to (a conversation of another user, or one that
