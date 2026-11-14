@@ -6,15 +6,28 @@ on:
     tags: ["[0-9]*"]
   pull_request:
     branches: [main]
+  # Merge-queue entries. Two PRs that are each green against an older main can
+  # still break it together: #1352 renamed ResourceAccessGuard.callerIsAdmin()
+  # while #1345 added a test calling it, both merged minutes apart, and main's
+  # test sources stopped compiling. The queue builds a temporary
+  # gh-readonly-queue/main/... ref holding main plus every PR ahead in the queue,
+  # and merges only once the REQUIRED checks (Build & Test, CodeQL Analysis) pass
+  # on it. So on this event both must run and report, and nothing may publish.
+  # What each job does here: docs/code-review-standards.md, "Merge queue".
+  merge_group:
+    types: [checks_requested]
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
 # three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
 # three CodeQL builds — with the superseded ones never cancelled, so an older
 # run could report onto a commit that is no longer the head. Pushes to main and
 # tag pushes are NOT cancelled: a release must never be interrupted mid-publish.
+# A merge-queue entry has a ref of its own (gh-readonly-queue/main/pr-<n>-<sha>),
+# so entries running side by side never share a group and never cancel each
+# other; cancel-in-progress only matters if the queue re-creates the same ref.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 permissions:
   contents: read
@@ -57,8 +70,11 @@ jobs:
       - name: Check paths
         id: filter
         # Skipped on tag pushes — a release must run the FULL pipeline no matter
-        # what the tagged commit happens to touch (see "Resolve" below).
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        # what the tagged commit happens to touch (see "Resolve" below) — and on
+        # merge-queue entries, for the same reason: the queue run is the last
+        # check before main moves, so it tests the combined code in full rather
+        # than trusting a diff to say what could have broken.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && github.event_name != 'merge_group' }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -279,7 +295,13 @@ jobs:
           # tag published REGARDLESS of test results. Forcing code=true here lets
           # docker rely on plain `needs` success instead, so a tag on a commit
           # with failing tests builds nothing.
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          #
+          # A merge-queue entry is forced the same way. "Check paths" does not run
+          # for it, and a diff-based skip there would be wrong in kind: the
+          # failure the queue exists to catch (#1345 + #1352) is two changes that
+          # are each fine alone, so the entry runs every test path. It publishes
+          # nothing all the same: every publishing job is gated on `push`.
+          if [[ "$GITHUB_REF" == refs/tags/* || "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "scripts=true" >> "$GITHUB_OUTPUT"
             echo "operator_docs=true" >> "$GITHUB_OUTPUT"
@@ -305,9 +327,12 @@ jobs:
         # The E2E matrix is data, not a job-level `if:`. `jobs.<id>.if` is evaluated
         # before the matrix expands and cannot see `matrix`, so a condition there
         # would not filter legs at all. PRs run MongoDB only; main and tags run both
-        # stores before anything is published.
+        # stores before anything is published. Merge-queue entries run MongoDB only
+        # too: Backend E2E is not a required check, so the queue does not wait on
+        # it, and a second store leg per entry would only lengthen the runner queue
+        # every other entry waits behind. The push to main still runs both.
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
             echo 'databases=["mongodb"]' >> "$GITHUB_OUTPUT"
           else
             echo 'databases=["mongodb","postgres"]' >> "$GITHUB_OUTPUT"
@@ -321,6 +346,9 @@ jobs:
           echo "- Backend changed: **${{ steps.result.outputs.backend }}**" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "- 🏷️ Tag push — full pipeline forced regardless of changed paths" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            echo "- 🚦 Merge-queue entry — every test path forced; nothing is published" >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ "${{ steps.result.outputs.code }}" = "false" ]; then
             echo "- ⏭️ Skipping build/test/docker (docs/licenses/config-only change)" >> "$GITHUB_STEP_SUMMARY"
@@ -1247,6 +1275,11 @@ jobs:
     # the same `code` condition explicitly for that reason. (codeql has no
     # condition at all — it is deliberately unconditional for OpenSSF Scorecard;
     # see its own header.)
+    #
+    # On a merge-queue entry detect-changes forces every filter true, so this
+    # REQUIRED check always runs and reports there. It must: the queue waits for
+    # Build & Test on the queue's ref, and a job that never starts would leave
+    # the entry waiting until the queue's status-check timeout fails it.
     if: >-
       needs.detect-changes.outputs.backend == 'true' ||
       needs.detect-changes.outputs.operator_docs == 'true' ||
@@ -1514,6 +1547,9 @@ jobs:
   # (checks/raw/sast.go -> ListCheckRunsForRef(pr.HeadSHA)), so scanning main on
   # push is invisible to it — a docs-only PR that skipped CodeQL still counts as
   # an unscanned commit. Gating this on detect-changes cost us 2 of the last 30.
+  # Ungated means it runs on merge-queue entries too, where it is the second
+  # REQUIRED check the queue waits for. (codeql.yml's job carries the same name
+  # but is schedule-only, so it never reports on a PR or a queue entry.)
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
@@ -1838,10 +1874,12 @@ jobs:
       # secret in the same pull request that introduces it. Taking both from
       # the base branch means a config change takes effect once it is merged
       # and reviewed, rather than while it is still being proposed.
+      # A merge-queue entry is the same PR code, so it takes the config from the
+      # queue's base (main as it stands) too.
       - name: Take the gitleaks config from the base branch
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
           for f in .gitleaksignore .gitleaks.toml; do
@@ -1864,6 +1902,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          QUEUE_HEAD: ${{ github.event.merge_group.head_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.sha }}
         run: |
@@ -1872,7 +1912,20 @@ jobs:
 
           have() { git cat-file -e "$1^{commit}" 2> /dev/null; }
 
-          if [ "$EVENT" = "pull_request" ]; then
+          if [ "$EVENT" = "merge_group" ]; then
+            # Every commit the queue stacked on main for this entry: the PRs ahead
+            # of it and its own. Without this branch the event fell through to
+            # "scan only the tip", which sees the last PR of a group and none of
+            # the others. Both ends must resolve, as for a pull request.
+            for sha in "$QUEUE_BASE" "$QUEUE_HEAD"; do
+              if ! have "$sha"; then
+                echo "::error::gitleaks: $sha is not in this checkout, so the merge-queue entry was not scanned. Check that actions/checkout still uses fetch-depth: 0."
+                exit 1
+              fi
+            done
+            LOG_OPTS="--no-merges $QUEUE_BASE..$QUEUE_HEAD"
+            echo "scanning merge-queue range $QUEUE_BASE..$QUEUE_HEAD"
+          elif [ "$EVENT" = "pull_request" ]; then
             # Both ends must resolve. Quietly narrowing the range here would
             # turn a fetch problem into a scan that passes without looking.
             for sha in "$PR_BASE" "$PR_HEAD"; do
@@ -3418,7 +3471,10 @@ jobs:
   notify-slack:
     name: Slack Notification
     runs-on: ubuntu-latest
-    if: always()
+    # Not for merge-queue entries: each is a throwaway ref the queue builds and
+    # deletes, and a red one is reported on the PR, which leaves the queue. The
+    # push to main that a passing entry turns into notifies as before.
+    if: always() && github.event_name != 'merge_group'
     needs:
       [detect-changes, build-and-test, integration-test, ui-gate, build-image, e2e-fullstack, e2e-auth, docker, smoke-test, codeql, trivy-scan, gitleaks, preflight-check, preflight-push, post-release]
 
