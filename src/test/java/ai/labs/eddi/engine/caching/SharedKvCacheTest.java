@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.cluster.events.RecordingEventBus;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalAnswers;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -28,6 +29,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,8 +38,10 @@ import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -145,6 +150,81 @@ class SharedKvCacheTest {
         assertEquals("conv-1", nodeB.get("task-1"));
         nodeB.remove("task-1");
         assertNull(nodeA.get("task-1"));
+    }
+
+    /**
+     * The GDPR sweep counts what {@code remove} reports. Node B never wrote the
+     * key, so its node-local mirror is empty: reporting the mirror's value said
+     * "nothing removed" while the bucket's value was deleted.
+     */
+    @Test
+    @DisplayName("remove on a node that did not write the key reports the value it removed from the bucket")
+    void removeReportsTheSharedValue() {
+        var kv = new InMemorySharedKv("A2A_TASKS", Duration.ofMinutes(5));
+        ICache<String, String> nodeA = new SharedKvCache<>(local("a"), kv, false);
+        ICache<String, String> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        nodeA.put("task-1", "conv-1");
+
+        assertEquals("conv-1", nodeB.remove("task-1"));
+        assertNull(nodeA.get("task-1"));
+        assertNull(nodeB.remove("task-1"), "a second remove finds nothing");
+    }
+
+    @Test
+    @DisplayName("a failed pre-read does not stop remove from deleting the shared record")
+    void removeDeletesEvenWhenTheValueReadFails() {
+        var kv = spy(new InMemorySharedKv("A2A_TASKS", Duration.ofMinutes(5)));
+        ICache<String, String> node = new SharedKvCache<>(local("a"), kv, true);
+        node.put("task-1", "conv-1");
+        doThrow(new ClusterUnavailableException("read failed")).when(kv).get(any());
+
+        node.remove("task-1");
+
+        verify(kv).delete(any());
+        reset(kv);
+        assertTrue(kv.get(KvKeys.hashed("task-1")).isEmpty(), "the shared record is gone");
+        assertNull(node.get("task-1"), "and no node reads it any more");
+    }
+
+    @Test
+    @DisplayName("while the bucket is unreachable, remove reports the node-local copy it removed")
+    void degradedRemoveReportsTheLocalValue() {
+        ICache<String, String> node = new SharedKvCache<>(local("down"), new DownSharedKv(), false);
+        node.put("task-1", "conv-1");
+
+        assertEquals("conv-1", node.remove("task-1"));
+        assertNull(node.get("task-1"));
+    }
+
+    /**
+     * The views are the node-local mirror. A removal through one changed that
+     * mirror and never reached the bucket, so the key lived on in every other
+     * node's reads; the views therefore refuse to change anything, whatever the
+     * local cache underneath allows.
+     */
+    @Test
+    @DisplayName("keySet, values and entrySet refuse to change the cache")
+    void viewsAreReadOnly() {
+        var kv = new InMemorySharedKv("A2A_TASKS", Duration.ofMinutes(5));
+        ICache<String, String> cache = new SharedKvCache<>(mutableViewCache(), kv, false);
+        cache.put("k", "v");
+
+        assertThrows(UnsupportedOperationException.class, () -> cache.keySet().remove("k"));
+        assertThrows(UnsupportedOperationException.class, () -> cache.values().removeIf(v -> true));
+        assertThrows(UnsupportedOperationException.class, () -> cache.entrySet().iterator().next().setValue("x"));
+        assertEquals("v", cache.get("k"));
+        assertEquals(Set.of("k"), Set.copyOf(cache.keySet()), "the views still read the entries");
+    }
+
+    /**
+     * A local cache whose own views can change it, so a test shows the wrapper
+     * itself is what refuses — a {@code CacheFactory} cache refuses on its own.
+     */
+    @SuppressWarnings("unchecked")
+    static ICache<String, String> mutableViewCache() {
+        ICache<String, String> cache = mock(ICache.class, AdditionalAnswers.delegatesTo(new ConcurrentHashMap<String, String>()));
+        doReturn("mutable-views").when(cache).getCacheName();
+        return cache;
     }
 
     @Test

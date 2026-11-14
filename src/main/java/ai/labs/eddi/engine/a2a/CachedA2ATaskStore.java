@@ -39,10 +39,22 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     static final String ERASING_CACHE = "a2aTaskMapping:erasing";
     static final String INDEX_CACHE = "a2aTaskMapping:index";
     /**
-     * Ids remembered per principal — and so tasks (and bindings) a principal may
-     * hold at once: the records of ids that fall off the end are removed with them.
+     * Most ids remembered per principal — and so the most tasks (and bindings) a
+     * principal may hold at once: the records of ids that fall off the end of their
+     * shard are removed with them.
      */
     static final int MAX_INDEXED_IDS = 10_000;
+    /**
+     * Index values per principal. One value per principal grew to about 5 MB at the
+     * cap with long caller-chosen ids, over the NATS payload limit (1 MB by
+     * default); the shared cache then kept it on the writing node only, so the
+     * other nodes could no longer erase or export through it. A shard holds at most
+     * {@link #MAX_IDS_PER_SHARD} ids per list, about 330 KB at the 256-character id
+     * limit, and a concurrent writer contends only with writers of its own shard.
+     */
+    static final int INDEX_SHARDS = 16;
+    /** Ids per list (tasks, contexts) one shard keeps, oldest dropped first. */
+    static final int MAX_IDS_PER_SHARD = MAX_INDEXED_IDS / INDEX_SHARDS;
 
     /**
      * How long writes for a principal stay refused after its erasure began — long
@@ -60,13 +72,19 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * caches are shared KV buckets whose keys are hashed: a node can read a record
      * by its key but cannot enumerate another node's records by principal, and the
      * local mirror only holds what this node wrote. The index is the enumeration.
-     * Every save adds its id with a compare-and-set loop ({@code putIfAbsent} /
+     * <p>
+     * It is split into {@link #INDEX_SHARDS} values per principal
+     * ({@link #indexKey}); an id goes to the shard its hash picks
+     * ({@link #shardOf}), task and context ids each by their own. Every save adds
+     * its id to that one shard with a compare-and-set loop ({@code putIfAbsent} /
      * {@code replace(key, expected, next)}), which the shared cache implements as a
      * revision-checked update on the bucket, so concurrent writers on any nodes all
-     * land their ids. The index holds at most {@link #MAX_INDEXED_IDS} ids per
-     * principal; an id that falls off the end takes its record with it, so every
-     * live record stays discoverable and a principal cannot hold more than that
-     * many tasks or bindings at once.
+     * land their ids. Each shard keeps at most {@link #MAX_IDS_PER_SHARD} ids per
+     * list, so a principal holds at most {@link #MAX_INDEXED_IDS} of each; an id
+     * that falls off the end of its shard takes its record with it, so every live
+     * record stays discoverable. A sweep or an export reads every shard, and the
+     * unsharded value an earlier release kept under the bare principal (see
+     * {@link #indexKeysOf}).
      */
     private final ICache<String, PrincipalIndex> index;
     /**
@@ -94,7 +112,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         this.index = cacheFactory.getCache(INDEX_CACHE);
     }
 
-    /** What a principal holds, by id; the value of the shared index. */
+    /**
+     * What a principal holds in one shard, by id; the value of the shared index.
+     */
     public record PrincipalIndex(List<String> taskIds, List<String> contextIds) implements Serializable {
 
         @Serial
@@ -114,7 +134,7 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
         private static List<String> append(List<String> ids, String id) {
             List<String> copy = new ArrayList<>(ids.size() + 1);
-            copy.addAll(ids.size() >= MAX_INDEXED_IDS ? ids.subList(ids.size() - MAX_INDEXED_IDS + 1, ids.size()) : ids);
+            copy.addAll(ids.size() >= MAX_IDS_PER_SHARD ? ids.subList(ids.size() - MAX_IDS_PER_SHARD + 1, ids.size()) : ids);
             copy.add(id);
             return List.copyOf(copy);
         }
@@ -141,7 +161,8 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             tasks.put(scopedKey(principal, record.taskId()), record);
-            for (String evicted : updateIndex(principal, current -> current.withTask(record.taskId())).taskIds()) {
+            String shard = indexKey(principal, shardOf(record.taskId()));
+            for (String evicted : updateIndex(shard, current -> current.withTask(record.taskId())).taskIds()) {
                 tasks.remove(scopedKey(principal, evicted));
             }
         } finally {
@@ -162,7 +183,8 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             contexts.put(scopedKey(principal, contextId), conversationId);
-            for (String evicted : updateIndex(principal, current -> current.withContext(contextId)).contextIds()) {
+            String shard = indexKey(principal, shardOf(contextId));
+            for (String evicted : updateIndex(shard, current -> current.withContext(contextId)).contextIds()) {
                 contexts.remove(scopedKey(principal, evicted));
             }
         } finally {
@@ -188,7 +210,7 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     @Override
     public List<A2ATaskRecord> tasksOf(String principal) {
         List<A2ATaskRecord> found = new ArrayList<>();
-        for (String key : taskKeysOf(principal)) {
+        for (String key : taskKeysOf(principal, indexesOf(principal))) {
             A2ATaskRecord record = tasks.get(key);
             if (record != null) {
                 found.add(record);
@@ -197,29 +219,36 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         return found;
     }
 
-    private PrincipalIndex indexOf(String principal) {
-        PrincipalIndex current = index.get(principal);
-        return current == null ? PrincipalIndex.empty() : current;
+    /** Every index value the principal has: its shards, and a legacy value. */
+    private List<PrincipalIndex> indexesOf(String principal) {
+        List<PrincipalIndex> found = new ArrayList<>();
+        for (String key : indexKeysOf(principal)) {
+            PrincipalIndex shard = index.get(key);
+            if (shard != null) {
+                found.add(shard);
+            }
+        }
+        return found;
     }
 
     /**
-     * Applies {@code change} to the principal's index with a compare-and-set loop,
-     * so concurrent writers — on this node or another — each land their id. The
-     * loop has no attempt cap: every lost round means another writer landed, so it
+     * Applies {@code change} to one index shard with a compare-and-set loop, so
+     * concurrent writers — on this node or another — each land their id. The loop
+     * has no attempt cap: every lost round means another writer landed, so it
      * cannot spin without progress, and giving up to overwrite (as a first cut did)
      * is exactly the lost update it exists to prevent — eight writers lost 78 of
      * 1600 ids to a ten-attempt cap.
      *
      * @return the ids the cap pushed out, whose records the caller removes
      */
-    private PrincipalIndex updateIndex(String principal, UnaryOperator<PrincipalIndex> change) {
+    private PrincipalIndex updateIndex(String shardKey, UnaryOperator<PrincipalIndex> change) {
         while (true) {
-            PrincipalIndex current = index.get(principal);
+            PrincipalIndex current = index.get(shardKey);
             PrincipalIndex next = change.apply(current == null ? PrincipalIndex.empty() : current);
             if (next.equals(current)) {
                 return PrincipalIndex.empty();
             }
-            boolean landed = current == null ? index.putIfAbsent(principal, next) == null : index.replace(principal, current, next);
+            boolean landed = current == null ? index.putIfAbsent(shardKey, next) == null : index.replace(shardKey, current, next);
             if (landed) {
                 return (current == null ? PrincipalIndex.empty() : current).minus(next);
             }
@@ -231,19 +260,19 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * Every task key of the principal this node can name: the local mirror's, and
      * the index's — the latter is what reaches records another node wrote.
      */
-    private Set<String> taskKeysOf(String principal) {
+    private Set<String> taskKeysOf(String principal, List<PrincipalIndex> indexes) {
         String prefix = principalPrefix(principal);
         Set<String> keys = new LinkedHashSet<>();
         tasks.keySet().stream().filter(key -> key.startsWith(prefix)).forEach(keys::add);
-        indexOf(principal).taskIds().forEach(id -> keys.add(scopedKey(principal, id)));
+        indexes.forEach(shard -> shard.taskIds().forEach(id -> keys.add(scopedKey(principal, id))));
         return keys;
     }
 
-    private Set<String> contextKeysOf(String principal) {
+    private Set<String> contextKeysOf(String principal, List<PrincipalIndex> indexes) {
         String prefix = principalPrefix(principal);
         Set<String> keys = new LinkedHashSet<>();
         contexts.keySet().stream().filter(key -> key.startsWith(prefix)).forEach(keys::add);
-        indexOf(principal).contextIds().forEach(id -> keys.add(scopedKey(principal, id)));
+        indexes.forEach(shard -> shard.contextIds().forEach(id -> keys.add(scopedKey(principal, id))));
         return keys;
     }
 
@@ -257,21 +286,55 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
             long removed = 0;
             // Keys are collected first (local mirror plus the shared index), then
             // removed, so the removal never races the iteration it is driven by.
-            for (String key : taskKeysOf(principal)) {
+            List<PrincipalIndex> indexes = indexesOf(principal);
+            for (String key : taskKeysOf(principal, indexes)) {
                 if (tasks.remove(key) != null) {
                     removed++;
                 }
             }
-            for (String key : contextKeysOf(principal)) {
+            for (String key : contextKeysOf(principal, indexes)) {
                 if (contexts.remove(key) != null) {
                     removed++;
                 }
             }
-            index.remove(principal);
+            indexKeysOf(principal).forEach(index::remove);
             return removed;
         } finally {
             erasureLock.writeLock().unlock();
         }
+    }
+
+    /**
+     * The shard of the index an id belongs to. Stable across nodes and restarts:
+     * {@link String#hashCode()} is specified, unlike an identity or seeded hash.
+     */
+    static int shardOf(String id) {
+        return Math.floorMod(id.hashCode(), INDEX_SHARDS);
+    }
+
+    /**
+     * The index key of one shard of {@code principal}. Built on
+     * {@link #principalPrefix}, so no two principals share a shard key.
+     */
+    static String indexKey(String principal, int shard) {
+        return principalPrefix(principal) + "#" + shard;
+    }
+
+    /**
+     * Every index key a principal may have: its {@link #INDEX_SHARDS} shards, then
+     * the bare principal — the single value the release before the shards kept.
+     * During a rolling upgrade a node of that release still writes it, and the
+     * bucket keeps it for {@code eddi.a2a.task-ttl} after; a sweep or an export
+     * that skipped it would miss records only those nodes wrote. Drop the bare
+     * principal from this list one release after the shards shipped.
+     */
+    static List<String> indexKeysOf(String principal) {
+        List<String> keys = new ArrayList<>(INDEX_SHARDS + 1);
+        for (int shard = 0; shard < INDEX_SHARDS; shard++) {
+            keys.add(indexKey(principal, shard));
+        }
+        keys.add(principal);
+        return keys;
     }
 
     /**

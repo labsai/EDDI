@@ -5,17 +5,24 @@
 package ai.labs.eddi.engine.caching;
 
 import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalAnswers;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 
 class CacheImplTest {
 
@@ -193,6 +200,80 @@ class CacheImplTest {
     void entrySet() {
         cache.put("a", "1");
         assertEquals(1, cache.entrySet().size());
+    }
+
+    /**
+     * Entries change through the map methods only. In cluster mode those are what
+     * announce the change to the other nodes or reach the shared bucket, so the
+     * node-local cache refuses a view change too: a deployment of one node fails
+     * where a cluster would, not only in production.
+     */
+    @Test
+    @DisplayName("keySet, values and entrySet refuse to change the cache")
+    void viewsAreReadOnly() {
+        cache.put("k", "v");
+
+        assertThrows(UnsupportedOperationException.class, () -> cache.keySet().remove("k"));
+        assertThrows(UnsupportedOperationException.class, () -> cache.values().removeIf(v -> true));
+        assertThrows(UnsupportedOperationException.class, () -> cache.entrySet().iterator().next().setValue("x"));
+        assertEquals("v", cache.get("k"));
+    }
+
+    /**
+     * {@code put} and {@code remove} answer with the value they replaced or
+     * removed, as {@code ConcurrentMap} requires. They read first and wrote second,
+     * so a write landing in between was replaced (or removed) while the caller was
+     * told about the value before it. The racing write is made inside the read; the
+     * removal listener reports what the cache really replaced.
+     */
+    @Nested
+    @DisplayName("put and remove report the value they actually replaced")
+    class AtomicPutAndRemove {
+
+        private final List<String> replaced = new ArrayList<>();
+        private final List<String> removed = new ArrayList<>();
+        private CacheImpl<String, String> racy;
+
+        @BeforeEach
+        void setUp() {
+            Cache<String, String> real = Caffeine.newBuilder()
+                    .executor(Runnable::run)
+                    .expireAfter(WriteExpiry.<String, String>never())
+                    .<String, String>removalListener((key, value, cause) -> {
+                        if (cause == RemovalCause.REPLACED) {
+                            replaced.add(value);
+                        } else if (cause == RemovalCause.EXPLICIT) {
+                            removed.add(value);
+                        }
+                    })
+                    .build();
+            real.put("k", "old");
+            @SuppressWarnings("unchecked")
+            Cache<String, String> withRacer = mock(Cache.class, AdditionalAnswers.delegatesTo(real));
+            doAnswer(invocation -> {
+                String read = real.getIfPresent("k");
+                real.put("k", "racer");
+                replaced.clear(); // the racer's own replacement of "old" is not under test
+                return read;
+            }).when(withRacer).getIfPresent("k");
+            racy = new CacheImpl<>("racy", withRacer);
+        }
+
+        @Test
+        void putReturnsTheValueItReplaced() {
+            String answered = racy.put("k", "mine");
+
+            assertEquals(List.of(answered), replaced);
+            assertEquals("mine", racy.backingCache().asMap().get("k"));
+        }
+
+        @Test
+        void removeReturnsTheValueItRemoved() {
+            String answered = racy.remove("k");
+
+            assertEquals(List.of(answered), removed);
+            assertNull(racy.backingCache().asMap().get("k"));
+        }
     }
 
     // ==================== TTL-aware methods ====================
