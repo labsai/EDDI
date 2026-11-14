@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -68,6 +69,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -136,6 +138,17 @@ public class UpgradeExecutor {
         } else if (config != null) {
             config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
         }
+    }
+
+    /**
+     * Refuses an agent-originated upgrade that would change the target's
+     * {@code hitlConfig.oversight}. Null when built outside the container.
+     */
+    private AgentCallOversightGuard oversightGuard;
+
+    @Inject
+    void useOversightGuard(AgentCallOversightGuard guard) {
+        this.oversightGuard = guard;
     }
 
     @Inject
@@ -215,6 +228,9 @@ public class UpgradeExecutor {
             // secret scrubber replaced with ${vault:REDACTED} — see
             // restoreRedactedSecrets.
             ImportPreview preview = structuralMatcher.buildPreview(source, targetAgentId, true);
+            // Before anything is written, like the EDIT check above: an agent's own call
+            // may not change the target's oversight policy through a sync.
+            requireNoAgentOriginatedOversightChange(preview, targetAgentId, selectedSourceIds);
 
             List<WorkflowSourceData> sourceWorkflows = source.readWorkflows();
             List<SnippetSourceData> sourceSnippets = source.readSnippets();
@@ -416,6 +432,31 @@ public class UpgradeExecutor {
             LOGGER.errorf(e, "Upgrade failed for target agent %s", LogSanitizer.sanitize(targetAgentId));
             throw new RuntimeException("Upgrade failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Refuses (403) an upgrade carrying {@code X-EDDI-Agent-Call} whose agent
+     * settings would change the target's {@code hitlConfig.oversight}. The agent
+     * write at the end goes through {@code RestAgentStore.updateAgent}, which
+     * refuses it as well — but only after workflows and extensions have been
+     * written; checked here, nothing is. Both an UPDATE and a CONFLICT are checked,
+     * since either may be adopted.
+     */
+    void requireNoAgentOriginatedOversightChange(ImportPreview preview, String targetAgentId, Set<String> selectedSourceIds)
+            throws IOException {
+        if (oversightGuard == null || !oversightGuard.isAgentOriginated() || preview == null || preview.resources() == null) {
+            return;
+        }
+        ResourceDiff agentDiff = preview.resources().stream().filter(diff -> "agent".equals(diff.resourceType())).findFirst().orElse(null);
+        if (agentDiff == null || agentDiff.sourceContent() == null || !isSelected(selectedSourceIds, agentDiff.sourceId())
+                || (agentDiff.action() != DiffAction.UPDATE && agentDiff.action() != DiffAction.CONFLICT)) {
+            return;
+        }
+        AgentConfiguration incoming = jsonSerialization.deserialize(agentDiff.sourceContent(), AgentConfiguration.class);
+        oversightGuard.requireNoOversightChange(targetAgentId, incoming, () -> {
+            Integer version = resolveLatestVersion(targetAgentId);
+            return version == null ? null : agentStore.readAgent(targetAgentId, version);
+        });
     }
 
     /**

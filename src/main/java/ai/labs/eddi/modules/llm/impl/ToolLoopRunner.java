@@ -1973,9 +1973,12 @@ class ToolLoopRunner {
         var guardrails = task.getToolResultGuardrails();
         boolean willWrap = guardrails == null
                 || (!Boolean.FALSE.equals(guardrails.getEnabled()) && !Boolean.FALSE.equals(guardrails.getMarkProvenance()));
-        if (limits == null || !willWrap) {
+        if (!willWrap) {
             return limits;
         }
+        // No limits configured means the built-in defaults (as in the truncator), and
+        // the envelope's room is reserved against those too.
+        limits = limits != null ? limits : new LlmConfiguration.ToolResponseLimits();
         var reserved = new LlmConfiguration.ToolResponseLimits();
         reserved.setDefaultMaxChars(reduce(limits.getDefaultMaxChars()));
         reserved.setTruncationStrategy(limits.getTruncationStrategy());

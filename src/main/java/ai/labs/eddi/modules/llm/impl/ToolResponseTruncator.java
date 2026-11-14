@@ -196,9 +196,13 @@ public class ToolResponseTruncator {
      */
     public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
                                    String taskType, Map<String, String> taskParameters, SummarizerSpend spend) {
-        if (limits == null || result == null) {
+        if (result == null) {
             return result;
         }
+        // No toolResponseLimits configured means the built-in defaults (50,000
+        // chars, headTail), not "unbounded": a remote tool could otherwise put tens of
+        // megabytes into the prompt and the stored trace. 0 still disables.
+        limits = limits != null ? limits : new ToolResponseLimits();
 
         int maxChars = resolveLimit(toolName, limits);
         if (maxChars <= 0 || result.length() <= maxChars) {

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -134,6 +135,53 @@ class McpToolsProviderDiscoveryTest {
 
     private static List<String> names(List<ToolSpecification> specs) {
         return specs.stream().map(ToolSpecification::name).toList();
+    }
+
+    // ==================== per-server tool cap (after the whitelist)
+    // ====================
+
+    private static McpToolProviderManager.McpToolsResult manyTools(int count) {
+        List<ToolSpecification> specs = new ArrayList<>();
+        Map<String, ToolExecutor> executors = new HashMap<>();
+        for (int i = 1; i <= count; i++) {
+            specs.add(spec("tool_" + i));
+            executors.put("tool_" + i, executor());
+        }
+        return new McpToolProviderManager.McpToolsResult(specs, executors);
+    }
+
+    @Test
+    @DisplayName("300 tools, whitelist naming tool #250: that tool is offered — the cap counts after the whitelist")
+    void whitelistedToolPastTheCapIsOffered() throws Exception {
+        var config = mcpConfig("big", "http://mcp.example/mcp");
+        config.setToolsWhitelist(List.of("tool_250"));
+        wireWorkflowWith(config);
+        when(manager.toolsPerServerCap()).thenReturn(McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER);
+        when(manager.discoverTools(anyList())).thenReturn(manyTools(300));
+
+        var result = provider().discover(memory);
+
+        assertEquals(List.of("tool_250"), names(result.toolSpecs()));
+        assertTrue(result.executors().containsKey("tool_250"));
+    }
+
+    @Test
+    @DisplayName("without a whitelist the cap keeps the first N of what the server offers")
+    void capAppliesToWhatRemains() throws Exception {
+        wireWorkflowWith(mcpConfig("big", "http://mcp.example/mcp"));
+        when(manager.toolsPerServerCap()).thenReturn(2);
+        when(manager.discoverTools(anyList())).thenReturn(manyTools(300));
+
+        assertEquals(List.of("tool_1", "tool_2"), names(provider().discover(memory).toolSpecs()));
+    }
+
+    @Test
+    @DisplayName("an unset cap (0) falls back to the default of 128")
+    void unsetCapIsTheDefault() throws Exception {
+        wireWorkflowWith(mcpConfig("big", "http://mcp.example/mcp"));
+        when(manager.discoverTools(anyList())).thenReturn(manyTools(300));
+
+        assertEquals(McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER, provider().discover(memory).toolSpecs().size());
     }
 
     // ==================== whitelist / blacklist ====================

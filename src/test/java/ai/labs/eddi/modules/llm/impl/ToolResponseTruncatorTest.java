@@ -82,6 +82,18 @@ class ToolResponseTruncatorTest {
     }
 
     @Test
+    @DisplayName("no toolResponseLimits configured: a 30 MB remote result is still cut to the 50,000-char default")
+    void truncateIfNeeded_nullLimits_appliesBuiltInDefault() {
+        String huge = "A".repeat(30 * 1024 * 1024);
+
+        String result = truncator.truncateIfNeeded("remote_tool", huge, null, TASK_TYPE, TASK_PARAMS);
+
+        int defaultMax = new ToolResponseLimits().getDefaultMaxChars();
+        assertTrue(result.length() < defaultMax + 1_000, "capped near the default, was " + result.length());
+        assertTrue(result.length() < huge.length());
+    }
+
+    @Test
     void truncateIfNeeded_nullResult_returnsNull() {
         var limits = new ToolResponseLimits();
         assertNull(truncator.truncateIfNeeded("myTool", null, limits, TASK_TYPE, TASK_PARAMS));

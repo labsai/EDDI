@@ -108,6 +108,15 @@ public class OpenAiMessageMapper {
     private final ObjectMapper objectMapper;
     private final int maxAttachmentsPerTurn;
 
+    /**
+     * Ceiling for a client {@code system} message, shared with the turn input's
+     * ({@code eddi.conversations.max-input-chars}); {@code 0} disables it.
+     * Field-injected so the constructor keeps its shape.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.conversations.max-input-chars", defaultValue = "200000")
+    int maxInputChars = 200_000;
+
     @Inject
     public OpenAiMessageMapper(ObjectMapper objectMapper,
             @ConfigProperty(name = "eddi.attachments.max-per-turn",
@@ -142,6 +151,14 @@ public class OpenAiMessageMapper {
 
         ChatMessage systemMessage = request.lastSystemMessage();
         String systemText = extractText(systemMessage);
+        if (systemText != null && maxInputChars > 0 && systemText.length() > maxInputChars) {
+            // The system message rides along as a context on every turn and is stored
+            // with it, so it gets the same ceiling the user's input has; uncapped, a
+            // client could persist megabytes per turn. 400, as for an over-long input.
+            throw OpenAiApiException.badRequest(OpenAiConversationBridge.INPUT_TOO_LARGE_CODE, String.format(
+                    "The system message is %d characters; at most %d are accepted per turn (eddi.conversations.max-input-chars).",
+                    systemText.length(), maxInputChars));
+        }
         if (systemText != null && !systemText.isBlank()) {
             contexts.put(CONTEXT_SYSTEM_MESSAGE, new Context(Context.ContextType.string, systemText));
         }

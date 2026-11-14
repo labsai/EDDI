@@ -52,6 +52,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -208,6 +209,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Refuses an agent-originated merge that would change an existing agent's
+     * {@code hitlConfig.oversight}. Null when built outside the container.
+     */
+    private AgentCallOversightGuard oversightGuard;
+
+    @Inject
+    void useOversightGuard(AgentCallOversightGuard guard) {
+        this.oversightGuard = guard;
     }
 
     /**
@@ -892,6 +904,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // import), and surfaced as a 500 instead of a 400.
                 HitlConfigValidation.validate(agentConfig.getHitlConfig());
                 AgentStore.validateContinuation(agentConfig);
+                // Before the workflows land, like the checks above.
+                if (isMerge && isSelected(selectedSet, agentOriginId)) {
+                    requireNoAgentOriginatedOversightChange(agentConfig, agentOriginId);
+                }
 
                 // Each distinct workflow once. The first pass repoints every occurrence of
                 // a URI, so a repeated one used to be imported again for nothing — a full
@@ -1417,6 +1433,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         String targetSpace = spaceContext != null ? spaceContext.defaultWriteSpace() : null;
         String space = descriptor.getSpaceId();
         return targetSpace == null || space == null || space.isBlank() || targetSpace.equals(space);
+    }
+
+    /**
+     * Refuses (403) a merge import carrying {@code X-EDDI-Agent-Call} whose agent
+     * would replace an existing agent's {@code hitlConfig.oversight} with a
+     * different one. The merge's agent write goes through
+     * {@code RestAgentStore.updateAgent}, which refuses it too, but only after the
+     * workflows and extensions were written; checked here, nothing is. An archive
+     * agent with no local match is created as a new agent and is not checked.
+     */
+    void requireNoAgentOriginatedOversightChange(AgentConfiguration incoming, String agentOriginId) {
+        if (oversightGuard == null || !oversightGuard.isAgentOriginated()) {
+            return;
+        }
+        URI existingUri = findLocalUriByOriginId(agentOriginId);
+        IResourceId localResId = existingUri != null ? RestUtilities.extractResourceId(existingUri) : null;
+        if (localResId == null) {
+            return;
+        }
+        IResourceStore<AgentConfiguration> store = resolveStore(IAgentStore.class);
+        oversightGuard.requireNoOversightChange(localResId.getId(), incoming, () -> store.read(localResId.getId(), localResId.getVersion()));
     }
 
     private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, boolean compatible,

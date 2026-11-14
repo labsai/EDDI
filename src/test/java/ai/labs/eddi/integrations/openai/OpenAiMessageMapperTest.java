@@ -121,6 +121,28 @@ class OpenAiMessageMapperTest {
     }
 
     @Test
+    void systemMessageOverTheInputCeiling_isRefusedWith400() throws Exception {
+        var capped = new OpenAiMessageMapper(objectMapper, 5);
+        capped.maxInputChars = 100;
+        var request = parse("{\"model\":\"m\",\"messages\":[{\"role\":\"system\",\"content\":\"" + "s".repeat(101)
+                + "\"},{\"role\":\"user\",\"content\":\"Hi\"}]}");
+
+        var refused = assertThrows(OpenAiApiException.class, () -> capped.toInputData(request));
+        assertEquals(400, refused.getStatus());
+        assertTrue(refused.getMessage().contains("eddi.conversations.max-input-chars"), refused.getMessage());
+    }
+
+    @Test
+    void systemMessageAtTheInputCeiling_isAccepted() throws Exception {
+        var capped = new OpenAiMessageMapper(objectMapper, 5);
+        capped.maxInputChars = 100;
+        var request = parse("{\"model\":\"m\",\"messages\":[{\"role\":\"system\",\"content\":\"" + "s".repeat(100)
+                + "\"},{\"role\":\"user\",\"content\":\"Hi\"}]}");
+
+        assertEquals("s".repeat(100), capped.toInputData(request).getContext().get(OpenAiMessageMapper.CONTEXT_SYSTEM_MESSAGE).getValue());
+    }
+
+    @Test
     void channelContextIsAlwaysPresent() throws Exception {
         var request = parse("""
                 {"model":"m","messages":[{"role":"user","content":"Hi"}]}""");

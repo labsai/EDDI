@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
@@ -25,6 +26,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Discovers mcpcalls configurations from the agent's workflow and connects to
@@ -101,7 +104,9 @@ class McpToolsProvider implements ToolSourceProvider {
                 return host;
             }
         } catch (IllegalArgumentException e) {
-            LOGGER.debugf("mcpServerUrl is not a URI, grouping its tools as 'mcp': %s", e.getMessage());
+            // The parser's message quotes the URL, which can carry a credential.
+            LOGGER.debugf("mcpServerUrl is not a URI, grouping its tools as 'mcp': %s",
+                    sanitize(UriRedactor.redactUri(String.valueOf(config.getMcpServerUrl()))));
         }
         return "mcp";
     }
@@ -193,12 +198,25 @@ class McpToolsProvider implements ToolSourceProvider {
                 List<String> whitelist = mcpCallsConfig.getToolsWhitelist();
                 List<String> blacklist = mcpCallsConfig.getToolsBlacklist();
 
+                // eddi.mcp.tools.max-per-server, counted AFTER this agent's whitelist and
+                // blacklist: the discovered list is cached per server and shared by every
+                // agent, so capping it there would hide a whitelisted tool past position
+                // N on a large server.
+                int toolCap = mcpToolProviderManager.toolsPerServerCap() > 0
+                        ? mcpToolProviderManager.toolsPerServerCap()
+                        : McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER;
+                int keptFromServer = 0;
+                int droppedByCap = 0;
                 for (ToolSpecification spec : result.toolSpecs()) {
                     String name = spec.name();
                     if (whitelist != null && !whitelist.isEmpty() && !whitelist.contains(name))
                         continue;
                     if (blacklist != null && blacklist.contains(name))
                         continue;
+                    if (keptFromServer >= toolCap) {
+                        droppedByCap++;
+                        continue;
+                    }
 
                     // First-write-wins WITHIN this provider, and only when the spec has
                     // an executor. Without it, two MCP servers exposing the same tool
@@ -209,23 +227,29 @@ class McpToolsProvider implements ToolSourceProvider {
                     // hostile or careless server can trigger against another's name.
                     ToolExecutor executor = result.executors().get(name);
                     if (executor == null) {
-                        LOGGER.warnf("mcpcalls tool '%s' has a specification but no executor — skipping", name);
+                        LOGGER.warnf("mcpcalls tool '%s' has a specification but no executor — skipping", sanitize(name));
                         continue;
                     }
                     if (executors.containsKey(name)) {
                         LOGGER.warnf("mcpcalls tool name collision: '%s' is exposed by more than one MCP server — "
                                 + "keeping the first and dropping the duplicate. Use 'toolsBlacklist' on the losing "
-                                + "server to make the choice explicit.", name);
+                                + "server to make the choice explicit.", sanitize(name));
                         continue;
                     }
                     toolSpecs.add(spec);
                     executors.put(name, executor);
+                    keptFromServer++;
                     // Pin the call: without this the approver saw a tool name and
                     // nothing else, and the pre-execution re-check had nothing to
                     // compare against.
                     resolversOut.put(name, RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), name,
                             mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
                     groupsOut.put(name, group);
+                }
+                if (droppedByCap > 0) {
+                    LOGGER.warnf("MCP server '%s' offers this agent %d tools after its whitelist/blacklist — keeping the first %d, "
+                            + "dropping %d (eddi.mcp.tools.max-per-server). Name the tools the agent needs in toolsWhitelist.",
+                            sanitize(groupId(mcpCallsConfig)), keptFromServer + droppedByCap, toolCap, droppedByCap);
                 }
 
                 // Resource bridge — explicit opt-in per config, and deliberately NOT
@@ -240,7 +264,7 @@ class McpToolsProvider implements ToolSourceProvider {
                             ToolExecutor executor = bridge.executors().get(spec.name());
                             if (executor == null || executors.containsKey(spec.name())) {
                                 LOGGER.warnf("mcpcalls resource-bridge tool '%s' dropped (missing executor or name collision)",
-                                        spec.name());
+                                        sanitize(spec.name()));
                                 continue;
                             }
                             toolSpecs.add(spec);

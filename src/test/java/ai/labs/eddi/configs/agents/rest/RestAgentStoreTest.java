@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallOversightGuard;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -278,6 +279,19 @@ class RestAgentStoreTest {
             assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 
             verify(restWorkflowStore, never()).readWorkflow(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an agent-originated update that the oversight guard refuses writes nothing")
+        void agentOriginatedOversightChangeIsRefusedBeforeAnyWrite() throws Exception {
+            AgentCallOversightGuard oversightGuard = mock(AgentCallOversightGuard.class);
+            doThrow(new ForbiddenException("oversight")).when(oversightGuard).requireNoOversightChange(eq(AGENT_ID), any(), any());
+            restAgentStore.oversightGuard = oversightGuard;
+
+            assertThrows(ForbiddenException.class, () -> restAgentStore.updateAgent(AGENT_ID, 1, referencing(PKG1_ID), false));
+
+            verify(AgentStore, never()).update(anyString(), anyInt(), any(), anyBoolean());
+            verifyNoInteractions(capabilityRegistryService);
         }
 
         @Test

@@ -305,7 +305,10 @@ Every property has an environment-variable form: `eddi.openai-compat.api-key` �
 
 The header value is namespaced to `openwebui:<id>`, so a header can never name an
 OIDC principal or any other identity source. The prefix is reserved: an OIDC
-principal that begins with `openwebui:` is refused with `401`.
+principal that begins with `openwebui:` is refused with `401`. So is an OIDC
+principal whose name equals `default-user` (ignoring case): it would otherwise own
+every anonymous conversation. The shipped default, `openai-anonymous`, is reserved
+deployment-wide like `anonymous`.
 
 Chats created before header ids were namespaced are mapped under the raw id. Such
 a mapping does not record whether the header or an OIDC principal (while `/v1`
@@ -380,7 +383,7 @@ So instead of `what is this pdf about?`, your agent receives `{memory.current.in
 - "RAG_SYSTEM_CONTEXT=true"
 ```
 
-With it set, the context lands in the system message, the adapter maps it to the `openai_system_message` context entry, and the agent decides whether to use it — `{context.openai_system_message}` — or ignore it. The user's actual text stays the user's actual text.
+With it set, the context lands in the system message, the adapter maps it to the `openai_system_message` context entry, and the agent decides whether to use it — `{context.openai_system_message}` — or ignore it. The user's actual text stays the user's actual text. The system message is held to the same ceiling as the input, `eddi.conversations.max-input-chars` (200,000 characters by default); a longer one is refused with `400 input_too_large`, because it is stored with every turn.
 
 If you are using EDDI's own RAG pipeline instead, this still matters: without it, Open WebUI's retrieval output pollutes the input regardless.
 
