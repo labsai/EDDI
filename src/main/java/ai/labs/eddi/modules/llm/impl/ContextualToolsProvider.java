@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
+import ai.labs.eddi.engine.memory.ContestedMemoryMarker;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -254,7 +255,10 @@ class ContextualToolsProvider implements ToolSourceProvider {
         // once per tool assembly, and a turn assembles once per cascade step and again
         // on a HITL resume.
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config,
-                memory::isCancelled, TurnCounter.onStep(memory, KEY_MEMORY_WRITES));
+                memory::isCancelled, TurnCounter.onStep(memory, KEY_MEMORY_WRITES),
+                // A fact the tool wrote is stored ACCEPTED: it is no longer contested
+                // in this conversation, though its conversation property is unchanged.
+                key -> ContestedMemoryMarker.lift(memory.getConversationProperties(), Set.of(key)));
         tools.add(tool);
         // Conversation id, not user id: sanitize() strips control characters, it does
         // not make an identifier non-personal, and this line fires on every turn that

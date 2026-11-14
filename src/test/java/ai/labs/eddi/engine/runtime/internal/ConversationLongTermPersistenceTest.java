@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry.Assessment;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -457,6 +458,86 @@ class ConversationLongTermPersistenceTest {
 
         assertEquals(List.of("s", "o"), chosen.stream().map(UserMemoryEntry::id).toList());
         assertEquals(List.of("s", "o"), Conversation.mostSpecificPerKey(List.of(global, self, other)).stream().map(UserMemoryEntry::id).toList());
+    }
+
+    @Test
+    @DisplayName("a superseded entry gives way to its visible replacement, more specific scope or not")
+    void supersededEntryGivesWayAtLoad() {
+        Instant now = Instant.now();
+        var superseded = new UserMemoryEntry("s", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, false, 0,
+                now.minusSeconds(60), now.minusSeconds(60), Assessment.SUPERSEDED, "g");
+        var replacement = new UserMemoryEntry("g", "user-1", "lang", "de", "fact", Visibility.global, "agent-2", List.of(), null, false, 0, now,
+                now);
+
+        assertEquals(List.of("g"), Conversation.mostSpecificPerKey(List.of(superseded, replacement)).stream().map(UserMemoryEntry::id).toList());
+    }
+
+    @Test
+    @DisplayName("a superseded entry that is the reader's only one for its key is still loaded")
+    void lonelySupersededEntryIsKept() {
+        Instant now = Instant.now();
+        var superseded = new UserMemoryEntry("s", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now,
+                now, Assessment.SUPERSEDED, "invisible");
+
+        assertEquals(List.of("s"), Conversation.mostSpecificPerKey(List.of(superseded)).stream().map(UserMemoryEntry::id).toList());
+    }
+
+    @Test
+    @DisplayName("a contested memory is loaded as usual and listed in properties.contestedMemories")
+    void contestedMemoryIsMarked() throws Exception {
+        Instant now = Instant.now();
+        var contested = new UserMemoryEntry("c", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, true, 0, now, now,
+                Assessment.CONTESTED, null);
+        var accepted = new UserMemoryEntry("a", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now,
+                now);
+        when(userMemoryStore.getVisibleEntries(any(), any(), any(), any(), anyInt())).thenReturn(List.of(contested, accepted));
+
+        nextTurn().init(new LinkedHashMap<>());
+
+        assertEquals("fr", memory.getConversationProperties().get("lang").getValueString());
+        Property marker = memory.getConversationProperties().get(Conversation.KEY_CONTESTED_MEMORIES);
+        assertNotNull(marker);
+        assertEquals(Scope.conversation, marker.getScope(), "the marker must never be persisted as a memory");
+        assertEquals(Map.of("lang", true), marker.getValueObject());
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+    }
+
+    @Test
+    @DisplayName("no contested memory, no marker")
+    void noContestNoMarker() throws Exception {
+        Instant now = Instant.now();
+        var accepted = new UserMemoryEntry("a", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), null, false, 0, now,
+                now);
+        when(userMemoryStore.getVisibleEntries(any(), any(), any(), any(), anyInt())).thenReturn(List.of(accepted));
+
+        nextTurn().init(new LinkedHashMap<>());
+
+        assertFalse(memory.getConversationProperties().containsKey(Conversation.KEY_CONTESTED_MEMORIES));
+    }
+
+    @Test
+    @DisplayName("rewriting a contested key lifts it from the marker for the rest of the conversation")
+    void rewritingLiftsTheMarker() throws Exception {
+        Instant now = Instant.now();
+        var lang = new UserMemoryEntry("c", "user-1", "lang", "fr", "fact", Visibility.self, "agent-1", List.of(), null, true, 0, now, now,
+                Assessment.CONTESTED, null);
+        var city = new UserMemoryEntry("d", "user-1", "city", "Vienna", "fact", Visibility.self, "agent-1", List.of(), null, true, 0, now, now,
+                Assessment.CONTESTED, null);
+        when(userMemoryStore.getVisibleEntries(any(), any(), any(), any(), anyInt())).thenReturn(List.of(lang, city));
+        nextTurn().init(new LinkedHashMap<>());
+
+        Conversation turn = nextTurn();
+        memory.getConversationProperties().put("lang", new Property("lang", "de", Scope.longTerm));
+        turn.say("I speak German", new LinkedHashMap<>());
+
+        verify(userMemoryStore).upsert(argThat(e -> "lang".equals(e.key()) && e.assessment() == Assessment.ACCEPTED));
+        assertEquals(Map.of("city", true), memory.getConversationProperties().get(Conversation.KEY_CONTESTED_MEMORIES).getValueObject());
+
+        Conversation next = nextTurn();
+        memory.getConversationProperties().put("city", new Property("city", "Graz", Scope.longTerm));
+        next.say("I moved to Graz", new LinkedHashMap<>());
+
+        assertFalse(memory.getConversationProperties().containsKey(Conversation.KEY_CONTESTED_MEMORIES));
     }
 
     @Test
