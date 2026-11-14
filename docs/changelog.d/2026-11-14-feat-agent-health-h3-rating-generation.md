@@ -38,3 +38,22 @@ refusal there could only roll them back on a best-effort basis, and a failed del
 before `importConnections`. So "nothing is written" now holds for that path too. A sync imports no connections and
 keeps relying on the executor's own check. Tests: `RestImportServiceConnectionsTest.upgradeRefusedSettingsCreateNoConnection`
 and `UpgradeExecutorSyncTest.checkAdoptedSettingsBeforeAnyWrite`.
+
+## 🐛 fix(health): a newer capture is not skipped after a failed direct retry; the late-write column is catalog-checked (2026-11-14)
+
+**Repo:** EDDI (`feat/agent-health-h3`)
+
+### What changed and why
+
+Review findings on PR #1389.
+
+- **Newer capture after a failed direct retry.** A failed feed conversation's direct retry put it in the pass's `seen`
+  set even when the retry failed again or gave it up. A newer capture that the replay or the forward feed then read
+  in the same pass was skipped, while the cursor moved past it, so its new retry window never started. A failed direct
+  retry now records the capture it tried. A later read in the same pass is skipped only when its capture is no newer
+  than that one, so the same capture is still never tried twice. Test: `HealthOutcomeEvaluatorTest.newerCaptureInTheGivingUpPass`.
+- **`written_at_ms` checked in the catalog.** `PostgresHealthTurnStore.ensureSchema` ran
+  `ALTER TABLE … ADD COLUMN IF NOT EXISTS written_at_ms` on every node start, which still waits for an ACCESS EXCLUSIVE
+  lock. Behind a long streaming read, that queues every later reader. Both added columns now go through one
+  catalog-checked `addColumnIfMissing`, the way `self_reported_outcome` already did. It runs before the indexes, since
+  one of them is on `written_at_ms`. Test: `PostgresHealthTurnStoreTest.addedColumnsCheckedInTheCatalog`.
