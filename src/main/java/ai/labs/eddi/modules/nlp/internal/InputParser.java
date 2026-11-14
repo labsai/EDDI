@@ -120,6 +120,28 @@ public class InputParser implements IInputParser {
         return tokenize(sentence).length > limits.maxInputTokens();
     }
 
+    /**
+     * The part of {@code sentence} that {@link #parse} reads: its first
+     * {@link Limits#maxInputTokens()} tokens, joined by single blanks. Anything
+     * that consults the input besides the dictionaries (the semantic fallback) is
+     * handed this, so the configured limit holds for every path.
+     */
+    public static String withinTokenLimit(String sentence, Limits limits) {
+        String[] tokens = tokenize(sentence);
+        if (tokens.length <= limits.maxInputTokens()) {
+            return sentence == null ? "" : sentence;
+        }
+        return String.join(BLANK_CHAR, Arrays.copyOf(tokens, limits.maxInputTokens()));
+    }
+
+    /**
+     * The language a turn is parsed in: the conversation's, or {@code en} when it
+     * has none — the same default {@link #parse} and {@link #normalize} apply.
+     */
+    public static String effectiveLanguage(String userLanguage) {
+        return getLanguageOrDefault(userLanguage);
+    }
+
     private static String[] tokenize(String sentence) {
         String trimmed = sentence == null ? "" : sentence.trim();
         // An empty input is one empty token, as it always was: it is reported as
@@ -162,6 +184,7 @@ public class InputParser implements IInputParser {
             iterateDictionaries(holder, currentInputPart, userLanguage, dictionaries);
 
             iterateCorrections(holder, currentInputPart, userLanguage, tmpDictionaries);
+            holder.preferAccurateEnough(holder.index, config.getMinMatchingAccuracy());
         }
 
         return lookupPhrases(holder, phrasesFor(userLanguage), preparePhrases(tmpDictionaries, userLanguage), allReadings);
@@ -239,12 +262,12 @@ public class InputParser implements IInputParser {
 
     /**
      * Adds a token's matches, skipping any that mean the same as one already
-     * recorded for the token — same word, same expressions, same phrase role.
-     * Dictionaries and corrections report the same word more than once (a
+     * recorded for the token — same word, same expressions, same phrase role, same
+     * accuracy. Dictionaries and corrections report the same word more than once (a
      * correction at distance 0 of a word the dictionary already found, two
      * dictionaries sharing a word); each copy doubled the combinations the parser
-     * enumerates while adding no reading. The first copy wins, so the better
-     * (earlier) one is kept.
+     * enumerates while adding no reading. Copies of different accuracy are both
+     * kept, so the accuracy threshold can choose between them.
      */
     private void addDictionaryEntriesTo(InputHolder holder, String matchedInputValue, List<IDictionary.IFoundWord> foundWords) {
         for (IDictionary.IFoundWord foundWord : foundWords) {
@@ -271,6 +294,13 @@ public class InputParser implements IInputParser {
         // as many more as can be reported as alternatives are worth building.
         boolean noPhrases = !allReadings && phrasesMap.isEmpty() && tmpPhrasesMap.isEmpty();
         int solutionsWanted = noPhrases ? Math.min(limits.maxSolutions(), 1 + Math.max(0, config.getMaxAlternatives())) : limits.maxSolutions();
+
+        // Once a complete reading is found, only the configured alternatives (or, for
+        // parseAllReadings, every reading) are still worth enumerating.
+        int readingsWantedAfterComplete = allReadings
+                ? limits.maxSolutions()
+                : Math.min(limits.maxSolutions(), 1 + Math.max(0, config.getMaxAlternatives()));
+        boolean completeFound = false;
 
         int evaluatedSuggestions = 0;
         while (suggestionIterator.hasNext()) {
@@ -309,12 +339,23 @@ public class InputParser implements IInputParser {
             }
 
             if (matchedFullPhrase && noWordsLeft(foundWords)) {
-                // Every phrase word belongs to a phrase: nothing a later combination
-                // finds can be better. It goes to the FRONT — it used to be appended
-                // behind the worse solutions earlier combinations had produced, and
-                // the caller takes the first solution.
-                addIfAbsent(possibleSolutions, new RawSolution(RawSolution.Match.FULLY, foundWords), 0);
-                return possibleSolutions;
+                // Every phrase word belongs to a phrase: nothing a later combination finds
+                // can be better. The first such reading goes to the FRONT — it used to be
+                // appended behind the worse solutions earlier combinations had produced,
+                // and the caller takes the first solution. Enumeration stops right away
+                // unless alternatives (or every reading) were asked for; it used to stop
+                // regardless, so /parser and maxAlternatives missed the other readings.
+                var complete = new RawSolution(RawSolution.Match.FULLY, foundWords);
+                if (completeFound) {
+                    insertByRank(possibleSolutions, complete);
+                } else {
+                    addIfAbsent(possibleSolutions, complete, 0);
+                    completeFound = true;
+                }
+                if (possibleSolutions.size() >= readingsWantedAfterComplete) {
+                    return possibleSolutions;
+                }
+                continue;
             }
 
             // second try: fragments of phrases ("good morning" of "good morning sir")
@@ -341,6 +382,10 @@ public class InputParser implements IInputParser {
                 match = RawSolution.Match.PARTLY;
             }
             insertByRank(possibleSolutions, new RawSolution(match, foundWords));
+
+            if (completeFound && possibleSolutions.size() >= readingsWantedAfterComplete) {
+                break;
+            }
 
             // Hard cap: keeps memory bounded when many distinct partial solutions match.
             if (possibleSolutions.size() >= solutionsWanted) {
@@ -435,39 +480,51 @@ public class InputParser implements IInputParser {
     private List<IDictionary.IFoundWord> matchPartialPhrases(List<IDictionary.IFoundWord> foundWords,
                                                              Collection<IDictionary.IPhrase> candidatePhrases) {
         List<IDictionary.IFoundWord> current = foundWords;
-        // every replacement consumes at least one phrase word, so this terminates
+        // Starting words of fragments found ambiguous: skipped, so that the other
+        // positions are still searched. It used to give up on the whole input at the
+        // first ambiguity, dropping an unambiguous fragment elsewhere in it.
+        Set<IDictionary.IFoundWord> ambiguousStarts = Collections.newSetFromMap(new IdentityHashMap<>());
+        // each round replaces a fragment (consuming phrase words) or excludes one more
+        // starting word, so this terminates
         while (!noWordsLeft(current)) {
-            PartialMatch best = null;
-            boolean ambiguous = false;
+            List<PartialMatch> qualifying = new ArrayList<>();
             for (IDictionary.IPhrase phrase : candidatePhrases) {
-                PartialMatch candidate = longestFragment(current, phrase);
-                if (candidate == null || candidate.coverage() < config.getMinPartialPhraseCoverage()) {
-                    continue;
-                }
-                if (best == null || candidate.coverage() > best.coverage()
-                        || (candidate.coverage() == best.coverage() && candidate.length() > best.length())) {
-                    best = candidate;
-                    ambiguous = false;
-                } else if (candidate.coverage() == best.coverage() && candidate.length() == best.length() && candidate.start() == best.start()) {
-                    ambiguous = true;
+                PartialMatch candidate = longestFragment(current, phrase, ambiguousStarts);
+                if (candidate != null && candidate.coverage() >= config.getMinPartialPhraseCoverage()) {
+                    qualifying.add(candidate);
                 }
             }
-            if (best == null || ambiguous) {
+            if (qualifying.isEmpty()) {
                 return current;
             }
-            int end = best.start() + best.length();
-            List<IDictionary.IFoundWord> constituents = current.subList(best.start(), end);
-            double accuracy = best.coverage() * MatchQuality.lowestAccuracy(constituents);
-            current = replaceRange(current, best.start(), end, new FoundPhrase(best.phrase(), MatchQuality.anyCorrected(constituents), accuracy));
+            PartialMatch best = qualifying.getFirst();
+            for (PartialMatch candidate : qualifying) {
+                if (candidate.coverage() > best.coverage() || (candidate.coverage() == best.coverage() && candidate.length() > best.length())) {
+                    best = candidate;
+                }
+            }
+            PartialMatch chosen = best;
+            long equallyGood = qualifying.stream().filter(candidate -> candidate.start() == chosen.start() && candidate.length() == chosen.length()
+                    && candidate.coverage() == chosen.coverage()).count();
+            if (equallyGood > 1) {
+                ambiguousStarts.add(current.get(chosen.start()));
+                continue;
+            }
+            int end = chosen.start() + chosen.length();
+            List<IDictionary.IFoundWord> constituents = current.subList(chosen.start(), end);
+            double accuracy = chosen.coverage() * MatchQuality.lowestAccuracy(constituents);
+            current = replaceRange(current, chosen.start(), end, new FoundPhrase(chosen.phrase(), MatchQuality.anyCorrected(constituents), accuracy));
         }
         return current;
     }
 
     /**
      * The longest run of consecutive phrase-word matches in {@code foundWords} that
-     * equals a run of consecutive words of {@code phrase}; {@code null} if none.
+     * equals a run of consecutive words of {@code phrase} and does not start at one
+     * of {@code excludedStarts}; {@code null} if none.
      */
-    private static PartialMatch longestFragment(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase) {
+    private static PartialMatch longestFragment(List<IDictionary.IFoundWord> foundWords, IDictionary.IPhrase phrase,
+                                                Set<IDictionary.IFoundWord> excludedStarts) {
         List<IDictionary.IWord> phraseWords = phrase.getWords();
         if (phraseWords.isEmpty()) {
             return null;
@@ -475,6 +532,9 @@ public class InputParser implements IInputParser {
         int bestStart = -1;
         int bestLength = 0;
         for (int i = 0; i < foundWords.size(); i++) {
+            if (excludedStarts.contains(foundWords.get(i))) {
+                continue;
+            }
             for (int j = 0; j < phraseWords.size(); j++) {
                 int k = 0;
                 while (i + k < foundWords.size() && j + k < phraseWords.size() && isPhraseWord(foundWords.get(i + k))

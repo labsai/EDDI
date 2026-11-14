@@ -383,6 +383,27 @@ class VaultGrantCheckerTest {
                     "the general scan had the same blind spot as the connection hop");
         }
 
+        /**
+         * The in-place expansion had no exception handling, so a variable-store failure
+         * escaped to the catch-all of findUngrantedReferences(agentId, version), which
+         * answers "no violations": the agent deployed with nothing checked.
+         */
+        @Test
+        @DisplayName("a variable store that fails is a violation, not a pass")
+        void variableStoreFailureFailsClosed() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.llm", LLM_ID);
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "${vars:anthropic-key}")));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+            when(globalVariableResolver.resolveValue(anyString(), anyString())).thenThrow(new IllegalStateException("variable store down"));
+            when(agentStore.read(eq("agent-1"), anyInt())).thenReturn(agent);
+
+            assertFalse(checker.findUngrantedReferences("agent-1", 1).isEmpty(),
+                    "an unreadable variable may hold any vault reference, so the check must not pass");
+        }
+
         @Test
         @DisplayName("a variable that expands to plain text contributes nothing")
         void plainVariableIsIgnored() throws Exception {

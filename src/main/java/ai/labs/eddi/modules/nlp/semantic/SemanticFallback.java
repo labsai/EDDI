@@ -143,7 +143,9 @@ public class SemanticFallback {
     }
 
     private static boolean appliesToLanguage(String exampleLanguage, String userLanguage) {
-        return isNullOrEmpty(exampleLanguage) || isNullOrEmpty(userLanguage) || exampleLanguage.equals(userLanguage);
+        // Only an example without a language applies to every conversation; a turn
+        // without a language matches no language-specific example.
+        return isNullOrEmpty(exampleLanguage) || exampleLanguage.equals(userLanguage);
     }
 
     /**

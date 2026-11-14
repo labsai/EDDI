@@ -15,6 +15,8 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.nlp.model.FoundPhrase;
+import ai.labs.eddi.modules.nlp.model.FoundWord;
+import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.modules.nlp.model.MatchQuality;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -23,6 +25,10 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Phrase matching, solution ordering and match quality of {@link InputParser}.
@@ -107,6 +113,56 @@ class InputParserMatchingTest {
         assertEquals("book_flight", first(parser.parse("bok flight", "en", List.of())).getExpressions().toString());
     }
 
+    /**
+     * Two readings of the same word with different accuracy: a guess at 0.3 listed
+     * first, a typo correction at 0.5 second. The dedupe used to drop the second as
+     * a repeat, and the parser chose the first, which the threshold then removed.
+     */
+    @Test
+    @DisplayName("minMatchingAccuracy chooses the reading that meets it, not merely the first one")
+    void thresholdChoosesTheQualifyingReading() throws Exception {
+        var dictionary = new RegularDictionary();
+        dictionary.addWord("hello", exp("greeting"), 0);
+        ICorrection guess = mock(ICorrection.class);
+        when(guess.lookupIfKnown()).thenReturn(true);
+        when(guess.correctWord(eq("helo"), any(), any())).thenReturn(List.of(new FoundWord(new Word("hello", exp("greeting"), null), true, 0.3)));
+        var typo = new DamerauLevenshteinCorrection(1, true);
+        typo.init(List.of(dictionary));
+        var config = new IInputParser.Config();
+        config.setMinMatchingAccuracy(0.4);
+
+        var raw = parser(config, List.of(dictionary), List.of(guess, typo)).parse("helo", "en", List.of());
+
+        assertEquals("greeting", DictionaryUtilities.extractExpressions(raw, false, false, 0.4).getFirst().getExpressions().toString());
+    }
+
+    /**
+     * A complete phrase reading used to end the search at once, so the other
+     * readings of the words around it were never collected for maxAlternatives or
+     * parseAllReadings.
+     */
+    @Test
+    @DisplayName("readings beside a complete phrase are still collected when alternatives are asked for")
+    void alternativesBesideACompletePhrase() throws Exception {
+        var greetings = phrases("hello world", "hw");
+        var first = new RegularDictionary();
+        first.addWord("x", exp("a"), 0);
+        var second = new RegularDictionary();
+        second.addWord("x", exp("b"), 0);
+        var config = new IInputParser.Config();
+        config.setMaxAlternatives(1);
+        var parser = parser(config, List.of(greetings, first, second), List.of());
+
+        var solutions = DictionaryUtilities.extractExpressions(parser.parse("hello world x", "en", List.of()), false, false);
+
+        assertEquals(List.of("hw, a", "hw, b"), solutions.stream().map(solution -> solution.getExpressions().toString()).toList());
+        assertEquals(2,
+                parser(new IInputParser.Config(), List.of(greetings, first, second), List.of()).parseAllReadings("hello world x", "en").size());
+        assertEquals(1,
+                parser(new IInputParser.Config(), List.of(greetings, first, second), List.of()).parse("hello world x", "en", List.of()).size(),
+                "without alternatives the search still stops at the complete reading");
+    }
+
     @Nested
     @DisplayName("partial phrases")
     class PartialPhrases {
@@ -158,6 +214,20 @@ class InputParserMatchingTest {
             var raw = parser(partial(true), List.of(phrases("good morning", "gm", "good night", "gn")), List.of()).parse("good", "en", List.of());
 
             assertTrue(first(raw).getExpressions().isEmpty(), "picked one arbitrarily: " + first(raw).getExpressions());
+        }
+
+        /**
+         * An ambiguous fragment ("good": morning or night) used to stop the search for
+         * the whole input, dropping the unambiguous "thanks" of "thanks sir" too.
+         */
+        @Test
+        @DisplayName("an ambiguous fragment does not suppress an unambiguous one elsewhere")
+        void ambiguityIsLocal() throws Exception {
+            var raw = parser(partial(true), List.of(phrases("good morning", "gm", "good night", "gn", "thanks sir", "ts")), List.of()).parse(
+                    "good thanks",
+                    "en", List.of());
+
+            assertEquals("ts", first(raw).getExpressions().toString());
         }
 
         @Test

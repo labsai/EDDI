@@ -73,8 +73,9 @@ public class RegularDictionary implements IDictionary {
     }
 
     /**
-     * Index of the phrases' words: lower-cased value to the distinct words with
-     * that value (one per spelling). Built lazily, dropped whenever phrases change.
+     * Index of the phrases' words: value (compared ignoring case) to the distinct
+     * words with that value (one per spelling). Built lazily, dropped whenever
+     * phrases change.
      * <p>
      * {@link #lookupTerm(String)} runs for every input token, and it used to stream
      * every word of every phrase twice — and to return one match per phrase that
@@ -88,10 +89,14 @@ public class RegularDictionary implements IDictionary {
     private Map<String, List<IWord>> phraseWordIndex() {
         Map<String, List<IWord>> index = phraseWordIndex;
         if (index == null) {
-            Map<String, List<IWord>> built = new HashMap<>();
+            // Keyed with the same case-insensitive equivalence as the words map
+            // (String.CASE_INSENSITIVE_ORDER, i.e. equalsIgnoreCase): ROOT lower-casing is
+            // not equivalent to it - Turkish dotless and dotted i lower-case to different
+            // keys yet compare equal ignoring case.
+            Map<String, List<IWord>> built = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
             for (IPhrase phrase : phrases) {
                 for (IWord partOfPhrase : phrase.getWords()) {
-                    List<IWord> spellings = built.computeIfAbsent(partOfPhrase.getValue().toLowerCase(Locale.ROOT), k -> new ArrayList<>(1));
+                    List<IWord> spellings = built.computeIfAbsent(partOfPhrase.getValue(), k -> new ArrayList<>(1));
                     if (spellings.stream().noneMatch(known -> known.getValue().equals(partOfPhrase.getValue()))) {
                         spellings.add(partOfPhrase);
                     }
@@ -107,7 +112,7 @@ public class RegularDictionary implements IDictionary {
     public List<IFoundWord> lookupTerm(String lookup) {
         List<IFoundWord> ret = new ArrayList<>();
 
-        List<IWord> phraseWords = phraseWordIndex().get(lookup.toLowerCase(Locale.ROOT));
+        List<IWord> phraseWords = phraseWordIndex().get(lookup);
         if (phraseWords != null) {
             // exact spelling first, then the case-insensitive ones
             phraseWords.stream().filter(partOfPhrase -> partOfPhrase.getValue().equals(lookup))

@@ -90,9 +90,13 @@ public class DamerauLevenshteinCorrection implements ICorrection {
             int lookupLength = lowerCaseLookup.length();
             for (IDictionary.IWord word : dictionary.getWords()) {
                 String value = word.getValue();
-                // The length bound first: it rules out most of a dictionary without
+                // A cheap length bound first: it rules out most of a dictionary without
                 // lower-casing (allocating) every word of it for every unknown token.
-                if (value == null || Math.abs(value.length() - lookupLength) > maxDistance) {
+                // Lower-casing never shortens a word but can lengthen it ('İ' becomes
+                // two chars), so a word is ruled out here only if it is too long as typed,
+                // or too short even at twice its length; calculateDistance applies the
+                // exact bound to the lower-cased word.
+                if (value == null || value.length() - lookupLength > maxDistance || 2L * value.length() < lookupLength - maxDistance) {
                     continue;
                 }
                 final int distance = calculateDistance(lowerCaseLookup, value.toLowerCase(Locale.ROOT));

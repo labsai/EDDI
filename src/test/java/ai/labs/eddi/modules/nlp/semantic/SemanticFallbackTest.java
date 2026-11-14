@@ -57,6 +57,15 @@ class SemanticFallbackTest {
     }
 
     @Test
+    @DisplayName("a turn without a language matches only examples without one")
+    void noLanguageIsNoWildcard() {
+        var fallback = new SemanticFallback(() -> model, EXAMPLES, 0.5);
+
+        assertTrue(fallback.classify("wetter", null).isEmpty(), "a German example matched a turn of no stated language");
+        assertEquals("cancel_order", fallback.classify("cancel order", null).orElseThrow().example().expressions());
+    }
+
+    @Test
     @DisplayName("embeds the examples once, in batches, and reuses them")
     void embedsExamplesOnce() {
         List<SemanticFallback.Example> many = new ArrayList<>();

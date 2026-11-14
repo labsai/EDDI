@@ -65,6 +65,16 @@ applies its length bound before lower-casing each dictionary word.
   string value with the linear reference scanner instead of one regex over the serialized document,
   where an unterminated `${vault:` in one field hid the reference in the next; the new counter is
   documented in [`metrics.md`](../metrics.md) and charted on the full-metrics dashboard ("Input Parser" row).
+- From the second review (after merging main): a variable-store failure during the grant check's in-place
+  `${vars:…}` expansion escaped to the catch-all that answers "no violations" — it now fails closed through
+  the per-variable path; the semantic fallback reads the same token-limited input and the same effective
+  language (default `en`) as the dictionaries, and an example with a language never matches a turn without
+  one; `minMatchingAccuracy` takes part in choosing a token's reading (qualifying readings first, and
+  readings of different accuracy are no longer collapsed); a complete phrase reading no longer cuts off the
+  readings asked for by `maxAlternatives` / `parseAllReadings`; an ambiguous phrase fragment no longer
+  suppresses unambiguous fragments elsewhere; the phrase index uses the same case-insensitive equivalence as
+  the word map (Turkish dotted/dotless i), and the Damerau–Levenshtein length pre-check allows for lower-case
+  expansion (`İ`).
 
 **Files:** [`InputParser.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/InputParser.java),
 [`IterationCounter.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/matches/IterationCounter.java),

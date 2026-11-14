@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
+import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
 import org.junit.jupiter.api.BeforeEach;
@@ -95,5 +96,20 @@ public class DamerauLevenshteinCorrectionTest {
         public boolean lookupIfKnown() {
             return false;
         }
+    }
+
+    /**
+     * Lower-casing can lengthen a word ('İ' becomes two chars), so a length guard
+     * on the spelling as typed rejected "İŞ" for "İŞŞ" although the lower-cased
+     * words are one insertion apart.
+     */
+    @Test
+    public void lengthGuardAllowsForLowerCaseExpansion() {
+        RegularDictionary dictionary = new RegularDictionary();
+        dictionary.addWord("İŞ", expressionUtilities.parseExpressions("work"), 0);
+        DamerauLevenshteinCorrection correction = new DamerauLevenshteinCorrection(1, false);
+        correction.init(List.of(dictionary));
+
+        assertEquals(1, correction.correctWord("İŞŞ", DEFAULT_LANGUAGE).size());
     }
 }

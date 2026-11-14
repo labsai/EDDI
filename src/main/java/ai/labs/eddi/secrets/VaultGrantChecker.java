@@ -821,7 +821,20 @@ public class VaultGrantChecker {
         }
         List<String> scanned = new ArrayList<>();
         scanned.add(value);
-        String inPlace = globalVariableResolver.resolveValue(value, tenantId);
+        String inPlace = null;
+        try {
+            inPlace = globalVariableResolver.resolveValue(value, tenantId);
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // a verdict, reported as a violation by the caller
+            throw e;
+        } catch (Exception e) {
+            // A store failure here used to escape to findUngrantedReferences' catch-all,
+            // which answers "no violations" and lets the agent deploy unchecked. Skip the
+            // in-place expansion instead: the per-variable pass below asks the same store
+            // and records every ${vars:...} it cannot expand as unresolved, which fails the
+            // check closed.
+            LOGGER.debugf("Could not expand %s in place while checking vault grants: %s", sanitize(value), sanitize(e.getMessage()));
+        }
         if (inPlace != null && !inPlace.equals(value)) {
             scanned.add(inPlace);
         }

@@ -271,6 +271,51 @@ class InputParserTaskQualityTest {
             assertEquals(1.0, meterRegistry.counter(InputParserTask.METRIC_SEMANTIC_FALLBACK, "outcome", "match").count());
         }
 
+        /**
+         * The dictionaries read only the first maxInputTokens tokens, while the
+         * fallback was handed the whole input, so words past the limit could still
+         * select an example.
+         */
+        @Test
+        @DisplayName("words past maxInputTokens do not reach the fallback either")
+        void fallbackHonoursTheTokenLimit() throws Exception {
+            Map<String, Object> config = new HashMap<>(fallback(List.of(cancelExample())));
+            config.put("maxInputTokens", "2");
+            var memory = turn("hello there cancel my order");
+
+            task.execute(memory, configure(config));
+
+            String parsed = stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key());
+            assertFalse(String.valueOf(parsed).contains("cancel_order"), String.valueOf(parsed));
+        }
+
+        /**
+         * Without a conversation language the dictionaries parse in the default one,
+         * but the fallback was given no language and accepted examples of any.
+         */
+        @Test
+        @DisplayName("without a conversation language, examples of another language do not match")
+        void fallbackUsesTheEffectiveLanguage() throws Exception {
+            var german = Map.of("text", "cancel my order", "expressions", "intent(cancel_order)", "lang", "de");
+            var memory = turn("cancel order");
+
+            task.execute(memory, configure(fallback(List.of(german))));
+
+            String parsed = stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key());
+            assertFalse(String.valueOf(parsed).contains("cancel_order"), String.valueOf(parsed));
+        }
+
+        @Test
+        @DisplayName("without a conversation language, examples in the default language match")
+        void fallbackDefaultsToTheParsersLanguage() throws Exception {
+            var english = Map.of("text", "cancel my order", "expressions", "intent(cancel_order)", "lang", "en");
+            var memory = turn("cancel order");
+
+            task.execute(memory, configure(fallback(List.of(english))));
+
+            assertEquals("intent(cancel_order)", stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key()));
+        }
+
         @Test
         @DisplayName("no similar example leaves the dictionaries' result")
         void noMatch() throws Exception {

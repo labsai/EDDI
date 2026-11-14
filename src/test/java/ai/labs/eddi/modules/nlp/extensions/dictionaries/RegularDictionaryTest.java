@@ -168,4 +168,17 @@ class RegularDictionaryTest {
 
         assertEquals(1, dict.lookupTerm("thank").size());
     }
+
+    /**
+     * The phrase index was keyed by ROOT lower-casing, which is not the
+     * case-insensitive equivalence the words map (and the old equalsIgnoreCase
+     * scan) uses: "IŞIK" lower-cases to "işik", while the dotless spelling "ışık"
+     * is equal to it ignoring case.
+     */
+    @Test
+    void phraseWordWithTurkishDotlessIIsFoundIgnoringCase() {
+        dict.addPhrase("IŞIK AÇ", new Expressions(new Expression("light_on")));
+
+        assertEquals(1, dict.lookupTerm("ışık").size());
+    }
 }

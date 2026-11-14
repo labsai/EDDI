@@ -180,7 +180,11 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
-        String userLanguage = retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties());
+        // Resolved once, so the dictionaries and the semantic fallback read the turn in
+        // the same language; the fallback used to get null when the conversation had
+        // none and then accepted examples of every language, while the dictionaries
+        // parsed in the default one.
+        String userLanguage = InputParser.effectiveLanguage(retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties()));
 
         List<RawSolution> parsedSolutions;
         String normalizedUserInput;
@@ -214,7 +218,10 @@ public class InputParserTask implements ILifecycleTask {
         Solution solution = solutions.isEmpty() ? null : solutions.getFirst();
 
         if ((solution == null || !solution.hasMeaningfulExpressions()) && parser.getSemanticFallback() != null) {
-            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), normalizedUserInput, userLanguage);
+            // The same tokens the dictionaries read: words past maxInputTokens must not
+            // select an example either.
+            String fallbackInput = limits == null ? normalizedUserInput : InputParser.withinTokenLimit(normalizedUserInput, limits);
+            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), fallbackInput, userLanguage);
             if (semantic != null) {
                 solution = semantic;
                 solutions = List.of(semantic);
