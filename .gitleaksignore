@@ -186,3 +186,21 @@ a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStoreReadRedactionTest.java:generic-api-key:62
 208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStoreReadRedactionTest.java:generic-api-key:78
 208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/secrets/sanitize/ConfigSecretRedactorTest.java:generic-api-key:202
+
+# PR #1304 (feat/connections-jwt-bearer): the OAuth2 JWT-bearer / private_key_jwt
+# flows parse a PKCS#8 private key, so their source, Javadoc and tests had to write
+# the PEM armour lines as literals: a Javadoc line and a constant in SigningKey, two
+# throwaway literals in ConnectionConfigurationSignedJwtValidationTest (a refused
+# pasted key and a redaction case) and two in JwtAssertionsTest (a PEM assembled
+# around a key generated at test time, and a list of unsupported key shapes). The
+# private-key rule matches the armour plus any 64+ characters up to the next armour
+# line, so it fires on prose and placeholder text. No entry holds key material: every
+# body is empty, a placeholder or generated in memory per test run. Later commits of
+# the same PR assemble the armour at runtime, but gitleaks scans the whole commit
+# range and reads this file from the base branch, so the commit that introduced them
+# is named here. Four candidates are listed; the CI run reported three, and an entry
+# that matches nothing is inert.
+0cd8c96934f6f9bf3e1dbef60bbac1231e357152:src/main/java/ai/labs/eddi/connections/oauth/SigningKey.java:private-key:23
+0cd8c96934f6f9bf3e1dbef60bbac1231e357152:src/test/java/ai/labs/eddi/configs/connections/model/ConnectionConfigurationSignedJwtValidationTest.java:private-key:100
+0cd8c96934f6f9bf3e1dbef60bbac1231e357152:src/test/java/ai/labs/eddi/connections/oauth/JwtAssertionsTest.java:private-key:65
+0cd8c96934f6f9bf3e1dbef60bbac1231e357152:src/test/java/ai/labs/eddi/connections/oauth/JwtAssertionsTest.java:private-key:253
