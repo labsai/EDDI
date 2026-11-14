@@ -341,9 +341,6 @@ public class AgentCardService {
     }
 
     /**
-     * Build an AgentCard from an agent configuration.
-     */
-    /**
      * The agent's human name, as its descriptor records it.
      * <p>
      * A2A Agent Cards are how other systems discover what an agent <em>is</em>, and
