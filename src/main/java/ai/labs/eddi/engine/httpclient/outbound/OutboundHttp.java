@@ -72,8 +72,8 @@ import java.util.function.UnaryOperator;
  * <li><b>Redirects</b> — never followed by the engine. Followed here hop by
  * hop, up to the policy's limit, with the method rewritten as its
  * {@link MethodRule} says.</li>
- * <li><b>Credentials</b> — on a cross-origin hop, {@link #SENSITIVE_HEADERS}
- * and every header the request marked as caller-derived are dropped.</li>
+ * <li><b>Credentials</b> — a cross-origin hop keeps only the
+ * {@link #CROSS_ORIGIN_SAFE_HEADERS}; every other header stays behind.</li>
  * <li><b>Trace context</b> — the W3C {@code traceparent}/{@code tracestate} of
  * the calling thread's span (a tool call's {@code execute_tool} span) is added
  * to the first hop unless the request already carries one, kept on same-origin
@@ -94,18 +94,22 @@ public class OutboundHttp {
     private static final Logger LOGGER = Logger.getLogger(OutboundHttp.class);
 
     /**
-     * Security-sensitive headers stripped on cross-origin redirects. Beyond the
-     * three RFC-managed ones, this also carries the widely-used custom credential
-     * header names: a redirect from a public host to another origin must not replay
-     * an {@code X-Api-Key} (or the like) any more than it may replay
-     * {@code Authorization}.
+     * The request headers a cross-origin redirect hop keeps (lower case): content
+     * negotiation and the client's identity, none of which carries a credential.
+     * Every other header stays behind.
      * <p>
-     * Public and lower-cased so the Vert.x httpcalls client
-     * ({@code HttpClientModule}) strips the same set on its own cross-origin
-     * redirect hops.
+     * An allow-list, not a list of credential names: a key can sit in any header
+     * ({@code X-Custom-Token}, {@code Ocp-Apim-Subscription-Key}, a
+     * {@code ${caller:token}} under a name the author chose), so no fixed list of
+     * names could be trusted to catch it. The W3C trace context falls out with the
+     * rest — the caller vouched for one origin, and the trace id names this
+     * deployment's trace.
+     * <p>
+     * Public so the Vert.x httpcalls client ({@code HttpClientModule}) applies the
+     * same list on its own cross-origin redirect hops.
      */
-    public static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
-            "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication");
+    public static final Set<String> CROSS_ORIGIN_SAFE_HEADERS = Set.of("accept", "accept-encoding", "accept-language",
+            "user-agent", "content-type", "content-language", "cache-control", "pragma");
 
     /**
      * Per-hop response timeout applied when the request sets none. It bounds only
@@ -391,11 +395,11 @@ public class OutboundHttp {
 
             hops++;
             if (hops > follow.maxHops()) {
-                throw new RedirectLimitException("Too many redirects (" + hops + ") for URL: " + uri);
+                throw new RedirectLimitException("Too many redirects (" + hops + ") for URL: " + withoutQuery(uri));
             }
             String location = first(received.headers(), "Location");
             if (location == null || location.isBlank()) {
-                throw new IOException("Redirect " + status + " without Location header from: " + uri);
+                throw new IOException("Redirect " + status + " without Location header from: " + withoutQuery(uri));
             }
             URI target;
             try {
@@ -420,7 +424,7 @@ public class OutboundHttp {
                     LogSanitizer.sanitize(withoutQuery(target)));
 
             boolean preserved = action == MethodRule.Action.FOLLOW_PRESERVING;
-            headers = redirectHeaders(headers, isSameOrigin(uri, target), preserved, request.callerDerivedHeaders());
+            headers = redirectHeaders(headers, isSameOrigin(uri, target), preserved);
             if (!preserved) {
                 method = action == MethodRule.Action.FOLLOW_AS_HEAD ? "HEAD" : "GET";
                 body = new byte[0];
@@ -534,12 +538,12 @@ public class OutboundHttp {
 
     /**
      * The headers of a redirect hop. Same origin: everything but the engine-managed
-     * headers. Cross-origin: also no {@link #SENSITIVE_HEADERS}, no W3C trace
-     * context and no caller-derived header. A method downgraded to GET/HEAD loses
+     * headers. Cross-origin: only the {@link #CROSS_ORIGIN_SAFE_HEADERS}, so no
+     * credential and no W3C trace context. A method downgraded to GET/HEAD loses
      * {@code Content-Type} with its body.
      */
     static Map<String, List<String>> redirectHeaders(Map<String, List<String>> previous, boolean sameOrigin,
-                                                     boolean methodPreserved, Set<String> callerDerived) {
+                                                     boolean methodPreserved) {
         TreeMap<String, List<String>> next = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         previous.forEach((name, values) -> {
             String lower = name.toLowerCase(Locale.ROOT);
@@ -549,7 +553,7 @@ public class OutboundHttp {
             if (!methodPreserved && "content-type".equals(lower)) {
                 return;
             }
-            if (!sameOrigin && (SENSITIVE_HEADERS.contains(lower) || callerDerived.contains(lower) || TracePropagation.isTraceHeader(lower))) {
+            if (!sameOrigin && !CROSS_ORIGIN_SAFE_HEADERS.contains(lower)) {
                 return;
             }
             next.put(name, values);

@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
 import ai.labs.eddi.engine.httpclient.outbound.ConnectedPeers;
-import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -475,8 +474,9 @@ public class HttpClientModule {
      * a resolved
      * {@code ${vault:…}}/{@code ${connection:…}}/{@code ${caller:token}}. On every
      * hop whose origin differs from the request that produced it, this keeps only
-     * {@link #CROSS_ORIGIN_SAFE_HEADERS} - a credential can sit in any header name
-     * an httpcall configures, so the fix does not depend on knowing which one.
+     * {@link OutboundHttp#CROSS_ORIGIN_SAFE_HEADERS} - a credential can sit in any
+     * header name an httpcall configures, so the fix does not depend on knowing
+     * which one.
      */
     static Function<HttpClientResponse, Future<RequestOptions>> strippingCrossOriginCredentials(
                                                                                                 Function<HttpClientResponse, Future<RequestOptions>> delegate) {
@@ -495,41 +495,25 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every header but {@link #CROSS_ORIGIN_SAFE_HEADERS} from {@code next}
-     * when it targets a different origin (scheme, host or effective port) than
-     * {@code original} - {@link OutboundHttp#SENSITIVE_HEADERS} and the
-     * {@link TracePropagation#HEADERS trace context} included. Same-origin hops
-     * keep their headers, so an in-service redirect still authenticates.
+     * Removes every header but {@link OutboundHttp#CROSS_ORIGIN_SAFE_HEADERS} from
+     * {@code next} when it targets a different origin (scheme, host or effective
+     * port) than {@code original} - every credential and the W3C trace context
+     * included, as on the {@code OutboundHttp} facade. Same-origin hops keep their
+     * headers, so an in-service redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
         if (original == null || !sameOrigin(original, next)) {
             // Cannot prove same-origin (null original), so fail safe and strip.
-            OutboundHttp.SENSITIVE_HEADERS.forEach(next::removeHeader);
-            // The W3C trace context goes too, as in OutboundHttp: the caller vouched
-            // for one origin, and the trace id names this deployment's trace.
-            TracePropagation.HEADERS.forEach(next::removeHeader);
-            // A fixed list cannot name every credential: an httpcall may carry its key
-            // in any header it likes (X-Custom-Token, Ocp-Apim-Subscription-Key...).
-            // So a cross-origin hop keeps only headers that describe the request and
-            // never carry a secret; everything the configuration added stays behind.
             MultiMap headers = next.getHeaders();
             if (headers != null) {
                 for (String name : new ArrayList<>(headers.names())) {
-                    if (!CROSS_ORIGIN_SAFE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                    if (!OutboundHttp.CROSS_ORIGIN_SAFE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
                         next.removeHeader(name);
                     }
                 }
             }
         }
     }
-
-    /**
-     * The request headers a cross-origin redirect hop keeps (lower case). Content
-     * negotiation and the client's identity only: none of them carries a
-     * credential.
-     */
-    static final Set<String> CROSS_ORIGIN_SAFE_HEADERS = Set.of("accept", "accept-encoding", "accept-language", "user-agent",
-            "content-type", "content-language", "cache-control", "pragma");
 
     private static boolean sameOrigin(HttpClientRequest original, RequestOptions next) {
         String originalUri = original.absoluteURI();
