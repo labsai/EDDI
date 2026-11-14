@@ -15,13 +15,18 @@ import jakarta.annotation.security.PermitAll;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -68,27 +73,67 @@ public class RestSlackWebhook {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
+    /** Default of {@code eddi.slack.max-body-bytes}. */
+    static final int DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+    private static final String INVALID_SIGNATURE = "{\"error\":\"Invalid signature\"}";
+
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackSignatureVerifier signatureVerifier;
     private final SlackEventHandler eventHandler;
     private final SlackInteractivityHandler interactivityHandler;
     private final ObjectMapper objectMapper;
+    private final int maxBodyBytes;
 
     @Inject
     public RestSlackWebhook(ChannelTargetRouter channelTargetRouter,
             SlackSignatureVerifier signatureVerifier,
             SlackEventHandler eventHandler,
             SlackInteractivityHandler interactivityHandler,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            @ConfigProperty(name = "eddi.slack.max-body-bytes", defaultValue = "1048576") int maxBodyBytes) {
         this.channelTargetRouter = channelTargetRouter;
         this.signatureVerifier = signatureVerifier;
         this.eventHandler = eventHandler;
         this.interactivityHandler = interactivityHandler;
         this.objectMapper = objectMapper;
+        this.maxBodyBytes = maxBodyBytes > 0 ? maxBodyBytes : DEFAULT_MAX_BODY_BYTES;
+    }
+
+    /** With the default body limit. */
+    public RestSlackWebhook(ChannelTargetRouter channelTargetRouter,
+            SlackSignatureVerifier signatureVerifier,
+            SlackEventHandler eventHandler,
+            SlackInteractivityHandler interactivityHandler,
+            ObjectMapper objectMapper) {
+        this(channelTargetRouter, signatureVerifier, eventHandler, interactivityHandler, objectMapper, DEFAULT_MAX_BODY_BYTES);
     }
 
     /**
-     * Receive Slack Events API webhooks.
+     * Receive Slack Events API webhooks. The body is read as a stream, at most
+     * {@code eddi.slack.max-body-bytes} of it (413 above): the endpoint is public
+     * and answers before any signature is known, so it must not buffer whatever an
+     * anonymous caller sends.
+     *
+     * @return 200 OK (immediately) for valid requests; 403 for invalid signatures;
+     *         413 for a body over the limit
+     */
+    @POST
+    @Path("/events")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response handleEvents(InputStream body,
+                                 @Context HttpHeaders httpHeaders,
+                                 @HeaderParam("X-Slack-Signature") String signature,
+                                 @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+        String rawBody = readBounded(body, httpHeaders);
+        if (rawBody == null) {
+            return tooLarge();
+        }
+        return handleEvents(rawBody, signature, timestamp);
+    }
+
+    /**
+     * The events endpoint after the body has been read.
      *
      * @param rawBody
      *            the raw request body (needed for signature verification)
@@ -98,12 +143,10 @@ public class RestSlackWebhook {
      *            the X-Slack-Request-Timestamp header
      * @return 200 OK (immediately) for valid requests; 403 for invalid signatures
      */
-    @POST
-    @Path("/events")
-    @Consumes(MediaType.APPLICATION_JSON)
-    public Response handleEvents(String rawBody,
-                                 @HeaderParam("X-Slack-Signature") String signature,
-                                 @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+    public Response handleEvents(String rawBody, String signature, String timestamp) {
+        if (rawBody != null && rawBody.length() > maxBodyBytes) {
+            return tooLarge();
+        }
 
         // Step 1: Verify signature against all known signing secrets
         Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");
@@ -289,8 +332,35 @@ public class RestSlackWebhook {
      * ChannelConnector secrets are excluded — a decision that cannot be bound to a
      * new-style integration is rejected.
      * <p>
+     * Nothing of the body is decoded or parsed before a signature is known to be
+     * genuine: missing headers and a stale timestamp are refused first, then the
+     * raw body must verify against one of the configured signing secrets (the pool,
+     * as {@code /events} checks first) — only then is the payload read to find the
+     * owning integration, whose secret alone must verify it again.
+     * <p>
      * Responds 200 within Slack's 3-second window and processes the decision
-     * asynchronously.
+     * asynchronously. The body is read as a stream, at most
+     * {@code eddi.slack.max-body-bytes} of it (413 above).
+     *
+     * @return 200 OK for valid requests; 403 for invalid/unbindable signatures; 400
+     *         for a missing/malformed payload; 413 for a body over the limit
+     */
+    @POST
+    @Path("/interactive")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response handleInteractive(InputStream body,
+                                      @Context HttpHeaders httpHeaders,
+                                      @HeaderParam("X-Slack-Signature") String signature,
+                                      @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+        String rawBody = readBounded(body, httpHeaders);
+        if (rawBody == null) {
+            return tooLarge();
+        }
+        return handleInteractive(rawBody, signature, timestamp);
+    }
+
+    /**
+     * The interactivity endpoint after the body has been read.
      *
      * @param rawBody
      *            the raw request body (needed for signature verification)
@@ -298,15 +368,22 @@ public class RestSlackWebhook {
      *            the X-Slack-Signature header
      * @param timestamp
      *            the X-Slack-Request-Timestamp header
-     * @return 200 OK for valid requests; 403 for invalid/unbindable signatures; 400
-     *         for a missing/malformed payload
      */
-    @POST
-    @Path("/interactive")
-    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
-    public Response handleInteractive(String rawBody,
-                                      @HeaderParam("X-Slack-Signature") String signature,
-                                      @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+    public Response handleInteractive(String rawBody, String signature, String timestamp) {
+        if (rawBody != null && rawBody.length() > maxBodyBytes) {
+            return tooLarge();
+        }
+        // Step 0: before any decoding — the headers, their freshness, and a signature
+        // by SOME configured Slack app. No configured secret at all: nothing can be
+        // genuine.
+        if (signature == null || timestamp == null || !signatureVerifier.isTimestampFresh(timestamp)) {
+            return Response.status(Response.Status.FORBIDDEN).entity(INVALID_SIGNATURE).build();
+        }
+        Set<String> signingSecrets = channelTargetRouter.getSigningSecrets(CHANNEL_TYPE_SLACK);
+        if (signingSecrets.isEmpty() || !signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
+            LOGGER.warnf("Slack interactive signature verification failed (timestamp=%s)", sanitize(timestamp));
+            return Response.status(Response.Status.FORBIDDEN).entity(INVALID_SIGNATURE).build();
+        }
 
         // Step 1: Extract the "payload" form parameter (URL-encoded JSON string).
         String payloadJson = extractPayloadParam(rawBody);
@@ -348,6 +425,33 @@ public class RestSlackWebhook {
         // Step 4: Process async (Slack's 3-second requirement) and ack immediately.
         interactivityHandler.handlePayloadAsync(payloadJson);
         return Response.ok().build();
+    }
+
+    /**
+     * The body as UTF-8 text, or null when it is (or declares to be) larger than
+     * {@code eddi.slack.max-body-bytes}. A body that cannot be read is empty, which
+     * no signature verifies.
+     */
+    private String readBounded(InputStream body, HttpHeaders httpHeaders) {
+        long declared = httpHeaders != null ? httpHeaders.getLength() : -1;
+        if (declared > maxBodyBytes) {
+            return null;
+        }
+        byte[] raw;
+        try {
+            raw = body == null ? new byte[0] : body.readNBytes(maxBodyBytes + 1);
+        } catch (IOException e) {
+            return "";
+        }
+        if (raw.length > maxBodyBytes) {
+            return null;
+        }
+        return new String(raw, StandardCharsets.UTF_8);
+    }
+
+    private Response tooLarge() {
+        return Response.status(413).type(MediaType.APPLICATION_JSON)
+                .entity("{\"error\":\"The request body exceeds " + maxBodyBytes + " bytes.\"}").build();
     }
 
     /**

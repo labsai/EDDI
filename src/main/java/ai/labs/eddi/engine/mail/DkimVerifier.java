@@ -27,11 +27,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * RFC 6376 DKIM verification on the raw RFC 5322 bytes of a message (email plan
@@ -126,9 +128,32 @@ public class DkimVerifier {
      *            why the message could not be read at all (then {@code results} is
      *            empty), or null
      */
-    public record Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure) {
+    public record Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure,
+            Map<String, List<String>> headers, String firstBodyLine) {
         public Verification {
             results = results == null ? List.of() : List.copyOf(results);
+            headers = headers == null ? Map.of() : Map.copyOf(headers);
+        }
+
+        public Verification(List<DkimResult> results, int signaturesFound, int fromFieldCount, String messageFailure) {
+            this(results, signaturesFound, fromFieldCount, messageFailure, Map.of(), null);
+        }
+
+        /**
+         * How many instances of {@code name} (lower-case) the top-level header block
+         * holds.
+         */
+        public int headerCount(String name) {
+            List<String> values = headers.get(name);
+            return values == null ? 0 : values.size();
+        }
+
+        /**
+         * The values of {@code name} (lower-case), top to bottom, unfolded, as
+         * ISO-8859-1 text of the raw bytes.
+         */
+        public List<String> headerValues(String name) {
+            return headers.getOrDefault(name, List.of());
         }
 
         /** No DKIM-Signature at all (and the message itself was readable). */
@@ -192,6 +217,22 @@ public class DkimVerifier {
      *            the instant the timestamps are judged at, or null for now
      */
     public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt) {
+        return verify(raw, budget, evaluatedAt, domain -> true);
+    }
+
+    /**
+     * Verifies the signatures whose {@code d=} {@code alignable} accepts first — so
+     * their keys are fetched before the message's lookup budget can be spent on
+     * others — and the rest only when none of those passed. Once an alignable
+     * signature passes, the remaining non-alignable ones are
+     * {@link Outcome#SKIPPED}: no outcome of theirs could change the verdict.
+     * Results stay in header order.
+     *
+     * @param alignable
+     *            whether a signing domain could align with {@code From} at all
+     *            (judged without DNS)
+     */
+    public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt, Predicate<String> alignable) {
         long at = (evaluatedAt != null ? evaluatedAt : clock.instant()).getEpochSecond();
         if (raw == null || raw.length == 0) {
             return new Verification(List.of(), 0, 0, "the message is empty");
@@ -206,12 +247,87 @@ public class DkimVerifier {
         }
         int fromCount = message.indexes.getOrDefault("from", List.of()).size();
         List<Integer> signatures = message.indexes.getOrDefault("dkim-signature", List.of());
-        List<DkimResult> results = new ArrayList<>();
+        int evaluated = Math.min(signatures.size(), MAX_SIGNATURES);
+        DkimResult[] results = new DkimResult[evaluated];
         Map<Canon, byte[]> bodyHashes = new EnumMap<>(Canon.class);
-        for (int i = 0; i < signatures.size() && i < MAX_SIGNATURES; i++) {
-            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget, at));
+        boolean alignedPassed = false;
+        for (int i = 0; i < evaluated; i++) {
+            String domain = signingDomain(message, signatures.get(i));
+            if (domain != null && alignable.test(domain)) {
+                results[i] = verifyOne(message, signatures.get(i), bodyHashes, budget, at);
+                alignedPassed |= results[i].passed();
+            }
         }
-        return new Verification(results, signatures.size(), fromCount, null);
+        for (int i = 0; i < evaluated; i++) {
+            if (results[i] != null) {
+                continue;
+            }
+            results[i] = alignedPassed
+                    ? new DkimResult(signingDomain(message, signatures.get(i)), null, null, Outcome.SKIPPED,
+                            "not checked: a signature of a domain aligned with From already verifies")
+                    : verifyOne(message, signatures.get(i), bodyHashes, budget, at);
+        }
+        return new Verification(List.of(results), signatures.size(), fromCount, null, reportedHeaders(message), firstBodyLine(message));
+    }
+
+    /** The validated {@code d=} of a signature field, or null. */
+    private static String signingDomain(ParsedMessage message, int fieldIndex) {
+        String value = message.fields.get(fieldIndex).value();
+        if (value.length() > MAX_SIGNATURE_FIELD_LENGTH) {
+            return null;
+        }
+        TagList tags = TagList.parse(value);
+        return tags == null ? null : validDomain(tags.value("d"));
+    }
+
+    /** Characters of the first body line kept for the caller. */
+    private static final int MAX_FIRST_LINE = 1000;
+
+    /**
+     * The body's first non-blank line, trailing whitespace removed, as ISO-8859-1
+     * text — the bytes the body hash covers — or null when the body is blank.
+     */
+    private static String firstBodyLine(ParsedMessage message) {
+        byte[] b = message.bytes;
+        int pos = message.bodyStart;
+        while (pos < b.length) {
+            int end = pos;
+            while (end < b.length && b[end] != '\r' && b[end] != '\n') {
+                end++;
+            }
+            int contentEnd = end;
+            while (contentEnd > pos && (b[contentEnd - 1] == ' ' || b[contentEnd - 1] == '\t')) {
+                contentEnd--;
+            }
+            if (contentEnd > pos) {
+                return new String(b, pos, Math.min(contentEnd - pos, MAX_FIRST_LINE), StandardCharsets.ISO_8859_1);
+            }
+            pos = end + 1;
+        }
+        return null;
+    }
+
+    /**
+     * The headers a caller weighs against the signatures' coverage: those whose
+     * unsigned instances would change what EDDI reads or does.
+     */
+    static final List<String> REPORTED_HEADERS = List.of("from", "to", "cc", "reply-to", "subject", "date", "message-id", "in-reply-to",
+            "references", "content-type", "content-transfer-encoding", "mime-version");
+
+    private static Map<String, List<String>> reportedHeaders(ParsedMessage message) {
+        Map<String, List<String>> headers = new HashMap<>();
+        for (String name : REPORTED_HEADERS) {
+            List<Integer> positions = message.indexes.get(name);
+            if (positions == null) {
+                continue;
+            }
+            List<String> values = new ArrayList<>(positions.size());
+            for (int position : positions) {
+                values.add(message.fields.get(position).value().replace("\r\n", ""));
+            }
+            headers.put(name, values);
+        }
+        return headers;
     }
 
     // ---------------------------------------------------------------------
@@ -383,7 +499,24 @@ public class DkimVerifier {
         if (key.testing) {
             return new DkimResult(domain, selector, algorithmText, Outcome.TESTING, "the key is in testing mode (t=y)");
         }
-        return new DkimResult(domain, selector, algorithmText, Outcome.PASS, "verified");
+        String t = tags.value("t");
+        return new DkimResult(domain, selector, algorithmText, Outcome.PASS, "verified", signedHeaders, t == null ? null : timestamp(t),
+                signatureDigest(domain, signature));
+    }
+
+    /**
+     * The replay key of a verified signature: its (lower-case, validated) domain
+     * and its <em>decoded</em> signature bytes. Never the {@code b=} text: the
+     * {@code b=} value is blanked from the signed header input, so its spelling —
+     * padding, folding, whitespace — can be changed without breaking the signature,
+     * and every spelling must give the same key.
+     */
+    static String signatureDigest(String domain, byte[] signature) {
+        MessageDigest digest = sha256();
+        digest.update(domain.getBytes(StandardCharsets.US_ASCII));
+        digest.update((byte) 0);
+        digest.update(signature);
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private record Sig(String domain, String selector, String algorithm) {

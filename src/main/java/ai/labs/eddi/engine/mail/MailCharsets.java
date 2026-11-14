@@ -8,9 +8,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CodingErrorAction;
-import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.StandardCharsets;
-import java.nio.charset.UnsupportedCharsetException;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -34,6 +33,9 @@ import java.util.Map;
 public final class MailCharsets {
 
     private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
+
+    /** Every charset this JVM has, by lower-case name and alias. */
+    private static final Map<String, Charset> AVAILABLE = availableCharsets();
 
     /** Names mail uses that the JDK does not know, or knows as something worse. */
     private static final Map<String, String> ALIASES = Map.of(
@@ -79,16 +81,31 @@ public final class MailCharsets {
         return new Decoded(new String(bytes, charset), false);
     }
 
-    /** A charset by name, or null when the JDK does not have it. */
+    /**
+     * A charset by name or alias (case-insensitive), or null when the JDK does not
+     * have it.
+     * <p>
+     * Answered from a map built once, never by {@link Charset#forName}: that
+     * searches every provider for a name it does not know, each time, and a mail
+     * can name a different unknown charset in every one of thousands of encoded
+     * words.
+     */
     static Charset lookup(String name) {
         if (name == null || name.isBlank()) {
             return null;
         }
-        try {
-            return Charset.forName(name);
-        } catch (IllegalCharsetNameException | UnsupportedCharsetException e) {
-            return null;
+        return AVAILABLE.get(name.strip().toLowerCase(Locale.ROOT));
+    }
+
+    private static Map<String, Charset> availableCharsets() {
+        Map<String, Charset> byName = new HashMap<>();
+        for (Charset charset : Charset.availableCharsets().values()) {
+            byName.put(charset.name().toLowerCase(Locale.ROOT), charset);
+            for (String alias : charset.aliases()) {
+                byName.putIfAbsent(alias.toLowerCase(Locale.ROOT), charset);
+            }
         }
+        return Map.copyOf(byName);
     }
 
     private static String utf8OrWindows1252(byte[] bytes) {

@@ -55,9 +55,11 @@ public class E2eMailDns extends MailDnsResolver {
 
     /**
      * Signs a CRLF message as {@code domain} with the published key
-     * (relaxed/relaxed).
+     * (relaxed/relaxed), covering the headers a real signer covers — the body
+     * headers included, which an aligned pass requires for a multipart mail.
      */
     public static byte[] sign(byte[] message, String domain, String selector) {
-        return DkimTestSigner.sign(message, new DkimTestSigner.Options().domain(domain).selector(selector));
+        return DkimTestSigner.sign(message, new DkimTestSigner.Options().domain(domain).selector(selector).headers("from", "to", "cc", "subject",
+                "date", "message-id", "in-reply-to", "references", "mime-version", "content-type", "content-transfer-encoding"));
     }
 }

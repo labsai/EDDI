@@ -231,6 +231,16 @@ only from the app that signed the reply *and* serves the locked target, and a
 **group-discussion follow-up** must be posted in the discussion's own channel by
 the app that started it. Anything else is dropped and logged.
 
+**Nothing is parsed before a signature is known to be genuine, and bodies are
+small.** Both endpoints read at most `eddi.slack.max-body-bytes` (1 MB; Slack's
+payloads are a few KB) and answer 413 above it — a declared `Content-Length` over
+the limit is refused before the body is read at all. The interactivity endpoint
+refuses a request without `X-Slack-Signature`/`X-Slack-Request-Timestamp`, with a
+stale timestamp, or when no Slack signing secret is configured, before it decodes
+anything; it then verifies the raw body against the pool of configured secrets,
+and only then reads the payload to find the integration that owns the decision,
+whose secret alone must verify it again.
+
 ---
 
 ## Features

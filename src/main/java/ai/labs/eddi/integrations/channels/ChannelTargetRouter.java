@@ -784,6 +784,33 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Whether the integration serving this channel (the one whose bot token
+     * {@link #getBotToken} returns) has an agent target pointing at {@code agentId}
+     * — that is, whether the channel already belongs to that agent. False for a
+     * channel nobody serves.
+     */
+    public boolean channelTargetsAgent(String channelType, String platformChannelId, String agentId) {
+        if (agentId == null || platformChannelId == null) {
+            return false;
+        }
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        if (integration != null) {
+            String token = integration.getPlatformConfig() == null ? null : integration.getPlatformConfig().get("botToken");
+            if (token != null && !token.isBlank()) {
+                return integration.getTargets() != null && integration.getTargets().stream()
+                        .anyMatch(t -> t != null && t.getType() == ChannelTarget.TargetType.AGENT && agentId.equals(t.getTargetId()));
+            }
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            LegacyTarget legacy = legacyMap.get(platformChannelId);
+            return legacy != null && legacy.botToken() != null && agentId.equals(legacy.agentId());
+        }
+        return false;
+    }
+
+    /**
      * Check if any channel integrations are configured (new or legacy).
      */
     public boolean hasAnyChannels(String channelType) {

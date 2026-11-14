@@ -119,8 +119,14 @@ public class SlackSignatureVerifier {
         return false;
     }
 
-    /** Replay protection: reject requests older than 5 minutes. */
-    private boolean isTimestampFresh(String timestamp) {
+    /**
+     * Replay protection: reject requests older than 5 minutes. Public so an
+     * endpoint can refuse a stale request before it decodes anything.
+     */
+    public boolean isTimestampFresh(String timestamp) {
+        if (timestamp == null) {
+            return false;
+        }
         try {
             long requestTs = Long.parseLong(timestamp);
             long now = Instant.now().getEpochSecond();

@@ -9,10 +9,12 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EncodedWordsTest {
@@ -64,5 +66,64 @@ class EncodedWordsTest {
         assertEquals("Привет", known.text());
 
         assertEquals("", MailCharsets.decode(new byte[0], "utf-8").text());
+    }
+
+    @Test
+    @DisplayName("charset lookup by name and alias, any case, from a table built once")
+    void lookupTable() {
+        assertEquals(StandardCharsets.UTF_8, MailCharsets.lookup("UTF-8"));
+        assertEquals(StandardCharsets.UTF_8, MailCharsets.lookup(" utf8 "));
+        assertEquals(Charset.forName("windows-1252"), MailCharsets.lookup("CP1252"));
+        assertNull(MailCharsets.lookup("x-no-such-charset"));
+        assertNull(MailCharsets.lookup("not a ?legal* name"));
+        assertNull(MailCharsets.lookup(" "));
+    }
+
+    @Test
+    @DisplayName("thousands of words in thousands of distinct unknown charsets decode within a time budget")
+    void manyUnknownCharsets() {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 20_000; i++) {
+            text.append("=?x-unknown-").append(i).append("?Q?a?= x ");
+        }
+        String decoded = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> EncodedWords.decode(text.toString()));
+        assertTrue(decoded.startsWith("a x a x"), decoded.substring(0, 10));
+    }
+
+    @Test
+    @DisplayName("an address header with tens of thousands of encoded words in unknown charsets parses within a time budget")
+    void parseListBoundsLibraryDecoding() {
+        // InternetAddress.getPersonal() decodes the whole display name with the mail
+        // library's decoder, a charset lookup per word, before EDDI's own cap.
+        StringBuilder header = new StringBuilder("\"");
+        for (int i = 0; i < 30_000; i++) {
+            header.append("=?x-unknown-").append(i).append("?Q?a?= ");
+        }
+        header.append("\" <alice@example.com>, \"=?UTF-8?Q?J=C3=BCrgen?=\" <j@example.com>");
+
+        AddressNormalizer.Parsed parsed = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> AddressNormalizer.parseList(header.toString()));
+
+        assertEquals(2, parsed.addresses().size());
+        assertTrue(parsed.addresses().get(0).displayName().length() <= 256);
+        assertEquals("alice@example.com", parsed.addresses().get(0).address());
+        assertEquals("j@example.com", parsed.addresses().get(1).address());
+    }
+
+    @Test
+    @DisplayName("past the per-header budget, encoded words are broken so no decoder treats them as one")
+    void encodedWordBudget() {
+        String few = "=?UTF-8?Q?a?= =?UTF-8?Q?b?=";
+        assertEquals(few, AddressNormalizer.boundEncodedWords(few));
+        String many = "=?UTF-8?Q?a?= ".repeat(AddressNormalizer.MAX_ENCODED_WORDS_PER_HEADER + 5);
+        String bounded = AddressNormalizer.boundEncodedWords(many);
+        assertEquals(AddressNormalizer.MAX_ENCODED_WORDS_PER_HEADER, bounded.split("=\\?", -1).length - 1);
+    }
+
+    @Test
+    @DisplayName("a display name is capped before its encoded words are decoded")
+    void displayNameCappedBeforeDecoding() {
+        String name = "=?x-unknown?Q?a?= ".repeat(50_000);
+        String cleaned = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> AddressNormalizer.cleanDisplayName(name));
+        assertTrue(cleaned.length() <= 256);
     }
 }

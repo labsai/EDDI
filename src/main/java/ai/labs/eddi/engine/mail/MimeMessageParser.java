@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mail;
 
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import jakarta.activation.DataSource;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.mail.MessagingException;
@@ -19,6 +20,7 @@ import jakarta.mail.internet.MimePart;
 import jakarta.mail.internet.MimePartDataSource;
 import jakarta.mail.internet.MimeUtility;
 import jakarta.mail.internet.ParseException;
+import jakarta.mail.util.ByteArrayDataSource;
 import jakarta.mail.util.SharedByteArrayInputStream;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -77,6 +79,30 @@ public class MimeMessageParser {
     private static final int MAX_HEADER_VALUE_LENGTH = 2000;
     private static final int MAX_SUBJECT_LENGTH = 1000;
     private static final int MAX_FILENAME_LENGTH = 255;
+
+    /**
+     * Characters of a file name read at all. Decoding never lengthens text, so this
+     * keeps every name that can survive the cap, and the encoded-word decoder never
+     * sees more.
+     */
+    static final int MAX_RAW_FILENAME_LENGTH = MAX_FILENAME_LENGTH * 8;
+
+    /**
+     * A {@code Content-Type} longer than this refuses the message instead of being
+     * cut: a cut header is not the header the mail library reads, and the two
+     * readings could name different boundaries.
+     */
+    static final int MAX_CONTENT_TYPE_LENGTH = MAX_HEADER_VALUE_LENGTH * 8;
+
+    /**
+     * Headers whose second instance makes the message ambiguous: a client may show
+     * one while a signature covers the other ({@link SenderAuthenticator} refuses
+     * to authenticate such a message). To and Cc are not here — they legitimately
+     * repeat in the wild, and the authenticator ignores their unsigned instances
+     * instead.
+     */
+    static final List<String> SINGLETON_HEADERS = List.of("Message-ID", "Subject", "Date", "In-Reply-To", "References", "Reply-To",
+            "Content-Type", "Content-Transfer-Encoding", "MIME-Version");
 
     /**
      * Lenient where the wild is lenient, never where it would cost a limit.
@@ -139,7 +165,7 @@ public class MimeMessageParser {
         }
 
         Set<MailAnomaly> anomalies = EnumSet.noneOf(MailAnomaly.class);
-        for (String singleton : List.of("Message-ID", "Subject", "Date", "In-Reply-To", "References")) {
+        for (String singleton : SINGLETON_HEADERS) {
             String[] values = headers(message, singleton);
             if (values != null && values.length > 1) {
                 anomalies.add(MailAnomaly.DUPLICATE_SINGLETON_HEADER);
@@ -329,6 +355,13 @@ public class MimeMessageParser {
         final Set<MailAnomaly> anomalies;
         final Collected root = new Collected();
         int parts;
+        /**
+         * Body-part objects the mail library has built, in every multipart of the
+         * message together. Bounded by {@link MailLimits#maxParts()} as each one is
+         * built ({@link BudgetedMultipart}), whatever the delimiter count said.
+         */
+        int materialized;
+        int htmlCharacters;
         int attachmentCount;
         String reportType;
         String reportingMta;
@@ -351,10 +384,11 @@ public class MimeMessageParser {
             if (++parts > limits.maxParts()) {
                 throw tooManyParts();
             }
-            ContentType type = contentType(part);
+            String rawType = rawContentType(part);
+            ContentType type = contentType(rawType);
             String baseType = type.getBaseType().toLowerCase(Locale.ROOT);
             if (baseType.startsWith("multipart/")) {
-                visitMultipart(part, type, baseType, depth, into);
+                visitMultipart(part, rawType, type, baseType, depth, into);
             } else {
                 visitLeaf(part, type, baseType, into);
             }
@@ -365,8 +399,40 @@ public class MimeMessageParser {
                     "The message has more than " + limits.maxParts() + " MIME parts.");
         }
 
-        private ContentType contentType(MimePart part) {
-            String raw = firstHeader(part, "Content-Type");
+        /**
+         * One more body part is about to be built by the mail library.
+         *
+         * @throws PartBudgetSpent
+         *             when that would exceed {@link MailLimits#maxParts()}
+         */
+        void reservePart() throws PartBudgetSpent {
+            if (++materialized > limits.maxParts()) {
+                throw new PartBudgetSpent();
+            }
+        }
+
+        /**
+         * The part's first {@code Content-Type}, unfolded and whole — the one the mail
+         * library reads too — or null when it has none.
+         *
+         * @throws MailParseException
+         *             when it is longer than {@link #MAX_CONTENT_TYPE_LENGTH}: cutting
+         *             it would make EDDI and the library read different headers
+         */
+        private static String rawContentType(MimePart part) throws MailParseException {
+            String[] values = headers(part, "Content-Type");
+            if (values == null || values.length == 0 || values[0] == null) {
+                return null;
+            }
+            String unfolded = MimeUtility.unfold(values[0]).strip();
+            if (unfolded.length() > MAX_CONTENT_TYPE_LENGTH) {
+                throw new MailParseException(MailParseException.Reason.MALFORMED,
+                        "A Content-Type header is longer than " + MAX_CONTENT_TYPE_LENGTH + " characters.");
+            }
+            return unfolded;
+        }
+
+        private ContentType contentType(String raw) {
             if (raw == null) {
                 return new ContentType("text", "plain", null);
             }
@@ -378,7 +444,8 @@ public class MimeMessageParser {
             }
         }
 
-        private void visitMultipart(MimePart part, ContentType type, String baseType, int depth, Collected into) throws MailParseException {
+        private void visitMultipart(MimePart part, String rawType, ContentType type, String baseType, int depth, Collected into)
+                throws MailParseException {
             String encoding = transferEncoding(part);
             if (encoding != null && !encoding.equals("7bit") && !encoding.equals("8bit") && !encoding.equals("binary")) {
                 // RFC 2045 §6.4 forbids it, and a base64 multipart would hide its
@@ -386,8 +453,11 @@ public class MimeMessageParser {
                 anomalies.add(MailAnomaly.MALFORMED_PART);
                 return;
             }
+            // The boundary comes from the very header text the library is handed below
+            // (rawType), so the count and the library's split use the same one.
             String boundary = type.getParameter("boundary");
-            if (boundary == null || boundary.isEmpty() || boundary.length() > 200) {
+            if (boundary == null || boundary.isEmpty() || boundary.length() > 200 || boundary.indexOf('\r') >= 0
+                    || boundary.indexOf('\n') >= 0) {
                 anomalies.add(MailAnomaly.MALFORMED_PART);
                 return;
             }
@@ -407,9 +477,15 @@ public class MimeMessageParser {
             MimeMultipart multipart;
             int count;
             try {
-                multipart = new MimeMultipart(new MimePartDataSource(part));
+                // The pre-count above is a fast path, not the bound: whatever delimiter
+                // syntax the library accepts that the count does not, it cannot build
+                // more part objects than the budget allows.
+                multipart = new BudgetedMultipart(new FixedTypeDataSource(part, rawType), this);
                 count = multipart.getCount();
             } catch (MessagingException | RuntimeException e) {
+                if (budgetSpent(e)) {
+                    throw tooManyParts();
+                }
                 anomalies.add(MailAnomaly.MALFORMED_PART);
                 return;
             }
@@ -475,7 +551,8 @@ public class MimeMessageParser {
 
         private void visitLeaf(MimePart part, ContentType type, String baseType, Collected into) throws MailParseException {
             String disposition = disposition(part);
-            String filename = filename(part);
+            String rawFilename = rawFilename(part);
+            String filename = cleanFilename(rawFilename);
             boolean isBodyType = "text/plain".equals(baseType) || "text/html".equals(baseType);
             if (isBodyType && !"attachment".equals(disposition) && filename == null) {
                 byte[] bytes = readBounded(part, limits.maxRawBytes());
@@ -494,7 +571,7 @@ public class MimeMessageParser {
                     }
                     into.plain.add(text);
                 } else {
-                    into.html.add(decoded.text());
+                    into.html.add(boundedHtml(decoded.text()));
                 }
                 return;
             }
@@ -506,10 +583,29 @@ public class MimeMessageParser {
                     || "message/global".equals(baseType) || "message/global-headers".equals(baseType))) {
                 readOriginalMessageId(part);
             }
-            attachment(part, baseType, disposition, filename, into);
+            // A name too long to be read in full could hide its extension past the cap:
+            // it is treated as an executable, never stored.
+            boolean overlongName = rawFilename != null && rawFilename.length() > MAX_RAW_FILENAME_LENGTH;
+            attachment(part, baseType, disposition, filename, overlongName, into);
         }
 
-        private void attachment(MimePart part, String baseType, String disposition, String filename, Collected into)
+        /**
+         * The HTML within what is left of {@link MailLimits#maxHtmlCharacters()} for
+         * the whole message: the HTML parser builds a tree of it, and the quote
+         * stripper copies that tree.
+         */
+        private String boundedHtml(String html) {
+            int left = Math.max(0, limits.maxHtmlCharacters() - htmlCharacters);
+            if (html.length() <= left) {
+                htmlCharacters += html.length();
+                return html;
+            }
+            anomalies.add(MailAnomaly.HTML_TRUNCATED);
+            htmlCharacters = limits.maxHtmlCharacters();
+            return left == 0 ? "" : truncate(html, left);
+        }
+
+        private void attachment(MimePart part, String baseType, String disposition, String filename, boolean overlongName, Collected into)
                 throws MailParseException {
             if (++attachmentCount > limits.maxAttachments()) {
                 throw new MailParseException(MailParseException.Reason.TOO_MANY_ATTACHMENTS,
@@ -520,12 +616,13 @@ public class MimeMessageParser {
             boolean inline = "inline".equals(disposition);
             boolean archive = AttachmentClassifier.isArchive(filename, baseType);
             if (bytes == null) {
-                boolean executable = AttachmentClassifier.isExecutable(filename, baseType, null);
+                boolean executable = overlongName || AttachmentClassifier.isExecutable(filename, baseType, null);
                 into.attachments.add(new MailAttachment(filename, baseType, -1, contentId, inline, executable, archive,
                         MailAttachment.SkipReason.TOO_LARGE, null));
                 return;
             }
-            boolean executable = AttachmentClassifier.isExecutable(filename, baseType, Arrays.copyOf(bytes, Math.min(bytes.length, 8)));
+            boolean executable = overlongName
+                    || AttachmentClassifier.isExecutable(filename, baseType, Arrays.copyOf(bytes, Math.min(bytes.length, 8)));
             if (executable) {
                 into.attachments.add(new MailAttachment(filename, baseType, bytes.length, contentId, inline, true, archive,
                         MailAttachment.SkipReason.EXECUTABLE, null));
@@ -586,14 +683,13 @@ public class MimeMessageParser {
             }
         }
 
-        private static String filename(MimePart part) {
-            String name;
+        /** The file name as the part declares it (not decoded here), or null. */
+        private static String rawFilename(MimePart part) {
             try {
-                name = part.getFileName();
+                return part.getFileName();
             } catch (MessagingException | RuntimeException e) {
                 return null;
             }
-            return cleanFilename(name);
         }
 
         private static String contentId(MimePart part) {
@@ -620,6 +716,97 @@ public class MimeMessageParser {
         }
     }
 
+    /** The part budget ran out while the mail library was building parts. */
+    static final class PartBudgetSpent extends MessagingException {
+        PartBudgetSpent() {
+            super("The MIME part budget is spent.");
+        }
+    }
+
+    /**
+     * Builds the parts of one multipart body under the part budget, without the
+     * delimiter pre-count — so a test can show the budget holds on its own.
+     *
+     * @return how many parts the library built
+     */
+    static int buildPartsUnderBudget(byte[] content, String contentType, MailLimits limits) throws MailParseException {
+        Walk walk = new Walk(limits, EnumSet.noneOf(MailAnomaly.class), null);
+        // A shared stream, as a parsed message's content is: the library then builds
+        // each part from a sub-stream rather than a copied byte array.
+        DataSource source = new ByteArrayDataSource(content, contentType) {
+            @Override
+            public InputStream getInputStream() {
+                return new SharedByteArrayInputStream(content);
+            }
+        };
+        try {
+            return new BudgetedMultipart(source, walk).getCount();
+        } catch (MessagingException | RuntimeException e) {
+            if (budgetSpent(e)) {
+                throw walk.tooManyParts();
+            }
+            throw new MailParseException(MailParseException.Reason.MALFORMED, "The multipart cannot be read.", e);
+        }
+    }
+
+    private static boolean budgetSpent(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof PartBudgetSpent) {
+                return true;
+            }
+            if (t.getCause() == t) {
+                break;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A multipart that asks the walk before each body part it builds, so the number
+     * of part objects is bounded by construction: the library accepts delimiter
+     * forms (a bare CR around a boundary line, among others) that a byte count may
+     * miss, and it must not build a million parts while EDDI counted one. Every
+     * multipart of a message shares one walk, so nesting shares the budget.
+     */
+    private static final class BudgetedMultipart extends MimeMultipart {
+        private final Walk walk;
+
+        BudgetedMultipart(DataSource source, Walk walk) throws MessagingException {
+            super(source);
+            this.walk = walk;
+        }
+
+        @Override
+        protected MimeBodyPart createMimeBodyPart(InternetHeaders headers, byte[] content) throws MessagingException {
+            walk.reservePart();
+            return super.createMimeBodyPart(headers, content);
+        }
+
+        @Override
+        protected MimeBodyPart createMimeBodyPart(InputStream is) throws MessagingException {
+            walk.reservePart();
+            return super.createMimeBodyPart(is);
+        }
+    }
+
+    /**
+     * The part's content with the {@code Content-Type} EDDI parsed, so the library
+     * splits on exactly the boundary EDDI counted.
+     */
+    private static final class FixedTypeDataSource extends MimePartDataSource {
+        private final String contentType;
+
+        FixedTypeDataSource(MimePart part, String contentType) {
+            super(part);
+            this.contentType = contentType;
+        }
+
+        @Override
+        public String getContentType() {
+            return contentType;
+        }
+    }
+
     private static String transferEncoding(MimePart part) {
         String value = firstHeader(part, "Content-Transfer-Encoding");
         return value == null ? null : value.strip().toLowerCase(Locale.ROOT);
@@ -634,7 +821,15 @@ public class MimeMessageParser {
 
     /**
      * Counts multipart delimiter lines ({@code --boundary} at the start of a line)
-     * in a part's raw content, stopping once {@code stopAfter} is reached.
+     * in a part's raw content, stopping once {@code stopAfter} is reached. A bare
+     * CR starts a line as LF does, because the mail library's line reader treats it
+     * so.
+     * <p>
+     * A line counts only when it is a delimiter as RFC 2046 and the library read
+     * it: {@code --boundary}, optionally {@code --} (the closing one), then only
+     * spaces and tabs up to the line end. {@code --b-extra} or {@code --b10} for
+     * boundary {@code b} is body text, not a delimiter. A small state machine after
+     * each match, no backtracking.
      */
     static int countDelimiters(InputStream in, String boundary, int stopAfter) throws IOException {
         byte[] pattern = ("\n--" + boundary).getBytes(StandardCharsets.ISO_8859_1);
@@ -643,34 +838,59 @@ public class MimeMessageParser {
         // Start as if a newline preceded the content, so a delimiter on the first
         // line counts.
         int matched = 1;
-        // A full match only counts when the line ends there (or "--" closes it):
-        // "--b1" is a prefix of "--b10", which is a different boundary.
-        boolean pending = false;
+        int state = DELIMITER_NONE;
         byte[] buffer = new byte[8192];
         int read;
         while ((read = in.read(buffer)) > 0) {
             for (int i = 0; i < read; i++) {
                 byte b = buffer[i];
-                if (pending) {
-                    pending = false;
-                    if ((b == '\r' || b == '\n' || b == ' ' || b == '\t' || b == '-') && ++count >= stopAfter) {
-                        return count;
+                if (state != DELIMITER_NONE) {
+                    boolean lineEnd = b == '\r' || b == '\n';
+                    boolean blank = b == ' ' || b == '\t';
+                    if (lineEnd) {
+                        boolean counts = state != DELIMITER_DASH;
+                        state = DELIMITER_NONE;
+                        if (counts && ++count >= stopAfter) {
+                            return count;
+                        }
+                    } else if (blank && state != DELIMITER_DASH) {
+                        state = DELIMITER_TRAILING;
+                    } else if (b == '-' && state == DELIMITER_AFTER) {
+                        state = DELIMITER_DASH;
+                    } else if (b == '-' && state == DELIMITER_DASH) {
+                        state = DELIMITER_CLOSING;
+                    } else {
+                        // Anything else on the line: a near-match, not a delimiter.
+                        state = DELIMITER_NONE;
                     }
                 }
-                while (matched > 0 && pattern[matched] != b) {
+                byte c = b == '\r' ? (byte) '\n' : b;
+                while (matched > 0 && pattern[matched] != c) {
                     matched = failure[matched - 1];
                 }
-                if (pattern[matched] == b) {
+                if (pattern[matched] == c) {
                     matched++;
                 }
                 if (matched == pattern.length) {
-                    pending = true;
+                    state = DELIMITER_AFTER;
                     matched = failure[matched - 1];
                 }
             }
         }
-        return pending ? count + 1 : count;
+        // A delimiter on the last line, without a line end, still counts.
+        return state != DELIMITER_NONE && state != DELIMITER_DASH ? count + 1 : count;
     }
+
+    /** {@link #countDelimiters} states, after {@code --boundary} has matched. */
+    private static final int DELIMITER_NONE = 0;
+    /** Right after the boundary. */
+    private static final int DELIMITER_AFTER = 1;
+    /** One {@code -} after it: needs a second to be the closing delimiter. */
+    private static final int DELIMITER_DASH = 2;
+    /** {@code --boundary--}: only blanks may follow. */
+    private static final int DELIMITER_CLOSING = 3;
+    /** Trailing blanks: only more blanks or the line end may follow. */
+    private static final int DELIMITER_TRAILING = 4;
 
     private static int[] failureFunction(byte[] pattern) {
         int[] failure = new int[pattern.length];
@@ -768,22 +988,42 @@ public class MimeMessageParser {
         return out.toString();
     }
 
+    /** Characters of an extension kept when a long file name is cut. */
+    private static final int MAX_KEPT_EXTENSION = 32;
+
     /**
      * A file name with no path, no controls, decoded, capped; null when nothing is
-     * left.
+     * left. What survives the caps is the <em>end</em> of the name — the last path
+     * segment and its extension, which the executable check reads — never the
+     * start. (A name over {@link #MAX_RAW_FILENAME_LENGTH} is also withheld as
+     * executable by the walk, whatever is left of it.)
      */
     static String cleanFilename(String name) {
         if (name == null) {
             return null;
         }
-        String decoded = stripControls(EncodedWords.decode(name)).strip();
+        // Capped before decoding, so the encoded-word decoder's work is bounded by its
+        // input; the tail is kept, since the basename and extension are at the end.
+        String bounded = name.length() > MAX_RAW_FILENAME_LENGTH ? name.substring(name.length() - MAX_RAW_FILENAME_LENGTH) : name;
+        String decoded = stripControls(EncodedWords.decode(bounded)).strip();
         int slash = Math.max(decoded.lastIndexOf('/'), decoded.lastIndexOf('\\'));
         String base = slash >= 0 ? decoded.substring(slash + 1) : decoded;
         base = base.strip();
         if (base.isEmpty() || base.equals(".") || base.equals("..")) {
             return null;
         }
-        return base.length() > MAX_FILENAME_LENGTH ? truncate(base, MAX_FILENAME_LENGTH) : base;
+        if (base.length() <= MAX_FILENAME_LENGTH) {
+            return base;
+        }
+        // The extension as Windows sees it: trailing dots and spaces are dropped when a
+        // file is saved, so "x.exe." keeps ".exe." whole.
+        int end = base.length();
+        while (end > 0 && (base.charAt(end - 1) == '.' || base.charAt(end - 1) == ' ')) {
+            end--;
+        }
+        int dot = base.lastIndexOf('.', end - 1);
+        String extension = dot > 0 && base.length() - dot <= MAX_KEPT_EXTENSION ? base.substring(dot) : "";
+        return truncate(base, MAX_FILENAME_LENGTH - extension.length()) + extension;
     }
 
     private static String truncate(String text, int length) {
