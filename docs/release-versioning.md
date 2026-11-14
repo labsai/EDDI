@@ -58,10 +58,10 @@ All images are pushed to [Docker Hub: `labsai/eddi`](https://hub.docker.com/r/la
 | Trigger | Docker Tags | Purpose |
 |---|---|---|
 | Push to `main` | `labsai/eddi:6.3.0-b<N>` | Continuous integration build. `<N>` is the GitHub Actions run number. |
-| Git tag `6.3.0-RC1` | `labsai/eddi:6.3.0-RC1` + `labsai/eddi:latest` | Release candidate |
+| Git tag `6.3.0-RC1` | `labsai/eddi:6.3.0-RC1` | Release candidate |
 | Git tag `6.3.0` | `labsai/eddi:6.3.0` + `labsai/eddi:6.3` + `labsai/eddi:6` + `labsai/eddi:latest` | General availability release |
 
-> **Key rule:** `latest` is **only** pushed on tag-based releases (RC or GA), never on regular main builds. This ensures `docker pull labsai/eddi` always gives users a deliberately released version.
+> **Key rule:** `latest` is **only** pushed by a *stable* release tag, never by a release candidate or a regular main build. This ensures `docker pull labsai/eddi` (the compose default) always gives users a released, non-RC version.
 >
 > **The `6.3` and `6` aliases are moving tags**, and only a *stable* release publishes them — CI
 > gates them on `^([0-9]+)\.([0-9]+)\.([0-9]+)$`, so an RC never claims them. They are a
@@ -103,11 +103,9 @@ git tag 6.3.0-RC1
 git push origin 6.3.0-RC1
 ```
 
-This produces:
-- `labsai/eddi:6.3.0-RC1` — the version-pinned tag
-- `labsai/eddi:latest` — updated to point to this RC
+This produces `labsai/eddi:6.3.0-RC1`, the version-pinned tag, and a GitHub **pre-release**.
 
-An RC does **not** move the `6.3` or `6` aliases; only a stable release does.
+An RC does **not** move `latest` or the `6.3` and `6` aliases, and does not become the repository's "Latest" GitHub release; only a stable release does.
 
 ### Subsequent Release Candidates
 
@@ -187,7 +185,7 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 
 ```text
 ┌──────────────────┐
-│  build-and-test  │  ← Always runs (push, PR, tag)
+│  build-and-test  │  ← push, PR, tag (path filters below)
 │  mvnw clean test │     Unit tests only
 └────────┬─────────┘
          │
@@ -218,22 +216,25 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 Nothing is published until every gate above `docker` has passed. Its `needs` list is
 `[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]`, so a failing
 CVE scan, a secret leak, a CodeQL finding, a coverage shortfall or a failing end-to-end tier each block the push on their
-own. The diagram below shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
+own. The diagram above shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
 job that runs the JaCoCo 90/80 coverage gate.
 
 ### Job Details
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
-| **build-and-test** | Every push/PR/tag | When changed paths match the `code` filter (`src/**`, `pom.xml`, `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`, `k8s/**`, `helm/**`, `mvnw*`, `.mvn/**`); always on tags | ~3-5 min |
-| **integration-test** | Same as build-and-test | Runs `mvnw verify -DskipITs=false`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
-| **codeql** | Every push/PR/tag on the `code` filter | SAST build + analysis; blocks `docker` | ~8-12 min |
-| **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
-| **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
-| **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
+| **build-and-test** | Every push/PR/tag | On a push, when changed paths match the `code` filter (`detect-changes` in `ci.yml`: `src/**`, `pom.xml`, `.github/workflows/**`, Dockerfiles, compose files, `ui/**`, `k8s/**`, `helm/**`, `keycloak/**`, the Maven wrapper, the style configs and more); on a PR, when they match the `backend` filter (the same minus `ui/**`) or the operator docs the tests read (`README.md`, `docs/kubernetes.md`, `docs/security.md`, `docs/monitoring/**`, `docs/metrics.md`); always on tags | ~3-5 min |
+| **integration-test** | `code` filter (and `backend` on a PR) | Runs `mvnw verify -DskipITs=false -DskipUTs=true`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
+| **codeql** | Every push/PR/tag | SAST build + analysis of the Java backend (`codeql-ui` covers the UIs, when `ui/**` changed); blocks `docker` | ~8-12 min |
+| **trivy-scan** | `code` filter | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
+| **gitleaks** | Every push/PR/tag | Secret scanning; blocks `docker` | ~1 min |
+| **sbom** | Pushes on the `code` filter | CycloneDX SBOM; does not block `docker` | ~2 min |
 | **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate and ui-gate | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
-| **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
+| **release** | Tag pushes only, after `docker` | GitHub release with the signed `SHA256SUMS`; a pre-release for an RC tag | — |
+| **post-release** | Stable tags only, after `docker`, `smoke-test` and `release` | Calls `post-release.yml` ([After a GA Release](#after-a-ga-release)) | — |
+| **preflight-check** | Pull requests only | On the `code` filter; certifies the image `build-image` produced | ~5-7 min |
+| **preflight-push** | After `docker` succeeds on a push | Red Hat preflight against the pushed image | — |
 
 ### Secrets Required
 
@@ -245,6 +246,9 @@ Configure these in GitHub → Settings → Secrets → Actions:
 | `DOCKER_PASSWORD` | Docker Hub access token |
 | `REDHAT_API_TOKEN` | Red Hat certification (only for `redhat-certify.yml`) |
 | `REDHAT_CERT_PROJECT_ID` | Red Hat project ID (only for `redhat-certify.yml`) |
+| `REDHAT_REGISTRY_USERNAME`, `REDHAT_REGISTRY_KEY` | The Red Hat project's registry robot account (only for `redhat-certify.yml`) |
+| `RELEASE_BOT_TOKEN` / `CHANGELOG_BOT_TOKEN` | Optional bot PAT for the post-release PR (see **Tokens** below) |
+| `SLACK_WEBHOOK_URL` | Optional; `notify-slack` skips when it is unset |
 
 ---
 
@@ -275,11 +279,11 @@ Development                 Release Candidates          General Availability
 feature/version-6.3.0       tag 6.3.0-RC1               tag 6.3.0
     │                       │                           │
     ├── merge to main       ├── tag → Docker push       ├── tag → Docker push
-    │   → 6.3.0-b1          │   → 6.3.0-RC1 + latest    │   → 6.3.0 + latest
+    │   → 6.3.0-b1          │   → 6.3.0-RC1             │   → 6.3.0 + latest
     ├── merge to main       │                           │      + 6.3 + 6
     │   → 6.3.0-b2          tag 6.3.0-RC2               │
     ├── merge to main       │                           └── start 6.4.0 cycle
-    │   → 6.3.0-b3          └── 6.3.0-RC2 + latest
+    │   → 6.3.0-b3          └── 6.3.0-RC2
     └── ...
 ```
 
@@ -343,7 +347,7 @@ For full details on how signing works and how to verify images, see [Release Sig
 
 ### Signed Git Tags
 
-When creating release tags, use signed tags:
+Signing a release tag is optional, and the published tags so far are unsigned (the image and the release's `SHA256SUMS` carry the signatures). To sign one:
 
 ```bash
 # Instead of: git tag 6.3.0

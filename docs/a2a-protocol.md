@@ -326,6 +326,8 @@ form is `"method": "tasks/send"` with `"params": {"id": "task-1", "message": {â€
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once â€” see [The in-flight bound](#the-in-flight-bound) |
 | `eddi.a2a.task-ttl` | `24h` | How long a task/context mapping is kept (shared bucket in NATS mode) |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking send waits for its turn before answering `working` |
+| `eddi.a2a.tool-description.max-chars` | `1024` | Client side: a peer's skill descriptions are directive-redacted and cut to this length before they reach the model, as for [MCP tools](mcp-client.md#what-is-governed) |
+| `eddi.a2a.tool-schema.max-bytes` / `eddi.a2a.tool-schema.max-bytes-per-agent` | `32768` / `524288` | Client side: the serialised parameter-schema bound per tool and per peer; each redaction, truncation or drop is counted in `eddi_a2a_tool_schema_governed_total` |
 
 While `eddi.a2a.enabled=false`, the card and capability endpoints answer `404`,
 `GET /a2a/agents` answers `200` with an empty list, and the JSON-RPC endpoint

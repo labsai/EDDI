@@ -94,7 +94,7 @@ Client sends context with attachment_* keys
 
 ### Path A: URL Reference (Recommended)
 
-Best for images already hosted somewhere. The LLM provider fetches the image directly from the URL.
+Best for images already hosted somewhere. The URL is passed to the provider when it fetches URLs itself; otherwise EDDI downloads the bytes and inlines them (see [LLM Multimodal Support](#llm-multimodal-support)).
 
 ```json
 {
@@ -246,7 +246,7 @@ Send multiple attachments by incrementing the key index:
 }
 ```
 
-All attachments are forwarded to the LLM in a single multimodal user message.
+All attachments are forwarded to the LLM in a single multimodal user message — at most `eddi.attachments.max-per-turn` of them (default `5`; non-positive means unlimited). Extras are dropped with a note in `attachments:errors`.
 
 ---
 
