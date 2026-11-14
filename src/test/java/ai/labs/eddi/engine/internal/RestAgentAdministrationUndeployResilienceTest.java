@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -32,6 +33,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.net.URI;
 import java.time.Duration;
@@ -51,6 +53,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.intThat;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -248,5 +251,48 @@ class RestAgentAdministrationUndeployResilienceTest {
         doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
 
         assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, false));
+    }
+
+    /**
+     * The deployment sweep reads the registry, then the records, and deploys what
+     * is recorded deployed but not served. With the agent dropped from the registry
+     * first, a sweep whose two reads both fell before the record write deployed it
+     * again — on a single node for good, under an undeployed record.
+     */
+    @Test
+    @DisplayName("an undeploy flips the deployment record before it removes the agent from the registry")
+    void recordIsFlippedBeforeTheRegistryRemoval() throws Exception {
+        Response response = admin.undeployAgent(ENV, AGENT, 2, false, false);
+
+        assertEquals(202, response.getStatus());
+        InOrder order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 2, DeploymentInfo.DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(ENV, AGENT, 2);
+    }
+
+    @Test
+    @DisplayName("a registry removal that fails puts a deployed record back, so it never says undeployed for a served agent")
+    void failedRegistryRemovalRestoresTheRecord() throws Exception {
+        DeploymentInfo recorded = new DeploymentInfo();
+        recorded.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
+        when(deploymentStore.getDeploymentInfo("production", AGENT, 2)).thenReturn(recorded);
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
+
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, false));
+
+        InOrder order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 2, DeploymentInfo.DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(ENV, AGENT, 2);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT, 2, DeploymentInfo.DeploymentStatus.deployed);
+    }
+
+    @Test
+    @DisplayName("a registry removal that fails does not invent a deployed record the version did not have")
+    void failedRegistryRemovalDoesNotInventARecord() throws Exception {
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(ENV, AGENT, 2);
+
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, false));
+
+        verify(deploymentStore, never()).setDeploymentInfo(anyString(), anyString(), anyInt(), eq(DeploymentInfo.DeploymentStatus.deployed));
     }
 }

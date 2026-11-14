@@ -722,8 +722,18 @@ public class GroupLifecycleOps {
                     LOGGER.warnf("Ephemeral cleanup: agent '%s' carries no verifiable dynamic origin — undeploying only, not deleting",
                             LogSanitizer.sanitize(agentId));
                 }
-                agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
-                markDeploymentRecordsUndeployed(agentId);
+                // The records first, the registry second: the deployment sweep deploys
+                // what is recorded deployed and not served, so a sweep running between a
+                // registry drop and the record write would deploy the agent again.
+                List<Integer> flipped = markDeploymentRecordsUndeployed(agentId);
+                try {
+                    agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                } catch (RuntimeException e) {
+                    // Still served: the records go back to deployed, or they would say
+                    // undeployed for an agent that answers. Nothing is deleted either.
+                    restoreDeploymentRecords(agentId, flipped);
+                    throw e;
+                }
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
                 if (shouldDelete) {
@@ -787,21 +797,40 @@ public class GroupLifecycleOps {
      * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
      * REST undeploy does. The deployment sweep deploys what is recorded and no
      * longer served, so a record left saying deployed would undo this undeploy
-     * within about ten seconds. Never fatal.
+     * within about ten seconds. Called BEFORE the registry removal, for the same
+     * reason. Never fatal.
+     *
+     * @return the versions whose record this flipped, so a registry removal that
+     *         fails can put them back
      */
-    private void markDeploymentRecordsUndeployed(String agentId) {
+    private List<Integer> markDeploymentRecordsUndeployed(String agentId) {
+        List<Integer> flipped = new ArrayList<>();
         if (deploymentStore == null) {
-            return;
+            return flipped;
         }
         try {
             for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
                 if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
                     deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                    flipped.add(info.getAgentVersion());
                 }
             }
         } catch (Exception e) {
             LOGGER.warnf("Ephemeral cleanup: could not mark the deployment record(s) of agent '%s' undeployed: %s", LogSanitizer.sanitize(agentId),
                     e.getMessage());
+        }
+        return flipped;
+    }
+
+    /** Puts back the records {@link #markDeploymentRecordsUndeployed} flipped. */
+    private void restoreDeploymentRecords(String agentId, List<Integer> versions) {
+        for (Integer version : versions) {
+            try {
+                deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, version, DeploymentStatus.deployed);
+            } catch (Exception e) {
+                LOGGER.errorf("Ephemeral cleanup: agent '%s' version %d is still deployed, but its deployment record now says undeployed: %s",
+                        LogSanitizer.sanitize(agentId), version, e.getMessage());
+            }
         }
     }
 
