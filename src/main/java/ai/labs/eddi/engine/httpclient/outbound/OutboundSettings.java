@@ -21,12 +21,14 @@ import java.util.regex.Pattern;
  * Every key is spelled out literally below, so
  * {@code ConfigurationReferenceCoverageTest} can hold
  * {@code docs/configuration-reference.md} to it. Only the {@code default}
- * profile has keys yet; each other profile gets its own when its callers move
- * onto {@link OutboundHttp}, and until then shares the {@code default} settings
- * (while keeping a pool of its own).
+ * profile has timeout, protocol and TLS keys yet; each other profile gets its
+ * own when its callers move onto {@link OutboundHttp}, and until then shares
+ * the {@code default} settings (while keeping a pool of its own). The engine
+ * and the pool limit are per profile already.
  *
  * @param engine
- *            the engine name; only {@code jdk} exists so far
+ *            the deployment-wide default engine name, {@value #JDK_ENGINE} or
+ *            {@value #VERTX_ENGINE}; a profile may override it
  * @param profiles
  *            settings per profile
  * @param proxy
@@ -34,10 +36,19 @@ import java.util.regex.Pattern;
  */
 public record OutboundSettings(String engine, Map<Profile, ProfileSettings> profiles, ProxySettings proxy) {
 
-    /** The only engine this release ships. */
+    /** The {@code java.net.http} engine, the default. */
     public static final String JDK_ENGINE = "jdk";
 
+    /**
+     * The Vert.x core-client engine: a pre-send connected-peer check and a per-host
+     * pool limit. The default for the {@code apicalls} profile only.
+     */
+    public static final String VERTX_ENGINE = "vertx";
+
     private static final Duration DEFAULT_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+    /** Pooled connections per host on a Vert.x profile that sets no limit. */
+    static final int DEFAULT_VERTX_MAX_CONNECTIONS_PER_HOST = 50;
 
     public OutboundSettings {
         profiles = Map.copyOf(profiles);
@@ -78,9 +89,29 @@ public record OutboundSettings(String engine, Map<Profile, ProfileSettings> prof
      * @param tlsConfigurationName
      *            a named {@code quarkus.tls.<name>} configuration, or {@code null}
      *            for the JVM's default trust
+     * @param engine
+     *            {@value #JDK_ENGINE} or {@value #VERTX_ENGINE}
+     * @param maxConnectionsPerHost
+     *            the Vert.x pool limit per host and port; {@code null} on a JDK
+     *            profile, which has no such limit
      */
     public record ProfileSettings(Duration connectTimeout, Duration totalTimeout, Protocol protocol,
-            String tlsConfigurationName) {
+            String tlsConfigurationName, String engine, Integer maxConnectionsPerHost) {
+
+        /** On the JDK engine. */
+        public ProfileSettings(Duration connectTimeout, Duration totalTimeout, Protocol protocol, String tlsConfigurationName) {
+            this(connectTimeout, totalTimeout, protocol, tlsConfigurationName, JDK_ENGINE, null);
+        }
+
+        /** These settings on {@code engine}, with {@code maxConnectionsPerHost}. */
+        public ProfileSettings onEngine(String engine, Integer maxConnectionsPerHost) {
+            return new ProfileSettings(connectTimeout, totalTimeout, protocol, tlsConfigurationName, engine, maxConnectionsPerHost);
+        }
+
+        /** Whether this profile runs on the Vert.x engine. */
+        public boolean vertx() {
+            return VERTX_ENGINE.equals(engine);
+        }
 
         /** The budget floor: {@link #totalTimeout}, or three connect timeouts. */
         public Duration budgetFloor() {
@@ -143,11 +174,9 @@ public record OutboundSettings(String engine, Map<Profile, ProfileSettings> prof
      *             first request
      */
     public static OutboundSettings fromConfig(Config config) {
-        String engine = config.getOptionalValue("eddi.http.outbound.engine", String.class).orElse(JDK_ENGINE).trim();
-        if (!JDK_ENGINE.equalsIgnoreCase(engine)) {
-            throw new IllegalStateException("eddi.http.outbound.engine must be '" + JDK_ENGINE
-                    + "' — it is the only engine in this release; was '" + engine + "'");
-        }
+        Optional<String> globalEngine = engineName("eddi.http.outbound.engine",
+                config.getOptionalValue("eddi.http.outbound.engine", String.class));
+        String engine = globalEngine.orElse(JDK_ENGINE);
 
         Duration legacyConnect = config.getOptionalValue("httpClient.connectTimeoutInMillis", Integer.class)
                 .map(Duration::ofMillis)
@@ -177,7 +206,73 @@ public record OutboundSettings(String engine, Map<Profile, ProfileSettings> prof
                     list(config.getOptionalValue("eddi.http.outbound.proxy.non-proxy-hosts", String.class), "|"),
                     blankToNull(config.getOptionalValue("eddi.http.outbound.proxy.credentials", String.class)));
         }
-        return uniform(defaults, proxy);
+        // Spelled out per profile so ConfigurationReferenceCoverageTest sees each key.
+        Map<Profile, Optional<String>> engines = new EnumMap<>(Profile.class);
+        engines.put(Profile.DEFAULT, config.getOptionalValue("eddi.http.outbound.default.engine", String.class));
+        engines.put(Profile.LLM_PROVIDER, config.getOptionalValue("eddi.http.outbound.llm-provider.engine", String.class));
+        engines.put(Profile.APICALLS, config.getOptionalValue("eddi.http.outbound.apicalls.engine", String.class));
+        engines.put(Profile.INTERNAL_PEER, config.getOptionalValue("eddi.http.outbound.internal-peer.engine", String.class));
+        Map<Profile, Optional<Integer>> pools = new EnumMap<>(Profile.class);
+        pools.put(Profile.DEFAULT, config.getOptionalValue("eddi.http.outbound.default.max-connections-per-host", Integer.class));
+        pools.put(Profile.LLM_PROVIDER,
+                config.getOptionalValue("eddi.http.outbound.llm-provider.max-connections-per-host", Integer.class));
+        pools.put(Profile.APICALLS, config.getOptionalValue("eddi.http.outbound.apicalls.max-connections-per-host", Integer.class));
+        pools.put(Profile.INTERNAL_PEER,
+                config.getOptionalValue("eddi.http.outbound.internal-peer.max-connections-per-host", Integer.class));
+        // httpcalls' own pool size (the Vert.x client behind them today) is the
+        // apicalls
+        // fallback, so a deployment that tuned it keeps its value once httpcalls move
+        // here.
+        Optional<Integer> legacyApicallsPool = config.getOptionalValue("httpClient.maxConnectionPerRoute", Integer.class);
+
+        Map<Profile, ProfileSettings> all = new EnumMap<>(Profile.class);
+        for (Profile profile : Profile.values()) {
+            String prefix = "eddi.http.outbound." + profile.key();
+            // apicalls is where a pre-send peer check matters most (editor-written URLs,
+            // SSRF protection off by default), so it runs on Vert.x unless told otherwise.
+            String fallback = profile == Profile.APICALLS && globalEngine.isEmpty() ? VERTX_ENGINE : engine;
+            String profileEngine = engineName(prefix + ".engine", engines.get(profile)).orElse(fallback);
+            Optional<Integer> explicitPool = pools.get(profile);
+            Integer pool;
+            if (JDK_ENGINE.equals(profileEngine)) {
+                if (explicitPool.isPresent()) {
+                    throw new IllegalStateException(prefix + ".max-connections-per-host is set, but the " + profile.key()
+                            + " profile runs on the jdk engine, which has no per-host pool limit; set " + prefix
+                            + ".engine=vertx or remove the limit");
+                }
+                pool = null;
+            } else {
+                pool = explicitPool
+                        .or(() -> profile == Profile.APICALLS ? legacyApicallsPool : Optional.empty())
+                        .orElse(DEFAULT_VERTX_MAX_CONNECTIONS_PER_HOST);
+                if (pool < 1) {
+                    throw new IllegalStateException(prefix + ".max-connections-per-host must be at least 1, was " + pool);
+                }
+            }
+            all.put(profile, defaults.onEngine(profileEngine, pool));
+        }
+        return new OutboundSettings(engine, all, proxy);
+    }
+
+    private static Optional<String> engineName(String key, Optional<String> value) {
+        return value.map(v -> v.trim().toLowerCase(Locale.ROOT)).filter(v -> !v.isEmpty()).map(v -> {
+            if (!JDK_ENGINE.equals(v) && !VERTX_ENGINE.equals(v)) {
+                throw new IllegalStateException(key + " must be '" + JDK_ENGINE + "' or '" + VERTX_ENGINE + "', was '" + v + "'");
+            }
+            return v;
+        });
+    }
+
+    /** Whether any profile runs on the Vert.x engine. */
+    public boolean usesVertx() {
+        return profiles.values().stream().anyMatch(ProfileSettings::vertx);
+    }
+
+    /** These settings with every profile on {@code engine}. For tests. */
+    OutboundSettings onEngine(String engine, Integer maxConnectionsPerHost) {
+        Map<Profile, ProfileSettings> all = new EnumMap<>(Profile.class);
+        profiles.forEach((profile, settings) -> all.put(profile, settings.onEngine(engine, maxConnectionsPerHost)));
+        return new OutboundSettings(engine, all, proxy);
     }
 
     private static Duration positive(String key, Duration value) {

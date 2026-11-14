@@ -197,6 +197,16 @@ clean shutdown writes: killed, crashed or
 partitioned from NATS) or `LEFT` (it shut down cleanly); a lost or departed node stays on the
 screen for 15 minutes.
 
+A heartbeat's age (`heartbeatAgeMs`, the card's "Heartbeat … ago") is how long ago the answering
+node saw that record rewritten, measured on its own clock. It never compares another node's
+timestamp with its own, so clock skew between nodes does not make a node `STALE`, drop it from
+the member list or block a drain. `lastHeartbeat` is the writer's own timestamp, shown as it is.
+For about one presence interval after the answering node (re)connects it cannot date a record
+it found already written: the card shows the age that timestamp gives and stays `LIVE`, no
+`node.stale` is reported, and the drain guards count that node as not serving — a drain that
+needs it is refused until its next heartbeat: with `LAST_NODE`, or with `NODE_FAILED` ("this is
+the last node taking turns") when it is the node being drained that just (re)connected.
+
 ### Leases
 
 Each lease shows its holder, age, revision (the fencing token), its last renewal (the server's

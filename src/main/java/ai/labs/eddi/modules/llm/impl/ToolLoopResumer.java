@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
@@ -263,6 +265,20 @@ class ToolLoopResumer {
         Double maxBudget = task.getMaxBudgetPerConversation();
         List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
 
+        // Plan binding (HitlPlanHash): the hash the pause was committed with,
+        // re-derived
+        // here from the calls this loop is about to run. The resume admitted the
+        // decision against the same stored batch; this is the execution-side check,
+        // the last point before anything runs. A batch committed before plan hashing
+        // has no hash and runs as before.
+        String committedPlanHash = batch.getPlanHash();
+        boolean planIntact = HitlPlanBinding.verifies(committedPlanHash,
+                HitlPlanHash.forToolBatch(conversationId, memory.getAgentId(), memory.getAgentVersion(), batch));
+        if (!planIntact) {
+            LOGGER.warnf("hitl.plan.changed: the pending tool calls of conversation '%s' no longer match the plan they were approved "
+                    + "as — no approved call of this batch is executed", sanitize(conversationId));
+        }
+
         for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
             ToolCallDecision cd = perCall.get(c.getCallId());
             HitlDecision.HitlVerdict resolvedVerdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
@@ -292,7 +308,9 @@ class ToolLoopResumer {
             }
 
             // APPROVED (top-level default or per-call) below.
-            trace.add(Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId()));
+            trace.add(committedPlanHash != null
+                    ? Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId(), "planHash", committedPlanHash)
+                    : Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId()));
 
             // Truncated raw args can't be honestly executed (the approver never saw the
             // full args and the raw bytes are incomplete). Validation already blocks
@@ -301,6 +319,17 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                continue;
+            }
+
+            // The approval was given for a plan this batch no longer is: refuse every
+            // approved call of it, before the journal claim, like a changed request.
+            if (!planIntact) {
+                auditRequestChanged(memory, c, "the plan changed after it was approved");
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the plan changed after it was approved\"}"));
+                trace.add(Map.of("type", "hitl_plan_changed", "tool", c.getToolName(), "callId", c.getCallId()));
                 emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }

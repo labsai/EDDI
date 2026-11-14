@@ -208,6 +208,33 @@ class CrawlUrlsTest {
     }
 
     @Test
+    @DisplayName("the URL to fetch is encoded the way the document id is, and loses its fragment")
+    void fetchableEncodesLikeCanonicalize() {
+        assertEquals("https://example.com/docs/my%20doc.html",
+                CrawlUrls.fetchable("https://example.com/docs/my doc.html#section"));
+        assertEquals("https://example.com/search?q=a%7Cb", CrawlUrls.fetchable("https://example.com/search?q=a|b"));
+    }
+
+    @Test
+    @DisplayName("an already valid URL is fetched exactly as written, never encoded twice")
+    void fetchableLeavesValidUrlsAlone() {
+        // Unlike canonicalize, nothing is lowercased, reordered or stripped: the
+        // server gets the URL the page linked to.
+        String url = "https://Example.com/Docs/my%20doc.html?utm_source=x&b=2&a=1";
+
+        assertEquals(url, CrawlUrls.fetchable(url));
+    }
+
+    @Test
+    @DisplayName("a URL that cannot be parsed even encoded yields nothing to fetch")
+    void fetchableRejectsUnparseable() {
+        // A stray % is not a character encodeIllegal touches, and not a valid escape.
+        assertEquals("", CrawlUrls.fetchable("https://example.com/50%off"));
+        assertEquals("", CrawlUrls.fetchable(null));
+        assertEquals("", CrawlUrls.fetchable("  "));
+    }
+
+    @Test
     @DisplayName("a pipe or a brace in a query survives canonicalization")
     void encodesIllegalQueryCharacters() {
         String canonical = CrawlUrls.canonicalize("https://example.com/search?q=a|b");

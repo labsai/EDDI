@@ -200,6 +200,12 @@ curl -s "$EDDI/dictionarystore/dictionaries/<DICTIONARY_ID>?version=1" | jq
 >   -d '{ "operation": "SET",
 >         "document": { "name": "Greeting dictionary", "description": "hello / hi" } }'
 > ```
+>
+> The `document` may carry `name`, `description`, or both, and nothing else: a
+> document that also sets another field — `visibility`, `spaceId`, `grants`, a
+> timestamp, or a key the descriptor does not have — is refused with `400`, which
+> names each field, and nothing is changed. Visibility, space and sharing are
+> changed under [`/descriptorstore/descriptors/{id}/shares`](workspaces.md#sharing).
 
 ### 2. Create Behavior Rules
 
