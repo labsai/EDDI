@@ -14,9 +14,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -238,6 +241,46 @@ class ToolLoopResumerSelfConversationTest {
 
         assertNotNull(ToolLoopResumer.targetsOwnConversationLive(builtin, Map.of(), CONVERSATION_ID), "live path, no resolver");
         assertNotNull(resumer.targetsOwnConversation(call(args), null, Map.of(), CONVERSATION_ID), "resume path, no resolver");
+    }
+
+    /**
+     * Two argument strings no JSON parser accepts, which langchain4j still
+     * executes: when its first parse fails,
+     * {@code ToolExecutionRequestUtil.argumentsAsMap} strips one pair of outer
+     * quotes and turns every backslash-quote into a quote before parsing again.
+     * Built-in tools ({@code converse_with_agent}) take their arguments that way.
+     */
+    private static List<String> langchain4jFallbackShapes() {
+        String escapedQuote = "\\" + "\"";
+        String json = "{\"agentId\":\"x\",\"message\":\"hi\",\"conversationId\":\"" + jsonEscapedOwnId() + "\"}";
+        return List.of(json.replace("\"", escapedQuote), "\"" + json + "\"");
+    }
+
+    @Test
+    @DisplayName("arguments only langchain4j's fallback parse reads are refused on both paths when they name the own conversation")
+    void langchain4jFallbackShapesAreRefused() throws Exception {
+        Method argumentsAsMap = Class.forName("dev.langchain4j.service.tool.ToolExecutionRequestUtil")
+                .getDeclaredMethod("argumentsAsMap", String.class);
+        argumentsAsMap.setAccessible(true);
+        for (String args : langchain4jFallbackShapes()) {
+            assertFalse(args.contains(CONVERSATION_ID), "the raw arguments must not already name the id: " + args);
+            assertEquals(CONVERSATION_ID, ((Map<?, ?>) argumentsAsMap.invoke(null, args)).get("conversationId"),
+                    "langchain4j executes the call with the agent's own conversation id: " + args);
+
+            assertTrue(ToolLoopResumer.argumentsTargetConversation(args, CONVERSATION_ID), args);
+            var builtin = ToolExecutionRequest.builder().id("c1").name("converse_with_agent").arguments(args).build();
+            assertNotNull(ToolLoopResumer.targetsOwnConversationLive(builtin, Map.of(), CONVERSATION_ID), "live path: " + args);
+            assertNotNull(resumer.targetsOwnConversation(call(args), null, Map.of(), CONVERSATION_ID), "resume path: " + args);
+        }
+    }
+
+    @Test
+    @DisplayName("the same shapes naming another conversation still run")
+    void langchain4jFallbackShapesForAnotherConversationPass() {
+        for (String args : langchain4jFallbackShapes()) {
+            String other = args.replace(jsonEscapedOwnId(), OTHER_CONVERSATION_ID);
+            assertFalse(ToolLoopResumer.argumentsTargetConversation(other, CONVERSATION_ID), other);
+        }
     }
 
     @Test
