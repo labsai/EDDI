@@ -47,7 +47,7 @@ public class McpSetupTools {
 
     @Tool(name = "setup_agent", description = "Create a fully working, deployed Agent in a single call. "
             + "This creates all necessary resources (behavior rules, LLM connection, "
-            + "output set, package, agent), names them, and optionally deploys the agent. "
+            + "output set, workflow, agent), names them, and optionally deploys the agent. "
             + "This is the fastest way to get a new Agent running.")
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "

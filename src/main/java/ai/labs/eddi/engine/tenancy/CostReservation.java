@@ -7,7 +7,7 @@ package ai.labs.eddi.engine.tenancy;
 /**
  * A hold on part of a tenant's monthly cost budget: money set aside for a call
  * that has not been charged yet. See
- * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation}.
+ * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation-opt-in}.
  *
  * @param amountUsd
  *            the amount held
