@@ -4,6 +4,18 @@ EDDI can present its deployed agents as **OpenAI models**. Any client that speak
 
 The adapter lives at `/v1` and is **disabled by default**.
 
+> **Only want a chat front end for your agents? Use Open WebUI.** If your users need a generic, ChatGPT-style chat with EDDI agents behind it, Open WebUI over `/v1` does that well today, and EDDI does not try to out-build it on generic chat. What the OpenAI protocol cannot carry is EDDI's own interaction model, so over `/v1` your users go without:
+>
+> - **Approvals in the flow.** A paused turn arrives as a text notice; nobody can approve or reject in the chat, it happens out of band ([HITL](#hitl)).
+> - **Quick replies and `inputField`.** They are flattened to Markdown to read and retype, not buttons or a form ([§7.2](#72-structured-outputs)).
+> - **Secret input.** There is no masked field, so an agent asking for a password gets it in the clear in the client's history.
+> - **Ratings and review notices.** No thumbs or rating card, and no "replies are reviewed" notice from the agent's profile.
+> - **Group discussions.** Teams of agents are not models ([§10](#10-known-gaps)).
+> - **Memory transparency.** No view of what an agent remembers about the user, and no way to delete it there.
+> - **Branding.** Open WebUI shows its own brand, not the deployment's white-label name, logo and colours, and no per-agent appearance.
+>
+> Those are what EDDI's own surfaces exist for: the embeddable [Chat UI](chat-ui-embedding.md) at `/chat`, and the Manager and Workforce.
+
 ---
 
 ## Contents
