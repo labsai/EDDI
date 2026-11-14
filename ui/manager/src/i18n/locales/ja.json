@@ -3469,6 +3469,8 @@
     "hitlSection": "人間の承認",
     "hitlApprovalPoints": "承認箇所",
     "hitlOnTaskRejection": "却下時",
+    "hitlApprovalCompletesBacklogTask": "承認をバックログ上の完了とみなす",
+    "hitlApprovalCompletesBacklogTaskHelp": "常設チーム：人が承認したタスクは、ケイデンス実行の書き戻し時に完了のまま残り、バックログに戻って再実行されることはありません。タイムアウトによる自動承認は対象外です。",
     "hitlEdit": "編集",
     "hitlSaved": "承認設定を保存しました",
     "hitlEnable": "人間の承認を必須にする",

@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -423,6 +426,104 @@ class SharedTaskListHitlTest {
             assertEquals(SharedTaskList.TaskStatus.FAILED, rejected.status());
             assertEquals("Insufficient coverage", rejected.verificationNote());
             assertFalse(list.hasAwaitingApproval());
+        }
+    }
+    // =========================================================================
+    // approvals — the durable marker that a task was approved
+    // =========================================================================
+
+    @Nested
+    @DisplayName("approvals")
+    class Approvals {
+
+        private String awaiting() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Post", "d", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.submitForApproval(task.id(), "draft");
+            return task.id();
+        }
+
+        @Test
+        @DisplayName("approveTask records the decider")
+        void approveRecordsDecider() {
+            String id = awaiting();
+            list.approveTask(id, "alice");
+
+            var approval = list.approvalOf(id);
+            assertNotNull(approval);
+            assertEquals("alice", approval.decidedBy());
+            assertFalse(approval.edited());
+            assertTrue(approval.byPerson());
+            assertNotNull(approval.at());
+        }
+
+        @Test
+        @DisplayName("a system:* decider is not a person; an unnamed one is")
+        void systemDeciderIsNotAPerson() {
+            assertFalse(new SharedTaskList.TaskApproval("system:timeout", "t", false).byPerson());
+            assertFalse(new SharedTaskList.TaskApproval("system:no-progress", "t", false).byPerson());
+            assertTrue(new SharedTaskList.TaskApproval(null, "t", false).byPerson());
+            assertTrue(new SharedTaskList.TaskApproval("mcp:ops", "t", false).byPerson());
+        }
+
+        @Test
+        @DisplayName("an edited approval is recorded as edited, by the editor")
+        void editedApprovalRecorded() {
+            String id = awaiting();
+            list.approveTaskWithEditedResult(id, "better", new SharedTaskList.ReviewerEdit("bob", "t", "sha", 5));
+
+            assertEquals("bob", list.approvalOf(id).decidedBy());
+            assertTrue(list.approvalOf(id).edited());
+        }
+
+        @Test
+        @DisplayName("a task that completes without a gate has no approval, nor does a rejected one")
+        void noApprovalWithoutDecision() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Plain", "d", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.completeTask(task.id(), "done");
+            assertNull(list.approvalOf(task.id()));
+
+            String rejected = awaiting();
+            list.rejectTask(rejected, "no");
+            assertNull(list.approvalOf(rejected));
+            assertNull(list.approvalOf(null));
+        }
+
+        @Test
+        @DisplayName("a reset for another attempt clears the approval of the superseded result")
+        void resetClearsApproval() {
+            String id = awaiting();
+            list.approveTask(id, "alice");
+            list.verifyTask(id, false, "redo");
+            list.resetFromAnyToAssigned(id, "redo");
+
+            assertNull(list.approvalOf(id));
+        }
+
+        @Test
+        @DisplayName("a task list stored before approvals existed reads back with none, and approvals round-trip")
+        void jsonCompatibility() throws Exception {
+            var mapper = new ObjectMapper().registerModule(new JavaTimeModule())
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            String old = """
+                    {"tasks":[{"id":"t1","subject":"s","description":"d","status":"COMPLETED","assignedAgentId":"a",
+                     "assignedDisplayName":"A","dependsOnIds":[],"result":"r","verificationNote":null,"verified":false,
+                     "priority":1,"createdAt":"2026-11-01T10:00:00Z","completedAt":"2026-11-01T11:00:00Z",
+                     "createdByAgentId":null}],
+                     "awardedBids":{},"reviewerEdits":{},"reworkCounts":{}}
+                    """;
+            SharedTaskList read = mapper.readValue(old, SharedTaskList.class);
+            assertEquals(1, read.getTasks().size());
+            assertTrue(read.getApprovals().isEmpty());
+            assertNull(read.approvalOf("t1"));
+
+            String id = awaiting();
+            list.approveTask(id, "alice");
+            SharedTaskList back = mapper.readValue(mapper.writeValueAsString(list), SharedTaskList.class);
+            assertEquals(list.approvalOf(id), back.approvalOf(id));
         }
     }
 }

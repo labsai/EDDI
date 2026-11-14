@@ -51,6 +51,8 @@ export interface Cadence {
 /** Per-member reliability counters (I13) — RECORDING only; nothing in v1 routes, weights, or filters assignment on these numbers. */
 export interface MemberStats {
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   tasksFailed: number;
 }
 
@@ -58,6 +60,8 @@ export interface MemberStats {
 export interface WorkspaceMetrics {
   discussions: number;
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   totalCost: number;
   lastRunAt: string | null;
   perMemberStats: Record<string, MemberStats>;

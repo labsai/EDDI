@@ -3469,6 +3469,8 @@
     "hitlSection": "사람 승인",
     "hitlApprovalPoints": "승인 지점",
     "hitlOnTaskRejection": "거부 시",
+    "hitlApprovalCompletesBacklogTask": "승인을 백로그 완료로 간주",
+    "hitlApprovalCompletesBacklogTaskHelp": "상설 팀: 사람이 승인한 작업은 케이던스 실행 결과를 기록할 때 완료 상태로 유지되며, 백로그로 돌아가 다시 실행되지 않습니다. 시간 초과 자동 승인은 포함되지 않습니다.",
     "hitlEdit": "편집",
     "hitlSaved": "승인 설정이 저장되었습니다",
     "hitlEnable": "사람 승인 필요",

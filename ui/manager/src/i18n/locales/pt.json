@@ -3500,6 +3500,8 @@
     "hitlSection": "Aprovação humana",
     "hitlApprovalPoints": "Aprovação em",
     "hitlOnTaskRejection": "Ao rejeitar",
+    "hitlApprovalCompletesBacklogTask": "A aprovação conta como concluída no backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Equipes permanentes: uma tarefa aprovada por uma pessoa permanece concluída quando a execução da cadência é gravada, em vez de voltar ao backlog e ser executada novamente. Aprovações automáticas por tempo limite não contam.",
     "hitlEdit": "Editar",
     "hitlSaved": "Definições de aprovação guardadas",
     "hitlEnable": "Exigir aprovação humana",

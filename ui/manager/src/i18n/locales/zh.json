@@ -3469,6 +3469,8 @@
     "hitlSection": "人工批准",
     "hitlApprovalPoints": "批准于",
     "hitlOnTaskRejection": "拒绝时",
+    "hitlApprovalCompletesBacklogTask": "审批通过即视为待办已完成",
+    "hitlApprovalCompletesBacklogTaskHelp": "常设团队：经人工审批通过的任务在节奏运行回写时保持完成状态，而不会返回待办列表再次执行。超时自动批准不计入。",
     "hitlEdit": "编辑",
     "hitlSaved": "审批设置已保存",
     "hitlEnable": "需要人工审批",

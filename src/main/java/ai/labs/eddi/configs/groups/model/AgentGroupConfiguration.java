@@ -1995,6 +1995,34 @@ public class AgentGroupConfiguration {
         public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
             this.approvalContext = approvalContext;
         }
+
+        /**
+         * Standing teams only: whether a backlog task that a person approved at a
+         * TASK-granularity gate counts as done when its cadence run is written back.
+         * <p>
+         * {@code false} (the default, and what every stored config reads as) keeps the
+         * original rule — only a {@code VERIFIED} outcome stays done; an approved task
+         * is merely {@code COMPLETED} and returns to {@code PENDING}, so the next run
+         * executes it again. {@code true} keeps it done as well, with the approver's
+         * edited result when there was one. Only an approval somebody gave counts: a
+         * timeout auto-approval ({@code decidedBy system:*}) does not, and neither does
+         * a task that completed in an ungated phase.
+         * <p>
+         * A switch (not a default) on {@code hitlConfig} rather than on the cadence: it
+         * is versioned with the group and sits next to the gate it qualifies. Ignored
+         * by a group without a workspace.
+         *
+         * @since 6.7.0
+         */
+        private boolean approvalCompletesBacklogTask;
+
+        public boolean isApprovalCompletesBacklogTask() {
+            return approvalCompletesBacklogTask;
+        }
+
+        public void setApprovalCompletesBacklogTask(boolean approvalCompletesBacklogTask) {
+            this.approvalCompletesBacklogTask = approvalCompletesBacklogTask;
+        }
     }
 
 }

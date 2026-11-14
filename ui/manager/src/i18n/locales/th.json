@@ -3469,6 +3469,8 @@
     "hitlSection": "การอนุมัติจากมนุษย์",
     "hitlApprovalPoints": "อนุมัติที่",
     "hitlOnTaskRejection": "เมื่อปฏิเสธ",
+    "hitlApprovalCompletesBacklogTask": "การอนุมัติถือว่างานใน backlog เสร็จแล้ว",
+    "hitlApprovalCompletesBacklogTaskHelp": "ทีมถาวร: งานที่บุคคลอนุมัติจะยังคงเสร็จสิ้นเมื่อบันทึกผลรอบการทำงานกลับ แทนที่จะกลับไปที่ backlog และทำงานซ้ำ การอนุมัติอัตโนมัติเมื่อหมดเวลาจะไม่นับ",
     "hitlEdit": "แก้ไข",
     "hitlSaved": "บันทึกการตั้งค่าการอนุมัติแล้ว",
     "hitlEnable": "ต้องมีการอนุมัติจากมนุษย์",

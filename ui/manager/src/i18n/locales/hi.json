@@ -3469,6 +3469,8 @@
     "hitlSection": "मानवीय स्वीकृति",
     "hitlApprovalPoints": "स्वीकृति पर",
     "hitlOnTaskRejection": "अस्वीकृति पर",
+    "hitlApprovalCompletesBacklogTask": "स्वीकृति को बैकलॉग में पूर्ण माना जाए",
+    "hitlApprovalCompletesBacklogTaskHelp": "स्थायी टीमें: किसी व्यक्ति द्वारा स्वीकृत कार्य कैडेंस रन के राइटबैक पर पूर्ण बना रहता है, बजाय बैकलॉग में लौटकर फिर से चलने के। टाइमआउट पर स्वचालित स्वीकृतियाँ नहीं गिनी जातीं।",
     "hitlEdit": "संपादित करें",
     "hitlSaved": "अनुमोदन सेटिंग्स सहेजी गईं",
     "hitlEnable": "मानव अनुमोदन आवश्यक",

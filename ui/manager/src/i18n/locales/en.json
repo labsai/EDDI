@@ -3523,6 +3523,8 @@
     "hitlSection": "Human Approval",
     "hitlApprovalPoints": "Approval at",
     "hitlOnTaskRejection": "On rejection",
+    "hitlApprovalCompletesBacklogTask": "Approval counts as done for the backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Standing teams: a task a person approves stays done when the cadence run is written back, instead of returning to the backlog and running again. Timeout auto-approvals do not count.",
     "hitlEdit": "Edit",
     "hitlSaved": "Approval settings saved",
     "hitlEnable": "Require human approval",
