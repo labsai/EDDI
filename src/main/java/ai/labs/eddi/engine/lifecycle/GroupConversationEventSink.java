@@ -218,14 +218,20 @@ public final class GroupConversationEventSink {
      *            not the approver-facing text.
      */
     public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
-            @JsonIgnore RenderedApprovalContext approvalContext) {
+            @JsonIgnore RenderedApprovalContext approvalContext, @JsonIgnore String planHash) {
+
+        /** Without a plan hash (the pre-6.8 shape). */
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
+                RenderedApprovalContext approvalContext) {
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, approvalContext, null);
+        }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
-            this(phaseIndex, phaseName, reason, granularity, pausedAt, null);
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, null, null);
         }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
-            this(phaseIndex, phaseName, reason, granularity, null, null);
+            this(phaseIndex, phaseName, reason, granularity, null, null, null);
         }
     }
 

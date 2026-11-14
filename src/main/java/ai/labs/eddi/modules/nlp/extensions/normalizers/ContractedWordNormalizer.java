@@ -18,7 +18,7 @@ public class ContractedWordNormalizer implements INormalizer {
         contractedWords.put("didn't", "did not");
         contractedWords.put("can't", "cannot");
         contractedWords.put("couldn't", "could not");
-        contractedWords.put("won't", "would not");
+        contractedWords.put("won't", "will not");
         contractedWords.put("wasn't", "was not");
         contractedWords.put("weren't", "were not");
         contractedWords.put("shouldn't", "should not");

@@ -410,8 +410,9 @@ class McpRoleTierParityTest {
     @Test
     @DisplayName("where MCP is deliberately narrower than REST, it is narrower — never wider")
     void deliberateNarrowingsAreSubsets() {
-        // Schedules: the MCP tools address the schedule store directly, without the
-        // per-owner scoping RestScheduleStore applies, so they stay admin-only.
+        // Schedules: admin-only, narrower than REST's admin/editor tier. The tools run
+        // through RestScheduleStore under the caller's identity, so widening them is
+        // now a decision about the tier, not about missing owner checks.
         assertTrue(restRoles(IRestScheduleStore.class).containsAll(McpRoles.ADMIN_ONLY));
         // Memory writes for an arbitrary userId: admin-only; REST lets a user write
         // only their own.

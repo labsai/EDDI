@@ -393,6 +393,7 @@ Location: eddi://ai.labs.parser/parserstore/parsers/PARSER_ID?version=1
 | --------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `distance`      | `2`     | Maximum edit distance a dictionary word may have from the input token.                                                                                                                 |
 | `maxCandidates` | `5`     | Upper bound on how many correction candidates one token may produce. Every candidate becomes another branch in the parser's match matrix, so raising this multiplies the search space. |
+| `lookupIfKnown` | `false` | Also correct a token that a dictionary already matched. By default a correction only runs on unknown tokens. Accepts a JSON boolean or the string `"true"`; the phonetic correction takes the same key. |
 
 Candidates are sorted by edit distance first, so the closest matches survive the cap. A missing, non-numeric or non-positive value falls back to the default.
 

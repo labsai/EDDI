@@ -131,6 +131,11 @@ The blocks are rendered **once, when the pause is committed**, and the result is
 `digest` — a SHA-256 over the rendered items — identifies what was shown, so an audit entry can prove it without
 copying the text.
 
+The context describes the pause; it does not bind the decision. What binds it is the pause's
+[`planHash`](hitl.md#plan-binding-planhash), reported by `approval-status` next to `approvalContext`: a hash of
+exactly what the pause would let run (the tool calls and their arguments, the pending actions, the group work under
+review), which a decision sends back so it applies to that plan and no other.
+
 ## Where it is shown, and to whom
 
 | Surface | Shows the context to | Needs |

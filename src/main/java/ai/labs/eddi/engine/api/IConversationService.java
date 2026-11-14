@@ -709,4 +709,19 @@ public interface IConversationService {
             super(message);
         }
     }
+
+    /**
+     * A decision named a plan ({@code HitlDecision.planHash}) that is not the
+     * current pause's, or the stored plan no longer hashes to the value it was
+     * committed with. Nothing ran; the pause is left untouched. A
+     * {@link PauseMismatchException}, so every surface that maps a changed pause to
+     * a conflict maps this one too; a surface that can say more catches it first.
+     *
+     * @since 6.8.0
+     */
+    class PlanMismatchException extends PauseMismatchException {
+        public PlanMismatchException(String message) {
+            super(message);
+        }
+    }
 }

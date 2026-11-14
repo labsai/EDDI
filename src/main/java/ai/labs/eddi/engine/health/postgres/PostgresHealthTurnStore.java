@@ -57,7 +57,9 @@ import java.util.stream.Collectors;
  * applies only
  * {@code WHERE health_turns.updated_at_ms <= EXCLUDED.updated_at_ms} (or the
  * stored row is a discard marker), so a stale write is ignored.
- * {@link #insertIfAbsent} is {@code ON CONFLICT DO NOTHING}.
+ * {@link #insertIfAbsent} is {@code ON CONFLICT DO NOTHING}. A late write's
+ * stamp is {@code written_at_ms}, replaced by every applied write (an on-time
+ * one sets it {@code NULL}); its index is partial, over the stamped rows only.
  * <p>
  * A discard marker has {@code discarded_at_ms} and no {@code recorded_at_ms};
  * reads skip it. Actions are a {@code TEXT[]}, the failure list a small
@@ -108,6 +110,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 discarded BOOLEAN NOT NULL DEFAULT FALSE,
                 discarded_at_ms BIGINT,
                 self_reported_outcome VARCHAR(32),
+                written_at_ms BIGINT,
                 PRIMARY KEY (conversation_id, execution_id)
             )
             """;
@@ -125,7 +128,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_rows ON health_turns (discarded_at_ms) WHERE day IS NOT NULL "
                     + "AND discarded_at_ms IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)",
+            // Late rows only: the self-heal finds them by when they were written.
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"};
+
+    /** Columns added after the table first shipped on development branches. */
+    static final String[] ADD_COLUMNS = {"ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"};
 
     /**
      * Added in H3; a table created before lacks it. Checked in the catalog first:
@@ -153,12 +161,13 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     private static final String VALUES = WRITTEN.stream().map(c -> "failures".equals(c) ? "CAST(? AS JSONB)" : "?")
             .collect(Collectors.joining(", "));
 
-    private static final String INSERT = "INSERT INTO health_turns (" + COLUMNS + ") VALUES (" + VALUES + ") ";
+    /** {@link #WRITTEN}, then the late-write stamp, bound last. */
+    private static final String INSERT = "INSERT INTO health_turns (" + COLUMNS + ", written_at_ms) VALUES (" + VALUES + ", ?) ";
 
     static final String UPSERT = INSERT + "ON CONFLICT (conversation_id, execution_id) DO UPDATE SET "
             + WRITTEN.stream().filter(c -> !NOT_REPLACED.contains(c)).map(c -> c + " = EXCLUDED." + c).collect(Collectors.joining(", "))
             + ", day = COALESCE(health_turns.day, EXCLUDED.day), recorded_at_ms = COALESCE(health_turns.recorded_at_ms, EXCLUDED.recorded_at_ms)"
-            + ", discarded = health_turns.discarded OR EXCLUDED.discarded"
+            + ", discarded = health_turns.discarded OR EXCLUDED.discarded, written_at_ms = EXCLUDED.written_at_ms"
             + " WHERE health_turns.updated_at_ms IS NULL OR health_turns.updated_at_ms <= EXCLUDED.updated_at_ms";
 
     static final String INSERT_IF_ABSENT = INSERT + "ON CONFLICT (conversation_id, execution_id) DO NOTHING";
@@ -214,6 +223,9 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            for (String column : ADD_COLUMNS) {
+                statement.execute(column);
+            }
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
             }
@@ -233,19 +245,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public void upsert(HealthTurn turn) {
-        write(UPSERT, turn);
+    public void upsert(HealthTurn turn, Instant lateWrittenAt) {
+        write(UPSERT, turn, lateWrittenAt);
     }
 
     @Override
-    public void insertIfAbsent(HealthTurn turn) {
-        write(INSERT_IF_ABSENT, turn);
+    public void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt) {
+        write(INSERT_IF_ABSENT, turn, lateWrittenAt);
     }
 
-    private void write(String sql, HealthTurn turn) {
+    private void write(String sql, HealthTurn turn, Instant lateWrittenAt) {
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             bind(connection, statement, turn);
+            setLong(statement, WRITTEN.size() + 1, millis(lateWrittenAt));
             statement.executeUpdate();
         } catch (SQLException | JsonProcessingException e) {
             throw new HealthStoreException("Could not store a health turn", e);
@@ -322,12 +335,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt) {
         if (replacing == null || replacing.conversationId() == null || executionIds == null || executionIds.isEmpty()) {
             return 0L;
         }
         ensureSchema();
-        long at = (replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now()).toEpochMilli();
+        long at = (lateWrittenAt != null ? lateWrittenAt : replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now()).toEpochMilli();
         try (Connection connection = dataSourceInstance.get().getConnection();
                 PreparedStatement statement = connection.prepareStatement(MARK_DISCARDED)) {
             Set<String> ids = new LinkedHashSet<>(executionIds);
@@ -509,11 +522,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             + "AND recorded_at_ms IS NOT NULL AND NOT discarded AND origin = ANY(?) GROUP BY agent_id, conversation_id) c GROUP BY agent_id";
 
     /**
-     * Rows written, or discarded, in the window: a discard leaves updated_at_ms as
-     * it was.
+     * Rows written, discarded, or written late in the window: a discard leaves
+     * updated_at_ms as it was, and a late row's updated_at_ms is its capture time.
      */
     static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE ((updated_at_ms >= ? AND updated_at_ms < ?) "
-            + "OR (discarded_at_ms >= ? AND discarded_at_ms < ?)) AND day IS NOT NULL AND agent_id IS NOT NULL LIMIT ?";
+            + "OR (discarded_at_ms >= ? AND discarded_at_ms < ?) OR (written_at_ms >= ? AND written_at_ms < ?)) AND day IS NOT NULL "
+            + "AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_USER = "SELECT DISTINCT agent_id, day FROM health_turns WHERE user_id = ? AND day IS NOT NULL "
             + "AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_CONVERSATION = "SELECT DISTINCT agent_id, day FROM health_turns WHERE conversation_id = ? "
@@ -636,7 +650,9 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             statement.setLong(2, until.toEpochMilli());
             statement.setLong(3, since.toEpochMilli());
             statement.setLong(4, until.toEpochMilli());
-            statement.setInt(5, Math.max(1, limit));
+            statement.setLong(5, since.toEpochMilli());
+            statement.setLong(6, until.toEpochMilli());
+            statement.setInt(7, Math.max(1, limit));
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
                     consumer.accept(r.getString(1), r.getObject(2, LocalDate.class));

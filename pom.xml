@@ -927,10 +927,13 @@
                         <exclude>**/bootstrap/**</exclude>
                         <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
-                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
-                             cannot be tested without live API keys. -->
-                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- The two LLM provider builders whose clients cannot be built offline:
+                             Vertex needs GCP credentials and OCI an ~/.oci/config. The rest of
+                             the builder package (parameter catalog, value parsing, the bounded
+                             HTTP client, every other provider) is unit-tested against
+                             langchain4j's real request mapping and counts towards the gate. -->
+                        <exclude>**/llm/impl/builder/VertexGeminiLanguageModelBuilder*</exclude>
+                        <exclude>**/llm/impl/builder/OracleGenAiLanguageModelBuilder*</exclude>
                         <!-- Slack integration adapter: requires live Slack webhook API,
                              not testable without external service -->
                         <exclude>**/integrations/slack/**</exclude>

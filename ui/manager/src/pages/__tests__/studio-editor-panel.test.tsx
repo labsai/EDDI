@@ -91,9 +91,7 @@ describe("StudioEditorPanel", () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/Editor not available/i)
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "unknown");
     });
   });
 
@@ -105,9 +103,7 @@ describe("StudioEditorPanel", () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/no configuration URI/i)
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "noConfig");
     });
   });
 
@@ -119,9 +115,7 @@ describe("StudioEditorPanel", () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText("eddi://ai.labs.newtype")
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("studio-step-info-type")).toHaveTextContent("eddi://ai.labs.newtype");
     });
   });
 
@@ -148,10 +142,8 @@ describe("StudioEditorPanel", () => {
       config: { uri: "eddi://ai.labs.output.template/outputstore/outputsets/out1?version=1" },
     });
 
-    await waitFor(() => {
-      const unsupported = screen.queryByText(/Editor not available/i);
-      expect(unsupported).not.toBeInTheDocument();
-    });
+    expect(await screen.findByTestId("studio-editor-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-step-info")).not.toBeInTheDocument();
   });
 });
 

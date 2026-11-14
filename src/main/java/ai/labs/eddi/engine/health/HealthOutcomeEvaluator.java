@@ -25,6 +25,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -32,13 +34,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -53,7 +57,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ol>
  * <li><b>due sessions</b> — sessions whose window has closed since they were
  * judged ({@code dueAt}), and those a rating (saved or withdrawn) made due — at
- * most half of the pass's time, so they are never starved by a backfill;</li>
+ * most half of the pass's time, so they are never starved by a backfill. A due
+ * session whose evaluation fails is made due again later
+ * ({@link #DUE_RETRY_MIN} up to {@link #DUE_RETRY_MAX}, growing with the time
+ * since it was last judged), so failing sessions cannot fill every pass's page.
+ * Rating marks that could not be stored on arrival are stored first;</li>
  * <li><b>the incremental feed</b> — conversations with turn rows captured up to
  * one minute ago, paged by each conversation's newest capture (then its id),
  * oldest first. Where it stands is a persisted {@link HealthFeedCursor} of two
@@ -81,9 +89,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * position back to its capture time, so the next passes retry it however far
  * the forward feed has got — for at most {@link #MAX_RETRY} from its first
  * failure, then it is given up (a WARN; its next change or due time evaluates
- * it again). A failure is any store that cannot be read — turn rows, outcomes,
- * the agent's {@code healthConfig}, the ratings — so no session is judged on
- * what was merely unavailable.
+ * it again). The node that saw a failure also retries it directly at the start
+ * of the replay, so a later failure is retried even while the replay, restarted
+ * at the earliest one, does not reach it. A failure is any store that cannot be
+ * read — turn rows, outcomes, the agent's {@code healthConfig}, the ratings —
+ * so no session is judged on what was merely unavailable.
  * <p>
  * Per conversation it reads the turn rows of a <em>range of steps</em>, oldest
  * first: from the latest stored session on (the feed), or one stored session's
@@ -123,6 +133,14 @@ public class HealthOutcomeEvaluator {
     static final int MAX_RANGE_TURNS = 10_000;
     /** A rating below this normalised score is negative. */
     static final double NEGATIVE_RATING_BELOW = 0.5;
+    /**
+     * The shortest wait before a due session whose evaluation failed is looked at
+     * again; the wait grows with the time since its last successful evaluation, up
+     * to {@link #DUE_RETRY_MAX}.
+     */
+    static final Duration DUE_RETRY_MIN = Duration.ofMinutes(15);
+    /** The longest wait before a failed due session is looked at again. */
+    static final Duration DUE_RETRY_MAX = Duration.ofHours(6);
 
     /** What one pass did. */
     public record Result(int conversations, int sessions, int failed) {
@@ -140,12 +158,35 @@ public class HealthOutcomeEvaluator {
     private final HealthMetrics metrics;
     private final Clock clock;
 
+    /** Rating marks waiting on the hand-off thread. */
+    static final int RATING_QUEUE = 1_000;
+    /** The most conversations a full hand-off queue defers. */
+    static final int MAX_DEFERRED_RATINGS = 10_000;
+    /** At most one WARN about lost rating marks per this long. */
+    static final Duration RATING_WARN_INTERVAL = Duration.ofMinutes(1);
+
     /**
      * Where rating events are handed off: the rating request must never wait for
-     * Agent Health. One thread, a bounded queue; a full queue drops the mark (the
-     * session is judged again with its next change).
+     * Agent Health. One thread, a bounded queue. A mark the full queue refuses, or
+     * the store fails to take, is not dropped: its conversation is deferred
+     * ({@link #deferredRatings}) and marked — every session, as a withdrawal is —
+     * by the hand-off thread once it catches up, or by the next pass on this node.
+     * A closed session has no next change to be judged again with, so a dropped
+     * mark would have left a rating out of its outcome for good.
      */
     private Executor ratingExecutor;
+    /**
+     * Conversations whose rating mark the full queue refused, coalesced and bounded
+     * ({@link #MAX_DEFERRED_RATINGS}); only beyond that is a mark lost — counted
+     * and logged. Each deferral stamps the entry with a new generation, and the
+     * drain removes an entry only while it still holds the generation the drain
+     * read before marking: a rating deferred again while the mark was being stored
+     * (after a pass had already judged and cleared it) keeps its entry.
+     */
+    private final Map<String, Long> deferredRatings = new ConcurrentHashMap<>();
+    private final AtomicLong deferredRatingGeneration = new AtomicLong();
+    private final AtomicLong ratingsLostSinceWarn = new AtomicLong();
+    private final AtomicReference<Instant> lastRatingWarn = new AtomicReference<>();
     private ExecutorService ownedExecutor;
     /**
      * When the feed first failed to evaluate a conversation, by this node's clock:
@@ -153,6 +194,11 @@ public class HealthOutcomeEvaluator {
      * turn captured days ago is retried as long as a fresh one. Bounded and per
      * node — on another node the limit starts again, which only retries longer.
      */
+    /**
+     * The failure the direct retries took last, where the next pass's retries start
+     * after.
+     */
+    private volatile String lastRetried;
     private final Cache<String, FeedFailure> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
             .build();
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
@@ -166,13 +212,22 @@ public class HealthOutcomeEvaluator {
     public HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
             IConversationRatingStore ratingStore, HealthErasureFence fence, HealthSettings settings, HealthMetrics metrics) {
         this(turnStore, outcomeStore, configPolicy, ratingStore, fence, settings, metrics, Clock.systemUTC());
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1_000), r -> {
+        ThreadPoolExecutor executor = newRatingExecutor(RATING_QUEUE);
+        this.ownedExecutor = executor;
+        this.ratingExecutor = executor;
+    }
+
+    /**
+     * The rating hand-off: one thread and a bounded queue that <em>refuses</em> a
+     * task when full ({@code AbortPolicy}, the default) — {@link #handOff} defers
+     * what it refuses, where a discarding policy lost it without a trace.
+     */
+    static ThreadPoolExecutor newRatingExecutor(int queueSize) {
+        return new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(queueSize), r -> {
             Thread thread = new Thread(r, "health-outcome-ratings");
             thread.setDaemon(true);
             return thread;
-        }, new ThreadPoolExecutor.DiscardPolicy());
-        this.ownedExecutor = executor;
-        this.ratingExecutor = executor;
+        });
     }
 
     HealthOutcomeEvaluator(IHealthTurnStore turnStore, IHealthOutcomeStore outcomeStore, HealthConfigPolicy configPolicy,
@@ -223,6 +278,7 @@ public class HealthOutcomeEvaluator {
         // Due sessions first, within half of the time: windows close and ratings are
         // re-checked even while a backfill fills the feed.
         Instant dueDeadline = start.plus(Duration.between(start, deadline).dividedBy(2));
+        drainDeferredRatings(dueDeadline);
         try {
             due(dueDeadline, done);
         } catch (RuntimeException e) {
@@ -262,6 +318,34 @@ public class HealthOutcomeEvaluator {
         Instant replayDeadline = now.plus(Duration.between(now, deadline).dividedBy(2));
         int replayLimit = done[0] + Math.max(0, maxConversations - done[0]) / 2;
         boolean replayDone = !replayAt.isBefore(watermark) && (afterId == null || replayAt.isAfter(watermark));
+
+        // First, the conversations this node failed to evaluate, directly, oldest
+        // capture
+        // first, within the replay's share: the replay below restarts at the earliest
+        // failure, so a later one might never be reached by it before its limit.
+        List<Map.Entry<String, FeedFailure>> retries = new ArrayList<>(feedFailures.asMap().entrySet());
+        retries.removeIf(e -> e.getValue().givenUp());
+        retries.sort(Map.Entry.comparingByValue(Comparator.comparing(FeedFailure::capturedAt)));
+        // Rotated: this pass starts after the failure the last pass retried last, so
+        // one whose retry uses up the share every time cannot keep the later ones from
+        // their turn until they reach the limit and are given up.
+        String rotation = lastRetried;
+        for (int i = 0; rotation != null && i < retries.size(); i++) {
+            if (retries.get(i).getKey().equals(rotation)) {
+                Collections.rotate(retries, -(i + 1));
+                break;
+            }
+        }
+        for (Map.Entry<String, FeedFailure> retry : retries) {
+            if (!clock.instant().isBefore(replayDeadline) || done[0] >= replayLimit) {
+                break;
+            }
+            lastRetried = retry.getKey();
+            if (seen.add(retry.getKey())) {
+                failedAt = evaluateInFeed(new ConversationActivity(retry.getKey(), retry.getValue().capturedAt()), done, failedAt);
+            }
+        }
+
         replay : while (!replayDone) {
             if (!replayAt.isBefore(until)) {
                 replayDone = true;
@@ -368,13 +452,20 @@ public class HealthOutcomeEvaluator {
             return failedAt;
         }
         Instant now = clock.instant();
-        FeedFailure failure = feedFailures.get(conversationId, k -> new FeedFailure(now, false));
+        FeedFailure failure = feedFailures.get(conversationId, k -> new FeedFailure(now, false, activity.lastUpdatedAt()));
+        if (activity.lastUpdatedAt().isAfter(failure.capturedAt())) {
+            // A later change of the conversation: kept as its capture, and for a
+            // conversation that was given up the start of a new retry window — a
+            // re-read of the same capture does not start one.
+            failure = new FeedFailure(failure.givenUp() ? now : failure.first(), false, activity.lastUpdatedAt());
+            feedFailures.put(conversationId, failure);
+        }
         if (failure.givenUp()) {
             return failedAt;
         }
         if (Duration.between(failure.first(), now).compareTo(MAX_RETRY) >= 0) {
             // Kept as given up, so a later re-read of it does not start the limit again.
-            feedFailures.put(conversationId, new FeedFailure(failure.first(), true));
+            feedFailures.put(conversationId, new FeedFailure(failure.first(), true, failure.capturedAt()));
             LOGGER.warnf("Agent Health outcome evaluation kept failing for conversation %s (captured at %s) since %s; it is evaluated again "
                     + "with its next change or due time", sanitize(conversationId), activity.lastUpdatedAt(), failure.first());
             return failedAt;
@@ -383,27 +474,52 @@ public class HealthOutcomeEvaluator {
     }
 
     /**
-     * A conversation the feed failed to evaluate: since when, and whether it was
-     * given up.
+     * A conversation the feed failed to evaluate: since when, whether it was given
+     * up, and the capture it was read at (the order of the direct retries).
      */
-    private record FeedFailure(Instant first, boolean givenUp) {
+    private record FeedFailure(Instant first, boolean givenUp, Instant capturedAt) {
     }
 
     private void due(Instant deadline, int[] done) {
         if (!clock.instant().isBefore(deadline)) {
             return;
         }
-        Map<String, Set<Integer>> bySession = new LinkedHashMap<>();
+        Map<String, TreeMap<Integer, HealthOutcome>> bySession = new LinkedHashMap<>();
         for (HealthOutcome due : outcomeStore.findDue(clock.instant(), DUE_PAGE)) {
-            bySession.computeIfAbsent(due.conversationId(), k -> new TreeSet<>()).add(due.sessionNo());
+            bySession.computeIfAbsent(due.conversationId(), k -> new TreeMap<>()).put(due.sessionNo(), due);
         }
-        for (Map.Entry<String, Set<Integer>> entry : bySession.entrySet()) {
-            for (Integer sessionNo : entry.getValue()) {
+        for (Map.Entry<String, TreeMap<Integer, HealthOutcome>> entry : bySession.entrySet()) {
+            for (HealthOutcome session : entry.getValue().values()) {
                 if (!clock.instant().isBefore(deadline) || done[0] >= maxConversations) {
                     return;
                 }
-                evaluateSafely(entry.getKey(), sessionNo, done);
+                if (!evaluateSafely(entry.getKey(), session.sessionNo(), done)) {
+                    backOff(session);
+                }
             }
+        }
+    }
+
+    /**
+     * A due session whose evaluation failed is made due again later — as long after
+     * now as its last successful evaluation is before it, between
+     * {@link #DUE_RETRY_MIN} and {@link #DUE_RETRY_MAX} — so failing sessions leave
+     * the head of the due order to the others instead of filling every pass's page.
+     * Never throws: a session this cannot move is simply due as before.
+     */
+    private void backOff(HealthOutcome session) {
+        Instant now = clock.instant();
+        Duration wait = session.evaluatedAt() == null ? DUE_RETRY_MAX : Duration.between(session.evaluatedAt(), now);
+        if (wait.compareTo(DUE_RETRY_MIN) < 0) {
+            wait = DUE_RETRY_MIN;
+        } else if (wait.compareTo(DUE_RETRY_MAX) > 0) {
+            wait = DUE_RETRY_MAX;
+        }
+        try {
+            outcomeStore.markDue(session.conversationId(), List.of(session.sessionNo()), now.plus(wait));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not put back failed Agent Health session %s of conversation %s: %s", session.sessionNo(),
+                    sanitize(session.conversationId()), sanitize(e.getMessage()));
         }
     }
 
@@ -483,9 +599,10 @@ public class HealthOutcomeEvaluator {
             }
         }
         Integer firstSessionNo = stored.containsKey(from) && firstRead > from ? Integer.valueOf(from) : null;
+        LazyRatings ratings = new LazyRatings(conversationId);
         List<HealthOutcome> sessions = new ArrayList<>(HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live,
                 origin, version -> configPolicy.windowOf(origin, configOf(configs, agentId, version)), version -> configOf(configs, agentId, version),
-                knownFirstOutput, firstSessionNo, new LazyRatings(conversationId), evaluatedAt)));
+                knownFirstOutput, firstSessionNo, ratings, evaluatedAt)));
         int deleteBefore = to == null ? Integer.MAX_VALUE : to;
         if (truncated && !sessions.isEmpty()) {
             // The last session read may go on past the rows read: leave it as stored.
@@ -493,6 +610,7 @@ public class HealthOutcomeEvaluator {
             deleteBefore = partial.sessionNo();
         }
         outcomeStore.upsert(sessions);
+        recheckRatings(conversationId, stored.keySet(), sessions, ratings);
         Set<Integer> stale = new HashSet<>();
         for (Integer sessionNo : inRange) {
             if (sessionNo < deleteBefore) {
@@ -509,6 +627,47 @@ public class HealthOutcomeEvaluator {
             return 0;
         }
         return sessions.size();
+    }
+
+    /**
+     * A rating saved or withdrawn while this evaluation ran is marked on the
+     * sessions that existed then, which an existing row's upsert keeps — but a
+     * session this evaluation inserted did not exist yet, so its mark went nowhere.
+     * When such a new row was written as final (no due time that would read the
+     * ratings again) from ratings read during the evaluation, they are read once
+     * more; if they changed, the new final rows are made due now.
+     */
+    private void recheckRatings(String conversationId, Set<Integer> storedBefore, List<HealthOutcome> written, LazyRatings ratings) {
+        if (!ratings.wasRead()) {
+            return;
+        }
+        List<Integer> newFinal = new ArrayList<>();
+        for (HealthOutcome s : written) {
+            if (s.dueAt() == null && !storedBefore.contains(s.sessionNo())) {
+                newFinal.add(s.sessionNo());
+            }
+        }
+        if (newFinal.isEmpty()) {
+            return;
+        }
+        List<ConversationRating> again;
+        try {
+            again = readRatings(conversationId);
+        } catch (HealthStoreException e) {
+            // Cannot tell whether they changed: look again rather than keep a guess.
+            again = null;
+        }
+        if (again == null || !again.equals(ratings.read)) {
+            outcomeStore.markDue(conversationId, newFinal, clock.instant());
+        }
+    }
+
+    private List<ConversationRating> readRatings(String conversationId) {
+        try {
+            return ratingStore == null ? List.of() : new ArrayList<>(ratingStore.readByConversation(conversationId));
+        } catch (RuntimeException e) {
+            throw new HealthStoreException("Could not read the ratings of a conversation", e);
+        }
     }
 
     private Resolved configOf(Map<Integer, Resolved> configs, String agentId, Integer version) {
@@ -542,22 +701,89 @@ public class HealthOutcomeEvaluator {
             // event does not say which session it was in before: mark them all, as a
             // withdrawal does.
             Instant at = rating.isConversationRating() && changed(rating) ? null : ratingTime(rating);
-            handOff(() -> ratingChanged(rating.conversationId(), rating.stepIndex(), at));
+            handOff(rating.conversationId(), () -> ratingChanged(rating.conversationId(), rating.stepIndex(), at));
         }
     }
 
     void onRatingWithdrawn(@Observes ConversationRatingWithdrawn withdrawn) {
         if (withdrawn != null) {
             // A withdrawn conversation rating has no time left to place it by.
-            handOff(() -> ratingChanged(withdrawn.conversationId(), withdrawn.stepIndex(), null));
+            handOff(withdrawn.conversationId(), () -> ratingChanged(withdrawn.conversationId(), withdrawn.stepIndex(), null));
         }
     }
 
-    private void handOff(Runnable task) {
+    private void handOff(String conversationId, Runnable task) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return;
+        }
         try {
-            ratingExecutor.execute(task);
+            ratingExecutor.execute(() -> {
+                task.run();
+                drainDeferredRatings();
+            });
         } catch (RejectedExecutionException e) {
-            LOGGER.debugf("Agent Health rating hand-off rejected: %s", e.getMessage());
+            if (ownedExecutor != null && ownedExecutor.isShutdown()) {
+                // The application stops; the queue's own marks go with it.
+                return;
+            }
+            deferRating(conversationId);
+        }
+    }
+
+    /**
+     * The queue is full, or the store failed to take the mark: the conversation
+     * waits in {@link #deferredRatings}, drained by the hand-off thread after every
+     * mark it runs and by every outcome pass on this node, before the due sessions
+     * are read.
+     */
+    private void deferRating(String conversationId) {
+        long generation = deferredRatingGeneration.incrementAndGet();
+        if (deferredRatings.computeIfPresent(conversationId, (id, previous) -> generation) != null
+                || deferredRatings.size() < MAX_DEFERRED_RATINGS
+                        && deferredRatings.merge(conversationId, generation, (previous, next) -> next) != null) {
+            metrics.ratingMarkOverflow(HealthMetrics.RESULT_DEFERRED);
+            return;
+        }
+        metrics.ratingMarkOverflow(HealthMetrics.RESULT_DROPPED);
+        long lost = ratingsLostSinceWarn.incrementAndGet();
+        Instant now = clock.instant();
+        Instant last = lastRatingWarn.get();
+        if ((last == null || !now.isBefore(last.plus(RATING_WARN_INTERVAL))) && lastRatingWarn.compareAndSet(last, now)) {
+            ratingsLostSinceWarn.addAndGet(-lost);
+            LOGGER.warnf("Agent Health could not keep up with rating changes: %d rating mark(s) lost (conversation %s among them); "
+                    + "those sessions keep their outcome until they are judged again", lost, sanitize(conversationId));
+        }
+    }
+
+    /**
+     * Marks every session of each deferred conversation for another look — what a
+     * withdrawal does, since the deferred rating's own session is no longer known.
+     * A conversation leaves the set only once its mark is stored: at the first
+     * store failure the drain stops and the rest wait for the next drain (after the
+     * next hand-off, or the next pass on this node). Never throws.
+     */
+    void drainDeferredRatings() {
+        drainDeferredRatings(null);
+    }
+
+    /**
+     * As {@link #drainDeferredRatings()}, stopping at {@code deadline} if given.
+     */
+    void drainDeferredRatings(Instant deadline) {
+        for (Map.Entry<String, Long> deferred : List.copyOf(deferredRatings.entrySet())) {
+            if (deadline != null && !clock.instant().isBefore(deadline)) {
+                return;
+            }
+            String conversationId = deferred.getKey();
+            try {
+                outcomeStore.markDue(conversationId, null, clock.instant());
+                // Only the generation this mark covers: a later deferral stays for the next
+                // drain.
+                deferredRatings.remove(conversationId, deferred.getValue());
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not store the deferred Agent Health rating marks; they are retried: %s", sanitize(e.getMessage()));
+                return;
+            }
         }
     }
 
@@ -605,8 +831,9 @@ public class HealthOutcomeEvaluator {
                 outcomeStore.markDue(conversationId, List.of(target), now);
             }
         } catch (RuntimeException e) {
-            LOGGER.debugf("Could not mark the sessions of conversation %s for another look: %s", sanitize(conversationId),
+            LOGGER.debugf("Could not mark the sessions of conversation %s for another look; it is deferred: %s", sanitize(conversationId),
                     sanitize(e.getMessage()));
+            deferRating(conversationId);
         }
     }
 
@@ -617,24 +844,26 @@ public class HealthOutcomeEvaluator {
      */
     final class LazyRatings implements HealthSessionEvaluator.Ratings {
         private final String conversationId;
-        private List<ConversationRating> ratings;
+        /** The ratings as read, or {@code null} while no session needed them. */
+        private List<ConversationRating> read;
 
         LazyRatings(String conversationId) {
             this.conversationId = conversationId;
         }
 
+        boolean wasRead() {
+            return read != null;
+        }
+
         @Override
         public boolean negative(int fromStep, int toStep, Instant from, Instant until) {
-            if (ratings == null) {
-                try {
-                    ratings = ratingStore == null ? List.of() : new ArrayList<>(ratingStore.readByConversation(conversationId));
-                } catch (RuntimeException e) {
-                    // Unknown is not "not negative": fail the evaluation, so nothing is
-                    // written and the session is retried rather than stored as silence.
-                    throw new HealthStoreException("Could not read the ratings of a conversation", e);
-                }
+            if (read == null) {
+                // Unknown is not "not negative": a failed read fails the evaluation, so
+                // nothing is written and the session is retried rather than stored as
+                // silence.
+                read = readRatings(conversationId);
             }
-            for (ConversationRating r : ratings) {
+            for (ConversationRating r : read) {
                 if (r.normalizedScore() >= NEGATIVE_RATING_BELOW) {
                     continue;
                 }

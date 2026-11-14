@@ -292,6 +292,18 @@ public class GroupConversationService implements IGroupConversationService, User
     Instance<GroupApprovalContextRenderer> approvalContextRenderer;
 
     /**
+     * Strict plan binding for the whole deployment (see {@code HitlPlanBinding}).
+     * Field-injected with its default, like the other optional knobs here.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /** Whether every human group decision must carry the pause's plan hash. */
+    public boolean planHashStrict() {
+        return planHashStrict;
+    }
+
+    /**
      * The group approval-context renderer, or {@code null} when none is available.
      */
     public GroupApprovalContextRenderer approvalContextRenderer() {

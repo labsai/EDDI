@@ -244,6 +244,151 @@ class ApiCallExecutorTest {
         verify(mockRequest, times(1)).send();
     }
 
+    // ==================== Retries: the failure keys belong to the final attempt
+    //
+    // {name}Error / {name}HttpCode used to be written on every failed attempt and
+    // never removed, so a 503 followed by a successful retry left the 503 next to
+    // the good response — in memory and in the template data postResponse, output
+    // templates and the next call of the turn read.
+
+    @Test
+    @DisplayName("a failed attempt followed by a successful retry leaves no failure keys behind")
+    void retry_failureThenSuccess_leavesNoFailureKeys() throws Exception {
+        ApiCall call = weatherCallRetryingOn503(1);
+        IResponse down = failure(503, "down");
+        IResponse ok = textResponse(200, "sunny");
+        when(mockRequest.send()).thenReturn(down, ok);
+
+        Map<String, Object> templateData = new HashMap<>();
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        assertEquals("sunny", templateData.get("weather"));
+        assertFalse(templateData.containsKey("weatherError"), "stale error body: " + templateData);
+        assertFalse(templateData.containsKey("weatherHttpCode"), "stale http code: " + templateData);
+        verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("weatherError"), any());
+        verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("weatherHttpCode"), any());
+    }
+
+    @Test
+    @DisplayName("a retry that fails with a blank body does not keep the previous attempt's error body")
+    void retry_failureThenBlankFailure_keepsOnlyTheFinalAttempt() throws Exception {
+        ApiCall call = weatherCallRetryingOn503(1);
+        IResponse down = failure(503, "down");
+        IResponse blank = failure(500, "");
+        when(mockRequest.send()).thenReturn(down, blank);
+
+        Map<String, Object> templateData = new HashMap<>();
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        assertEquals(500, templateData.get("weatherHttpCode"));
+        assertFalse(templateData.containsKey("weatherError"), "attempt 1's body next to attempt 2's code: " + templateData);
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherHttpCode"), any());
+        verify(prePostUtils).createMemoryEntry(any(), eq(500), eq("weatherHttpCode"), any());
+        verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("weatherError"), any());
+    }
+
+    @Test
+    @DisplayName("retries that all fail record the failure once, from the final attempt")
+    void retry_allAttemptsFail_recordOnce() throws Exception {
+        ApiCall call = weatherCallRetryingOn503(1);
+        IResponse down = failure(503, "down");
+        IResponse stillDown = failure(503, "still down");
+        when(mockRequest.send()).thenReturn(down, stillDown);
+
+        Map<String, Object> templateData = new HashMap<>();
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        assertEquals("still down", templateData.get("weatherError"));
+        assertEquals(503, templateData.get("weatherHttpCode"));
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherError"), any());
+        verify(prePostUtils).createMemoryEntry(any(), eq("still down"), eq("weatherError"), any());
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherHttpCode"), any());
+    }
+
+    @Test
+    @DisplayName("a responseValuePathMatcher still reads the current attempt's {name}Error")
+    void retry_valuePathMatcherSeesTheCurrentAttemptsError() throws Exception {
+        // The error body reaches the template data only as {name}Error, so a matcher
+        // on it is how a config retries on WHAT the server said. It must see each
+        // attempt's own body: attempt 1 asks for a retry, attempt 2 does not.
+        ApiCall call = weatherCallRetryingOn503(3);
+        var matcher = new RetryApiCallInstruction.MatchingInfo();
+        matcher.setValuePath("weatherError");
+        matcher.setContains("try again");
+        var retry = ((HttpPostResponse) call.getPostResponse()).getRetryApiCallInstruction();
+        retry.setRetryOnHttpCodes(List.of());
+        retry.setResponseValuePathMatchers(List.of(matcher));
+        IResponse busy = failure(500, "busy, try again");
+        IResponse fatal = failure(500, "fatal");
+        when(mockRequest.send()).thenReturn(busy, fatal);
+
+        Map<String, Object> templateData = new HashMap<>();
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        verify(mockRequest, times(2)).send();
+        assertEquals("fatal", templateData.get("weatherError"));
+    }
+
+    @Test
+    @DisplayName("a memory-qualified responseValuePathMatcher sees the current attempt's code, which memory does not keep")
+    void retry_memoryQualifiedMatcherSeesTheCurrentAttempt_memoryKeepsOnlyTheFinal() throws Exception {
+        // Every attempt used to write {name}HttpCode into the live step output that
+        // template data exposes as memory.current, so this path saw the current
+        // attempt. Only the final attempt is stored now; the retry decision still
+        // has to see the attempt it is deciding about.
+        ApiCall call = weatherCallRetryingOn503(1);
+        var matcher = new RetryApiCallInstruction.MatchingInfo();
+        matcher.setValuePath("memory.current.httpCalls.weatherHttpCode");
+        matcher.setEquals("503");
+        var retry = ((HttpPostResponse) call.getPostResponse()).getRetryApiCallInstruction();
+        retry.setRetryOnHttpCodes(List.of());
+        retry.setResponseValuePathMatchers(List.of(matcher));
+        IResponse down = failure(503, "down");
+        IResponse stillDown = failure(503, "still down");
+        when(mockRequest.send()).thenReturn(down, stillDown);
+
+        Map<String, Object> httpCalls = new LinkedHashMap<>();
+        Map<String, Object> current = new LinkedHashMap<>(Map.of("httpCalls", httpCalls));
+        Map<String, Object> templateData = new HashMap<>(Map.of("memory", new HashMap<>(Map.of("current", current))));
+        executor.execute(call, memory, templateData, "http://example.com");
+
+        verify(mockRequest, times(2)).send();
+        assertTrue(httpCalls.isEmpty(), "the retry view must not write into the step output: " + httpCalls);
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherHttpCode"), any());
+        verify(prePostUtils, times(1)).createMemoryEntry(any(), any(), eq("weatherError"), any());
+        verify(prePostUtils).createMemoryEntry(any(), eq("still down"), eq("weatherError"), any());
+    }
+
+    private ApiCall weatherCallRetryingOn503(int maxRetries) {
+        ApiCall call = createSimpleApiCall("weather-call", true);
+        call.setResponseObjectName("weather");
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(maxRetries);
+        retryInstruction.setRetryOnHttpCodes(List.of(503));
+        retryInstruction.setExponentialBackoffDelayInMillis(0);
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        call.setPostResponse(postResponse);
+        return call;
+    }
+
+    private static IResponse failure(int httpCode, String body) {
+        IResponse response = mock(IResponse.class);
+        when(response.getHttpCode()).thenReturn(httpCode);
+        when(response.getContentAsString()).thenReturn(body);
+        when(response.getHttpCodeMessage()).thenReturn("failed");
+        when(response.getHttpHeader()).thenReturn(new HashMap<>());
+        return response;
+    }
+
+    private static IResponse textResponse(int httpCode, String body) {
+        IResponse response = mock(IResponse.class);
+        when(response.getHttpCode()).thenReturn(httpCode);
+        when(response.getContentAsString()).thenReturn(body);
+        when(response.getHttpHeader()).thenReturn(new HashMap<>(Map.of("Content-Type", "text/plain")));
+        return response;
+    }
+
     // ==================== Tool-result contract (what the LLM sees)
     // ====================
     //
@@ -542,11 +687,11 @@ class ApiCallExecutorTest {
     void resolve_withEmptyPropertyInstructions_isNotPinned() throws Exception {
         // The fail-open this closes. The old predicate used isNullOrEmpty, so an
         // empty list read as "absent" and the call was PINNED — while
-        // PrePostUtils guards on != null and therefore still re-runs
-        // memoryItemConverter.convert, discarding the model arguments merged in
-        // for this call. Gate time and resume time both skip that (both go
-        // through resolve), so they agreed with each other and the guard passed
-        // while execute() sent a request with every {arg} rendered empty.
+        // PrePostUtils guards on != null and therefore runs the pre-request step
+        // anyway. Gate time and resume time both skip that step (both go through
+        // resolve), so they agree with each other however the step changes the
+        // request — it used to render every {arg} empty — and the guard passed
+        // on a comparison that was never sound.
         ApiCall call = createSimpleApiCall("empty-instructions-call", false);
         var preRequest = new HttpPreRequest();
         preRequest.setPropertyInstructions(new ArrayList<>());

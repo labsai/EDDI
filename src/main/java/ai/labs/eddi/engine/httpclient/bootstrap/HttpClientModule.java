@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.httpclient.bootstrap;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.ConnectedPeers;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
@@ -169,19 +170,7 @@ public class HttpClientModule {
     }
 
     private static InetAddress parsePeer(String peerAddress) {
-        if (peerAddress == null || peerAddress.isBlank()) {
-            return null;
-        }
-        String bare = peerAddress.startsWith("[") && peerAddress.endsWith("]") ? peerAddress.substring(1, peerAddress.length() - 1) : peerAddress;
-        int zone = bare.indexOf('%');
-        if (zone > 0) {
-            bare = bare.substring(0, zone);
-        }
-        try {
-            return InetAddress.ofLiteral(bare);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return ConnectedPeers.parse(peerAddress);
     }
 
     private static boolean isHttps(HttpClientRequest request) {

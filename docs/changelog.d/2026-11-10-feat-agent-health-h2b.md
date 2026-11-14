@@ -167,8 +167,10 @@ presets, status and reasons.
   already past its rows, so a dropped day kept stale counts until `eddi.health.daily-retention`.
 - The self-heal no longer moves its watermark past pairs it did not mark. A window with more than 10,000 (agent, day)
   pairs is halved until one fits (down to one second), and the watermark moves only to the end of that part; the
-  rest is the next pass's. Exception: a one-second window still holding more than 10,000 pairs has only 10,000 marked,
-  with a WARN, and the watermark moves past it; the remaining pairs rely on their own marks.
+  rest is the next pass's. A one-second window still holding more than 10,000 pairs (many rows sharing a timestamp)
+  is not cut either: all of its pairs are streamed and marked in chunks of 10,000, with a WARN, and only then does the
+  watermark pass it. Re-marking a pair is idempotent (it only gives the dirty entry a new token). Test:
+  `selfHealNeverSkipsPastATruncatedScan` (10,500 pairs at one instant: all marked once, a second pass marks none).
 - A turn row that reaches the store more than 30 seconds (half the self-heal grace) after its capture time marks its
   day in the dirty store at once (`HealthDirtyDays.markLateWrite`, with the deletion marks' retry and fallback),
   not on the five-second flush. The self-heal finds rows by capture time and may already be past such a row, so a
@@ -194,3 +196,23 @@ presets, status and reasons.
   recovered. Tests: `lateWriteMarksBeforeTheWrite` (pre-mark, write, re-mark in that order) and
   `lateWriteMarkSurvivesARollupAndAFailedPreMark` (a real `HealthDirtyDays` whose store refuses the pre-mark: the
   day still reaches the store after the row).
+
+## 🐛 fix(health): single-flight health cache and a bounded portfolio (2026-11-12)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthQueryCache` loads are single-flight per key. It is now a Caffeine `AsyncCache`: the first caller of a missing
+  or expired key inserts a future and runs the query on its own thread, and concurrent callers of the same key wait for
+  that future instead of running the query again. The map is only touched to insert the future, so a slow query never
+  holds a lock other keys need. A failed or `null` load removes its entry: the callers already waiting see that one
+  outcome, and the next caller retries. The portfolio's batch reads (`dailyRows`, `portfolioSessions`) go through a new
+  `HealthQueryCache.shared`, single-flight without keeping the result, since their per-agent parts are cached
+  separately. Tests: `HealthQueryCacheTest` (8 concurrent callers on a cold key run the loader once; a failure is shared
+  by its waiters only and not cached; a `null` is not cached).
+- `GET /health/agents` was already paged (`limit` default 100, at most 500, `nextCursor` `null` on the last page) and
+  bounded in time (`7d`/`30d`/`90d`); the agents it aggregates were capped at 5,000, but silently and loosely — a page
+  of 200 descriptors could take it past the cap, and nothing told the caller agents were left out.
+  `HealthAccess.viewableAgents` now stops at exactly 5,000 and reports `truncated` only when a further viewable agent
+  exists (it reads one past the cap), and the portfolio carries it as the new field `agentsTruncated` (existing fields
+  unchanged). Tests: `HealthAccessTest.viewableAgentsCap` (exactly 5,000 is not truncated, 5,001 is),
+  `RestAgentHealthTest.portfolioTruncated`.

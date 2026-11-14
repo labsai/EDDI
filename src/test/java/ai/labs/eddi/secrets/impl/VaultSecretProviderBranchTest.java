@@ -576,7 +576,8 @@ class VaultSecretProviderBranchTest {
                     "Expected '3 secret(s) are stored' but got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("Set EDDI_VAULT_MASTER_KEY back"));
             assertTrue(ex.getMessage().contains("rotate-kek"));
-            assertTrue(ex.getMessage().contains("/reset"));
+            // The endpoint answers 400 without confirm=true, so the hint has to carry it.
+            assertTrue(ex.getMessage().contains("/reset?confirm=true"), ex.getMessage());
         }
 
         @Test

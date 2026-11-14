@@ -47,19 +47,48 @@ import java.util.function.Consumer;
  * arrived yet, so a delayed write cannot bring a discarded execution back. A
  * marker has no {@code timestamp} and no reads return it.</li>
  * </ul>
+ * <b>Late writes.</b> A row that reaches the store long after its capture
+ * ({@code HealthTurnRecorder} judges it) is written with a
+ * {@code lateWrittenAt} stamp: the time of the write, stored beside the row
+ * (MongoDB {@code writtenAt}, PostgreSQL {@code written_at_ms}) and matched by
+ * {@link #forEachAgentDayUpdatedSince}. The rollup's self-heal finds rows by
+ * {@code updatedAt}, the capture time, and its watermark may already be past a
+ * late row's; the stamp lets it find the row by the time it was written
+ * instead, in the same write as the row itself — so a late row needs no dirty
+ * mark to survive a stopping node. Only late rows carry it (a later on-time
+ * write of the row removes it), so the index on it holds the rare late rows
+ * only and an on-time write costs nothing extra.
+ * <p>
  * Every method throws {@link HealthStoreException} when the store fails.
  */
 public interface IHealthTurnStore {
 
     /** Inserts the row, or replaces it under the rules above. */
-    void upsert(HealthTurn turn);
+    default void upsert(HealthTurn turn) {
+        upsert(turn, null);
+    }
+
+    /**
+     * As {@link #upsert(HealthTurn)}; a non-null {@code lateWrittenAt} stamps the
+     * row as written late, at that time (see the class comment), and a null one
+     * removes an earlier stamp. A write ignored as stale changes nothing.
+     */
+    void upsert(HealthTurn turn, Instant lateWrittenAt);
 
     /**
      * Inserts the row unless one with its key exists — for an unsettled turn (an
      * abandoned wait, a cancelled turn), which must never replace what the
      * conversation kept.
      */
-    void insertIfAbsent(HealthTurn turn);
+    default void insertIfAbsent(HealthTurn turn) {
+        insertIfAbsent(turn, null);
+    }
+
+    /**
+     * As {@link #insertIfAbsent(HealthTurn)}; an inserted row carries the
+     * {@code lateWrittenAt} stamp when it is non-null.
+     */
+    void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt);
 
     /**
      * Marks the executions {@code executionIds} of {@code replacing}'s conversation
@@ -69,7 +98,18 @@ public interface IHealthTurnStore {
      *
      * @return the executions marked
      */
-    long markDiscarded(HealthTurn replacing, Collection<String> executionIds);
+    default long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+        return markDiscarded(replacing, executionIds, null);
+    }
+
+    /**
+     * As {@link #markDiscarded(HealthTurn, Collection)}. The time of the discard —
+     * what the self-heal matches a newly discarded row by — is
+     * {@code lateWrittenAt} when it is non-null (a late write: {@code replacing}'s
+     * capture time may be behind the self-heal watermark), else {@code replacing}'s
+     * {@code updatedAt}.
+     */
+    long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt);
 
     /** A conversation's rows, oldest step first, at most {@code limit}. */
     List<HealthTurn> findByConversation(String conversationId, int limit);
@@ -154,8 +194,10 @@ public interface IHealthTurnStore {
      * discarded, in [{@code since}, {@code until}) — at most {@code limit} — to
      * {@code consumer}. A discard keeps the row's write time (the write-ordering
      * guard), so the time it was first discarded is stored separately and matched
-     * here. What the rollup's self-heal pass re-marks dirty, so a dirty mark lost
-     * on a node (a hard kill before its flush) never leaves a day stale.
+     * here; so is a late row's {@code lateWrittenAt} stamp, since its
+     * {@code updatedAt} is its capture time. What the rollup's self-heal pass
+     * re-marks dirty, so a dirty mark lost on a node (a hard kill before its flush)
+     * never leaves a day stale.
      */
     void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer);
 

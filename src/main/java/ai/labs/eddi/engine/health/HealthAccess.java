@@ -116,11 +116,22 @@ public class HealthAccess {
         return accessGuard.seesEverything() || accessGuard.hasAccess(agentId, AccessLevel.EDIT);
     }
 
-    /** The agents the caller may view, at most {@link #MAX_AGENTS}. */
-    public List<AgentRef> viewableAgents() {
+    /**
+     * The agents a portfolio looks at, and whether the caller may view more than
+     * {@link #MAX_AGENTS} — the agents past the cap are left out.
+     */
+    public record ViewableAgents(List<AgentRef> agents, boolean truncated) {
+    }
+
+    /**
+     * The agents the caller may view, at most {@link #MAX_AGENTS}, in descriptor
+     * order. Reading stops at the first viewable agent past the cap, which is what
+     * {@code truncated} reports.
+     */
+    public ViewableAgents viewableAgents() {
         List<AgentRef> agents = new ArrayList<>();
         try {
-            for (int index = 0; agents.size() < MAX_AGENTS; index++) {
+            for (int index = 0;; index++) {
                 List<DocumentDescriptor> page = descriptorStore.readDescriptors(AGENT_DESCRIPTOR_TYPE, "", index, PAGE, false,
                         accessGuard.listingScope());
                 for (DocumentDescriptor descriptor : page) {
@@ -129,6 +140,9 @@ public class HealthAccess {
                     }
                     IResourceStore.IResourceId id = RestUtilities.extractResourceId(descriptor.getResource());
                     if (id != null && id.getId() != null) {
+                        if (agents.size() == MAX_AGENTS) {
+                            return new ViewableAgents(agents, true);
+                        }
                         agents.add(new AgentRef(id.getId(), descriptor.getName()));
                     }
                 }
@@ -137,10 +151,10 @@ public class HealthAccess {
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return agents;
+            return new ViewableAgents(agents, false);
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException("Could not list the agents", e);
         }
-        return agents;
+        return new ViewableAgents(agents, false);
     }
 }

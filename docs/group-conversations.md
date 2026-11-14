@@ -700,7 +700,10 @@ POST /groupstore/templates/{id}/instantiate      {"name": "...", "roleAssignment
 ```
 
 MCP: `list_group_templates`, `create_group_from_template`. Missing or unknown
-roles fail loudly, naming the template's real roles.
+roles fail loudly, naming the template's real roles. The group is saved through
+the normal store path, so an assigned agent you may not use is refused there,
+exactly as for a hand-written config: `403` over REST, and
+`"errorCode": "FORBIDDEN"` from the MCP tool.
 
 | Template | Style | What it packages |
 |---|---|---|
@@ -1340,6 +1343,13 @@ split is internal.
 | `list_group_templates` | List the preset group templates (I10) |
 | `create_group_from_template` | Create a group from a template + role assignments |
 
+`discuss_with_group`, `start_group_discussion`, `followup_with_member` and
+`continue_group_discussion` hold their arguments to the REST request ceilings: a
+question is required and at most 50,000 characters, and `userId` and
+`targetAgentId` at most 256. A refusal is
+`{"error": "…", "errorCode": "BAD_REQUEST"}`, returned before anything is read
+or run.
+
 ## Slack Integration
 
 Group discussions integrate natively with Slack. See [slack-integration.md](slack-integration.md) for full setup instructions.
@@ -1379,6 +1389,20 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 ### Follow-up Conversations
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
+## Restarts
+
+A discussion's leg runs in the JVM that started or resumed it, and nothing
+picks it up after that process dies. On a single node (`eddi.messaging.type=in-memory`)
+the startup HITL crash recovery therefore **cancels** every discussion still
+`IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
+started, so it does not sit in a running state that `continue` and `followup`
+refuse. Paused discussions are not affected: their timeout schedules are
+re-armed instead. Details, and when to turn it off
+(`eddi.hitl.crash-recovery.recover-in-progress`), are in
+[HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
+interrupted discussion still needs a manual cancel — or, for a standing team,
+the claim TTL (see [Standing Teams](#standing-teams-i13)).
 
 ## Not yet supported
 

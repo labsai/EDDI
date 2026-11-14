@@ -132,11 +132,27 @@ public final class SlackHitlSupport {
     }
 
     public static String buildActionValue(String integrationName, String subject, String cardId) {
+        return buildActionValue(integrationName, subject, cardId, null);
+    }
+
+    /**
+     * As above, with the pause's plan hash as a fourth field, so a click decides
+     * exactly the plan the card was posted for ({@code HitlDecision.planHash}) and
+     * Slack approvals satisfy strict plan binding. The hash ({@code v1:} and hex)
+     * never contains the separator; it is only appended to a card-bound value.
+     */
+    public static String buildActionValue(String integrationName, String subject, String cardId, String planHash) {
         if (integrationName == null || integrationName.isBlank()) {
             return subject;
         }
         String bound = integrationName + VALUE_SEPARATOR + subject;
-        return cardId == null || cardId.isBlank() ? bound : bound + VALUE_SEPARATOR + cardId;
+        if (cardId == null || cardId.isBlank()) {
+            return bound;
+        }
+        String carded = bound + VALUE_SEPARATOR + cardId;
+        return planHash == null || planHash.isBlank() || planHash.contains(VALUE_SEPARATOR)
+                ? carded
+                : carded + VALUE_SEPARATOR + planHash;
     }
 
     /**
@@ -161,13 +177,20 @@ public final class SlackHitlSupport {
         String rest = value.substring(sep + VALUE_SEPARATOR.length());
         String subject = rest;
         String cardId = null;
+        String planHash = null;
         int cardSep = rest.indexOf(VALUE_SEPARATOR);
         if (cardSep >= 0) {
             subject = rest.substring(0, cardSep);
             cardId = rest.substring(cardSep + VALUE_SEPARATOR.length());
+            // 6.8: a card posted with a plan hash carries it after the card id.
+            int planSep = cardId.indexOf(VALUE_SEPARATOR);
+            if (planSep >= 0) {
+                planHash = cardId.substring(planSep + VALUE_SEPARATOR.length());
+                cardId = cardId.substring(0, planSep);
+            }
         }
         return new ActionValue(integrationName.isBlank() ? null : integrationName, subject,
-                cardId == null || cardId.isBlank() ? null : cardId);
+                cardId == null || cardId.isBlank() ? null : cardId, planHash == null || planHash.isBlank() ? null : planHash);
     }
 
     /**
@@ -181,8 +204,17 @@ public final class SlackHitlSupport {
      * @param cardId
      *            the id of the card the button was on, or {@code null} for a value
      *            posted before card binding (refused)
+     * @param planHash
+     *            the plan hash of the pause the card was posted for, or
+     *            {@code null} for a card posted before plan hashing (or for a pause
+     *            without one)
      */
-    public record ActionValue(String integrationName, String subject, String cardId) {
+    public record ActionValue(String integrationName, String subject, String cardId, String planHash) {
+
+        public ActionValue(String integrationName, String subject, String cardId) {
+            this(integrationName, subject, cardId, null);
+        }
+
         /** Whether the subject targets a group discussion. */
         public boolean isGroup() {
             return subject != null && subject.startsWith(GROUP_VALUE_PREFIX);

@@ -155,6 +155,8 @@ class HealthOutcomeGdprParticipantTest {
             return null;
         }).when(outcomes).forEachConversationEvaluatedSince(any(), anyInt(), any());
         when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+        // The evaluated conversations have no recent turn rows: their days are read.
+        when(turns.deleteConversationIfDaysKnown(any())).thenReturn(new HealthDeletedRows(0L, Map.of()));
 
         HealthSettings settings = new HealthSettings(true, 10, Duration.ofDays(90), Duration.ofHours(48), 4);
         HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, settings, new HealthMetrics(new SimpleMeterRegistry()),
@@ -193,6 +195,8 @@ class HealthOutcomeGdprParticipantTest {
             return null;
         }).when(outcomes).forEachConversationEvaluatedSince(any(), anyInt(), any());
         when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+        // The evaluated conversations have no recent turn rows: their days are read.
+        when(turns.deleteConversationIfDaysKnown(any())).thenReturn(new HealthDeletedRows(0L, Map.of()));
 
         HealthSettings settings = new HealthSettings(true, 10, Duration.ofDays(90), Duration.ofHours(48), 4);
         HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, settings, new HealthMetrics(new SimpleMeterRegistry()),
@@ -240,5 +244,47 @@ class HealthOutcomeGdprParticipantTest {
 
         assertEquals(3L, retention.removeOrphans());
         verify(dirty).markDeletedRows("gone", Set.of("agent-1"), deleted);
+    }
+
+    @Test
+    @DisplayName("an orphan found only by its sessions has its older turn rows deleted and their days marked first; when their days "
+            + "cannot be read, the turn rows and the sessions are both kept for the next sweep")
+    @SuppressWarnings("unchecked")
+    void outcomeOnlyOrphanDeletesTurnRowsFirst() throws Exception {
+        IHealthTurnStore turns = mock(IHealthTurnStore.class);
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        IConversationMemoryStore conversations = mock(IConversationMemoryStore.class);
+        Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
+        when(conversationInstance.isResolvable()).thenReturn(true);
+        when(conversationInstance.get()).thenReturn(conversations);
+        Instance<IHealthOutcomeStore> outcomeInstance = mock(Instance.class);
+        when(outcomeInstance.isResolvable()).thenReturn(true);
+        when(outcomeInstance.get()).thenReturn(outcomes);
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        Instance<HealthDirtyDays> dirtyInstance = mock(Instance.class);
+        when(dirtyInstance.isResolvable()).thenReturn(true);
+        when(dirtyInstance.get()).thenReturn(dirty);
+        // No recent turn rows at all: both are found by their sessions only.
+        doAnswer(inv -> {
+            ((Consumer<String>) inv.getArgument(2)).accept("old-rows");
+            ((Consumer<String>) inv.getArgument(2)).accept("unreadable");
+            return null;
+        }).when(outcomes).forEachConversationEvaluatedSince(any(), anyInt(), any());
+        HealthDeletedRows old = new HealthDeletedRows(4L, Map.of("agent-1", Set.of(LocalDate.of(2026, 9, 1))));
+        when(turns.deleteConversationIfDaysKnown("old-rows")).thenReturn(old);
+        when(turns.deleteConversationIfDaysKnown("unreadable")).thenReturn(null);
+        when(outcomes.deleteByConversationId("old-rows")).thenReturn(1L);
+        when(conversations.loadListingSummaries(anyList())).thenReturn(Map.of());
+
+        HealthTurnRetention retention = new HealthTurnRetention(turns, conversationInstance, HealthSettings.defaults(),
+                new HealthMetrics(new SimpleMeterRegistry()), Clock.fixed(Instant.parse("2026-11-10T03:00:00Z"), ZoneOffset.UTC));
+        retention.outcomeStore = outcomeInstance;
+        retention.dirtyDays = dirtyInstance;
+
+        assertEquals(5L, retention.removeOrphans());
+        verify(dirty).markDeletedRows("old-rows", Set.of(), old);
+        verify(outcomes).deleteByConversationId("old-rows");
+        verify(outcomes, never()).deleteByConversationId("unreadable");
+        verify(turns, never()).deleteConversationReturningDays(any());
     }
 }

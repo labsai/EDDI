@@ -400,11 +400,14 @@ final class McpToolUtils {
      * when there is none), otherwise {@link #errorJson(String, String, Map)} with
      * the resource's own text. A body {@code {"error": "<CODE>", "message": "…"}}
      * keeps its code; a body {@code {"error": "<sentence>"}} — the shape of the
-     * team-handoff and team-budget resources — keeps the sentence, and the code
-     * follows the status (400 {@code BAD_REQUEST}, 403 {@code FORBIDDEN}, 404
-     * {@code NOT_FOUND}, 409 {@code CONFLICT}, 503 {@code UNAVAILABLE}, anything
-     * else {@code INTERNAL}). A 5xx without a body says only that the request
-     * failed: the resource has logged it.
+     * team-handoff and team-budget resources — or a plain-text body — the shape of
+     * the schedule resource's refusals — keeps the sentence, and the code follows
+     * the status (400 {@code BAD_REQUEST}, 403 {@code FORBIDDEN}, 404
+     * {@code NOT_FOUND}, 409 {@code CONFLICT}, 503 {@code UNAVAILABLE}, 504
+     * {@code TIMEOUT}, anything else {@code INTERNAL}). Either body is one the
+     * resource built and returned, not an exception's text, so it is kept on a 5xx
+     * too. A 5xx without a body says only that the request failed: the resource has
+     * logged it.
      */
     static String responseJson(IJsonSerialization jsonSerialization, Response response) throws IOException {
         if (response == null) {
@@ -421,6 +424,7 @@ final class McpToolUtils {
             case 404 -> "NOT_FOUND";
             case 409 -> "CONFLICT";
             case 503 -> "UNAVAILABLE";
+            case 504 -> "TIMEOUT";
             default -> "INTERNAL";
         };
         String message = "The request failed (HTTP " + status + ")";
@@ -431,6 +435,8 @@ final class McpToolUtils {
             } else {
                 message = error;
             }
+        } else if (entity instanceof String text && !text.isBlank()) {
+            message = text;
         }
         return errorJson(message, code, null);
     }

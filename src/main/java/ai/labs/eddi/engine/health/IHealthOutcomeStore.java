@@ -70,7 +70,8 @@ public interface IHealthOutcomeStore {
      * before {@code at} is due at {@code at} afterwards: still due, and the mark
      * now postdates an evaluation that started before it, so that evaluation's
      * {@link #upsert} keeps it rather than clearing an overdue time older than the
-     * evaluation.
+     * evaluation. The evaluation also passes a later {@code at} to put a session
+     * whose evaluation failed back in the due order.
      *
      * @return the sessions marked
      */

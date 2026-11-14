@@ -153,18 +153,6 @@ class HealthDirtyDaysTest {
     }
 
     @Test
-    @DisplayName("a late write's mark goes to the store at once, with the same retry and queue fallback as a deletion")
-    void markLateWriteWritesThrough() {
-        dirty.markLateWrite("a", List.of(TODAY));
-        verify(store).mark("a", Set.of(TODAY));
-        assertEquals(0, dirty.pendingCount());
-        doThrow(new HealthStoreException("down", null)).when(store).mark(any(), any());
-        dirty.markLateWrite("b", List.of(TODAY));
-        assertEquals(1, dirty.pendingCount());
-        dirty.markLateWrite(null, List.of(TODAY));
-    }
-
-    @Test
     @DisplayName("deleted rows with known days mark exactly those days")
     void deletedRowsKnownDays() {
         dirty.markDeletedRows("conv", List.of("other"), new HealthDeletedRows(1L, Map.of("a", Set.of(TODAY))));

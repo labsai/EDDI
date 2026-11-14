@@ -51,7 +51,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * may run first). Pairs of <em>written</em> rows noted on a node that is killed
  * before its next flush — at most a few seconds of them — are recovered by the
  * rollup's self-heal pass, which re-marks the days of turn rows written since
- * its last pass ({@code HealthRollupService}). The self-heal cannot see a
+ * its last pass ({@code HealthRollupService}) — a row written late by the time
+ * of its write, which the row carries ({@code IHealthTurnStore}), so a late row
+ * needs no mark held anywhere to be found again. The self-heal cannot see a
  * <em>deleted</em> row, which is why deletions are marked at once
  * ({@link #markDeleted}), with one retry.
  * <p>
@@ -120,20 +122,6 @@ public class HealthDirtyDays {
      */
     public void markDeleted(Map<String, Set<LocalDate>> agentDays) {
         markAtOnce(agentDays, "deleted Agent Health rows");
-    }
-
-    /**
-     * Marks the days of a row written late — after the rollup's self-heal grace had
-     * passed its capture time — dirty <b>at once</b>, like {@link #markDeleted}.
-     * The self-heal finds rows by their capture time, and its watermark may already
-     * be past this one's: a mark held in memory and lost with the node could then
-     * not be found again.
-     */
-    public void markLateWrite(String agentId, Collection<LocalDate> days) {
-        if (agentId == null || days == null) {
-            return;
-        }
-        markAtOnce(Map.of(agentId, new HashSet<>(days)), "late-written Agent Health rows");
     }
 
     private void markAtOnce(Map<String, Set<LocalDate>> agentDays, String what) {

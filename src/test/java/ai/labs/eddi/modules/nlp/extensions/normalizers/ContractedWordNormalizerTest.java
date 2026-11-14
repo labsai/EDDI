@@ -13,7 +13,7 @@ public class ContractedWordNormalizerTest {
     public void normalize() {
         // setup
         final String testString = "don't doesn't didn't can't couldn't won't shouldn't it's";
-        final String expected = "do not does not did not cannot could not would not should not it is";
+        final String expected = "do not does not did not cannot could not will not should not it is";
         ContractedWordNormalizer normalizer = new ContractedWordNormalizer();
 
         // test

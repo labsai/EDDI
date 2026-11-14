@@ -77,6 +77,14 @@ public class ScheduleConfiguration {
     private String agentId;
     private int agentVersion; // 0 = latest deployed
     private String environment; // "production" | "test"
+    /**
+     * Stored, returned and kept on a PUT that omits it, but read by no fire and by
+     * nothing that routes, filters or bills. Kept only so stored schedules and the
+     * column/index that hold it stay valid.
+     *
+     * @deprecated not read; do not build on it
+     */
+    @Deprecated(since = "6.8.0")
     private String tenantId;
 
     // -- Timing --
@@ -123,6 +131,14 @@ public class ScheduleConfiguration {
 
     // -- Security --
     private double maxCostPerFire = -1.0; // <= 0 = unlimited (Postgres stores 0 as NULL)
+    /**
+     * Stored, returned and kept on a PUT that omits it, but nothing checks it.
+     * Whether an agent may book its own check-backs is decided by its LLM task
+     * whitelisting the {@code schedule_followup} tool, not by a flag on a schedule.
+     *
+     * @deprecated not read; do not build on it
+     */
+    @Deprecated(since = "6.8.0")
     private boolean allowSelfScheduling;
     // Whether a deserialized body carried allowSelfScheduling at all. A primitive
     // cannot say "absent", and a PUT from a client that does not know the field
@@ -229,10 +245,18 @@ public class ScheduleConfiguration {
         this.environment = environment;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public String getTenantId() {
         return tenantId;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public void setTenantId(String tenantId) {
         this.tenantId = tenantId;
     }
@@ -381,10 +405,18 @@ public class ScheduleConfiguration {
         this.maxCostPerFire = maxCostPerFire;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public boolean isAllowSelfScheduling() {
         return allowSelfScheduling;
     }
 
+    /**
+     * @deprecated stored but not read; the property has no effect
+     */
+    @Deprecated(since = "6.8.0")
     public void setAllowSelfScheduling(boolean allowSelfScheduling) {
         this.allowSelfScheduling = allowSelfScheduling;
         this.allowSelfSchedulingProvided = true;

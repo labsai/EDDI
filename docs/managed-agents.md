@@ -260,7 +260,11 @@ _Response Code_
 
 _Agent not ready_
 
-If no version of the agent is deployed and ready yet (startup, rolling deploy), the managed endpoints that would start a conversation answer `503 Service Unavailable` with `Retry-After: 5`. Retry after that many seconds; no conversation was created.
+If no version of the agent is deployed and ready yet (startup, rolling deploy), the managed endpoints that would start a conversation answer `503 Service Unavailable` with `Retry-After: 5`. Retry after that many seconds; no conversation was created. The MCP `chat_managed` tool answers the same case with `"errorCode": "UNAVAILABLE"`.
+
+_Concurrent requests_
+
+Two requests for the same intent and user that both need a new conversation (none exists yet, or the current one has ended) each start one, but only one can be stored as the user's conversation. The other request uses the stored one and ends the conversation it started, so both clients talk to the same conversation. An ended conversation is only ever replaced while the mapping still points at it, so a slower request cannot remove the replacement a faster one has just stored.
 
 ### MCP Integration
 

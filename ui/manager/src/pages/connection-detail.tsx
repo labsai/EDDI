@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -134,6 +134,26 @@ export function ConnectionDetailPage() {
   const baselineDocRef = useRef<ConnectionConfiguration | null>(null);
   const draftRef = useRef<ConnectionConfiguration | null>(null);
   draftRef.current = draft;
+  /** Everything a save is built from, serialised: compared after an await to see whether the user typed meanwhile. */
+  const formStateRef = useRef("");
+  useLayoutEffect(() => {
+    formStateRef.current = JSON.stringify([draft, pendingScope, pendingOrigin]);
+  }, [draft, pendingScope, pendingOrigin]);
+  /**
+   * The extra-parameter rows as the field holds them, serialised.
+   *
+   * A row with no name never reaches `draft` (it is dropped on the way out), so
+   * text typed into one is invisible to `formStateRef`. The field reports its
+   * rows here, and a save compares both.
+   */
+  const extraRowsRef = useRef("");
+  /**
+   * `id@version` of the version a save created while the user kept editing.
+   *
+   * Following that version is the same document, not a different one, so the
+   * reset below must not throw away the edit made during the save.
+   */
+  const keepDraftFor = useRef<string | null>(null);
 
   /**
    * Reset the form wholesale when the route points at a different document.
@@ -157,8 +177,16 @@ export function ConnectionDetailPage() {
    * effect no-ops and runs later when the fetch lands), and it cannot resurrect
    * the clobbering bug below, because this effect's deps are only `[id,
    * version]` — a background refetch never runs it.
+   *
+   * The one route change it skips is a save following its own new version
+   * while the form holds an edit made during that save (`keepDraftFor`). The
+   * save has already moved the baseline to what it stored, so the seeding
+   * effect sees the edit as unsaved and leaves it alone.
    */
   useEffect(() => {
+    const keep = keepDraftFor.current === `${id}@${version}`;
+    keepDraftFor.current = null;
+    if (keep) return;
     baselineRef.current = null;
     baselineDocRef.current = null;
     setDraft(null);
@@ -351,6 +379,7 @@ export function ConnectionDetailPage() {
     }
     // `outgoing` already folds in any uncommitted chip text and drops the
     // fields this auth type does not use — see `toStoredConnection`.
+    const sentState = formStateRef.current + extraRowsRef.current;
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: outgoing });
 
@@ -359,11 +388,16 @@ export function ConnectionDetailPage() {
       // guard stopped protecting edits the backend had just refused, and the
       // next background refetch replaced them with the server copy. The whole
       // point of the guard is the case where the save did not happen.
-      setDraft(outgoing);
-      setPendingScope("");
-      setPendingOrigin("");
       baselineRef.current = JSON.stringify(outgoing);
       baselineDocRef.current = outgoing;
+      // The fields stay editable during the PUT. An edit made meanwhile is not
+      // saved: it stays on screen, unsaved against the new baseline.
+      const editedSinceSent = formStateRef.current + extraRowsRef.current !== sentState;
+      if (!editedSinceSent) {
+        setDraft(outgoing);
+        setPendingScope("");
+        setPendingOrigin("");
+      }
 
       const location = (result as { location?: string })?.location;
       if (location) {
@@ -371,6 +405,7 @@ export function ConnectionDetailPage() {
         // The mutation has already seeded this version's cache with what we
         // sent, so the switch re-seeds the form instead of showing a skeleton.
         const { version: newVersion } = parseConnectionResourceUri(location);
+        if (editedSinceSent) keepDraftFor.current = `${id}@${newVersion}`;
         setSearchParams({ version: String(newVersion) }, { replace: true });
       }
       toast.success(t("connections.saved", "Connection saved"));
@@ -725,6 +760,7 @@ export function ConnectionDetailPage() {
             <ExtraParamsField
               value={draft.oauth?.extraAuthParams ?? {}}
               onChange={(extraAuthParams) => patchOAuth({ extraAuthParams })}
+              rowsStateRef={extraRowsRef}
               error={fieldError("oauth.extraAuthParams")}
             />
 
@@ -950,10 +986,13 @@ function ScopesField({
 function ExtraParamsField({
   value,
   onChange,
+  rowsStateRef,
   error,
 }: {
   value: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
+  /** Receives the rows, serialised, so the page can see rows `onChange` leaves out. */
+  rowsStateRef: { current: string };
   error?: ValidationCode;
 }) {
   const { t } = useTranslation();
@@ -979,6 +1018,13 @@ function ExtraParamsField({
     emitted.current = value;
     setRows(Object.entries(value));
   }, [value]);
+
+  useLayoutEffect(() => {
+    rowsStateRef.current = JSON.stringify(rows);
+    return () => {
+      rowsStateRef.current = "";
+    };
+  }, [rows, rowsStateRef]);
 
   const emit = (next: [string, string][]) => {
     setRows(next);
