@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl.builder;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
+import dev.langchain4j.model.anthropic.AnthropicChatRequestParameters;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -130,6 +131,22 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
                 booleanOrNull(p, KEY_LOG_RESPONSES), stringMap(p, KEY_CUSTOM_HEADERS), body.isEmpty() ? null : body);
     }
 
+    /**
+     * The request-level settings as langchain4j's request parameters, handed to the
+     * synchronous and the streaming client alike: every request starts from them. A
+     * {@code null} leaves the provider default. What stays on the client builders
+     * is not part of a request (endpoint, credentials, timeout, logging, headers,
+     * API version and beta), or is a setting langchain4j only takes there:
+     * {@code thinkingDisplay}, {@code strictTools} and the extra body fields.
+     */
+    private static AnthropicChatRequestParameters requestParameters(Settings s) {
+        return AnthropicChatRequestParameters.builder().modelName(s.modelName()).maxOutputTokens(s.maxTokens())
+                .temperature(s.temperature()).topP(s.topP()).topK(s.topK()).stopSequences(s.stop()).thinkingType(s.thinkingType())
+                .thinkingBudgetTokens(s.thinkingBudgetTokens()).returnThinking(s.returnThinking()).sendThinking(s.sendThinking())
+                .cacheSystemMessages(s.cacheSystemMessages()).cacheTools(s.cacheTools()).cacheAutomatically(s.cacheAutomatically())
+                .cacheTtl(s.cacheTtl()).disableParallelToolUse(s.disableParallelToolUse()).userId(s.userId()).build();
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));
@@ -142,48 +159,17 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = AnthropicChatModel.builder().httpClientBuilder(httpClientBuilder);
+        var b = AnthropicChatModel.builder().httpClientBuilder(httpClientBuilder).defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        b.maxTokens(s.maxTokens());
         if (s.timeoutMs() != null)
             b.timeout(Duration.ofMillis(s.timeoutMs()));
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.topK() != null)
-            b.topK(s.topK());
-        if (s.stop() != null)
-            b.stopSequences(s.stop());
-        if (s.thinkingType() != null)
-            b.thinkingType(s.thinkingType());
-        if (s.thinkingBudgetTokens() != null)
-            b.thinkingBudgetTokens(s.thinkingBudgetTokens());
         if (s.thinkingDisplay() != null)
             b.thinkingDisplay(s.thinkingDisplay());
-        if (s.returnThinking() != null)
-            b.returnThinking(s.returnThinking());
-        if (s.sendThinking() != null)
-            b.sendThinking(s.sendThinking());
-        if (s.cacheSystemMessages() != null)
-            b.cacheSystemMessages(s.cacheSystemMessages());
-        if (s.cacheTools() != null)
-            b.cacheTools(s.cacheTools());
-        if (s.cacheAutomatically() != null)
-            b.cacheAutomatically(s.cacheAutomatically());
-        if (s.cacheTtl() != null)
-            b.cacheTtl(s.cacheTtl());
-        if (s.disableParallelToolUse() != null)
-            b.disableParallelToolUse(s.disableParallelToolUse());
         if (s.strictTools() != null)
             b.strictTools(s.strictTools());
-        if (s.userId() != null)
-            b.userId(s.userId());
         if (s.version() != null)
             b.version(s.version());
         if (s.beta() != null)
@@ -209,48 +195,18 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
     StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = AnthropicStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
+        var b = AnthropicStreamingChatModel.builder().httpClientBuilder(httpClientBuilder)
+                .defaultRequestParameters(requestParameters(s));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
             b.apiKey(s.apiKey());
-        if (s.modelName() != null)
-            b.modelName(s.modelName());
-        b.maxTokens(s.maxTokens());
         if (s.timeoutMs() != null)
             b.timeout(Duration.ofMillis(s.timeoutMs()));
-        if (s.temperature() != null)
-            b.temperature(s.temperature());
-        if (s.topP() != null)
-            b.topP(s.topP());
-        if (s.topK() != null)
-            b.topK(s.topK());
-        if (s.stop() != null)
-            b.stopSequences(s.stop());
-        if (s.thinkingType() != null)
-            b.thinkingType(s.thinkingType());
-        if (s.thinkingBudgetTokens() != null)
-            b.thinkingBudgetTokens(s.thinkingBudgetTokens());
         if (s.thinkingDisplay() != null)
             b.thinkingDisplay(s.thinkingDisplay());
-        if (s.returnThinking() != null)
-            b.returnThinking(s.returnThinking());
-        if (s.sendThinking() != null)
-            b.sendThinking(s.sendThinking());
-        if (s.cacheSystemMessages() != null)
-            b.cacheSystemMessages(s.cacheSystemMessages());
-        if (s.cacheTools() != null)
-            b.cacheTools(s.cacheTools());
-        if (s.cacheAutomatically() != null)
-            b.cacheAutomatically(s.cacheAutomatically());
-        if (s.cacheTtl() != null)
-            b.cacheTtl(s.cacheTtl());
-        if (s.disableParallelToolUse() != null)
-            b.disableParallelToolUse(s.disableParallelToolUse());
         if (s.strictTools() != null)
             b.strictTools(s.strictTools());
-        if (s.userId() != null)
-            b.userId(s.userId());
         if (s.version() != null)
             b.version(s.version());
         if (s.beta() != null)

@@ -13,8 +13,6 @@ import jakarta.ws.rs.ext.Provider;
 
 import java.util.Map;
 
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-
 /**
  * Refuses a write that names a space, in {@link SpaceContext#SPACE_HEADER}, the
  * caller does not belong to — before anything is created.
@@ -62,9 +60,9 @@ public class SpaceHeaderFilter implements ContainerRequestFilter {
             return;
         }
         if (!spaceContext.current().spaces().contains(space)) {
-            request.abortWith(refusal(Response.Status.FORBIDDEN, "You are not a member of the space '" + sanitize(space)
-                    + "'. Pick one of your own spaces (GET /workspaces lists them), or leave " + SpaceContext.SPACE_HEADER
-                    + " out to use your default."));
+            // Exact and case-sensitive on purpose: group names are, and a normalised match
+            // could file work in a space that is not the one the caller named.
+            request.abortWith(refusal(Response.Status.FORBIDDEN, SpaceRefusals.unknownSpaceHeader(space)));
         }
     }
 
