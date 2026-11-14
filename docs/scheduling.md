@@ -476,6 +476,17 @@ target must be written:
   node down in turn, forever.
 - A **disabled** schedule cannot be claimed, by the poller or by `POST /{id}/fire`:
   one disabled between the poll's read and its claim is no longer fired.
+- The poller's claim also requires the schedule to **still be due**. A poll reads
+  its batch once and claims it row by row, so another instance can claim, fire and
+  re-arm a schedule in between; that schedule is waiting for its next fire time
+  and is not fired a second time. `POST /{id}/fire` (and `fire_schedule_now`)
+  claims regardless of `nextFire`, since firing early is its purpose.
+- **A lease's age is measured on the database's clock.** The claim time is
+  written by the database, and the lease-expiry test compares against the same
+  clock, so instances whose clocks disagree cannot take over each other's
+  running fires. Clock skew between instances still shifts *when* a schedule
+  counts as due on each of them, by the amount of the skew, but it no longer
+  causes duplicate fires.
 - `POST /{id}/fire` (and the MCP `fire_schedule_now` tool) runs under the same bound as a polled fire
   (`eddi.schedule.fire-timeout` plus a 30 s grace) instead of without limit, so a
   manual Dream or ingestion run cannot outlast its claim's lease and be started a

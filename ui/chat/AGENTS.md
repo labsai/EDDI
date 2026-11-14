@@ -42,11 +42,13 @@ src/
 │   ├── chat-config.ts      # Operator settings from `window.__EDDI_CHAT__` (/chat/__config__.js), `?token=` gate
 │   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
+│   ├── ChatApp.tsx         # Picks the screen for the URL; unknown paths → /chat/production/default
+│   ├── ChatLocationProvider.tsx # The address bar (or, with initialPath, an in-memory one for tests)
 │   ├── ChatRoute.tsx       # `/chat/:environment/:agentId[/:userId]` route; neutral state for the demo under a brand
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 │   ├── MessageBubble.tsx   # User/agent messages with markdown
-│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js loading (rich-math.ts, rich-highlight.ts)
+│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js / raw-HTML loading (rich-math.ts, rich-highlight.ts, rich-raw.ts)
 │   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
@@ -68,6 +70,7 @@ src/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
 ├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
 ├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
+├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
 ├── rating-steps.ts     # Which conversation step a message belongs to (reply ratings are keyed by step)
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
@@ -164,7 +167,9 @@ src/
 1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind.
 2. **State** — `ChatProvider` → `useChatState()` / `useChatDispatch()`. No prop drilling.
 3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
-4. **Testing** — Wrap components in `<ChatProvider>`. Mock `window.matchMedia` in `test-setup.ts`.
+4. **Testing** — Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
+4a. **No router** — react-router was 92 KB of first load for three path shapes. `src/location.ts` parses `/chat/managed/:intent/:userId`, `/chat/:environment/:agentId/:userId` and `/chat/:environment/:agentId` with react-router's matching rules (case-insensitive literals, `managed` beats `:environment`, trailing slashes ignored, params decoded); `location.test.tsx` pins them — these URLs are a public contract for embedders. Do not add a router back for a fourth shape; extend `parseChatPath`.
+4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts`); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is still rendered (sanitised) for every agent until the per-agent `rawHtml` setting exists (frontend unification plan, D9).
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
 6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `lang` (`en`/`de`/`fr`/`es`, read in `i18n.ts`), `apiServer`, `token` (read once, then removed from the address bar; honoured only when the operator sets `eddi.chat.url-token.enabled`, default `false`), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
@@ -186,7 +191,7 @@ npm run build    # Outputs to dist/
 
 CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
 PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
-no CI at all). Run all three before pushing, plus `npm run build`.
+no CI at all), then builds and runs `npm run budget`. Run them all before pushing.
 
 ---
 

@@ -216,8 +216,11 @@ A default team never files somebody's work in a team they are not in: their
 work would otherwise be readable and editable by people they never chose to
 share it with.
 
-A header naming a space the caller is not a member of is refused with 403
-before anything is created.
+A header naming none of the caller's spaces is refused with 403 before
+anything is created. The value must be one of the ids `GET /workspaces` lists,
+exactly: it is compared case-sensitively (group names are case-sensitive) and
+only surrounding whitespace is ignored, so `TEAM:engineering` or
+`team:engineering/` is refused as well. The refusal quotes the value received.
 
 ### Notifications and access requests
 
@@ -440,6 +443,12 @@ administrator — in the Manager's **Workspaces** page, or:
 | `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. A create under `enforce` carries `allowedAgents` and `allowedHosts` (`["*"]` for "any"), as on [the tenant vault](secrets-vault.md#required-on-a-create). |
 | `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
 
+Space ids are opaque and may contain `%` — a group `a|b` is `team:a%7Cb` — so
+`space` is sent URL-encoded, exactly as `GET /workspaces` lists it
+(`encodeURIComponent(id)`, here `team%3Aa%257Cb`). Sent raw, the id is decoded
+once on the way in, arrives as `team:a|b`, and is refused with 403: it matches
+none of the caller's spaces.
+
 Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
 `${vars:<tenant>/model}`, where every response names the tenant. Membership is
 what authorizes, and it is checked where a human acts: **deploying an agent that
@@ -508,7 +517,26 @@ from:
 - **`STORED`** — changed at runtime; kept in the database.
 - **`DEFAULT`** — neither.
 
-Changes reach every node within seconds.
+Changes reach every node within seconds. A stored `legacy-visibility` other than
+`shared` or `admin-only` — the API refuses one, so only a direct database edit
+can store it — is ignored: the default applies, the setting reports `DEFAULT`,
+and a single `WARN` names the value.
+
+### Resources that predate ownership
+
+A resource created before ownership was recorded has a descriptor with no owner
+and no space. Under `legacy-visibility=shared` every user may **read, use, edit
+and deploy** it, so an upgrade hides nothing and stops no one's work. Nobody but
+an administrator **owns** it: deleting it, sharing it or revoking a share,
+changing its visibility (publishing it), moving it to another space, and reading
+its grant list all need `OWN`, so a non-admin is refused them and the Manager
+does not offer them. An absent owner is not a grant of ownership; otherwise any
+user could publish a colleague's pre-upgrade agent to anonymous callers, or move
+it into their own space and so take it from everyone else.
+
+An explicit share still counts in full: a user granted `OWN` on a legacy
+resource holds it. To hand a resource over for good, assign an owner with
+`PUT /descriptorstore/descriptors/{id}/shares/owner`.
 
 ### Resources with no descriptor at all
 
@@ -546,9 +574,12 @@ configuration would break every shared agent.
 2. Leave `eddi.workspaces.enabled=false`. New resources are attributed to their
    creators from this point on.
 3. Check the owners look right.
-4. Set `eddi.workspaces.enabled=true`.
-5. Optionally move to `legacy-visibility=admin-only` once the pre-existing
-   resources have been assigned owners with the ownership-transfer endpoint.
+4. Set `eddi.workspaces.enabled=true`. Pre-existing resources stay readable and
+   editable by everyone, but deleting, sharing, publishing or moving one is
+   admin-only until it has an owner — see
+   [Resources that predate ownership](#resources-that-predate-ownership).
+5. Assign owners to the pre-existing resources with the ownership-transfer
+   endpoint, then optionally move to `legacy-visibility=admin-only`.
 
 Rolling back is setting the flag to `false`. The recorded ownership is inert
 while enforcement is off.

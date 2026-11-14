@@ -49,7 +49,7 @@ export function AdjustBudgetDialog({ snapshot, onClose }: { snapshot: TeamBudget
     <AccessibleDialog open={snapshot !== null} onClose={close} title={t("teamBudget.adjustTitle", "Adjust this month's cap")} testId="team-budget-adjust-dialog">
       {snapshot && (
         <form
-          className="space-y-3"
+          className="space-y-3 p-5"
           onSubmit={(e) => {
             e.preventDefault();
             if (valid) submit();
@@ -183,7 +183,7 @@ export function TransferBudgetDialog({ open, teams, onClose }: { open: boolean; 
   return (
     <AccessibleDialog open={open} onClose={close} title={t("teamBudget.transferTitle", "Transfer budget between teams")} testId="team-budget-transfer-dialog">
       <form
-        className="space-y-3"
+        className="space-y-3 p-5"
         onSubmit={(e) => {
           e.preventDefault();
           if (valid) submit();

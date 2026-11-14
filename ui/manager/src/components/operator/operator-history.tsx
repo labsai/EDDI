@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { useConversationDescriptors } from "@/hooks/use-conversations";
-import { isOperatorProbeConversation } from "@/hooks/use-operator-chat";
+import { conversationRecency, isOperatorProbeConversation } from "@/hooks/use-operator-chat";
 import {
   getSimpleConversationLog,
   extractInput,
@@ -26,6 +26,9 @@ import { cn } from "@/lib/utils";
  * conversation on the platform with filters and paging, and duplicating that
  * here would be a second, worse copy of it. The cap is also what keeps the
  * per-row preview below affordable.
+ *
+ * The caller's own conversations only (`mine`), the same set the tab restores
+ * from: an admin's listing otherwise holds every admin's investigations.
  */
 const HISTORY_PAGE_SIZE = 15;
 
@@ -107,6 +110,10 @@ export function OperatorHistory({
     0,
     "",
     agentId,
+    undefined,
+    undefined,
+    undefined,
+    { mine: true },
   );
 
   if (listLoading) {
@@ -148,11 +155,12 @@ export function OperatorHistory({
 
   // Newest first, sorted here rather than trusted from the endpoint: the
   // descriptor store's sort is a per-filter backend setting, not a documented
-  // newest-first contract.
+  // newest-first contract. By conversationRecency, the definition the tab's
+  // restore picks by, so the first row is the conversation a new tab reopens.
   // Sorted BEFORE trimming, so the cap keeps the newest 15 rather than whichever
   // 15 the backend's own (per-filter, not newest-first) sort happened to return.
   const sorted = [...conversations]
-    .sort((a, b) => (b.lastModifiedOn ?? b.createdOn ?? 0) - (a.lastModifiedOn ?? a.createdOn ?? 0))
+    .sort((a, b) => conversationRecency(b) - conversationRecency(a))
     .slice(0, HISTORY_PAGE_SIZE);
 
   return (

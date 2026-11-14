@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import dev.langchain4j.agent.tool.P;
@@ -74,8 +76,8 @@ public class TeardownAgentTool {
     private final String groupConversationId;
 
     /**
-     * {@code deploymentStore} may be null; teardown then skips retiring deployment
-     * records.
+     * {@code deploymentStore} may be null; teardown then leaves the deployment
+     * records alone.
      *
      * @param conversationId
      *            the conversation this tool runs in
@@ -135,6 +137,7 @@ public class TeardownAgentTool {
             // --- Undeploy ---
             try {
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                markDeploymentRecordsUndeployed(agentId);
                 LOGGER.infof("[TEARDOWN] Undeployed agent '%s'", agentId);
             } catch (Exception e) {
                 LOGGER.warnf("[TEARDOWN] Undeploy failed for agent '%s': %s", agentId, e.getMessage());
@@ -224,6 +227,27 @@ public class TeardownAgentTool {
         tornDownAgentIds.add(agentId);
         createdAgentIds.remove(agentId);
         retainedAgentIds.remove(agentId);
+    }
+
+    /**
+     * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
+     * REST undeploy does. The deployment sweep deploys what is recorded and no
+     * longer served, so a record left saying deployed would undo this undeploy
+     * within about ten seconds. Never fatal.
+     */
+    private void markDeploymentRecordsUndeployed(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
+                if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
+                    deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[TEARDOWN] Could not mark the deployment record(s) of agent '%s' undeployed: %s", sanitize(agentId), e.getMessage());
+        }
     }
 
     /**

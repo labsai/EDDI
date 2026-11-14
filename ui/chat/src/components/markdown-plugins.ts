@@ -1,10 +1,18 @@
 /* ──────────────────────────────────────────────
-   Math and code-highlighting plugins, loaded on demand
+   Math, code-highlighting and raw-HTML plugins, loaded on demand
 
    KaTeX and highlight.js together roughly triple the widget's bundle, and most
    conversations never show a formula or a code block. They are split into
    their own chunks and fetched the first time a message looks like it needs
    them; until then the message renders as plain markdown.
+
+   The raw-HTML parser (rehype-raw, which brings parse5) is the same kind of
+   weight for the same kind of message: most replies contain no HTML at all.
+   It loads the first time one does. Until it is in, that message's HTML is
+   left out (rehype-sanitize drops the unparsed nodes) and its text shows;
+   once it is in, the message renders exactly as it always did. Whether an
+   agent's HTML is rendered at all becomes a per-agent setting later
+   (frontend unification plan, D9) — until then it always is.
    ────────────────────────────────────────────── */
 
 import { useEffect, useState } from "react";
@@ -21,10 +29,21 @@ export interface HighlightPlugins {
   rehypeHighlight: Pluggable;
 }
 
+export interface RawHtmlPlugins {
+  rehypeRaw: Pluggable;
+}
+
 let mathLoaded: MathPlugins | null = null;
 let highlightLoaded: HighlightPlugins | null = null;
+let rawLoaded: RawHtmlPlugins | null = null;
 let mathPromise: Promise<MathPlugins> | null = null;
 let highlightPromise: Promise<HighlightPlugins> | null = null;
+let rawPromise: Promise<RawHtmlPlugins> | null = null;
+
+function loadRaw(): Promise<RawHtmlPlugins> {
+  rawPromise ??= import("./rich-raw").then((m) => (rawLoaded = m.default));
+  return rawPromise;
+}
 
 function loadMath(): Promise<MathPlugins> {
   mathPromise ??= import("./rich-math").then((m) => (mathLoaded = m.default));
@@ -52,18 +71,54 @@ export function looksLikeCode(text: string): boolean {
 }
 
 /**
- * The math and highlight plugins this text needs, once they have loaded; null
- * for either until then (and whenever it is not needed or is disabled).
+ * Anything markdown could parse as HTML. Every HTML construct CommonMark knows
+ * — a block, an open or closing tag, a comment, a processing instruction, a
+ * declaration, CDATA — starts with `<` and then a letter, `/`, `!` or `?`, so
+ * text without that pair yields no HTML node and needs no parser. Erring the
+ * other way (an autolink `<https://…>`, a comparison `a <b`) only loads the
+ * chunk early; the output is the same either way.
+ */
+export function looksLikeHtml(text: string): boolean {
+  return /<[A-Za-z/!?]/.test(text);
+}
+
+/**
+ * The math, highlight and raw-HTML plugins this text needs, once they have
+ * loaded; null for each until then (and whenever it is not needed or is
+ * disabled).
  */
 export function useRichPlugins(
   text: string,
   enableMath: boolean,
   enableCodeHighlight: boolean,
-): { math: MathPlugins | null; highlight: HighlightPlugins | null } {
+  enableRawHtml = true,
+): {
+  math: MathPlugins | null;
+  highlight: HighlightPlugins | null;
+  raw: RawHtmlPlugins | null;
+} {
   const needsMath = enableMath && looksLikeMath(text);
   const needsCode = enableCodeHighlight && looksLikeCode(text);
+  const needsRaw = enableRawHtml && looksLikeHtml(text);
   const [math, setMath] = useState<MathPlugins | null>(mathLoaded);
   const [highlight, setHighlight] = useState<HighlightPlugins | null>(highlightLoaded);
+  const [raw, setRaw] = useState<RawHtmlPlugins | null>(rawLoaded);
+
+  useEffect(() => {
+    if (!needsRaw || raw) return;
+    let live = true;
+    loadRaw()
+      .then((m) => {
+        if (live) setRaw(m);
+      })
+      .catch(() => {
+        // A failed chunk load leaves the HTML out and the text in.
+        rawPromise = null;
+      });
+    return () => {
+      live = false;
+    };
+  }, [needsRaw, raw]);
 
   useEffect(() => {
     if (!needsMath || math) return;
@@ -99,5 +154,6 @@ export function useRichPlugins(
   return {
     math: needsMath ? math : null,
     highlight: needsCode ? highlight : null,
+    raw: needsRaw ? raw : null,
   };
 }

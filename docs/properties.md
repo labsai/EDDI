@@ -109,6 +109,8 @@ When the `greet_user` action fires:
 1. `greeted` is set to `"true"` for this conversation session
 2. `preferred_language` is set from the input context and persisted across all conversations and agents
 
+`"actions": ["*"]` selects an entry on every turn that emitted at least one action. Each instruction runs **at most once per turn**, however many of the turn's actions select it — in the order of the turn's actions, then the order of `setOnActions`.
+
 ### Via Pre/Post Request Instructions
 
 Properties can be set before or after any lifecycle task (HTTP calls, LLM calls):

@@ -110,8 +110,16 @@ public final class SecretRedactionFilter {
 
             // Bearer tokens — JWTs AND opaque tokens. A single possessive character
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
-            // dotted JWTs; min length 20 avoids redacting short benign words.
-            new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
+            // dotted JWTs; min length 20 avoids redacting short benign words. The
+            // scheme name is case-insensitive (RFC 9110), so 'bearer' and 'BEARER'
+            // match too, from a word boundary like the sk- rules: "forbearer" is a
+            // word, not a scheme. A word character that is the second half of an
+            // escape (the 'n' of a serialized \n line break) does not count: the
+            // canonical rule, which had no boundary, matched there, and serialized
+            // text is most of what this filter sees. The replacement is always
+            // 'Bearer ', the spelling notAlreadyRedacted() and FULLY_REDACTED_VALUE
+            // recognise.
+            new RedactionRule(Pattern.compile("(?i)(?<!(?<!\\\\)[A-Za-z0-9_])bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
                     "Bearer " + REDACTED),
 
             // Provider key shapes the rules above did not know (L6 of the 2026-10-17
@@ -142,12 +150,14 @@ public final class SecretRedactionFilter {
             // quadratic.
             new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_\\-])eyJ[A-Za-z0-9_\\-]{8,}+\\.eyJ[A-Za-z0-9_\\-]{8,}+\\.[A-Za-z0-9_\\-]*+"),
                     REDACTED),
-            // Authorization: Basic|Token|Digest <credential>. The name-bound rules
-            // below stop the value at the space after the scheme, which left the
-            // credential itself legible.
+            // Authorization: Basic|Bearer|Token|Digest <credential>. The name-bound
+            // rules below stop the value at the space after the scheme, which left
+            // the credential itself legible.
             // No length floor: after an explicit scheme word the next token IS the
-            // credential, and "Basic YTpi" (a:b) is as real as a long one.
-            new RedactionRule(Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|token|digest)\\s++[A-Za-z0-9+/=._~\\-]++"),
+            // credential, and "Basic YTpi" (a:b) is as real as a long one — as is a
+            // short opaque bearer token, which the bearer rule's floor lets through.
+            new RedactionRule(
+                    Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|bearer|token|digest)\\s++[A-Za-z0-9+/=._~\\-]++"),
                     "$1$2 " + REDACTED),
             // Azure API Management's subscription key header (api-key and x-api-key
             // are already matched by the name-bound rules below).

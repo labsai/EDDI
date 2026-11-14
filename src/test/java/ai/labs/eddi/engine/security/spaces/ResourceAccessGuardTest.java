@@ -212,6 +212,74 @@ class ResourceAccessGuardTest {
     }
 
     @Nested
+    @DisplayName("a resource that predates ownership (descriptor with no owner)")
+    class LegacyDescriptor {
+
+        private final WorkspaceSettings enforced = settings(true, true, WorkspaceSettings.LEGACY_SHARED);
+        private final WorkspaceSettings notEnforced = settings(false, true, WorkspaceSettings.LEGACY_SHARED);
+
+        private DocumentDescriptor legacy() {
+            return DescriptorAccess.rebuildIndex(new DocumentDescriptor());
+        }
+
+        private DocumentDescriptor legacyWithGrant() {
+            var d = legacy();
+            d.setGrants(List.of(new ResourceGrant(Subjects.user("carol"), AccessLevel.VIEW.name(), "root", new Date(0))));
+            return DescriptorAccess.rebuildIndex(d);
+        }
+
+        private IDocumentDescriptorStore storeReturning(DocumentDescriptor d) throws Exception {
+            var store = mock(IDocumentDescriptorStore.class);
+            when(store.readCurrentDescriptor(RESOURCE_ID)).thenReturn(d);
+            return store;
+        }
+
+        @Test
+        @DisplayName("can be edited by anyone under legacy-visibility=shared, so an upgrade breaks no workflow")
+        void editAllowed() throws Exception {
+            var g = guard(identity("bob"), enforced, storeReturning(legacy()));
+
+            assertEquals(AccessLevel.EDIT, g.requireAccess(RESOURCE_ID, AccessLevel.EDIT, "agent"));
+            assertEquals(AccessLevel.EDIT, g.currentLevel(RESOURCE_ID));
+        }
+
+        @Test
+        @DisplayName("cannot be deleted, shared, published or moved by a non-admin: those all require OWN")
+        void ownActsRefused() throws Exception {
+            // Before, every caller held OWN here. Bob could publish someone's pre-workspace
+            // agent to anonymous callers, or move it into user:bob — after which it was no
+            // longer unowned, so everyone else lost access to it.
+            var g = guard(identity("bob"), enforced, storeReturning(legacy()));
+
+            assertThrows(ForbiddenException.class, () -> g.requireAccess(RESOURCE_ID, AccessLevel.OWN, "agent"));
+            assertFalse(g.canAccess(legacy(), AccessLevel.OWN), "a cascading share must skip it, not re-share it");
+            assertEquals(AccessLevel.EDIT.name(), g.redactForCaller(legacy()).getCallerLevel(),
+                    "the Manager gates Delete and Share on this field");
+        }
+
+        @Test
+        @DisplayName("an administrator still holds OWN, which is how an owner gets assigned")
+        void adminOwns() throws Exception {
+            var g = guard(identity("root", "eddi-admin"), enforced, storeReturning(legacy()));
+
+            assertEquals(AccessLevel.OWN, g.requireAccess(RESOURCE_ID, AccessLevel.OWN, "agent"));
+        }
+
+        @Test
+        @DisplayName("its grant list stays hidden from a non-admin while enforcement is off")
+        void grantsHiddenWhenNotEnforcing() {
+            // With enforcement off, disclosure falls back to the structural level — which
+            // said OWN for every caller on legacy data, so anyone could read who it was
+            // shared with.
+            assertFalse(guard(identity("bob"), notEnforced, mock(IDocumentDescriptorStore.class)).mayReadGrants(legacyWithGrant()));
+            assertNull(guard(identity("bob"), notEnforced, mock(IDocumentDescriptorStore.class)).redactForCaller(legacyWithGrant())
+                    .getGrants());
+            assertTrue(guard(identity("root", "eddi-admin"), notEnforced, mock(IDocumentDescriptorStore.class))
+                    .mayReadGrants(legacyWithGrant()));
+        }
+    }
+
+    @Nested
     @DisplayName("principalMayUse — a named principal, no request")
     class PrincipalMayUse {
 
