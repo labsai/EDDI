@@ -166,6 +166,21 @@ class RestUserMemoryStoreTest {
         assertEquals("entry-id", body.get("id"));
     }
 
+    /**
+     * A client reads a contested entry, edits the value and PUTs the whole body
+     * back: the stale verdict must not ride along onto the new value.
+     */
+    @Test
+    void upsertMemory_editedContestedEntryIsStoredAsAccepted() throws Exception {
+        var echoed = entry("1", "key", "edited").withAssessment(UserMemoryEntry.Assessment.CONTESTED, null);
+        when(store.upsert(any())).thenReturn("entry-id");
+
+        assertEquals(200, rest.upsertMemory(echoed).getStatus());
+
+        verify(store).upsert(argThat(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED && !e.conflicted() && e.supersededBy() == null
+                && "edited".equals(e.value())));
+    }
+
     @Test
     void upsertMemory_shouldRejectNullEntry() {
         Response response = rest.upsertMemory(null);
