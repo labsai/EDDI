@@ -131,7 +131,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/preview?sourceUrl=https:/
 
 `targetId` and `targetVersion` are `null` for a `CREATE`, and `matchStrategy` records how the match was found (e.g. `targetAgent`, `position`, `type`, `name` — `null` for `CREATE`).
 
-`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `parser`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`.
+`resourceType` uses the config file extension labels, not the v6 URI names — the full set is `agent`, `workflow`, `langchain`, `httpcalls`, `behavior`, `parser`, `regulardictionary`, `property`, `output`, `mcpcalls`, `rag`, `snippet`, plus `schedule` in a ZIP import preview.
 
 **Actions explained:**
 
@@ -198,8 +198,8 @@ the status code — checking `response.ok` alone reports a half-applied sync as 
 | `201 Created` | Everything landed and something was written. |
 | `207 Multi-Status` | **Partially applied** — `failures[]` in the body names every resource that could not be written. |
 
-Two failures are reported apart from those, because they are not this instance's
-fault and the operator can act on both:
+The failures below are reported apart from those, as ordinary error statuses, so the
+operator can tell what to fix:
 
 | Status | Meaning |
 |--------|---------|
@@ -222,9 +222,14 @@ The body of a single sync is an `UpgradeResult`:
   "skipped": 5,
   "failures": [
     { "sourceId": "…", "resourceType": "langchain", "name": "GPT Config", "reason": "…" }
-  ]
+  ],
+  "compatible": false,
+  "compatibilityGeneration": 4
 }
 ```
+
+`compatible` and `compatibilityGeneration` say how the agent version the sync wrote was declared and which
+[compatibility generation](deployment-management-of-agents.md#the-compatibility-generation) it carries.
 
 `/backup/import/sync/batch` answers a JSON array of `BatchSyncResult`
 (`sourceAgentId`, `targetAgentId`, `result`, `error`) — one entry per request, in request
@@ -282,7 +287,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | `targetAgentId` | No | Local agent to upgrade. When omitted, the target is **the agent an earlier sync or import promoted from this source agent**, recognised by the `originId` its descriptor records — so repeating a sync never creates a second copy. Only when there is none (or `createNew=true`) is the agent created: the source's own export archive is fetched and imported with `strategy=create`, and the new agent records the source's id as its `originId`. The preview marks a target found this way with `matchStrategy: "originId"` on the agent row |
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
 | `selectedResources` | No (execute only) | Comma-separated ids of the preview rows to apply (the row's `sourceId`; for a `REMOVE` row that is the target's id). Omit to apply everything; an empty value is a `400`. A `CONFLICT` row is applied only when named here |
-| `workflowOrder` | No (execute only) | Desired workflow order after sync |
+| `workflowOrder` | No (execute only) | Desired workflow order after sync: comma-separated workflow ids of the target (a list in a `SyncRequest`). Unlisted workflows follow in their current order; without it, new workflows are appended |
 | `compatible` | No (execute only; default `false`) | Declare the agent version this sync writes **compatible** with the one it replaces, so conversations running on the target switch to it on their next turn. By default the version is a breaking change and they stay where they are. A `SyncRequest` takes `"compatible": true` per agent. No effect when the sync creates a new agent or writes nothing. See [Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync) |
 
 > **Note:** `sourceUrl` and agent parameters are query parameters. Batch endpoints accept `SyncMapping[]` / `SyncRequest[]` as a JSON request body for the per-agent mappings; both take an optional `createNew`, and a `SyncRequest` whose `selectedResources` is an empty list fails that entry the same way.

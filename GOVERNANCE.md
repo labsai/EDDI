@@ -51,7 +51,7 @@ Security vulnerability reporting follows [SECURITY.md](SECURITY.md). The Project
 - Release candidates use the `-RC` suffix (`6.0.0-RC1`).
 - The full process — tagging, the Docker tags each one publishes, and what happens after a release — is in [docs/release-versioning.md](docs/release-versioning.md).
 - Docker images are signed with Cosign (keyless OIDC) and published to Docker Hub.
-- All releases include an SBOM (Software Bill of Materials) generated during CI.
+- Every push build, releases included, generates CycloneDX SBOMs (Software Bill of Materials) for the backend, the Manager and the Chat UI. They are kept as the `sbom-cyclonedx` workflow artifact and are not attached to the GitHub release.
 
 ## License
 

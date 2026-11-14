@@ -27,7 +27,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | **UI** | React 19 + TypeScript 5 (strict) |
 | **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
 | **State (server)** | TanStack Query v5 |
-| **State (UI)** | Zustand (chat/debug), `useState` / `useCallback` elsewhere |
+| **State (UI)** | Zustand for cross-component UI state (chat, debug events, drawers, command palette, onboarding, navigation guard — `src/hooks/`), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
 | **i18n** | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)** | Vitest + React Testing Library + MSW |
@@ -110,7 +110,7 @@ that was broken while every test still passed. See CONTRIBUTING.md.
 The scope is `src/lib/operator/**`, `src/lib/api/updates.ts` and
 `src/lib/hitl-tool-approvals.ts`. Two exclusions are argued in
 `stryker.config.json`, each with the measurement behind it: `api-client.ts` (75
-importers, so each of its mutants replays most of the suite) and static mutants
+importers when measured, about 150 now, so each of its mutants replays most of the suite) and static mutants
 — module-level constants, which cost a full runner restart each. A constant you
 need guarded needs a unit test asserting its contents; this gate will not do it.
 (Tests themselves are excluded too, for the obvious reason.)
@@ -182,7 +182,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   rules:    (p, o, r) => <RulesEditor data={p} onChange={o} readOnly={r} />,
   llm:      (p, o, r) => <LlmEditor data={p} onChange={o} readOnly={r} />,
   apicalls: (p, o, r) => <ApiCallsEditor data={p} onChange={o} readOnly={r} />,
-  // ... output, dictionary, propertysetter, mcpcalls, rag, snippets, parser
+  // ... output, propertysetter, dictionary, mcpcalls, rag, snippets, parser, testsuite
 };
 ```
 
@@ -214,7 +214,7 @@ The resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`
 >
 > - Workflows reference a **parser** → parsers reference **dictionaries**
 > - The Manager's `dictionary` slug maps to `dictionarystore` (what users edit)
-> - `parserstore` **does** map to the `parser` slug in `pipeline-builder.tsx`, and `parser` is registered in `EDITOR_MAP`. A parser step with an embedded config is edited inline; one with a `config.uri` is edited as an ordinary resource
+> - `parserstore` **does** map to the `parser` slug (`STORE_TO_SLUG` in `src/lib/workflow-step-links.ts`, which `pipeline-builder.tsx` uses), and `parser` is registered in `EDITOR_MAP`. A parser step with an embedded config is edited inline; one with a `config.uri` is edited as an ordinary resource
 
 #### 3. MSW Mock Handlers
 
@@ -416,7 +416,7 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
 - Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
-- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
+- `secrets.ts` is the exception that is *not* justified: its seven remaining raw `fetch` call sites are ordinary JSON CRUD for historical reasons (one more has already moved onto `ApiClient`). They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`, with keys from `src/lib/query-keys.ts`
 
@@ -433,7 +433,7 @@ and what is next, and suggest a new conversation if the context is long.
 ## 5. Constraints
 
 - Do NOT use MUI, Redux, recompose, or legacy patterns
-- Do NOT use `moment.js` — use native `Intl` or `date-fns`
+- Do NOT use `moment.js` — use native `Intl` (`date-fns` is not a dependency either)
 - Do NOT hardcode the API URL, and do NOT add raw `fetch` for ordinary JSON — use `ApiClient` (the justified exceptions are listed under API Communication)
 - Do NOT use physical-direction utilities — `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*` / `text-left` / `text-right`. Use the logical ones (`ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*` / `text-start` / `text-end`): the app ships Arabic, and `e2e/rtl.spec.ts` checks it
 - Do NOT mix component exports with utility function exports in the same file (`react-refresh/only-export-components`)

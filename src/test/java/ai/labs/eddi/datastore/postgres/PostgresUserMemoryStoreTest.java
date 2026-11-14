@@ -50,6 +50,39 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
         }
     }
 
+    /**
+     * A deployment upgraded from a release without the assessment columns: the
+     * table exists, so {@code CREATE TABLE IF NOT EXISTS} does nothing and only the
+     * {@code ALTER TABLE} upgrade can add them. Its existing rows must read as
+     * ACCEPTED. Leaves the table in the current schema for the tests that follow.
+     */
+    @Test
+    @DisplayName("a table created before the assessment columns is upgraded and its rows read as ACCEPTED")
+    void legacyTableIsUpgraded() throws Exception {
+        try (var conn = ds.getConnection(); var stmt = conn.createStatement()) {
+            stmt.execute("DROP TABLE IF EXISTS usermemories");
+            stmt.execute("""
+                    CREATE TABLE usermemories (
+                        id VARCHAR(64) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        user_id VARCHAR(255) NOT NULL, key VARCHAR(255) NOT NULL, value JSONB,
+                        category VARCHAR(50) NOT NULL DEFAULT 'fact', visibility VARCHAR(20) NOT NULL DEFAULT 'self',
+                        source_agent_id VARCHAR(255), group_ids JSONB DEFAULT '[]'::jsonb, source_conversation_id VARCHAR(255),
+                        conflicted BOOLEAN DEFAULT FALSE, access_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)
+                    """);
+            stmt.execute("INSERT INTO usermemories (id, user_id, key, value, source_agent_id) VALUES ('legacy-1', 'u-legacy', 'lang', "
+                    + "'\"en\"'::jsonb, 'agent-1')");
+        }
+
+        var upgraded = new PostgresUserMemoryStore(createDataSourceInstance());
+        UserMemoryEntry legacy = upgraded.findEntryById("legacy-1").orElseThrow();
+        assertEquals(UserMemoryEntry.Assessment.ACCEPTED, legacy.assessment());
+        assertNull(legacy.supersededBy());
+
+        assertTrue(upgraded.setAssessmentIfUnchanged("legacy-1", UserMemoryEntry.Assessment.CONTESTED, null, legacy.updatedAt()));
+        assertEquals(UserMemoryEntry.Assessment.CONTESTED, upgraded.findEntryById("legacy-1").orElseThrow().assessment());
+    }
+
     // ─── Flat property view ─────────────────────────────────────
 
     @Nested
