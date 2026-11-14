@@ -13,7 +13,9 @@ import com.mongodb.MongoException;
 import com.mongodb.client.AggregateIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.WriteModel;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
@@ -263,5 +265,71 @@ class MongoHealthTurnStoreTest {
         when(collection.aggregate(anyList())).thenThrow(new MongoException("down"));
         assertThrows(HealthStoreException.class, () -> store.forEachConversationUpdatedSince(Instant.now(), 10, id -> {
         }));
+    }
+
+    @Test
+    @DisplayName("a late write stamps writtenAt in the same pipeline; an on-time one removes the stamp")
+    void lateWriteStamp() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        BsonDocument late = render(MongoHealthTurnStore.replacePipeline(turn(false), written).get(0)).getDocument("$set");
+        assertEquals(written.toEpochMilli(), late.getDocument(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getDateTime("$literal").getValue());
+        BsonDocument onTime = render(MongoHealthTurnStore.replacePipeline(turn(false)).get(0)).getDocument("$set");
+        assertEquals("$$REMOVE", onTime.getString(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getValue(),
+                "an on-time write leaves no stamp behind, so the sparse index holds late rows only");
+    }
+
+    @Test
+    @DisplayName("insertIfAbsent sets the stamp on insert only when the write is late")
+    void insertIfAbsentStamp() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        store.insertIfAbsent(turn(false), written);
+        store.insertIfAbsent(turn(false));
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(collection, times(2)).updateOne(any(Bson.class), update.capture(), any(UpdateOptions.class));
+        BsonDocument late = render(update.getAllValues().get(0)).getDocument("$setOnInsert");
+        assertEquals(written.toEpochMilli(), late.getDateTime(MongoHealthTurnStore.FIELD_WRITTEN_LATE).getValue());
+        assertFalse(render(update.getAllValues().get(1)).getDocument("$setOnInsert").containsKey(MongoHealthTurnStore.FIELD_WRITTEN_LATE));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("a late discard is timed by the write, an on-time one by the replacing turn's capture")
+    void lateDiscardTime() {
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+        store.markDiscarded(turn(false), List.of("a"), written);
+        store.markDiscarded(turn(false), List.of("a"));
+        ArgumentCaptor<List<WriteModel<Document>>> writes = ArgumentCaptor.forClass(List.class);
+        verify(collection, times(2)).bulkWrite(writes.capture());
+        assertEquals(new Document("$literal", Date.from(written)), discardTime(writes.getAllValues().get(0)));
+        assertEquals(new Document("$literal", Date.from(turn(false).updatedAt())), discardTime(writes.getAllValues().get(1)));
+    }
+
+    private static Object discardTime(List<WriteModel<Document>> writes) {
+        UpdateOneModel<Document> model = (UpdateOneModel<Document>) writes.get(0);
+        Document set = (Document) ((Document) model.getUpdatePipeline().get(0)).get("$set");
+        return ((List<?>) ((Document) set.get(MongoHealthTurnStore.FIELD_DISCARDED_AT)).get("$cond")).get(2);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the self-heal matches rows written, discarded, or written late in the window")
+    void selfHealMatchesTheStamp() {
+        AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(collection.aggregate(anyList())).thenReturn(aggregate);
+        when(aggregate.allowDiskUse(anyBoolean())).thenReturn(aggregate);
+        when(aggregate.iterator()).thenReturn(cursor);
+
+        store.forEachAgentDayUpdatedSince(Instant.parse("2026-11-10T11:00:00Z"), Instant.parse("2026-11-10T11:10:00Z"), 10, (a, d) -> {
+        });
+
+        ArgumentCaptor<List<Bson>> pipeline = ArgumentCaptor.forClass(List.class);
+        verify(collection).aggregate(pipeline.capture());
+        String match = render(pipeline.getValue().get(0)).toJson();
+        for (String field : List.of(MongoHealthTurnStore.FIELD_UPDATED, MongoHealthTurnStore.FIELD_DISCARDED_AT,
+                MongoHealthTurnStore.FIELD_WRITTEN_LATE)) {
+            assertTrue(match.contains("{\"" + field + "\": {\"$gte\""), field + " in " + match);
+            assertTrue(match.contains("{\"" + field + "\": {\"$lt\""), field + " in " + match);
+        }
     }
 }

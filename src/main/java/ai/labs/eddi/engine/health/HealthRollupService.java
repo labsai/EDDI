@@ -44,9 +44,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * window already {@link #SELF_HEAL_MIN_WINDOW} wide that still holds more is
  * streamed whole, in chunks, rather than cut — so the watermark never passes a
  * pair it did not mark. A row that reaches the store after the grace has passed
- * its capture time marks its days before it is written instead
- * ({@link HealthDirtyDays#markLateWrite}), since this scan may already be past
- * it.</li>
+ * its capture time is written with the time of its write as well
+ * ({@link IHealthTurnStore}'s {@code lateWrittenAt}), and this scan matches
+ * that too: the watermark may already be past the row's capture time, never
+ * past its write.</li>
  * <li><b>Drain</b>: reads the oldest dirty entries (with their tokens); for
  * each streams the agent-day's turn rows through a
  * {@link HealthTurnAggregator}, {@link IHealthDailyStore#replaceDay replaces}
@@ -78,7 +79,11 @@ public class HealthRollupService {
     static final Duration TIME_BUDGET = Duration.ofSeconds(90);
     /** Failed rollups of one entry in a row before it is dropped. */
     static final int MAX_ATTEMPTS = 5;
-    /** Rows younger than this are left to their own marks (still being flushed). */
+    /**
+     * Rows younger than this are left to their own marks (still being flushed). A
+     * row is found by this pass only if it commits within this long of its capture
+     * time — or, for a late row, of its write — less the clock skew between nodes.
+     */
     static final Duration SELF_HEAL_GRACE = Duration.ofMinutes(1);
     /** How far back the first self-heal pass looks. */
     static final Duration SELF_HEAL_FIRST_WINDOW = Duration.ofDays(1);

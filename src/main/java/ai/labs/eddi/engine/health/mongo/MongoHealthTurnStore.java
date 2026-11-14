@@ -82,7 +82,10 @@ import static com.mongodb.client.model.Filters.or;
  * </ul>
  * {@code day} is stored as an ISO {@code yyyy-MM-dd} string, which sorts and
  * range-compares in day order. A discard marker carries {@code discardedAt} and
- * no {@code timestamp}; reads skip it.
+ * no {@code timestamp}; reads skip it. A late write's stamp is
+ * {@code writtenAt}, set by the write that carries it and removed
+ * ({@code $$REMOVE}) by every other applied write, so its sparse index holds
+ * the late rows only.
  */
 @ApplicationScoped
 @DefaultBean
@@ -122,6 +125,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     static final String FIELD_DISCARDED = "discarded";
     static final String FIELD_DISCARDED_AT = "discardedAt";
     static final String FIELD_SELF_REPORTED = "selfReportedOutcome";
+    static final String FIELD_WRITTEN_LATE = "writtenAt";
 
     private final MongoCollection<Document> turns;
 
@@ -140,6 +144,9 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         turns.createIndex(Indexes.ascending(FIELD_DISCARDED_AT),
                 new IndexOptions().name("idx_health_turns_discarded_at").sparse(true).background(true));
         turns.createIndex(Indexes.ascending(FIELD_UPDATED), new IndexOptions().name("idx_health_turns_updated").background(true));
+        // Late rows only: the self-heal finds them by when they were written.
+        turns.createIndex(Indexes.ascending(FIELD_WRITTEN_LATE),
+                new IndexOptions().name("idx_health_turns_written_late").sparse(true).background(true));
     }
 
     /** For tests: a collection without index creation. */
@@ -161,15 +168,15 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
      * ignored.
      */
     @Override
-    public void upsert(HealthTurn turn) {
+    public void upsert(HealthTurn turn, Instant lateWrittenAt) {
         try {
-            guardedUpsert(turn);
+            guardedUpsert(turn, lateWrittenAt);
         } catch (MongoException e) {
             if (!isDuplicateKey(e)) {
                 throw new HealthStoreException("Could not store a health turn", e);
             }
             try {
-                guardedUpsert(turn);
+                guardedUpsert(turn, lateWrittenAt);
             } catch (MongoException retry) {
                 if (!isDuplicateKey(retry)) {
                     throw new HealthStoreException("Could not store a health turn", retry);
@@ -179,8 +186,8 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         }
     }
 
-    private void guardedUpsert(HealthTurn turn) {
-        turns.updateOne(guardedFilter(turn), replacePipeline(turn), new UpdateOptions().upsert(true));
+    private void guardedUpsert(HealthTurn turn, Instant lateWrittenAt) {
+        turns.updateOne(guardedFilter(turn), replacePipeline(turn, lateWrittenAt), new UpdateOptions().upsert(true));
     }
 
     private static boolean isDuplicateKey(MongoException e) {
@@ -194,6 +201,14 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     static List<Bson> replacePipeline(HealthTurn turn) {
+        return replacePipeline(turn, null);
+    }
+
+    /**
+     * The replace; {@code lateWrittenAt} sets the late-write stamp, null removes
+     * it.
+     */
+    static List<Bson> replacePipeline(HealthTurn turn, Instant lateWrittenAt) {
         Document values = toDocument(turn);
         Document set = new Document();
         values.forEach((field, value) -> {
@@ -203,6 +218,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 default -> set.put(field, literal(value));
             }
         });
+        set.put(FIELD_WRITTEN_LATE, lateWrittenAt == null ? "$$REMOVE" : literal(date(lateWrittenAt)));
         return List.of(new Document("$set", set));
     }
 
@@ -211,11 +227,14 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public void insertIfAbsent(HealthTurn turn) {
+    public void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt) {
         try {
             Document values = toDocument(turn);
-            List<Bson> inserts = new ArrayList<>(values.size());
+            List<Bson> inserts = new ArrayList<>(values.size() + 1);
             values.forEach((field, value) -> inserts.add(Updates.setOnInsert(field, value)));
+            if (lateWrittenAt != null) {
+                inserts.add(Updates.setOnInsert(FIELD_WRITTEN_LATE, date(lateWrittenAt)));
+            }
             turns.updateOne(eq("_id", id(turn.conversationId(), turn.executionId())), Updates.combine(inserts), new UpdateOptions().upsert(true));
         } catch (MongoException e) {
             if (ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY) {
@@ -226,12 +245,12 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt) {
         if (replacing == null || replacing.conversationId() == null || executionIds == null || executionIds.isEmpty()) {
             return 0L;
         }
         try {
-            Date now = date(replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now());
+            Date now = date(lateWrittenAt != null ? lateWrittenAt : replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now());
             List<WriteModel<Document>> writes = new ArrayList<>();
             for (String executionId : new LinkedHashSet<>(executionIds)) {
                 writes.add(new UpdateOneModel<>(eq("_id", id(replacing.conversationId(), executionId)), discardPipeline(replacing, executionId, now),
@@ -495,10 +514,11 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
 
     @Override
     public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
-        // Rows written, or discarded, in the window: a discard leaves updatedAt as it
-        // was.
+        // Rows written, discarded, or written late in the window: a discard leaves
+        // updatedAt as it was, and a late row's updatedAt is its capture time.
         Bson inWindow = or(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until))),
-                and(gte(FIELD_DISCARDED_AT, date(since)), lt(FIELD_DISCARDED_AT, date(until))));
+                and(gte(FIELD_DISCARDED_AT, date(since)), lt(FIELD_DISCARDED_AT, date(until))),
+                and(gte(FIELD_WRITTEN_LATE, date(since)), lt(FIELD_WRITTEN_LATE, date(until))));
         List<Bson> pipeline = List.of(Aggregates.match(and(inWindow, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
                 Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
         try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
