@@ -131,18 +131,21 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
+        // Resolved once: the version the carry-over check reads is the version updated.
+        final Integer target = restVersionInfo.validateParameters(id, version);
         requireMayAuthorCallerToken(llmConfiguration);
-        requireMayAuthorProvider(llmConfiguration, id, version);
+        requireMayAuthorProvider(llmConfiguration, id, target);
         warnOnPlaintextSecrets(llmConfiguration);
-        return restVersionInfo.update(id, version, llmConfiguration);
+        return restVersionInfo.update(id, target, llmConfiguration);
     }
 
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
-        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
+        final Integer target = restVersionInfo.validateParameters(id, version);
+        return restVersionInfo.patch(id, target, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             // The same pre-write checks updateLlm runs.
             requireMayAuthorCallerToken(patched);
-            requireMayAuthorProvider(patched, id, version);
+            requireMayAuthorProvider(patched, id, target);
             warnOnPlaintextSecrets(patched);
             return null;
         });
@@ -236,7 +239,7 @@ public class RestLlmStore implements IRestLlmStore {
             return null;
         }
         try {
-            return httpCallsStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
+            return httpCallsStore.read(id, version);
         } catch (Exception e) {
             return null;
         }

@@ -1556,6 +1556,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
         }
 
+        if (tracked != null && llmProviderAuthorPolicy != null) {
+            // A later write of the same resource: the rollback writes the ORIGINAL back
+            // over this one, so it must be restorable over this document too.
+            llmProviderAuthorPolicy.requireMayAuthor(tracked.original, document, "existing (restorable) " + localId);
+        }
+
         Response response = restUpdate.update(localId, localVersion, document);
         if (response == null || response.getStatus() != 200) {
             throw refusedUpdate(storeClass, localId, response);
@@ -1564,7 +1570,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (tracked != null) {
             tracked.latestImportedVersion = newVersion;
         } else {
-            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
+            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion, previous);
             T original = previous;
             DocumentDescriptor originalDescriptor = previousDescriptor;
             transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
@@ -2993,9 +2999,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
          */
         static final class TrackedUpdate {
             int latestImportedVersion;
+            /** What the first update replaced — what a rollback writes back. */
+            final Object original;
 
-            TrackedUpdate(int latestImportedVersion) {
+            TrackedUpdate(int latestImportedVersion, Object original) {
                 this.latestImportedVersion = latestImportedVersion;
+                this.original = original;
             }
         }
 
@@ -3008,8 +3017,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return updated.get(storeClass.getName() + "/" + id);
         }
 
-        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion) {
-            var update = new TrackedUpdate(importedVersion);
+        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion, Object original) {
+            var update = new TrackedUpdate(importedVersion, original);
             updated.put(storeClass.getName() + "/" + id, update);
             return update;
         }

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import io.quarkus.security.identity.SecurityIdentity;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -400,5 +401,20 @@ class LlmProviderAuthorPolicyTest {
             String stored = "{\"tasks\":[" + idless("approved", "true") + "," + idless("other", "false") + "]}";
             assertDoesNotThrow(() -> asEditor().requireMayAuthor(stored, stored, "langchain"));
         }
+    }
+
+    @Test
+    @DisplayName("a task id cannot spell out an approved step's path: ids are encoded")
+    void idCannotForgeAnotherElementsPath() throws Exception {
+        String step = "{\"parameters\":{\"modelId\":\"m2\"}}";
+        String stepKey = LlmProviderAuthorPolicy.elementKey(new ObjectMapper().readTree(step), 0);
+        String approvedTask = "{\"id\":\"a\",\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"m1\"},"
+                + "\"modelCascade\":{\"steps\":[" + step + "]}}";
+        String stored = "{\"tasks\":[" + approvedTask + "]}";
+        // A second task whose id, unencoded, would read as task a's approved step.
+        String forged = "{\"id\":\"a]/modelCascade/steps[" + stepKey + "\",\"type\":\"bedrock\",\"parameters\":{\"modelId\":\"m2\"}}";
+        String candidate = "{\"tasks\":[" + approvedTask + "," + forged + "]}";
+
+        assertThrows(ForbiddenException.class, () -> asEditor().requireMayAuthor(candidate, stored, "langchain"));
     }
 }

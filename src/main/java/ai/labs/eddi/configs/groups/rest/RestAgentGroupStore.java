@@ -199,7 +199,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
 
     private AgentGroupConfiguration readQuietly(String id, Integer version) {
         try {
-            return groupStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
+            return groupStore.read(id, version);
         } catch (Exception e) {
             return null;
         }
@@ -218,6 +218,8 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
         requireUseOnMembers(groupConfiguration);
+        // Resolved once: the version the checks read is the version updated.
+        version = restVersionInfo.validateParameters(id, version);
         requireTeamBudgetChangeAllowed(id, version, groupConfiguration);
         requireMayAuthorProvider(groupConfiguration, readQuietly(id, version));
         Response response = restVersionInfo.update(id, version, groupConfiguration);

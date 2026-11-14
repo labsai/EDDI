@@ -172,6 +172,8 @@ public class RestAgentStore implements IRestAgentStore {
         // able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
+        // Resolved once: the version the carry-over check reads is the version updated.
+        version = restVersionInfo.validateParameters(id, version);
         requireMayAuthorProvider(agentConfiguration, readQuietly(id, version));
         // dynamicOrigin is engine-written provenance that teardown_agent and group
         // cleanup rely on before they delete an agent. Keep what is stored, never
@@ -318,7 +320,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     private AgentConfiguration readQuietly(String id, Integer version) {
         try {
-            return agentStore.read(id, restVersionInfo.validateParameters(id, version)); // 0 means current
+            return agentStore.read(id, version);
         } catch (Exception e) {
             return null;
         }

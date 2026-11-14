@@ -273,4 +273,29 @@ class StandaloneDynamicAgentsTest {
         assertFalse(service(20).tearDownIfEnded(CONVERSATION, "late"));
         verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
     }
+
+    @Test
+    @DisplayName("when the conversation cannot be read, retention is unknown, so the origin search deletes nothing")
+    void unreadableConversationSkipsOriginTeardown() throws Exception {
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("retained")));
+        agent("retained", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+
+        service(20).cleanup(CONVERSATION);
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
+
+    @Test
+    @DisplayName("the cap reserves its slot: a second creation before the first finishes setup is refused, and released afterwards")
+    void capReservationIsAtomic() throws Exception {
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        var standalone = service(1);
+
+        assertNull(standalone.reserveCreation("user-1"), "the first creation takes the only slot");
+        assertNotNull(standalone.reserveCreation("user-1"), "a concurrent second creation is refused while the first is pending");
+        standalone.releaseCreation("user-1");
+        assertNull(standalone.reserveCreation("user-1"), "released once setup finished");
+    }
 }

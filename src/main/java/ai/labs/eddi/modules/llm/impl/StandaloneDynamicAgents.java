@@ -27,6 +27,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -84,12 +86,60 @@ public class StandaloneDynamicAgents {
      * when the deployments cannot be counted, creation is refused.
      */
     public String capRefusal(String userId) {
+        return capRefusal(userId, 0);
+    }
+
+    /**
+     * Creations that passed the cap on this node and whose setup has not finished,
+     * per user: counted with the deployed agents, so concurrent creations cannot
+     * all pass the same free slot. Across nodes the cap stays best-effort — two
+     * nodes may each admit the last slot once.
+     */
+    private final ConcurrentHashMap<String, AtomicInteger> pendingCreations = new ConcurrentHashMap<>();
+
+    /**
+     * As {@link #capRefusal(String)}, and when admitted, reserves the slot until
+     * {@link #releaseCreation} — check and reservation are one step per user.
+     */
+    public String reserveCreation(String userId) {
+        if (maxLivePerUser <= 0) {
+            return null;
+        }
+        AtomicInteger pending = pendingCreations.computeIfAbsent(userId == null ? "" : userId, key -> new AtomicInteger());
+        synchronized (pending) {
+            String refusal = capRefusal(userId, pending.get());
+            if (refusal == null) {
+                pending.incrementAndGet();
+            }
+            return refusal;
+        }
+    }
+
+    /**
+     * Gives back a slot {@link #reserveCreation} took, once setup has finished
+     * either way.
+     */
+    public void releaseCreation(String userId) {
+        if (maxLivePerUser <= 0) {
+            return;
+        }
+        AtomicInteger pending = pendingCreations.get(userId == null ? "" : userId);
+        if (pending != null) {
+            synchronized (pending) {
+                if (pending.get() > 0) {
+                    pending.decrementAndGet();
+                }
+            }
+        }
+    }
+
+    private String capRefusal(String userId, int pendingCreations) {
         if (maxLivePerUser <= 0) {
             return null;
         }
         long live;
         try {
-            live = liveStandaloneAgents(userId);
+            live = liveStandaloneAgents(userId) + pendingCreations;
         } catch (Exception e) {
             LOGGER.warnf("[DYNAMIC] Could not count the standalone sub-agents of user '%s' — refusing creation: %s", sanitize(userId),
                     sanitize(e.getMessage()));
@@ -155,6 +205,7 @@ public class StandaloneDynamicAgents {
         String owner = null;
         Set<String> handled = new HashSet<>();
         Set<String> retained = Set.of();
+        boolean retentionKnown = false;
         try {
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (snapshot != null) {
@@ -164,9 +215,10 @@ public class StandaloneDynamicAgents {
                 retained = DynamicAgentToolsProvider.seedRetainedAgentIds(memory, created);
                 cleanup(conversationId, memory);
                 handled.addAll(created);
+                retentionKnown = true;
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            // gone already: only the agents' own origins can name them now
+            // gone already: which agents were retained is gone with it
         } catch (Exception e) {
             LOGGER.warnf("[DYNAMIC] Could not read conversation %s to tear down its sub-agents: %s", sanitize(conversationId),
                     sanitize(e.getMessage()));
@@ -176,6 +228,15 @@ public class StandaloneDynamicAgents {
         // dynamicOrigin is durable the moment it exists, so the end also tears down
         // every deployed agent whose origin names this conversation: whichever of the
         // end and the turn's finalization runs last still finds it.
+        if (!retentionKnown) {
+            // Retention lives in the conversation's memory only. Without it the origin
+            // scan could permanently delete an agent the model asked to keep, so the
+            // destructive fallback does not run; the agents a turn creates after this
+            // are still caught by tearDownIfEnded.
+            LOGGER.warnf("[DYNAMIC] Conversation %s could not be read; its sub-agents are found by the snapshot only, not by origin",
+                    sanitize(conversationId));
+            return;
+        }
         for (String agentId : originTagged(conversationId, owner)) {
             if (!handled.contains(agentId) && !retained.contains(agentId)) {
                 teardown(agentId, conversationId);

@@ -107,4 +107,25 @@ class RestLlmStoreProviderAuthorTest {
             // the mocked store beyond the policy check is not under test
         }
     }
+
+    @Test
+    @DisplayName("version 0 is resolved once: the carry-over read and the update use the same version")
+    void versionZeroResolvedOnce() throws Exception {
+        IResourceStore.IResourceId first = mock(IResourceStore.IResourceId.class);
+        when(first.getVersion()).thenReturn(1);
+        IResourceStore.IResourceId second = mock(IResourceStore.IResourceId.class);
+        when(second.getVersion()).thenReturn(2);
+        // The current version moves between two reads.
+        when(llmStore.getCurrentResourceId("abc")).thenReturn(first, second);
+        when(llmStore.read("abc", 1)).thenReturn(bedrock("m1", "hi"));
+
+        try {
+            rest.updateLlm("abc", 0, bedrock("m1", "edited"));
+        } catch (RuntimeException afterTheCheck) {
+            // the mocked store beyond the policy check is not under test
+        }
+
+        verify(llmStore).read("abc", 1);
+        verify(llmStore, never()).read("abc", 2);
+    }
 }

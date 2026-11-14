@@ -16,6 +16,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -262,10 +263,13 @@ public class LlmProviderAuthorPolicy {
      * carries a privileged setting over only while it is unchanged — an unchanged
      * save still passes; any edit to such an element needs an administrator.
      */
-    private static String elementKey(JsonNode element, int index) {
+    static String elementKey(JsonNode element, int index) {
         JsonNode id = element != null && element.isObject() ? element.get("id") : null;
         if (id != null && id.isTextual() && !id.asText().isBlank()) {
-            return "id=" + id.asText().trim();
+            // Encoded, so an id cannot spell out the rest of another element's path
+            // ("a]/modelCascade/steps[0#…") — URL encoding is injective and leaves no
+            // '[', ']', '/', '#' or '|' in it.
+            return "id=" + URLEncoder.encode(id.asText().trim(), StandardCharsets.UTF_8);
         }
         return index + "#" + digest(element == null ? "" : element.toString());
     }
