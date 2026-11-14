@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.nlp.semantic;
 
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -80,6 +82,27 @@ class SemanticFallbackTest {
         // two batches for the examples, one request per input
         assertEquals(4, model.requests.get());
         assertEquals(many.size() + 2, model.embeddedTexts.get());
+    }
+
+    /**
+     * The factory builds a new client when a variable or secret it depends on
+     * changes. The vectors of the old one belong to another embedding space (here
+     * even of another length), so they are embedded again with the new one.
+     */
+    @Test
+    @DisplayName("re-embeds the examples when the model changes")
+    void reEmbedsWhenTheModelChanges() {
+        var narrow = new KeywordEmbeddingModel("cancel", "order");
+        var current = new AtomicReference<EmbeddingModel>(narrow);
+        var fallback = new SemanticFallback(current::get, EXAMPLES, 0.8);
+        assertEquals("cancel_order", fallback.classify("cancel order", "en").orElseThrow().example().expressions());
+
+        current.set(model);
+
+        assertEquals("refund", fallback.classify("refund my money", "en").orElseThrow().example().expressions());
+        assertEquals(EXAMPLES.size() + 1, model.embeddedTexts.get(), "the examples were not embedded with the new model");
+        fallback.classify("refund my money", "en");
+        assertEquals(EXAMPLES.size() + 2, model.embeddedTexts.get(), "an unchanged model re-embedded the examples");
     }
 
     @Test

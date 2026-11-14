@@ -206,6 +206,29 @@ class InputParserTaskQualityTest {
             assertEquals("finance", stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key()));
             assertEquals(List.of("river"), stored(memory, MemoryKeys.EXPRESSIONS_ALTERNATIVES.key()));
         }
+
+        /**
+         * A second parser on the same step that replaces the first one's result
+         * (appendExpressions false) and understands nothing used to leave the first
+         * one's confidence, alternatives and matches next to its own expressions.
+         */
+        @Test
+        @DisplayName("a replacing parser clears the diagnostics of the result it replaces")
+        void replacingParserClearsDiagnostics() throws Exception {
+            var first = dictionaryWith("finance", "bank", "finance");
+            var second = dictionaryWith("geography", "bank", "river");
+            var memory = turn("bank");
+            task.execute(memory, configure(Map.of("maxAlternatives", "3"), Map.of("dictionaries", List.of(first, second))));
+            assertNotNull(stored(memory, MemoryKeys.EXPRESSIONS_CONFIDENCE.key()));
+
+            task.execute(memory, configure(Map.of("appendExpressions", "false")));
+
+            assertEquals("unknown(bank)", stored(memory, MemoryKeys.EXPRESSIONS_PARSED.key()));
+            assertNull(stored(memory, MemoryKeys.EXPRESSIONS_CONFIDENCE.key()));
+            assertNull(stored(memory, MemoryKeys.EXPRESSIONS_ALTERNATIVES.key()));
+            List<String> matches = stored(memory, MemoryKeys.EXPRESSIONS_MATCHES.key());
+            assertTrue(matches == null || matches.stream().noneMatch(match -> match.contains("finance")), "stale matches: " + matches);
+        }
     }
 
     @Nested
@@ -365,6 +388,13 @@ class InputParserTaskQualityTest {
             var block = new HashMap<>((Map<String, Object>) badScore.get("semanticFallback"));
             block.put("minScore", 1.5);
             assertThrows(IllegalExtensionConfigurationException.class, () -> configure(Map.of("semanticFallback", block)));
+            var misspelt = new HashMap<>(block);
+            misspelt.put("minScore", 0.8);
+            misspelt.put("embeddingProvider", "opneai");
+            assertThrows(IllegalExtensionConfigurationException.class, () -> configure(Map.of("semanticFallback", misspelt)),
+                    "an unknown provider deployed and only ever answered no match");
+            misspelt.put("embeddingProvider", " ollama ");
+            assertDoesNotThrow(() -> configure(Map.of("semanticFallback", misspelt)));
 
             var withoutFactory = new InputParserTask(expressionProvider, normalizers, dictionaries, new HashMap<>(), MAPPER,
                     mock(IResourceClientLibrary.class));

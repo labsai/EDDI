@@ -89,6 +89,27 @@ class InputParserMatchingTest {
             assertTrue(solution.isCorrected(), "the phrase was assembled from a typo correction");
             assertTrue(solution.getConfidence() < 1.0, "a corrected phrase is not an exact match: " + solution.getConfidence());
         }
+
+        /**
+         * The same phrase assembled from a correction of accuracy 0.5: below the
+         * threshold it yields no expressions, so it must not be the FULLY reading that
+         * pushes the regex reading of "bok" out of first place.
+         */
+        @Test
+        @DisplayName("is not taken when its accuracy is below minMatchingAccuracy")
+        void phraseBelowTheThreshold() throws Exception {
+            var regexes = new RegularDictionary();
+            regexes.addRegex("bok", exp("code"));
+            List<IDictionary> dictionaries = List.of(regexes, phrases("book flight", "book_flight"));
+            var correction = new DamerauLevenshteinCorrection(1, true);
+            correction.init(dictionaries);
+            var config = new IInputParser.Config();
+            config.setMinMatchingAccuracy(0.8);
+
+            List<RawSolution> raw = parser(config, dictionaries, List.of(correction)).parse("bok flight", "en", List.of());
+
+            assertEquals("code", DictionaryUtilities.extractExpressions(raw, false, false, 0.8).getFirst().getExpressions().toString());
+        }
     }
 
     /**
@@ -228,6 +249,24 @@ class InputParserMatchingTest {
                     "en", List.of());
 
             assertEquals("ts", first(raw).getExpressions().toString());
+        }
+
+        /**
+         * "good" is a fragment of "good morning" (coverage 0.5, so accuracy 0.5) and an
+         * ordinary word of its own. Below the threshold the fragment yields nothing,
+         * but as a PARTLY reading it was ranked ahead of the word's reading.
+         */
+        @Test
+        @DisplayName("a fragment below minMatchingAccuracy does not outrank an ordinary word reading")
+        void fragmentBelowTheThreshold() throws Exception {
+            var words = new RegularDictionary();
+            words.addWord("good", exp("affirmative"), 0);
+            var config = partial(true);
+            config.setMinMatchingAccuracy(0.8);
+
+            var raw = parser(config, List.of(phrases("good morning", "greeting"), words), List.of()).parse("good", "en", List.of());
+
+            assertEquals("affirmative", DictionaryUtilities.extractExpressions(raw, false, false, 0.8).getFirst().getExpressions().toString());
         }
 
         @Test

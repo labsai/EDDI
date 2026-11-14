@@ -75,6 +75,12 @@ applies its length bound before lower-casing each dictionary word.
   suppresses unambiguous fragments elsewhere; the phrase index uses the same case-insensitive equivalence as
   the word map (Turkish dotted/dotless i), and the Damerau–Levenshtein length pre-check allows for lower-case
   expansion (`İ`).
+- From the third review: a phrase or phrase fragment whose final accuracy is below `minMatchingAccuracy` is no
+  longer taken (it outranked a qualifying word reading and then yielded nothing); the semantic fallback
+  re-embeds its examples when the factory hands out a new model (changed variable or secret), so input and
+  examples share one embedding space; an unsupported `embeddingProvider` fails the deployment; a parser that
+  replaces an earlier result on the same step (`appendExpressions: false`) clears its confidence,
+  alternatives and matches.
 
 **Files:** [`InputParser.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/InputParser.java),
 [`IterationCounter.java`](../../src/main/java/ai/labs/eddi/modules/nlp/internal/matches/IterationCounter.java),

@@ -497,7 +497,7 @@ Every match carries an accuracy between 0 and 1: `1.0` for the word as typed, `0
 | `expressions:alternatives` | With `maxAlternatives` above 0: the other readings, best first, as expression strings |
 | `expressions:inputTruncated` | `true` when the input had more than `maxInputTokens` tokens |
 
-`minMatchingAccuracy` is the switch for "don't act on a guess": with `0.9`, `"delte my account"` no longer becomes `delete(account)` through a typo correction. The rejected match contributes no expression at all — it does not turn into `unknown(...)` either — so write the fallback rule for "nothing matched" (for example on the absence of the expressions you expect), not for `unknown(*)`.
+`minMatchingAccuracy` is the switch for "don't act on a guess": with `0.9`, `"delte my account"` no longer becomes `delete(account)` through a typo correction. The rejected match contributes no expression at all — it does not turn into `unknown(...)` either — so write the fallback rule for "nothing matched" (for example on the absence of the expressions you expect), not for `unknown(*)`. The threshold also decides which reading is chosen: a phrase whose accuracy falls below it (assembled from corrections, or a fragment whose coverage brings it below) is not taken, so it cannot push out a word reading that does qualify.
 
 ### Partial phrases
 
@@ -537,7 +537,8 @@ What it costs and how it fails:
 
 - **One embedding request per turn the dictionaries did not understand**, and one batch of requests for the examples the first time it is used (at most 2,000 examples; inputs are cut at 1,000 characters). Turns the dictionaries understood never reach the provider. The counter `eddi_parser_semantic_fallback_total{outcome="match"|"no_match"}` counts the consultations.
 - **A provider failure only means "no match"**: the turn continues with the dictionaries' result. If the examples cannot be embedded, the next attempt waits 60 seconds.
-- **A malformed block fails the deployment**, not a conversation: a missing provider, no examples at all, an example without parseable expressions or a `minScore` out of range are refused when the workflow is built.
+- **The examples are embedded again when the model changes**: when a global variable or secret the embedding configuration uses changes, or the model's client was idle for 30 minutes and was rebuilt. The input is always embedded by the same model as the examples it is compared with.
+- **A malformed block fails the deployment**, not a conversation: a missing or unsupported provider, no examples at all, an example without parseable expressions or a `minScore` out of range are refused when the workflow is built.
 - The matched example shows up in `expressions:matches` as `"<input>" [semantic 0.87, like "<example>"] → <expressions>`, and its similarity is the stored `expressions:confidence`.
 - The standalone `/parser` endpoint below does not consult the fallback; it shows what the dictionaries make of an input.
 

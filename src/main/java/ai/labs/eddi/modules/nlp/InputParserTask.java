@@ -399,6 +399,13 @@ public class InputParserTask implements ILifecycleTask {
                 currentExpressions.addAll(newExpressions);
                 newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
             }
+        } else {
+            // This result replaces an earlier parser's on this step: its diagnostics
+            // must not survive next to it (they are only rewritten when this one has
+            // its own).
+            currentStep.removeData(EXPRESSIONS_MATCHES.key());
+            currentStep.removeData(EXPRESSIONS_CONFIDENCE.key());
+            currentStep.removeData(EXPRESSIONS_ALTERNATIVES.key());
         }
 
         String expressionString = joinStrings(", ", newExpressions);
@@ -518,6 +525,12 @@ public class InputParserTask implements ILifecycleTask {
         }
         if (fallback == null || isNullOrEmpty(fallback.embeddingProvider())) {
             throw new IllegalExtensionConfigurationException("Parser 'semanticFallback' needs an 'embeddingProvider'.");
+        }
+        // The model is built lazily, so a misspelt provider would otherwise deploy and
+        // only ever answer "no match".
+        if (!RagConfiguration.SUPPORTED_EMBEDDING_PROVIDERS.contains(fallback.embeddingProvider().trim())) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback.embeddingProvider' '" + fallback.embeddingProvider()
+                    + "' is not supported (supported: " + RagConfiguration.SUPPORTED_EMBEDDING_PROVIDERS.stream().sorted().toList() + ").");
         }
         if (embeddingModelFactory == null) {
             throw new IllegalExtensionConfigurationException("Parser 'semanticFallback' is not available in this runtime (no embedding models).");

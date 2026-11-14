@@ -444,7 +444,13 @@ public class InputParser implements IInputParser {
         }
         int endOfMatch = startOfMatch + phrase.getWords().size();
         List<IDictionary.IFoundWord> constituents = foundWords.subList(startOfMatch, endOfMatch);
-        var foundPhrase = new FoundPhrase(phrase, MatchQuality.anyCorrected(constituents), MatchQuality.lowestAccuracy(constituents));
+        double accuracy = MatchQuality.lowestAccuracy(constituents);
+        if (!accurateEnough(accuracy)) {
+            // A phrase below the threshold contributes no expressions: taking it would
+            // rank an empty reading above one that does.
+            return foundWords;
+        }
+        var foundPhrase = new FoundPhrase(phrase, MatchQuality.anyCorrected(constituents), accuracy);
         return replaceRange(foundWords, startOfMatch, endOfMatch, foundPhrase);
     }
 
@@ -490,7 +496,11 @@ public class InputParser implements IInputParser {
             List<PartialMatch> qualifying = new ArrayList<>();
             for (IDictionary.IPhrase phrase : candidatePhrases) {
                 PartialMatch candidate = longestFragment(current, phrase, ambiguousStarts);
-                if (candidate != null && candidate.coverage() >= config.getMinPartialPhraseCoverage()) {
+                // Judged by its final accuracy (coverage included): a fragment below
+                // minMatchingAccuracy yields no expressions, and as a PARTLY reading it
+                // would still outrank the token's ordinary word reading.
+                if (candidate != null && candidate.coverage() >= config.getMinPartialPhraseCoverage()
+                        && accurateEnough(fragmentAccuracy(current, candidate))) {
                     qualifying.add(candidate);
                 }
             }
@@ -512,10 +522,18 @@ public class InputParser implements IInputParser {
             }
             int end = chosen.start() + chosen.length();
             List<IDictionary.IFoundWord> constituents = current.subList(chosen.start(), end);
-            double accuracy = chosen.coverage() * MatchQuality.lowestAccuracy(constituents);
-            current = replaceRange(current, chosen.start(), end, new FoundPhrase(chosen.phrase(), MatchQuality.anyCorrected(constituents), accuracy));
+            current = replaceRange(current, chosen.start(), end,
+                    new FoundPhrase(chosen.phrase(), MatchQuality.anyCorrected(constituents), fragmentAccuracy(current, chosen)));
         }
         return current;
+    }
+
+    private static double fragmentAccuracy(List<IDictionary.IFoundWord> foundWords, PartialMatch fragment) {
+        return fragment.coverage() * MatchQuality.lowestAccuracy(foundWords.subList(fragment.start(), fragment.start() + fragment.length()));
+    }
+
+    private boolean accurateEnough(double accuracy) {
+        return accuracy >= config.getMinMatchingAccuracy();
     }
 
     /**
