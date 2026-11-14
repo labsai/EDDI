@@ -1652,6 +1652,15 @@ jobs:
       - name: Unit tests with coverage
         run: npx vitest run --coverage
 
+      # First-load budget (frontend unification plan, phase 0): the gzipped
+      # scripts and stylesheets each HTML shell loads before any lazy chunk,
+      # against ui/bundle-budget.json. `vite build` alone: typecheck ran above.
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle budget
+        run: npm run budget
+
       - name: Upload coverage report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1741,6 +1750,13 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      # First-load budget, as in UI Manager Checks (ui/bundle-budget.json).
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle budget
+        run: npm run budget
 
   # ─── Job 2g: UI Gate ───────────────────────────────────────────
   # docker must not publish an image whose UI failed its checks — but a bare

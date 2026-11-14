@@ -812,8 +812,10 @@ authentication settings, never `*.ssl.trust`, socket-factory, proxy or SOCKS pro
 The mail core it serves (`engine/mail`) treats every message as untrusted: size, header, nesting, part and
 attachment limits are enforced before the work they bound, executables never carry content, archives are never
 expanded, HTML is converted with hidden content removed (`display:none`, `hidden`, zero opacity, zero-size or
-transparent text, text the colour of its background, off-screen positioning, `<style>` hiding rules, comments —
-`HiddenContentFilter` in mail mode; web and file ingestion use its conservative page mode, which keeps
+transparent text, text the colour of its background, off-screen positioning, comments, and `<style>` hiding
+rules, including those inside `@layer`, `@supports` and screen-wide `@media` blocks but not those behind a media
+feature such as `(max-width:600px)`, where responsive mail hides its alternate copy — `HiddenContentFilter` in
+mail mode; web and file ingestion use its conservative page mode, which keeps
 script-revealed content and drops only comments, 1px text, transparent text and explicitly same-coloured text),
 a `multipart/alternative` whose plain and HTML parts say different things is flagged `ALTERNATIVES_DIVERGE`, and
 the plain-text renderer refuses any header value containing a line break. Every one of these passes is linear in
