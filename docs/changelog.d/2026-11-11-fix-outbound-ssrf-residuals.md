@@ -53,8 +53,8 @@ Seven confirmed findings from a security review of the outbound paths.
 - **Every MCP request to this deployment is marked**, whatever its credential (static key, connection, none), not
   only one carrying `${caller:token}`.
 - **OpenAPI bundling**: the output is capped at 32 M characters while it is written (a shared large value
-  referenced many times no longer builds an unbounded string); a relative or `#` `` under an `` that
-  changes the base is refused instead of resolved against the wrong document; `` siblings are merged keeping
+  referenced many times no longer builds an unbounded string); a relative or `#` `$ref` under an `$id` that
+  changes the base is refused instead of resolved against the wrong document; `$ref` siblings are merged keeping
   the stricter bound, the union of `required` and the intersection of `enum` (holder wins otherwise), because
   `OpenApiArgumentSchemas` turns a non-object `allOf` into an untyped schema; redirect aliases no longer count
   twice toward the 32-document cap.
@@ -64,6 +64,22 @@ Seven confirmed findings from a security review of the outbound paths.
 - **Uploaded HTML** keeps relative links and images relative again (a real relative reference only: no scheme, no
   authority, no whitespace), as `HtmlDocumentExtractor` documents.
 - **Attachments**: an image URL refused by validation now leaves the model a generic note, like a failed download.
+### Second review round
+
+- **Crawl redirect hops keep the policy's checks**: the crawler's scope check is now an `additionalHopCheck` on
+  `OutboundRequest`, run after the SSRF policy's hop check. A `hopValidator` replaced that check and dropped the
+  connected-peer check for the hop (the DNS-rebinding guard on the Vert.x engine); `hopValidator` keeps its
+  replacing meaning for the callers that need it.
+- **One served path for scope**: a redirect hop is checked as it will be requested, and page identities use the
+  served path too (`/docs/%2e/../private` is `/private`, not `URI.normalize()`'s `/docs/private`). A path with `;`
+  parameters is judged as written and with them dropped, for the prefix, `excludePatterns` and robots.txt.
+- **OpenAPI literal data**: a `$ref` inside `example`, `default`, `const`, `enum`, an Example `value`, a JSON Schema
+  `examples` array or an `x-` extension is copied as a value and never fetched; keys of name maps (`properties`,
+  `schemas`, `responses`, ...) are names, so a property called `example` is still a schema.
+- **Discriminator mappings in referenced documents** are rewritten: each mapped schema is moved into the root's
+  `components.schemas` (renamed on a clash) and the mapping value points at it.
+- **Enum intersection** is indexed (linear), keeping the holder's order.
+- **Markdown destinations** with an embedded line ending or control character are dropped.
 ### Design decisions
 
 - Inline-and-bundle rather than refusing remote refs: multi-file specs keep working, and no new property is needed.

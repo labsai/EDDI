@@ -869,6 +869,12 @@ public class HtmlToMarkdownConverter {
         if (trimmed.isEmpty() || trimmed.length() > MAX_DESTINATION_LENGTH) {
             return null;
         }
+        if (hasControlCharacter(trimmed)) {
+            // CommonMark forbids a line ending in any destination, angle brackets
+            // included: one ended the link early and spilled the rest of the attribute
+            // into the chunk.
+            return null;
+        }
         String resolved;
         if (hasSafeScheme(trimmed)) {
             resolved = trimmed;
@@ -906,6 +912,16 @@ public class HtmlToMarkdownConverter {
         } catch (URISyntaxException e) {
             return false;
         }
+    }
+
+    private static boolean hasControlCharacter(String url) {
+        for (int i = 0; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (Character.isISOControl(c) || c == ' ' || c == ' ') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasSafeScheme(String url) {

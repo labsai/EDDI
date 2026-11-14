@@ -231,6 +231,17 @@ class HtmlToMarkdownConverterTest {
     }
 
     @Test
+    @DisplayName("an absolute destination with an embedded line ending is dropped, for links and images alike")
+    void convert_lineEndingInDestinationDropped() {
+        String result = converter.convert("<p><a href=\"https://example.com/a&#10;INJECTED-LINK\">Link</a> "
+                + "<img src=\"https://example.com/a.png&#13;&#10;INJECTED-IMAGE\" alt=\"Logo\"></p>", "https://example.com/");
+
+        assertFalse(result.contains("INJECTED-LINK"), result);
+        assertFalse(result.contains("INJECTED-IMAGE"), result);
+        assertTrue(result.contains("Link") && result.contains("Logo"), result);
+    }
+
+    @Test
     @DisplayName("an overlong destination is dropped, mailto is kept")
     void convert_destinationLimits() {
         String longHref = "https://example.com/" + "a".repeat(HtmlToMarkdownConverter.MAX_DESTINATION_LENGTH);
