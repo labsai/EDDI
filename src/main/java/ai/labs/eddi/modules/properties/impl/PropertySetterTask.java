@@ -147,9 +147,14 @@ public class PropertySetterTask implements ILifecycleTask {
             }
         }
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
+            // Collected across all of the turn's actions first, then applied once each:
+            // collecting per action ran an instruction under "*" (or under two of the
+            // turn's actions) once per action — and every run of a secret one wrote a
+            // fresh vault slot that only the last reference pointed to, orphaning the
+            // rest. Order: the turn's actions, then the order of setOnActions.
             var setOnActionsList = propertySetter.getSetOnActionsList();
+            var propertyInstructions = new LinkedList<PropertyInstruction>();
             for (String action : actionsData.getResult()) {
-                var propertyInstructions = new LinkedList<PropertyInstruction>();
                 setOnActionsList.forEach(setOnAction -> {
                     List<String> actions = setOnAction.getActions();
                     if (actions.contains(action) || actions.contains("*")) {
@@ -157,27 +162,25 @@ public class PropertySetterTask implements ILifecycleTask {
                                 .forEach(propertyInstructions::add);
                     }
                 });
+            }
 
-                if (!isNullOrEmpty(propertyInstructions)) {
-                    try {
-                        for (PropertyInstruction property : propertyInstructions) {
-                            checkNotNull(property.getName(), "property.name");
-                            // One implementation for property.json and every postResponse /
-                            // preRequest instruction — see PropertyInstructionExecutor.
-                            String vaulted = propertyInstructionExecutor.apply(property, memory, templateDataObjects);
-                            if (vaulted != null) {
-                                vaultedPlaintexts.add(vaulted);
-                            }
-                        }
-                    } catch (LifecycleException e) {
-                        // Already a lifecycle-level failure — keep its message and cause intact.
-                        throw e;
-                    } catch (Exception e) {
-                        // Including a fail-closed secret vaulting error: the turn fails rather
-                        // than the value being persisted in plaintext.
-                        throw new LifecycleException(e.getLocalizedMessage(), e);
+            try {
+                for (PropertyInstruction property : propertyInstructions) {
+                    checkNotNull(property.getName(), "property.name");
+                    // One implementation for property.json and every postResponse /
+                    // preRequest instruction — see PropertyInstructionExecutor.
+                    String vaulted = propertyInstructionExecutor.apply(property, memory, templateDataObjects);
+                    if (vaulted != null) {
+                        vaultedPlaintexts.add(vaulted);
                     }
                 }
+            } catch (LifecycleException e) {
+                // Already a lifecycle-level failure — keep its message and cause intact.
+                throw e;
+            } catch (Exception e) {
+                // Including a fail-closed secret vaulting error: the turn fails rather
+                // than the value being persisted in plaintext.
+                throw new LifecycleException(e.getLocalizedMessage(), e);
             }
         }
 

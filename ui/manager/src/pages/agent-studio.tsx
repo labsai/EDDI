@@ -16,6 +16,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { ResizeHandle } from "@/components/ui/resize-handle";
 import { ErrorState } from "@/components/shared/error-state";
+import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   Bot,
@@ -33,14 +34,14 @@ import { cn } from "@/lib/utils";
 interface WorkflowStep {
   type: string;
   extensions: Record<string, unknown>;
-  config: { uri?: string };
+  config: { uri?: string; [key: string]: unknown };
 }
 
 // ==================== Constants ====================
 
 const PIPELINE_MIN = 180;
 const PIPELINE_MAX = 400;
-const PIPELINE_DEFAULT = 256;
+const PIPELINE_DEFAULT = 288;
 const CHAT_MIN = 280;
 const CHAT_MAX = 600;
 const CHAT_DEFAULT = 384;
@@ -372,13 +373,32 @@ export function AgentStudioPage() {
     );
   }
 
+  // The pipeline list's heading row (with the step count) and, for an agent
+  // with several workflows, the switcher — shared by the desktop column and the
+  // mobile tab.
+  const renderPipelineHeader = () => (
+    <div className="flex items-center gap-2 px-4 pb-2 pt-4">
+      <h2 className="flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {t("studio.pipeline", "Pipeline")}
+      </h2>
+      {workflowSteps.length > 0 && (
+        <span
+          className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground"
+          data-testid="studio-pipeline-count"
+        >
+          {workflowSteps.length}
+        </span>
+      )}
+    </div>
+  );
+
   const renderWorkflowSwitcher = (idSuffix: string) => {
     const selectId = workflowSelectId + idSuffix;
     return agentWorkflows.length > 1 ? (
-      <div className="px-3 pb-2">
+      <div className="px-4 pb-3">
         <label
           htmlFor={selectId}
-          className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60"
+          className="mb-1 block text-xs font-medium text-muted-foreground"
         >
           {t("studio.workflow", "Workflow")}
         </label>
@@ -386,7 +406,7 @@ export function AgentStudioPage() {
           id={selectId}
           value={Math.min(selectedWorkflowIndex, agentWorkflows.length - 1)}
           onChange={(e) => handleSelectWorkflow(Number(e.target.value))}
-          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           data-testid="studio-workflow-switcher"
         >
           {agentWorkflows.map((uri, i) => {
@@ -413,7 +433,7 @@ export function AgentStudioPage() {
     // scrolls the whole studio.
     <div className="relative flex h-dvh flex-col bg-background" data-testid="agent-studio">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 shrink-0">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card/30 px-4">
         <Link
           to={`/manage/agentview/${agentId}`}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -430,25 +450,29 @@ export function AgentStudioPage() {
             <h1 className="text-sm font-semibold text-foreground truncate">
               {agentDescriptor?.name ?? agentId}
             </h1>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {t("studio.title", "Agent Studio")}
             </p>
           </div>
         </div>
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={() => setRightPanelOpen(!rightPanelOpen)}
           // Below lg the chat is a tab of the bottom bar, not a side panel.
-          className="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="hidden lg:inline-flex"
           title={rightPanelOpen ? t("studio.hideChat", "Hide chat") : t("studio.showChat", "Show chat")}
+          aria-label={rightPanelOpen ? t("studio.hideChat", "Hide chat") : t("studio.showChat", "Show chat")}
+          aria-pressed={rightPanelOpen}
           data-testid="toggle-right-panel"
         >
           {rightPanelOpen ? (
-            <PanelRightClose className="h-4 w-4 rtl:-scale-x-100" />
+            <PanelRightClose className="rtl:-scale-x-100" aria-hidden="true" />
           ) : (
-            <PanelRight className="h-4 w-4 rtl:-scale-x-100" />
+            <PanelRight className="rtl:-scale-x-100" aria-hidden="true" />
           )}
-        </button>
+        </Button>
       </div>
 
       {/* Desktop: Three-panel layout */}
@@ -458,11 +482,7 @@ export function AgentStudioPage() {
           className="shrink-0 border-e border-border overflow-y-auto bg-card/30 hidden lg:block"
           style={{ width: pipelineWidth }}
         >
-          <div className="px-3 pt-3 pb-1">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-              {t("studio.pipeline", "Pipeline")}
-            </h2>
-          </div>
+          {renderPipelineHeader()}
           {renderWorkflowSwitcher("-desktop")}
           <PipelineRailroad
             workflowSteps={workflowSteps}
@@ -514,11 +534,7 @@ export function AgentStudioPage() {
           <div className="flex flex-1 flex-col overflow-hidden lg:hidden">
             {mobileTab === "pipeline" && (
               <div className="flex-1 overflow-y-auto">
-                <div className="px-3 pt-3 pb-1">
-                  <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                    {t("studio.pipeline", "Pipeline")}
-                  </h2>
-                </div>
+                {renderPipelineHeader()}
                 {renderWorkflowSwitcher("-mobile")}
                 <PipelineRailroad
                   workflowSteps={workflowSteps}

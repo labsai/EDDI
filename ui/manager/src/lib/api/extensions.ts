@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import type { LucideIcon } from "lucide-react";
 import { RESOURCE_TYPE_ICONS as ICONS, UNKNOWN_RESOURCE_TYPE_ICON } from "../resource-type-icons";
 import { api } from "../api-client";
+import { getResourceTypeByStore } from "./resources";
 
 /** Matches EDDI backend ExtensionDescriptor.ConfigValue */
 export interface ExtensionConfigValue {
@@ -59,6 +60,8 @@ export const EXTENSION_TYPE_INFO: Record<
   "eddi://ai.labs.apicalls": { label: "API Calls", labelKey: "extensionTypes.apicalls", icon: ICONS.apicalls, order: 5, color: "text-orange-400" },
   "eddi://ai.labs.httpcalls": { label: "API Calls (legacy)", labelKey: "extensionTypes.httpcallsLegacy", icon: ICONS.apicalls, order: 6, color: "text-orange-400" },
   "eddi://ai.labs.llm": { label: "LLM", labelKey: "extensionTypes.llm", icon: ICONS.llm, order: 7, color: "text-purple-400" },
+  // Pre-v6 name of the LLM step, still registered by LlmModule.
+  "eddi://ai.labs.langchain": { label: "LLM", labelKey: "extensionTypes.llm", icon: ICONS.llm, order: 15, color: "text-purple-400" },
   "eddi://ai.labs.output": { label: "Output", labelKey: "extensionTypes.output", icon: ICONS.output, order: 8, color: "text-emerald-400" },
   "eddi://ai.labs.templating": { label: "Templating", labelKey: "extensionTypes.templating", icon: ICONS.templating, order: 9, color: "text-cyan-400" },
   "eddi://ai.labs.output.template": { label: "Templating", labelKey: "extensionTypes.templating", icon: ICONS.templating, order: 10, color: "text-cyan-400" },
@@ -165,6 +168,8 @@ export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
   "eddi://ai.labs.apicalls": "apicalls",
   "eddi://ai.labs.httpcalls": "apicalls",
   "eddi://ai.labs.llm": "llm",
+  // Pre-v6 name of the LLM step; LlmModule still registers it as an alias.
+  "eddi://ai.labs.langchain": "llm",
   "eddi://ai.labs.output": "output",
   "eddi://ai.labs.property": "propertysetter",
   "eddi://ai.labs.mcpcalls": "mcpcalls",
@@ -181,7 +186,45 @@ export function hasResourceStore(extensionType: string): boolean {
 
 /** Get the resource slug for an extension type (undefined if no store) */
 export function getResourceSlugForExtension(extensionType: string): string | undefined {
-  return EXTENSION_TO_RESOURCE_SLUG[extensionType];
+  return EXTENSION_TO_RESOURCE_SLUG[normaliseExtensionType(extensionType)];
+}
+
+/** `ai.labs.llm` and `eddi://ai.labs.llm` name the same step type. */
+function normaliseExtensionType(type: string): string {
+  return type.startsWith("eddi://") ? type : `eddi://${type}`;
+}
+
+/**
+ * The store segment of an `eddi://` config URI — `apicallstore` in
+ * `eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1` — or
+ * undefined when the URI does not have the `/{store}/{plural}/{id}` shape.
+ */
+export function storeOfConfigUri(uri: string): string | undefined {
+  const path = uri.replace(/^[a-z]+:\/\/[^/]*/i, "").split(/[?#]/)[0] ?? "";
+  const segments = path.split("/").filter(Boolean);
+  return segments.length >= 3 ? segments[0] : undefined;
+}
+
+/**
+ * The resource slug (and so the editor) for a workflow step — the ONE
+ * resolution every screen that opens a step's config shares.
+ *
+ * The config URI's store segment decides first: it names the store the step
+ * really reads from, whichever spelling of the step type a workflow carries
+ * (`ai.labs.httpcalls` and `ai.labs.apicalls` both point at `apicallstore`).
+ * The step type is the fallback for a URI without that shape. Undefined means
+ * the step has no stored resource behind it — templating, a parser with an
+ * embedded config, or a type this Manager does not know.
+ */
+export function getResourceSlugForStep(step: {
+  type: string;
+  config?: { uri?: unknown; [key: string]: unknown } | null;
+}): string | undefined {
+  const uri = typeof step.config?.uri === "string" ? step.config.uri : "";
+  if (!uri) return undefined;
+  const store = storeOfConfigUri(uri);
+  const byStore = store ? getResourceTypeByStore(store)?.slug : undefined;
+  return byStore ?? getResourceSlugForExtension(step.type);
 }
 
 /** Get the sort order for an extension type (99 for unknown types) */
