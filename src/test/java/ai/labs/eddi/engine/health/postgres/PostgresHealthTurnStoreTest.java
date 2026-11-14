@@ -241,11 +241,11 @@ class PostgresHealthTurnStoreTest {
         Instant written = Instant.parse("2026-11-10T11:05:00Z");
 
         store.upsert(turn(), written);
-        verify(upsert).setLong(31, written.toEpochMilli());
+        verify(upsert).setLong(PostgresHealthTurnStore.WRITTEN.size() + 1, written.toEpochMilli());
         store.upsert(turn());
-        verify(upsert).setNull(31, Types.BIGINT);
+        verify(upsert).setNull(PostgresHealthTurnStore.WRITTEN.size() + 1, Types.BIGINT);
         store.insertIfAbsent(turn(), written);
-        verify(insert).setLong(31, written.toEpochMilli());
+        verify(insert).setLong(PostgresHealthTurnStore.WRITTEN.size() + 1, written.toEpochMilli());
         verify(ddl).execute("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT");
 
         store.markDiscarded(turn(), List.of("old"), written);
