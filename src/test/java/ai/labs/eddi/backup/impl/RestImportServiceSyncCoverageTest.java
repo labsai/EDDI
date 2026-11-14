@@ -651,6 +651,79 @@ class RestImportServiceSyncCoverageTest {
     }
 
     // =========================================================
+    // sourceAgentId goes into the path of every request to the source
+    // =========================================================
+
+    /**
+     * The source agent id is concatenated into the request path, and the result is
+     * resolved against the source URL, which normalises it: an id such as
+     * {@code ../../backup/export/x} turned a read of the agent into a GET of any
+     * path on the source, sent with the caller's token. Only an EDDI resource id is
+     * taken, and anything else is a 400 before a request leaves.
+     */
+    @Nested
+    @DisplayName("sourceAgentId")
+    class SourceAgentIdTests {
+
+        private static final String CRAFTED_ID = "../../backup/export/x";
+
+        @Test
+        @DisplayName("a preview refuses a sourceAgentId that is not a resource id, before reading the source")
+        void previewRefusesACraftedId() {
+            BadRequestException thrown;
+            try (var sources = mockConstruction(RemoteApiResourceSource.class)) {
+                thrown = assertThrows(BadRequestException.class,
+                        () -> importService.previewSync(PUBLIC_SOURCE_URL, CRAFTED_ID, 1, TARGET_A, null, null));
+            }
+
+            assertRefusedWithBody(thrown);
+            verifyNoInteractions(structuralMatcher);
+        }
+
+        @Test
+        @DisplayName("a sync refuses it on both paths, onto an agent and as a new one")
+        void syncRefusesACraftedId() {
+            try (var sources = mockConstruction(RemoteApiResourceSource.class)) {
+                assertRefusedWithBody(assertThrows(BadRequestException.class, () -> importService.executeSync(PUBLIC_SOURCE_URL,
+                        CRAFTED_ID, 1, TARGET_A, null, null, null, null)));
+                assertRefusedWithBody(assertThrows(BadRequestException.class, () -> importService.executeSync(PUBLIC_SOURCE_URL,
+                        CRAFTED_ID, 1, null, null, null, null, true)));
+                assertTrue(sources.constructed().isEmpty(), "no source is opened for an id that is not one");
+            }
+            verifyNoInteractions(upgradeExecutor, documentDescriptorStore, zipArchive);
+        }
+
+        @Test
+        @DisplayName("in a batch the crafted row fails and the others still run")
+        void batchFailsOnlyTheCraftedRow() {
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any(), anyBoolean())).thenReturn(cleanResult(TARGET_B));
+
+            Response response;
+            List<ImportPreview> previews;
+            try (var sources = mockConstruction(RemoteApiResourceSource.class)) {
+                response = importService.executeSyncBatch(PUBLIC_SOURCE_URL, List.of(
+                        new SyncRequest(CRAFTED_ID, 1, TARGET_A, null, List.of()),
+                        new SyncRequest("aabbccddeeff112233445577", 1, TARGET_B, null, List.of())), null);
+                previews = importService.previewSyncBatch(PUBLIC_SOURCE_URL, List.of(new SyncMapping(CRAFTED_ID, 1, TARGET_A)), null);
+            }
+
+            @SuppressWarnings("unchecked")
+            var rows = (List<RestImportService.BatchSyncResult>) response.getEntity();
+            assertNotNull(rows.get(0).error(), "the crafted row reports its refusal");
+            assertNull(rows.get(1).error(), "a valid row is not taken down with it");
+            verify(upgradeExecutor, never()).executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean());
+            assertNotNull(previews.getFirst().error());
+            verifyNoInteractions(structuralMatcher);
+        }
+
+        private static void assertRefusedWithBody(BadRequestException thrown) {
+            assertEquals(400, thrown.getResponse().getStatus());
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("sourceAgentId"),
+                    "the body has to say which parameter was refused, was: " + thrown.getResponse().getEntity());
+        }
+    }
+
+    // =========================================================
     // The status code an upgrade answers with
     // =========================================================
 

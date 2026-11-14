@@ -5,6 +5,9 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -13,6 +16,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.configs.migration.IDocumentMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -41,6 +45,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -75,11 +80,14 @@ class RestImportServiceMergeSharedExtensionTest {
     private static final String LOCAL_DICT_ID = "eeee11112222333344445555";
     private static final String DICT_URI_IN_ARCHIVE = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + DICT_ORIGIN_ID
             + "?version=1";
+    private static final String API_CALLS_ORIGIN_ID = "ffff11112222333344445555";
+    private static final String LOCAL_API_CALLS_ID = "ffff11112222333344445556";
 
     private IZipArchive zipArchive;
     private IJsonSerialization jsonSerialization;
     private IDocumentDescriptorStore documentDescriptorStore;
     private TemplateSyntaxMigrator templateSyntaxMigrator;
+    private IMigrationManager migrationManager;
     private RestImportService importService;
 
     @BeforeEach
@@ -90,7 +98,8 @@ class RestImportServiceMergeSharedExtensionTest {
         templateSyntaxMigrator = mock(TemplateSyntaxMigrator.class);
         when(templateSyntaxMigrator.migrate(anyString())).thenAnswer(i -> i.getArgument(0));
 
-        importService = new RestImportService(zipArchive, jsonSerialization, mock(IMigrationManager.class), documentDescriptorStore,
+        migrationManager = mock(IMigrationManager.class);
+        importService = new RestImportService(zipArchive, jsonSerialization, migrationManager, documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class), mock(UpgradeExecutor.class), mock(IScheduleStore.class),
                 mock(BackupMetrics.class), mock(ResourceAccessGuard.class), mock(SpaceContext.class),
                 mock(RagSourceIngestionService.class), true, false, Optional.empty());
@@ -231,6 +240,164 @@ class RestImportServiceMergeSharedExtensionTest {
         verify(agentStore, never()).create(any());
         assertTrue(failure.getMessage().contains(localDictB) && failure.getMessage().contains("could not be read"),
                 failure.getMessage());
+    }
+
+    /**
+     * A dictionary store refuses an update whose regular expression does not
+     * compile, and answers 400 instead of throwing. The merge used to read that as
+     * "create it instead": the refused document went straight into the store,
+     * unvalidated, as a second dictionary carrying the same origin id, and the
+     * workflow was pointed at the copy. The resource exists here, so the refusal is
+     * the answer — the import fails with it, and the dictionary the first workflow
+     * had already merged is written back.
+     */
+    @Test
+    @DisplayName("a dictionary update the store refuses fails the merge with its answer, rolls back, and creates no copy")
+    void refusedDictionaryUpdateFailsTheMergeAndCreatesNothing() throws Exception {
+        String dictOriginB = "dddd11112222333344445556";
+        String localDictB = "eeee11112222333344445556";
+        stubWorkflowsWithOwnDictionaries(List.of(WORKFLOW_1, WORKFLOW_2), List.of(DICT_ORIGIN_ID, dictOriginB));
+
+        var originalA = new DictionaryConfiguration();
+        var dictionaryStore = mock(IDictionaryStore.class);
+        when(dictionaryStore.read(LOCAL_DICT_ID, 1)).thenReturn(originalA);
+        when(dictionaryStore.read(localDictB, 1)).thenReturn(new DictionaryConfiguration());
+
+        var currentA = new AtomicInteger(1);
+        List<Object> writtenA = new ArrayList<>();
+        var restDictionaryStore = mock(IRestDictionaryStore.class);
+        when(restDictionaryStore.updateRegularDictionary(eq(LOCAL_DICT_ID), anyInt(), any())).thenAnswer(i -> {
+            if ((int) i.getArgument(1) != currentA.get()) {
+                throw new WebApplicationException(Response.status(409).build());
+            }
+            currentA.incrementAndGet();
+            writtenA.add(i.getArgument(2));
+            return Response.ok().build();
+        });
+        Response refusal = Response.status(400).entity(Map.of("error", "regEx '([' is not a valid regular expression")).build();
+        when(restDictionaryStore.updateRegularDictionary(eq(localDictB), anyInt(), any())).thenReturn(refusal);
+
+        when(documentDescriptorStore.findByOriginId(DICT_ORIGIN_ID)).thenAnswer(i -> List.of(localDescriptorAt(LOCAL_DICT_ID, currentA.get())));
+        when(documentDescriptorStore.findByOriginId(dictOriginB)).thenAnswer(i -> List.of(localDescriptorAt(localDictB, 1)));
+        when(documentDescriptorStore.getCurrentResourceId(anyString())).thenAnswer(i -> resourceId(i.getArgument(0), 1));
+        when(documentDescriptorStore.readDescriptor(anyString(), anyInt())).thenAnswer(i -> new DocumentDescriptor());
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("cccc11112222333344445551", 1),
+                resourceId("cccc11112222333344445552", 1));
+        var agentStore = mock(IAgentStore.class);
+
+        WebApplicationException failure;
+        try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+            CDI cdi = mock(CDI.class);
+            cdiMock.when(CDI::current).thenReturn(cdi);
+            stubBean(cdi, IWorkflowStore.class, workflowStore);
+            stubBean(cdi, IAgentStore.class, agentStore);
+            stubBean(cdi, IDictionaryStore.class, dictionaryStore);
+            stubBean(cdi, IRestDictionaryStore.class, restDictionaryStore);
+            stubBean(cdi, CapabilityRegistryService.class, mock(CapabilityRegistryService.class));
+
+            failure = assertThrows(WebApplicationException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+        }
+
+        assertSame(refusal, failure.getResponse(), "the store's own 400, and the body saying what is wrong, reach the client");
+        assertTrue(failure.getMessage().contains(localDictB), failure.getMessage());
+        verify(dictionaryStore, never()).create(any());
+        // A, merged by the first workflow, is written back to its pre-import content.
+        assertEquals(2, writtenA.size(), "the merge update and its restore");
+        assertSame(originalA, writtenA.get(1));
+        // The first workflow's create is undone, and the agent is never written.
+        verify(workflowStore).deleteAllPermanently("cccc11112222333344445551");
+        verify(agentStore, never()).create(any());
+    }
+
+    /**
+     * The other store that answers a refusal instead of throwing: httpcalls whose
+     * batch settings exceed this deployment's ceiling. The direct create does not
+     * run that check, so the fallback stored exactly the document the ceiling
+     * exists to keep out.
+     */
+    @Test
+    @DisplayName("an httpcalls update the store refuses fails the merge and creates no copy")
+    void refusedApiCallsUpdateFailsTheMergeAndCreatesNothing() throws Exception {
+        WebApplicationException failure = mergeApiCallsAnswering(
+                Response.status(400).entity(Map.of("error", "forEach.maxItems exceeds the ceiling")).build());
+
+        assertEquals(400, failure.getResponse().getStatus());
+        assertTrue(failure.getMessage().contains(LOCAL_API_CALLS_ID), failure.getMessage());
+    }
+
+    /**
+     * The store's answer is passed on only when it is an error. No answer, or a
+     * success that is not the 200 an update gives, is a broken contract: passing a
+     * 204 on would report the failed, rolled-back import to the client as a
+     * success.
+     */
+    @Test
+    @DisplayName("an update answered with no error status, or not at all, still fails the merge, as a 500")
+    void updateWithoutAnErrorStatusFailsTheMergeAsAServerError() throws Exception {
+        assertEquals(500, mergeApiCallsAnswering(Response.noContent().build()).getResponse().getStatus());
+        assertEquals(500, mergeApiCallsAnswering(null).getResponse().getStatus());
+    }
+
+    /**
+     * Merges an archive whose one workflow carries one httpcalls document that
+     * exists here, with the REST store answering its update with {@code answer};
+     * asserts that nothing past the refusal was written.
+     */
+    private WebApplicationException mergeApiCallsAnswering(Response answer) throws Exception {
+        String apiCallsUri = "eddi://ai.labs.apicalls/apicallstore/apicalls/" + API_CALLS_ORIGIN_ID + "?version=1";
+        doAnswer(inv -> {
+            File dir = inv.getArgument(1);
+            dir.mkdirs();
+            Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "AGENTJSON");
+            File workflowDir = new File(new File(dir, WORKFLOW_1), "1");
+            workflowDir.mkdirs();
+            Files.writeString(new File(workflowDir, WORKFLOW_1 + ".workflow.json").toPath(),
+                    "{\"workflowSteps\":[{\"config\":{\"uri\":\"" + apiCallsUri + "\"}}]}");
+            Files.writeString(new File(workflowDir, API_CALLS_ORIGIN_ID + ".httpcalls.json").toPath(), "APICALLSJSON");
+            return null;
+        }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_1 + "?version=1")));
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(agentConfig);
+        when(jsonSerialization.deserialize(eq("APICALLSJSON"), eq(ApiCallsConfiguration.class))).thenAnswer(i -> new ApiCallsConfiguration());
+        // The archive's httpcalls pass through the document migration on the way in.
+        when(jsonSerialization.deserialize(eq("APICALLSJSON"), eq(Map.class))).thenReturn(Map.of());
+        when(migrationManager.migrateApiCalls()).thenReturn(mock(IDocumentMigration.class));
+        when(jsonSerialization.deserialize(anyString(), eq(WorkflowConfiguration.class))).thenAnswer(i -> new WorkflowConfiguration());
+
+        var apiCallsStore = mock(IApiCallsStore.class);
+        when(apiCallsStore.read(LOCAL_API_CALLS_ID, 1)).thenReturn(new ApiCallsConfiguration());
+        var restApiCallsStore = mock(IRestApiCallsStore.class);
+        when(restApiCallsStore.updateApiCalls(eq(LOCAL_API_CALLS_ID), eq(1), any())).thenReturn(answer);
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.apicalls/apicallstore/apicalls/" + LOCAL_API_CALLS_ID + "?version=1"));
+        when(documentDescriptorStore.findByOriginId(API_CALLS_ORIGIN_ID)).thenReturn(List.of(descriptor));
+
+        var workflowStore = mock(IWorkflowStore.class);
+        var agentStore = mock(IAgentStore.class);
+
+        WebApplicationException failure;
+        try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+            CDI cdi = mock(CDI.class);
+            cdiMock.when(CDI::current).thenReturn(cdi);
+            stubBean(cdi, IWorkflowStore.class, workflowStore);
+            stubBean(cdi, IAgentStore.class, agentStore);
+            stubBean(cdi, IApiCallsStore.class, apiCallsStore);
+            stubBean(cdi, IRestApiCallsStore.class, restApiCallsStore);
+            stubBean(cdi, CapabilityRegistryService.class, mock(CapabilityRegistryService.class));
+
+            failure = assertThrows(WebApplicationException.class, () -> importService.importAgent(
+                    new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+        }
+
+        verify(restApiCallsStore).updateApiCalls(eq(LOCAL_API_CALLS_ID), eq(1), any());
+        verify(apiCallsStore, never()).create(any());
+        verify(workflowStore, never()).create(any());
+        verify(agentStore, never()).create(any());
+        return failure;
     }
 
     private static DocumentDescriptor localDescriptorAt(String localId, int version) {
