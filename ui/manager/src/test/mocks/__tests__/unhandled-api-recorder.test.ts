@@ -53,7 +53,7 @@ describe("recordUnhandledApiRequest", () => {
 
   it("ignores static assets the app really does serve", () => {
     // The regression that motivated this file: index.html links this icon, and
-    // MSW's own asset filter is bypassed when onUnhandledRequest is a function.
+    // MSW's own asset filter is bypassed when onUnhandledFrame is a function.
     record(`${ORIGIN}/eddi-icon.svg`);
     record(`${ORIGIN}/eddi-icon.ico`);
     record(`${ORIGIN}/assets/index-a1b2c3.js`);
@@ -67,6 +67,25 @@ describe("recordUnhandledApiRequest", () => {
     record(`${ORIGIN}/@vite/client`);
     record(`${ORIGIN}/node_modules/.vite/deps/react.js`);
     expect(recorded()).toEqual([]);
+  });
+
+  it("ignores a page load or reload, which MSW 3 hands to the handlers", () => {
+    const print = printer();
+    recordUnhandledApiRequest(
+      new Request(`${ORIGIN}/manage/agents`, { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } }),
+      print,
+    );
+    expect(recorded()).toEqual([]);
+    expect(print.warning).not.toHaveBeenCalled();
+  });
+
+  it("still records a JSON call to the same kind of path", () => {
+    const print = printer();
+    recordUnhandledApiRequest(
+      new Request(`${ORIGIN}/agentstore/agents`, { headers: { accept: "application/json" } }),
+      print,
+    );
+    expect(recorded()).toEqual(["GET /agentstore/agents"]);
   });
 
   it("ignores off-origin requests", () => {

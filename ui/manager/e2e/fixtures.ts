@@ -5,7 +5,7 @@ import { test as base, expect } from "@playwright/test";
  *
  * It carries one auto fixture: after each test, any API call MSW had no handler
  * for fails that test. Before this, the browser worker ran
- * `onUnhandledRequest: "bypass"`, so a missing handler fell through to the dev
+ * `onUnhandledFrame: "bypass"`, so a missing handler fell through to the dev
  * server, the page rendered without its data, and a suite averaging 1.5
  * assertions per test sailed past it. That is the actual cause of the "MSW
  * browser worker too slow for this page" skips that used to sit in

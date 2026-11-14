@@ -31,6 +31,8 @@ let current: number;
 let docs: Record<number, Doc>;
 let conflicts: string[];
 let deletes: number[];
+/** Versions the page has read, in order — to know when the server's copy has been adopted. */
+let reads: number[];
 /** A read of this version waits for `releaseRead()` — to land a refetch mid-edit. */
 let heldVersion: number | null;
 let releaseRead: () => void;
@@ -51,6 +53,7 @@ beforeEach(() => {
   };
   conflicts = [];
   deletes = [];
+  reads = [];
   heldVersion = null;
   const gate = new Promise<void>((resolve) => (releaseRead = resolve));
   const version = (request: Request) => Number(new URL(request.url).searchParams.get("version"));
@@ -58,6 +61,7 @@ beforeEach(() => {
     http.get("*/groupstore/groups/wb1", async ({ request }) => {
       if (version(request) === heldVersion) await gate;
       const doc = docs[version(request)];
+      reads.push(version(request));
       return doc ? HttpResponse.json(doc) : new HttpResponse(null, { status: 404 });
     }),
     http.put("*/groupstore/groups/wb1", async ({ request }) => {
@@ -126,7 +130,11 @@ describe("WorkforceSettings — after a save", () => {
     await rename(user, "Board Two");
     await waitFor(() => expect(current).toBe(2));
     await waitFor(() => expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled());
-    expect(screen.getByDisplayValue("Board Two")).toBeInTheDocument();
+    // The saved version is read back and adopted asynchronously; a second edit made
+    // before that lands is overwritten by it, so wait for the read and the form.
+    await waitFor(() => expect(reads).toContain(2));
+    await waitFor(() => expect(screen.getByLabelText(/Task Force Name/i)).toHaveValue("Board Two"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Save Changes/i })).toBeDisabled());
 
     await rename(user, "Board Three");
     await waitFor(() => expect(current).toBe(3));

@@ -1,3 +1,5 @@
+import type { UnhandledFrameHandle } from "msw";
+import { HttpNetworkFrame } from "msw/experimental";
 import { DEV_ASSET_PATHS } from "./browser-handlers";
 import { UNHANDLED_API_REQUESTS_KEY } from "./unhandled-api";
 
@@ -28,8 +30,8 @@ const DEV_ASSET_PREFIXES = DEV_ASSET_PATHS.map((p) =>
  * Static assets the app serves from `public/` or imports as URLs.
  *
  * MSW normally filters these itself with `isCommonAssetRequest` — but only when
- * `onUnhandledRequest` is one of the string strategies. Passing a **function**
- * makes `onUnhandledRequest.js` invoke the callback and `return` before that
+ * `onUnhandledFrame` is one of the string strategies. Passing a **function**
+ * makes `the unhandled-frame handler` invoke the callback and `return` before that
  * filter is ever reached, so every asset lands here. Without this, the single
  * `<link rel="icon" href="/eddi-icon.svg">` in `index.html` fails every test
  * that reloads the page.
@@ -63,6 +65,11 @@ export function recordUnhandledApiRequest(
   if (url.origin !== window.location.origin) return;
   if (DEV_ASSET_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return;
   if (ASSET_EXTENSIONS.test(url.pathname)) return;
+  // A page load or reload is not an API call. MSW 2's worker script skipped
+  // navigations itself; MSW 3's hands them to the handlers, so they arrive here.
+  // Browsers ask for documents with `Accept: text/html`; the app's `fetch` calls
+  // ask for JSON, an event stream or `*/*`.
+  if (request.method === "GET" && request.headers.get("accept")?.includes("text/html")) return;
 
   const record = `${request.method} ${url.pathname}${url.search}`;
 
@@ -88,3 +95,22 @@ export function recordUnhandledApiRequest(
 
   print.warning();
 }
+
+/**
+ * The `onUnhandledFrame` callback for `worker.start()`.
+ *
+ * MSW 3 replaced `onUnhandledRequest(request, print)` with
+ * `onUnhandledFrame({ frame, defaults })`: the callback now sees a network
+ * frame of any protocol, and `defaults.warn()` is the old `print.warning()`.
+ * Only HTTP frames carry a `Request`; WebSocket frames are not API calls and
+ * are left alone. The filtering and recording live in
+ * {@link recordUnhandledApiRequest}, which stays protocol-agnostic and testable
+ * with a plain `Request`.
+ */
+export const recordUnhandledApiFrame: Exclude<UnhandledFrameHandle, string> = ({
+  frame,
+  defaults,
+}) => {
+  if (!(frame instanceof HttpNetworkFrame)) return;
+  recordUnhandledApiRequest(frame.data.request, { warning: defaults.warn });
+};

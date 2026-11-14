@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
 import { server } from "@/test/mocks/server";
@@ -77,12 +77,18 @@ describe("AuditPage", () => {
     const user = userEvent.setup();
     const select = screen.getByTestId("agent-input") as HTMLSelectElement;
 
-    // Wait for agents to load, then select one
+    // Wait until the agent sits in its final group before selecting it. The list is
+    // rebuilt as deployment statuses arrive, and an option that moves from "Not
+    // deployed" to "Deployed" is a new DOM node: user-event resolves the option
+    // first and selects it asynchronously, so selecting a node that is about to be
+    // replaced leaves the select on "".
     await waitFor(() => {
-      expect(select.options.length).toBeGreaterThan(1);
+      expect(
+        within(within(select).getByRole("group", { name: "Deployed" })).getByRole("option", { name: "FAQ Agent" }),
+      ).toBeInTheDocument();
     });
 
-    await user.selectOptions(select, select.options[1]!.value);
+    await user.selectOptions(select, "agent2");
 
     await waitFor(() => {
       expect(screen.getByTestId("audit-timeline")).toBeInTheDocument();
