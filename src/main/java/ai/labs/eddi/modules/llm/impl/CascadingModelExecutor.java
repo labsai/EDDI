@@ -10,9 +10,11 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.RetryObserver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -803,7 +805,7 @@ class CascadingModelExecutor {
 
                 if (stepTimedOut && bestSoFar != null) {
                     stepTrace.put("status", "timeout");
-                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName);
+                    recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "streaming timeout"), modelName, memory, false);
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
@@ -884,7 +886,8 @@ class CascadingModelExecutor {
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName);
+                recordFailure(stepTrace, new LlmFailure(FailureClass.TIMEOUT, null, "cascade step timeout"), modelName, memory,
+                        isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): timeout after %dms", i, modelName, durationMs));
                 increment("eddi.llm.cascade.escalations", "reason", "timeout");
@@ -963,7 +966,7 @@ class CascadingModelExecutor {
                 stepTrace.put("status", errorType);
                 stepTrace.put("error", failureDescription);
                 stepTrace.put("durationMs", durationMs);
-                recordFailure(stepTrace, failure, modelName);
+                recordFailure(stepTrace, failure, modelName, memory, isLastStep && bestSoFar == null);
                 trace.add(stepTrace);
                 errors.add(String.format("Step %d (%s): %s", i, modelName, failureDescription));
                 increment("eddi.llm.cascade.escalations", "reason", errorType);
@@ -1331,7 +1334,7 @@ class CascadingModelExecutor {
         // child of the eddi.pipeline.task span (ToolExecutionService does the same).
         var started = new AtomicBoolean();
         var unwound = new CountDownLatch(1);
-        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
+        Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(RetryObserver.propagate(() -> {
             started.set(true);
             try {
                 if (useAgentMode) {
@@ -1345,7 +1348,7 @@ class CascadingModelExecutor {
             } finally {
                 unwound.countDown();
             }
-        })));
+        }))));
 
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
@@ -1804,7 +1807,12 @@ class CascadingModelExecutor {
      * class is counted as {@code eddi.llm.failure{class,model}}. The trace's
      * existing {@code status}/{@code error} fields are unchanged.
      */
-    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName) {
+    private void recordFailure(Map<String, Object> stepTrace, LlmFailure failure, String modelName, IConversationMemory memory,
+                               boolean endsCascade) {
+        // Agent Health: escalated (or an earlier answer served) is recovered by the
+        // cascade; a failure that ends it is settled by the task (fallback or none).
+        LlmFailureRecords.record(memory != null ? memory.getCurrentStep() : null, failure.cls(), modelName,
+                endsCascade ? LlmFailureRecords.PENDING : HealthFailure.CASCADE);
         stepTrace.put("failureClass", failure.cls().name());
         if (failure.retryAfterMs() != null) {
             stepTrace.put("retryAfterMs", failure.retryAfterMs());

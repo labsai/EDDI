@@ -107,6 +107,16 @@ class ToolLoopRunner {
 
     private static final Logger LOGGER = Logger.getLogger(ToolLoopRunner.class);
 
+    /**
+     * Flags on a {@code tool_result} trace entry: the tool ran and failed (an
+     * exception, an HTTP error, a timeout, an unknown tool — as
+     * {@link ToolOutcomeClassifier} reads the result), or it never ran (a quota,
+     * the turn deadline, a mock's refusal). Absent on a success. Read by Agent
+     * Health.
+     */
+    static final String TRACE_FAILED = "failed";
+    static final String TRACE_NOT_EXECUTED = "notExecuted";
+
     private final ToolExecutionService toolExecutionService;
     private final ToolResponseTruncator toolResponseTruncator;
     private final TenantQuotaService tenantQuotaService;
@@ -1655,6 +1665,9 @@ class ToolLoopRunner {
             withCallId(mockedStep, toolRequest);
             mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
             mockedStep.put("mocked", true);
+            if (ToolMockRegistry.isRefusal(mockedResult)) {
+                mockedStep.put(TRACE_NOT_EXECUTED, true);
+            }
             trace.add(mockedStep);
             // A mock stands in for the tool's own answer; a refusal means it never ran.
             return new ToolCallResult(mockedResult, mockedResult, ToolMockRegistry.isRefusal(mockedResult));
@@ -1906,6 +1919,15 @@ class ToolLoopRunner {
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
         withCallId(resultStep, toolRequest);
+        // Agent Health reads the outcome off the trace: ran and failed, or never ran.
+        ToolOutcomeClassifier.Outcome tracedOutcome = notExecuted
+                ? ToolOutcomeClassifier.Outcome.NOT_EXECUTED
+                : ToolOutcomeClassifier.classify(untruncatedResult);
+        if (tracedOutcome.isFailure()) {
+            resultStep.put(TRACE_FAILED, true);
+        } else if (tracedOutcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED) {
+            resultStep.put(TRACE_NOT_EXECUTED, true);
+        }
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
         // toolResult was redacted above; it is scanned again because truncation

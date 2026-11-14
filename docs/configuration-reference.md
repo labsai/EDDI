@@ -284,6 +284,20 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 
 ---
 
+## Agent Health
+
+Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
+| `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each health row was captured (not written): the conversations of those rows are checked against the conversation store, and the rows of those that no longer exist deleted |
+| `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. No cursor is kept, so the excess is not guaranteed a later check and may stay until `eddi.health.facts-retention` |
+
+---
+
 ## Knowledge bases (RAG)
 
 | Property | Default | Description |

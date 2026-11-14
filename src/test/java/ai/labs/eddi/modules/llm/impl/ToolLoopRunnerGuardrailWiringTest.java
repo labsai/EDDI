@@ -457,4 +457,19 @@ class ToolLoopRunnerGuardrailWiringTest {
         assertEquals("Order #7 shipped.", resultStep.get("result"),
                 "showing an operator EDDI's own envelope back would obscure what the tool actually said");
     }
+
+    @Test
+    @DisplayName("Agent Health: a tool that ran and failed is marked failed on its trace entry; a success carries no flag")
+    void traceMarksFailedExecutions() {
+        var failedTrace = new ArrayList<Map<String, Object>>();
+        execute("Error: tool 'get_order' failed with an internal error", Map.of("get_order", "mcp"), failedTrace);
+        var failed = failedTrace.stream().filter(step -> "tool_result".equals(step.get("type"))).findFirst().orElseThrow();
+        assertEquals(Boolean.TRUE, failed.get(ToolLoopRunner.TRACE_FAILED));
+
+        var okTrace = new ArrayList<Map<String, Object>>();
+        execute("Order #7 shipped.", Map.of("get_order", "mcp"), okTrace);
+        var ok = okTrace.stream().filter(step -> "tool_result".equals(step.get("type"))).findFirst().orElseThrow();
+        assertFalse(ok.containsKey(ToolLoopRunner.TRACE_FAILED));
+        assertFalse(ok.containsKey(ToolLoopRunner.TRACE_NOT_EXECUTED));
+    }
 }

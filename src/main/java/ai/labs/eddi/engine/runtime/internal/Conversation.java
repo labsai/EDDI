@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.TurnAuditBuffer;
+import ai.labs.eddi.engine.health.TurnExecutions;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -143,6 +144,13 @@ public class Conversation implements IConversation {
      * onto the next one, so the bound holds across pauses and reloads.
      */
     private int revisionRoundsUsed;
+
+    /**
+     * Agent Health: the execution ids of the undone steps this turn's new step
+     * discards, collected before the redo cache is dropped — see
+     * {@link TurnExecutions}.
+     */
+    private List<String> discardedExecutions;
 
     /**
      * Conversation output written when a rejection revised the answer: the
@@ -300,6 +308,7 @@ public class Conversation implements IConversation {
             var lifecycleData = prepareLifecycleData("", context, null);
             executeConversationStep(lifecycleData, null);
         } finally {
+            TurnExecutions.stamp(conversationMemory.getCurrentStep(), discardedExecutions);
             recordAgentVersion();
             checkActionsForConversationEnd();
         }
@@ -555,6 +564,7 @@ public class Conversation implements IConversation {
             // Recorded last, after the pipeline, so a step's existing data keeps its
             // positions — detailed snapshots are read by index — and on every run: a
             // rerun re-executes the step, possibly on another version than the first.
+            TurnExecutions.stamp(conversationMemory.getCurrentStep(), discardedExecutions);
             recordAgentVersion();
             checkActionsForConversationEnd();
 
@@ -643,6 +653,7 @@ public class Conversation implements IConversation {
 
     private void startNextStep() {
         clearStaleToolPauseState();
+        discardedExecutions = TurnExecutions.executionIdsOf(conversationMemory.getRedoCache());
         ((ConversationMemory) conversationMemory).startNextStep();
     }
 

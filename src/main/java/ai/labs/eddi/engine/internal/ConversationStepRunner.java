@@ -913,6 +913,8 @@ class ConversationStepRunner {
                                        Callable<Void> executeConversation, ConversationState memoryStateAtSubmit,
                                        ConversationState preTurnPersistedState, ConversationService.ProcessingTurn processingTurn,
                                        BooleanSupplier dispatcherGaveUp) {
+        // Whether onComplete stored this turn's snapshot — what Agent Health reports.
+        AtomicBoolean committed = new AtomicBoolean();
         return waitForExecutionFinishOrTimeout(loggingContext, conversationId, conversationMemory,
                 runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
                     @Override
@@ -1000,6 +1002,7 @@ class ConversationStepRunner {
                                     refreshCachedState(conversationId);
                                     return;
                                 }
+                                committed.set(true);
                                 // M2: close the cancel-during-commit window. A cancel that
                                 // signalled setCancelled(true) AFTER the top-of-onComplete
                                 // check but BEFORE the store above returned CANCELLED to its
@@ -1042,6 +1045,7 @@ class ConversationStepRunner {
                                 // conflicted, failed to store — never queues its successor.
                                 conversationService.decideContinuation(conversationMemory);
                                 storeConversationMemory(conversationMemory, environment);
+                                committed.set(true);
                                 conversationService.armContinuation(conversationId, conversationMemory, environment);
                             }
                         } catch (ConversationFencedException e) {
@@ -1172,7 +1176,7 @@ class ConversationStepRunner {
                             logConversationError(loggingContext, conversationId, t);
                         }
                     }
-                }, null));
+                }, null), committed::get);
     }
 
     /**
@@ -1273,8 +1277,27 @@ class ConversationStepRunner {
      */
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
+        return waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future, null);
+    }
+
+    /**
+     * As above.
+     *
+     * @param committed
+     *            whether the turn's completion callback stored its snapshot (it
+     *            runs before {@code Future.get} returns); a completed turn whose
+     *            snapshot was not stored — a lost pause compare-and-store, a
+     *            conflict — is reported to Agent Health as unsettled. {@code null}:
+     *            not tracked, taken as stored
+     */
+    boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
+                                            IConversationMemory memory, Future<Void> future, BooleanSupplier committed) {
+        long waitStarted = System.nanoTime();
         TurnWait wait = awaitTurn(loggingContext, conversationId, memory, future);
         reportTurnOutcome(memory, wait);
+        // Agent Health records every turn, clean or not, on its own worker.
+        conversationService.reportHealthTurn(memory, wait, (System.nanoTime() - waitStarted) / 1_000_000L,
+                committed == null || wait != TurnWait.COMPLETED || committed.getAsBoolean());
         return wait == TurnWait.TIMED_OUT || wait == TurnWait.INTERRUPTED || wait == TurnWait.ABANDONED_WHILE_PAUSED;
     }
 

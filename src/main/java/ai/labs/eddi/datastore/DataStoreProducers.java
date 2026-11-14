@@ -42,6 +42,9 @@ import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthTurnStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
 import ai.labs.eddi.engine.alerts.IAlertEventStore;
@@ -441,6 +444,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IEmailSuppressionStore emailSuppressionStore(Instance<MongoEmailSuppressionStore> mongo,
                                                         Instance<PostgresEmailSuppressionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthTurnStore healthTurnStore(Instance<MongoHealthTurnStore> mongo, Instance<PostgresHealthTurnStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

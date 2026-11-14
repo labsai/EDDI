@@ -272,6 +272,18 @@ public class RetryConfiguration {
     public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
                                          long[] sharedBackoffMs, TurnDeadline deadline)
             throws LifecycleException {
+        // Whether a reported retry recovered is known only here, when the loop ends —
+        // on every exit path, a thrown failure included.
+        try (RetryObserver.Loop observed = RetryObserver.loop()) {
+            T result = runWithRetry(action, retryConfig, actionDescription, sharedBackoffMs, deadline);
+            observed.succeeded();
+            return result;
+        }
+    }
+
+    private static <T> T runWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
+                                      long[] sharedBackoffMs, TurnDeadline deadline)
+            throws LifecycleException {
 
         if (retryConfig == null) {
             retryConfig = new RetryConfiguration();
@@ -373,6 +385,7 @@ public class RetryConfiguration {
                                     + "ms and retry [" + failure.cls() + "]", e);
                         }
 
+                        RetryObserver.retrying(failure.cls());
                         LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts
                                 + "), retrying after " + sleepFor + "ms: " + e.getMessage());
 

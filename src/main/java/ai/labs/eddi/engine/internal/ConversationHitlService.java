@@ -1041,7 +1041,8 @@ class ConversationHitlService {
                                 runtime.submitCallable(withConversationPrincipal(memory,
                                         callerIdentityContext.withIdentity(resumeCallerIdentity,
                                                 callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),
-                                        resumeFinished, null));
+                                        resumeFinished, null),
+                                () -> committedResumeState.get() != null);
                     } finally {
                         // Backstop: the runtime callbacks flush a deferred re-pause, but a
                         // resume that reached neither (cancelled before it ran) must still

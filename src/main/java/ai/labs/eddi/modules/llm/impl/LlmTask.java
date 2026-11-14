@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
@@ -321,6 +322,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
     @Override
     public void execute(IConversationMemory memory, Object component) throws LifecycleException {
+        // Agent Health: same-model retries of this task are recorded on its step.
+        try (var retries = LlmFailureRecords.observeRetries(memory)) {
+            executeObservingRetries(memory, component);
+        }
+    }
+
+    private void executeObservingRetries(IConversationMemory memory, Object component) throws LifecycleException {
         final var llmConfig = (LlmConfiguration) component;
 
         try {
@@ -785,6 +793,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean taskHasTools = task.isAgentMode() || ((cascadeConfigured || reservationOn) && agentOrchestrator.offersTools(task, memory));
         boolean skipCascade = cascadeConfigured && taskHasTools && !cascadeConfig.isEnableInAgentMode();
         boolean cascadeActive = cascadeConfigured && !skipCascade;
+        // Agent Health: where this model phase's failure records begin.
+        int failureMark = LlmFailureRecords.mark(currentStep);
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
         ConversationEventSink eventSink = memory.getEventSink();
@@ -1082,6 +1092,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             // where the model's answer would have gone. A cascade refused before a later
             // step still paid for its earlier ones.
             recordFailedPhaseSpend(currentStep, refused);
+            // A cascade refused after escalating: its failed steps end in this fallback.
+            LlmFailureRecords.settle(currentStep, null, null, HealthFailure.FALLBACK, failureMark);
             fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
             responseContent = fallbackServed.content();
             responseMetadata = new HashMap<>();
@@ -1097,6 +1109,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // A cascade counts each step's failure itself (with the step's model).
                 countFailure(e, resolveModelNameOf(processedParams, resolvedType));
             }
+            LlmFailureRecords.settle(currentStep, e, cascadeActive ? null : resolveModelNameOf(processedParams, resolvedType),
+                    fallbackOnError && !memory.isCancelled() ? HealthFailure.FALLBACK : HealthFailure.NONE, failureMark);
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(e)) {
                 recordFailedPhaseSpend(currentStep, e);
                 throw e;
@@ -2386,6 +2400,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             // answer; a pause, a cancel or a refused approval is control flow and
             // propagates as before.
             countFailure(failure, resolveModelNameOf(processedParams, resolvedType));
+            LlmFailureRecords.settle(currentStep, failure, resolveModelNameOf(processedParams, resolvedType),
+                    fallbackOnError && !memory.isCancelled() ? HealthFailure.FALLBACK : HealthFailure.NONE, Integer.MAX_VALUE);
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(failure)) {
                 recordFailedPhaseSpend(currentStep, failure);
                 throw failure;
@@ -2669,6 +2685,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      */
     @Override
     public boolean reviseAnswer(IConversationMemory memory, Object component, HitlRevisionRequest request) throws LifecycleException {
+        // Agent Health: like execute, the revision's same-model retries are recorded.
+        try (var retries = LlmFailureRecords.observeRetries(memory)) {
+            return reviseAnswerObservingRetries(memory, component, request);
+        }
+    }
+
+    private boolean reviseAnswerObservingRetries(IConversationMemory memory, Object component, HitlRevisionRequest request)
+            throws LifecycleException {
         if (!(component instanceof LlmConfiguration llmConfig) || request == null || request.candidate() == null) {
             return false;
         }
