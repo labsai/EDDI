@@ -12,6 +12,9 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -24,20 +27,29 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.SetupResult;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.SubAgentLocks;
+import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -71,7 +83,38 @@ class StandaloneDynamicAgentsTest {
     }
 
     private StandaloneDynamicAgents service(int cap) {
-        return new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, cap);
+        return new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, cap, (IConversationLeaseManager) null);
+    }
+
+    /**
+     * A lease store shared by every "node" of a test: a key held by one cannot be
+     * acquired by another until released. Not reentrant, like the cluster
+     * implementations.
+     */
+    private static DynamicOrigin released() {
+        var origin = new DynamicOrigin("parent", CONVERSATION, null, "user-1");
+        origin.setRetained(false);
+        return origin;
+    }
+
+    private static IConversationLeaseManager sharedLeases(Set<String> held) {
+        IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
+        when(leases.acquireKey(anyString(), any(Duration.class))).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            if (!held.add(key)) {
+                return CompletableFuture.failedFuture(new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, "other-node", key));
+            }
+            LeaseHandle handle = mock(LeaseHandle.class);
+            when(handle.key()).thenReturn(key);
+            return CompletableFuture.completedFuture(handle);
+        });
+        doAnswer(invocation -> {
+            LeaseHandle handle = invocation.getArgument(0);
+            held.remove(handle.key());
+            return null;
+        }).when(leases).release(any(LeaseHandle.class));
+        when(leases.tryAcquireKey(anyString())).thenReturn(Optional.empty());
+        return leases;
     }
 
     private void agent(String agentId, DynamicOrigin origin) throws Exception {
@@ -383,5 +426,53 @@ class StandaloneDynamicAgentsTest {
 
         assertTrue(markedDuringUndeploy.get(), "a retain arriving meanwhile is refused");
         assertFalse(SubAgentLocks.isTearingDown("sub-1"), "cleared once teardown is over");
+    }
+
+    @Test
+    @DisplayName("while teardown holds the agent's cluster lease, a retain on another node is refused, and the lease is released after")
+    void teardownLeaseRefusesRetainElsewhere() throws Exception {
+        Set<String> held = ConcurrentHashMap.newKeySet();
+        IConversationLeaseManager leases = sharedLeases(held);
+        agent("sub-1", released());
+        // Node B: the same conversation's retain tool, sharing only the lease store.
+        var retainTool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, new CopyOnWriteArrayList<>(List.of("sub-1")),
+                ConcurrentHashMap.newKeySet(), ConcurrentHashMap.newKeySet(), CONVERSATION, null, leases);
+        var retainReply = new AtomicReference<String>();
+        // The retain lands while teardown (node A) is reading the flag — after it took
+        // the lease, before it marked the agent; only the lease can refuse it here.
+        doAnswer(invocation -> {
+            if (retainReply.get() == null) {
+                retainReply.set("pending");
+                retainReply.set(retainTool.retainAgent("sub-1"));
+            }
+            var configuration = new AgentConfiguration();
+            configuration.setDynamicOrigin(released());
+            return configuration;
+        }).when(agentStore).read("sub-1", 1);
+        var nodeA = new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, 20, leases);
+
+        nodeA.cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1"), Set.of()));
+
+        assertTrue(retainReply.get().contains("changed elsewhere"), retainReply.get());
+        verify(agentStore, never()).update(eq("sub-1"), any(), any(), anyBoolean());
+        verify(agentStore).deleteAllPermanently("sub-1");
+        assertTrue(held.isEmpty(), "teardown released the lease");
+    }
+
+    @Test
+    @DisplayName("a teardown that cannot get the agent's lease (a retain holds it elsewhere) skips the agent this time")
+    void leaseHeldElsewhereSkipsTeardown() throws Exception {
+        Set<String> held = ConcurrentHashMap.newKeySet();
+        held.add(SubAgentLocks.LEASE_PREFIX + "sub-1");
+        agent("sub-1", released());
+        agent("sub-2", released());
+        var service = new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, 20, sharedLeases(held));
+
+        service.cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1", "sub-2"), Set.of()));
+
+        verify(agentFactory, never()).undeployAgent(any(), eq("sub-1"), any());
+        verify(agentStore, never()).deleteAllPermanently("sub-1");
+        verify(agentFactory).undeployAgent(Environment.production, "sub-2", null);
+        assertEquals(Set.of(SubAgentLocks.LEASE_PREFIX + "sub-1"), held, "the other node's lease is untouched, ours released");
     }
 }

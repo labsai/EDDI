@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
+import ai.labs.eddi.modules.llm.tools.DelegationBudget;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,6 +43,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -346,6 +351,109 @@ class DelegationCostCeilingTest {
         assertEquals(0.2, hold.allowance().getAsDouble(), 1e-9);
         assertEquals(0.5, memory.getSpendReservations().heldUsd(), 1e-9, "never above the ceiling");
         assertTrue(memory.getSpendReservations().reserveHeadroom(0.5, 1.0).isEmpty(), "nothing left");
+    }
+
+    @Test
+    @DisplayName("no headroom left: the delegation is refused with an allowance of 0 and nothing is held")
+    void zeroHeadroomRefuses() {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(1.0);
+
+        var hold = new MemoryDelegationBudget(memory).admit();
+
+        assertEquals(0.0, hold.allowance().getAsDouble(), 1e-9, "refused, not unbounded");
+        assertEquals(0.0, memory.getSpendReservations().heldUsd(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("no ceiling: no allowance and no hold")
+    void noCeilingHoldsNothing() {
+        var hold = new MemoryDelegationBudget(memory).admit();
+
+        assertTrue(hold.allowance().isEmpty());
+        assertEquals(0.0, memory.getSpendReservations().heldUsd(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("admission reads the spend inside the reservations lock: a charge-back arriving meanwhile waits until the hold is taken")
+    void chargeWaitsForAdmission() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        SpendReservations reservations = memory.getSpendReservations();
+        SpendReadProbe probe = new SpendReadProbe(memory, reservations);
+        // Another delegation's charge-back, started from inside the spend read.
+        probe.whileReadingSpend = () -> new MemoryDelegationBudget(memory).charge(0.4);
+
+        var hold = new MemoryDelegationBudget(probe.memory).admit();
+        probe.join();
+
+        assertTrue(probe.readUnderLock.get(), "the spend is read under the reservations monitor");
+        assertTrue(probe.blockedDuringRead.get(), "the charge waited for the admission");
+        assertEquals(0.5, hold.allowance().getAsDouble(), 1e-9, "the headroom as it was at the read");
+        assertEquals(0.9, LlmSpendGate.conversationCost(memory), 1e-9, "the charge landed after");
+    }
+
+    @Test
+    @DisplayName("admission is atomic: a parallel admission arriving during the spend read waits and finds the headroom taken")
+    void parallelAdmissionWaits() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        SpendReservations reservations = memory.getSpendReservations();
+        SpendReadProbe probe = new SpendReadProbe(memory, reservations);
+        var second = new AtomicReference<DelegationBudget.Hold>();
+        probe.whileReadingSpend = () -> second.set(new MemoryDelegationBudget(memory).admit());
+
+        var first = new MemoryDelegationBudget(probe.memory).admit();
+        probe.join();
+
+        assertTrue(probe.blockedDuringRead.get(), "the second admission waited");
+        assertEquals(0.5, first.allowance().getAsDouble(), 1e-9);
+        assertEquals(0.0, second.get().allowance().getAsDouble(), 1e-9, "nothing handed out twice");
+        assertEquals(0.5, reservations.heldUsd(), 1e-9, "never above the ceiling");
+    }
+
+    /**
+     * A spy on the conversation memory that, the first time the spend is read while
+     * the reservations monitor is held, starts {@link #whileReadingSpend} on
+     * another thread and waits until that thread is blocked on the monitor.
+     */
+    private static final class SpendReadProbe {
+        final ConversationMemory memory;
+        final AtomicBoolean readUnderLock = new AtomicBoolean();
+        final AtomicBoolean blockedDuringRead = new AtomicBoolean();
+        Runnable whileReadingSpend;
+        private Thread other;
+
+        SpendReadProbe(ConversationMemory real, SpendReservations reservations) {
+            memory = spy(real);
+            doAnswer(invocation -> {
+                if (Thread.holdsLock(reservations) && other == null) {
+                    readUnderLock.set(true);
+                    other = new Thread(whileReadingSpend);
+                    other.start();
+                    blockedDuringRead.set(awaitBlocked(other));
+                }
+                return invocation.callRealMethod();
+            }).when(memory).getAllSteps();
+        }
+
+        void join() throws InterruptedException {
+            if (other != null) {
+                other.join(5_000);
+                assertFalse(other.isAlive(), "the other thread finished");
+            }
+        }
+
+        private static boolean awaitBlocked(Thread thread) throws InterruptedException {
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (System.nanoTime() < deadline) {
+                if (thread.getState() == Thread.State.BLOCKED) {
+                    return true;
+                }
+                Thread.sleep(1);
+            }
+            return false;
+        }
     }
 
     @Test

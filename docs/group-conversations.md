@@ -1228,6 +1228,17 @@ have at most `eddi.dynamic-agents.standalone.max-live-per-user` (default 20)
 such agents deployed at once, across all their conversations; at the cap the
 tool refuses with a message naming `teardown_agent`.
 
+Retaining and tearing down are coordinated **cluster-wide**: the teardown holds
+the agent's lease (`subagent.<agentId>`, in the same lease store that serialises
+conversation turns) while it reads the retain flag, undeploys and deletes, and
+`retain_agent` / `unretain_agent` take the same lease to write the flag. A retain
+that cannot get it within a short wait is refused with "the agent is being torn
+down or changed elsewhere, try again"; a teardown that cannot get it leaves that
+agent for the next cleanup instead of deleting it unprotected. With clustering
+off, a per-node lock does the same job. The per-user cap, by contrast, stays
+best-effort across nodes (see `eddi.dynamic-agents.standalone.max-live-per-user`
+in the [configuration reference](configuration-reference.md)).
+
 **Only a vault reference is inherited, never a plaintext key.** When the vault is
 unconfigured, `vaultApiKey` falls back to storing the key in clear; copying such a
 value into a second config would multiply that fallback's blast radius. A parent

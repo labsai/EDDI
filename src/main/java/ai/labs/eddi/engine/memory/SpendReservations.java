@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import java.util.Optional;
+import java.util.function.DoubleSupplier;
 
 /**
  * The paid calls of one conversation that are in flight: what each is expected
@@ -76,13 +77,32 @@ public final class SpendReservations {
      *         none
      */
     public synchronized Optional<Reservation> reserveHeadroom(double spentUsd, double ceilingUsd) {
-        double headroom = ceilingUsd - spentUsd - heldUsd;
+        return reserveHeadroom(() -> spentUsd, ceilingUsd);
+    }
+
+    /**
+     * As {@link #reserveHeadroom(double, double)}, with the recorded spend read
+     * <em>inside</em> this object's monitor: a charge written under the same
+     * monitor (see {@link #exclusively}) then lands either wholly before the read
+     * or wholly after the reservation, never between them.
+     */
+    public synchronized Optional<Reservation> reserveHeadroom(DoubleSupplier spentUsd, double ceilingUsd) {
+        double headroom = ceilingUsd - spentUsd.getAsDouble() - heldUsd;
         if (!Double.isFinite(headroom) || !(headroom > 0.0)) {
             return Optional.empty();
         }
         heldUsd += headroom;
         open++;
         return Optional.of(new Reservation(headroom));
+    }
+
+    /**
+     * Runs {@code action} under this object's monitor, the one every reservation,
+     * settlement and release takes, so a write to the recorded spend it makes is
+     * atomic with respect to {@link #reserveHeadroom(DoubleSupplier, double)}.
+     */
+    public synchronized void exclusively(Runnable action) {
+        action.run();
     }
 
     /** What the calls in flight are holding right now. */

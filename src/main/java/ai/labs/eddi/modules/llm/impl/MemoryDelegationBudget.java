@@ -5,13 +5,16 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.tools.DelegationBudget;
 
+import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.function.DoubleSupplier;
 
 /**
  * The {@link DelegationBudget} of one conversation, read from and written to
@@ -53,46 +56,30 @@ final class MemoryDelegationBudget implements DelegationBudget {
     }
 
     /**
-     * Held in the conversation's {@link SpendReservations}, which every ceiling
-     * check of this turn counts, and never released: the turn's memory carries it
-     * until the turn ends. Not persisted — a later turn sees only what was charged.
-     */
-    /**
-     * Reads what is left and holds all of it in one step
-     * ({@link SpendReservations#tryReserve} refuses once the spend plus what is
-     * held reaches the ceiling): a parallel delegation of the same turn then finds
-     * the allowance taken and is refused rather than handed it a second time.
+     * Reads what is left and holds all of it in one step, under the conversation's
+     * {@link SpendReservations} monitor: the recorded spend is read there
+     * ({@link SpendReservations#reserveHeadroom(DoubleSupplier, double)}), and
+     * {@link #charge} and every release take the same monitor, so neither a
+     * parallel delegation nor a charge-back can land between the read and the hold.
+     * A delegation that finds no headroom (or no reservations to hold it in) is
+     * refused with an allowance of {@code 0}; only a conversation with no ceiling
+     * at all gets no allowance (unbounded) and no hold.
      */
     @Override
     public Hold admit() {
-        OptionalDouble remaining = remainingUsd();
-        SpendReservations reservations = memory != null ? memory.getSpendReservations() : null;
-        if (remaining.isEmpty() || reservations == null || !(remaining.getAsDouble() > 0.0)) {
-            return DelegationBudget.super.admit();
+        if (memory == null) {
+            return Hold.NONE;
         }
         OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
-        // Read and reserve the headroom in one step: a value read earlier could be
-        // stale once another reservation landed in between.
-        var held = reservations.reserveHeadroom(LlmSpendGate.conversationCost(memory), ceiling.getAsDouble());
+        if (!LlmSpendGate.ceilingApplies(ceiling)) {
+            return Hold.NONE;
+        }
+        SpendReservations reservations = memory.getSpendReservations();
+        Optional<SpendReservations.Reservation> held = reservations == null
+                ? Optional.empty()
+                : reservations.reserveHeadroom(() -> LlmSpendGate.conversationCost(memory), ceiling.getAsDouble());
         if (held.isEmpty()) {
-            // Another delegation of this turn took it first.
-            OptionalDouble none = OptionalDouble.of(0.0);
-            return new Hold() {
-                @Override
-                public OptionalDouble allowance() {
-                    return none;
-                }
-
-                @Override
-                public void release() {
-                    // nothing held
-                }
-
-                @Override
-                public void keep(double usd) {
-                    // nothing held
-                }
-            };
+            return REFUSED;
         }
         SpendReservations.Reservation reservation = held.get();
         OptionalDouble allowance = OptionalDouble.of(reservation.amountUsd());
@@ -113,6 +100,26 @@ final class MemoryDelegationBudget implements DelegationBudget {
             }
         };
     }
+
+    /** No headroom: an allowance of {@code 0}, nothing held. */
+    private static final Hold REFUSED = new Hold() {
+        private final OptionalDouble none = OptionalDouble.of(0.0);
+
+        @Override
+        public OptionalDouble allowance() {
+            return none;
+        }
+
+        @Override
+        public void release() {
+            // nothing held
+        }
+
+        @Override
+        public void keep(double usd) {
+            // nothing held
+        }
+    };
 
     @Override
     public void reserve(double usd) {
@@ -136,8 +143,19 @@ final class MemoryDelegationBudget implements DelegationBudget {
         if (step == null) {
             return;
         }
-        // Parallel tool calls of one task may charge at once: the read-add-store must
-        // not lose one of them.
+        // Under the reservations monitor (the one admit() reads the spend in), so an
+        // admission sees the charge wholly or not at all; and under the step's, as
+        // parallel tool calls of one task may charge at once and the read-add-store
+        // must not lose one of them.
+        SpendReservations reservations = memory.getSpendReservations();
+        if (reservations != null) {
+            reservations.exclusively(() -> addToStep(step, usd));
+        } else {
+            addToStep(step, usd);
+        }
+    }
+
+    private static void addToStep(IConversationStep step, double usd) {
         synchronized (step) {
             IData<Object> existing = step.getData(MemoryKeys.AUDIT_DELEGATED_COST);
             double total = usd;

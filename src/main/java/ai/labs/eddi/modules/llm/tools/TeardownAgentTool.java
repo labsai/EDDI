@@ -11,6 +11,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import dev.langchain4j.agent.tool.P;
@@ -19,10 +20,10 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -73,6 +74,10 @@ public class TeardownAgentTool {
     private final String conversationId;
     /** The calling conversation's discussion, or null; also accepted as a match. */
     private final String groupConversationId;
+    /**
+     * Guards each agent's retain flag cluster-wide; {@code null}: this node only.
+     */
+    private final IConversationLeaseManager leaseManager;
 
     /**
      * {@code deploymentStore} may be null; teardown then leaves the deployment
@@ -91,6 +96,26 @@ public class TeardownAgentTool {
             Set<String> tornDownAgentIds,
             String conversationId,
             String groupConversationId) {
+        this(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds, tornDownAgentIds, conversationId,
+                groupConversationId, null);
+    }
+
+    /**
+     * @param leaseManager
+     *            the cluster lease manager that serialises retain / unretain with
+     *            teardown of the same agent on every node; {@code null} guards this
+     *            node only
+     */
+    public TeardownAgentTool(IAgentFactory agentFactory,
+            IAgentStore agentStore,
+            IDeploymentStore deploymentStore,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            Set<String> tornDownAgentIds,
+            String conversationId,
+            String groupConversationId,
+            IConversationLeaseManager leaseManager) {
+        this.leaseManager = leaseManager;
         this.conversationId = conversationId;
         this.groupConversationId = groupConversationId;
         this.agentFactory = agentFactory;
@@ -195,17 +220,20 @@ public class TeardownAgentTool {
         if (SubAgentLocks.isTearingDown(agentId)) {
             return tearingDown;
         }
-        ReentrantLock lock = SubAgentLocks.lockFor(agentId);
-        lock.lock();
-        try {
-            // Re-checked under the lock: a teardown that took the lock first may have
+        // The agent's guard, cluster-wide: a teardown on another node holds it across
+        // reading this flag, undeploying and deleting.
+        Optional<SubAgentLocks.Guard> guard = SubAgentLocks.acquire(leaseManager, agentId);
+        if (guard.isEmpty()) {
+            return "⚠️ Cannot %s agent '%s' — the agent is being torn down or changed elsewhere, try again."
+                    .formatted(retained ? "retain" : "un-retain", agentId);
+        }
+        try (SubAgentLocks.Guard held = guard.get()) {
+            // Re-checked under the guard: a teardown that took it first may have
             // decided to delete it meanwhile (and, once done, the agent is gone).
             if (SubAgentLocks.isTearingDown(agentId)) {
                 return tearingDown;
             }
             return writeRetainedFlagLocked(agentId, retained);
-        } finally {
-            lock.unlock();
         }
     }
 

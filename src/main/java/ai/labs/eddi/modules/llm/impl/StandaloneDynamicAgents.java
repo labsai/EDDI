@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -19,6 +20,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.llm.tools.SubAgentLocks;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -27,10 +29,10 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -70,16 +72,38 @@ public class StandaloneDynamicAgents {
     private final IDeploymentStore deploymentStore;
     private final IConversationMemoryStore conversationMemoryStore;
     private final int maxLivePerUser;
+    private final IConversationLeaseManager leaseManager;
 
     @Inject
     public StandaloneDynamicAgents(IAgentStore agentStore, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore,
-            @ConfigProperty(name = "eddi.dynamic-agents.standalone.max-live-per-user", defaultValue = "20") int maxLivePerUser) {
+            @ConfigProperty(name = "eddi.dynamic-agents.standalone.max-live-per-user", defaultValue = "20") int maxLivePerUser,
+            Instance<IConversationLeaseManager> leaseManager) {
+        this(agentStore, agentFactory, deploymentStore, conversationMemoryStore, maxLivePerUser,
+                leaseManager != null && leaseManager.isResolvable() ? leaseManager.get() : null);
+    }
+
+    /**
+     * @param leaseManager
+     *            the cluster lease manager guarding each sub-agent's retain flag
+     *            against teardown on other nodes; {@code null} guards this node
+     *            only
+     */
+    public StandaloneDynamicAgents(IAgentStore agentStore, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore, int maxLivePerUser, IConversationLeaseManager leaseManager) {
         this.agentStore = agentStore;
         this.agentFactory = agentFactory;
         this.deploymentStore = deploymentStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.maxLivePerUser = maxLivePerUser;
+        this.leaseManager = leaseManager;
+    }
+
+    /**
+     * The lease manager that guards sub-agents cluster-wide, or {@code null}.
+     */
+    public IConversationLeaseManager leaseManager() {
+        return leaseManager;
     }
 
     /**
@@ -380,15 +404,21 @@ public class StandaloneDynamicAgents {
     }
 
     private void teardown(String agentId, String conversationId) {
-        // Held across reading the flag, undeploying and deleting: a retain_agent in
-        // between would otherwise report success for an agent deleted anyway.
-        ReentrantLock lock = SubAgentLocks.lockFor(agentId);
-        lock.lock();
-        try {
+        // Held across reading the flag, undeploying and deleting, cluster-wide: a
+        // retain_agent in between (on any node) would otherwise report success for an
+        // agent deleted anyway.
+        Optional<SubAgentLocks.Guard> guard = SubAgentLocks.acquire(leaseManager, agentId);
+        if (guard.isEmpty()) {
+            // Never delete unprotected: a retain may be in flight elsewhere. The agent
+            // is left for the next cleanup of this conversation.
+            LOGGER.warnf("[DYNAMIC] Sub-agent '%s' is being changed elsewhere — not torn down this time (conversation %s)",
+                    sanitize(agentId), sanitize(conversationId));
+            return;
+        }
+        try (SubAgentLocks.Guard held = guard.get()) {
             teardownLocked(agentId, conversationId);
         } finally {
             SubAgentLocks.clearTearingDown(agentId);
-            lock.unlock();
         }
     }
 

@@ -438,7 +438,8 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         if (allows(whitelist, whitelistOmitted, "teardown_agent") && dynamicConfig.isEnabled()
                 && agentFactory != null && agentStore != null) {
             tools.add(new TeardownAgentTool(agentFactory, agentStore, deploymentStore, sharedCreatedIds, sharedRetainedIds,
-                    sharedTornDownIds, callerConversationId, groupConversationId));
+                    sharedTornDownIds, callerConversationId, groupConversationId,
+                    standaloneAgents != null ? standaloneAgents.leaseManager() : null));
             LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
             anyDynamicToolAdded = true;
         }
