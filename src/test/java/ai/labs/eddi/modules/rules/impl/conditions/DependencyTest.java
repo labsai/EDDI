@@ -177,27 +177,51 @@ class DependencyTest {
     }
 
     @Test
-    void validateConfiguration_missingReference_isRefused() {
-        var thrown = assertThrows(IllegalArgumentException.class, () -> new Dependency().validateConfiguration());
+    void retiredConfiguration_missingReference_isReported() {
+        var dependency = new Dependency();
 
-        assertTrue(thrown.getMessage().contains("dependency"), thrown.getMessage());
-        assertTrue(thrown.getMessage().contains("reference"), thrown.getMessage());
+        assertDoesNotThrow(dependency::validateConfiguration, "a stored ruleset must still load");
+        var retired = dependency.retiredConfiguration();
+        assertNotNull(retired);
+        assertTrue(retired.contains("dependency"), retired);
+        assertTrue(retired.contains("reference"), retired);
     }
 
     @Test
-    void validateConfiguration_blankReference_isRefused() {
+    void retiredConfiguration_blankReference_isReported() {
         var dependency = new Dependency();
         dependency.setConfigs(Map.of("reference", "  "));
 
-        assertThrows(IllegalArgumentException.class, dependency::validateConfiguration);
+        assertNotNull(dependency.retiredConfiguration());
+    }
+
+    /**
+     * A stored dependency without a reference matches no rule and fails, as it did
+     * before — also when the set holds an unnamed rule.
+     */
+    @Test
+    void execute_storedWithoutReference_fails() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var unnamed = new Rule(null);
+        unnamed.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(unnamed)));
+        ruleSet.setRuleGroups(List.of(group));
+        var dependency = new Dependency();
+        dependency.setContainingRuleSet(ruleSet);
+
+        var state = TemplateDataScope.call(memory, () -> dependency.execute(memory, new ArrayList<>()));
+
+        assertEquals(IRuleCondition.ExecutionState.FAIL, state);
     }
 
     @Test
-    void validateConfiguration_withReference_passes() {
+    void retiredConfiguration_withReference_isNone() {
         var dependency = new Dependency();
         dependency.setConfigs(Map.of("reference", "greetingRule"));
 
-        assertDoesNotThrow(dependency::validateConfiguration);
+        assertNull(dependency.retiredConfiguration());
     }
 
     private static Dependency dependencyOn(String reference, RuleSet ruleSet) {

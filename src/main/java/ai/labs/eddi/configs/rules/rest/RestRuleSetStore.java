@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rules.rest;
 
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -76,7 +77,9 @@ public class RestRuleSetStore implements IRestRuleSetStore {
     public Response duplicateRuleSet(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         var behaviorConfiguration = restVersionInfo.read(id, version);
-        return restVersionInfo.create(behaviorConfiguration);
+        // A copy of a stored ruleset (an agent duplicate, too): a retired condition
+        // config it carries is accepted with a WARN, as on deploy, not refused.
+        return ExistingRuleSetWrite.call(() -> restVersionInfo.create(behaviorConfiguration));
     }
 
     @Override

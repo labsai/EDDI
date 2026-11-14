@@ -49,15 +49,16 @@ public class Dependency implements IRuleCondition {
 
     /**
      * Without a {@code reference} the condition can only ever fail, so the rule
-     * that carries it never fires. Refused when the ruleset is read, naming the
-     * rule.
+     * that carries it never fires (or, under a negation, always fires). Refused
+     * when a ruleset is saved, naming the rule; a stored one still deploys, with a
+     * WARN, and evaluates as before.
      */
     @Override
-    public void validateConfiguration() {
+    public String retiredConfiguration() {
         if (reference == null || reference.isBlank()) {
-            throw new IllegalArgumentException(String.format("'%s' requires a '%s' config value naming the behavior rule it depends on.", ID,
-                    referenceQualifier));
+            return String.format("'%s' requires a '%s' config value naming the behavior rule it depends on.", ID, referenceQualifier);
         }
+        return null;
     }
 
     @Override
@@ -72,8 +73,10 @@ public class Dependency implements IRuleCondition {
         for (RuleGroup behaviorGroup : behaviorSet.getRuleGroups()) {
             for (Rule behaviorRule : behaviorGroup.getRules()) {
                 // Rule names are optional: an unnamed rule anywhere in the set must not
-                // turn every dependency lookup into a NullPointerException.
-                if (reference.equals(behaviorRule.getName())) {
+                // turn every dependency lookup into a NullPointerException. A stored
+                // ruleset may still carry a dependency without a reference: it
+                // matches no rule and fails, as it always did.
+                if (reference != null && reference.equals(behaviorRule.getName())) {
                     filteredRules.add(behaviorRule);
                 }
             }

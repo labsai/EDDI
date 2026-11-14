@@ -173,7 +173,9 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
             var behaviorConfiguration = resourceClientLibrary.getResource(uri, RuleSetConfiguration.class);
             var behaviorConfigJson = jsonSerialization.serialize(behaviorConfiguration);
-            var behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson);
+            // A stored ruleset: a retired condition config is accepted with a WARN
+            // naming this URI, so an agent that deployed before keeps deploying.
+            var behaviorSet = behaviorSerialization.deserialize(behaviorConfigJson, uri.toString());
 
             Object appendActionsObj = configuration.getOrDefault(BEHAVIOR_CONFIG_APPEND_ACTIONS, behaviorConfiguration.getAppendActions());
             if (appendActionsObj != null) {

@@ -373,3 +373,16 @@ DNS lookups made by this check now give up after `eddi.security.ssrf-protection.
 count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
 refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
 See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).
+
+### Behavior rules with `tagMatches` or a reference-less `dependency`
+
+Two condition configs are now refused when you save a ruleset: a `deploymentContext` condition with a
+non-blank `tagMatches`, and a `dependency` condition without a `reference`. Neither could ever match.
+Rulesets that already carry one are **not** refused: they still deploy, import, sync and duplicate,
+and each such condition logs a WARN naming the ruleset and the rule. The condition evaluates as it
+did before, so it never matches, and a rule that negates it keeps firing on every turn.
+
+What you will see: the WARN at deploy, and a 400 naming the rule the next time you save that
+ruleset. Remove the field before saving. A negated `tagMatches` was always true, so when you remove
+it, keep the rule's behavior by dropping the negation too, or by rewriting the rule. See
+[behavior-rules.md](behavior-rules.md#deployment-context).

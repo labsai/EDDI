@@ -102,30 +102,61 @@ class DeploymentContextConditionTest {
     /**
      * Agents carry no tags: nothing ever wrote the {@code agent:tags} key the
      * condition read, so a rule with {@code tagMatches} could never fire —
-     * including a safety rule meant to force cautious behaviour in production. The
-     * ruleset is refused instead of saved as a rule that silently never matches.
+     * including a safety rule meant to force cautious behaviour in production.
+     * {@code tagMatches} is retired: refused on save, accepted on load.
      */
     @Test
-    void validateConfiguration_tagMatches_isRefused() {
+    void retiredConfiguration_tagMatches_isReported() {
         condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
 
-        var thrown = assertThrows(IllegalArgumentException.class, () -> condition.validateConfiguration());
-        assertTrue(thrown.getMessage().contains("tagMatches"), thrown.getMessage());
-        assertTrue(thrown.getMessage().contains("contextmatcher"), thrown.getMessage());
+        assertDoesNotThrow(() -> condition.validateConfiguration(), "a stored ruleset must still load");
+        var retired = condition.retiredConfiguration();
+        assertNotNull(retired);
+        assertTrue(retired.contains("tagMatches"), retired);
+        assertTrue(retired.contains("contextmatcher"), retired);
     }
 
     @Test
-    void validateConfiguration_blankTagMatches_passes() {
+    void retiredConfiguration_blankTagMatches_isNone() {
         condition.setConfigs(Map.of("when", "production", "tagMatches", "  "));
 
-        assertDoesNotThrow(() -> condition.validateConfiguration());
+        assertNull(condition.retiredConfiguration());
     }
 
     @Test
-    void validateConfiguration_whenOnly_passes() {
+    void retiredConfiguration_whenOnly_isNone() {
         condition.setConfigs(Map.of("when", "production"));
 
-        assertDoesNotThrow(() -> condition.validateConfiguration());
+        assertNull(condition.retiredConfiguration());
+    }
+
+    /**
+     * A stored rule with {@code tagMatches} keeps the behaviour it always had: it
+     * never matches, whatever the environment.
+     */
+    @Test
+    void execute_storedTagMatches_neverMatches() {
+        doReturn("production").when(condition).resolveDeploymentEnv();
+
+        condition.setConfigs(Map.of("when", "production", "tagMatches", "high-risk"));
+        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
+
+        condition.setConfigs(Map.of("tagMatches", "high-risk"));
+        assertEquals(FAIL, condition.execute(memory, Collections.emptyList()));
+    }
+
+    /**
+     * Under a negation the inner condition's FAIL made the rule fire on every turn.
+     * That is what a stored ruleset did before the upgrade, so it still does.
+     */
+    @Test
+    void execute_negatedStoredTagMatches_stillSucceeds() throws Exception {
+        doReturn("production").when(condition).resolveDeploymentEnv();
+        condition.setConfigs(Map.of("tagMatches", "high-risk"));
+        var negation = new Negation();
+        negation.setConditions(List.of(condition));
+
+        assertEquals(SUCCESS, negation.execute(memory, Collections.emptyList()));
     }
 
     @Test
