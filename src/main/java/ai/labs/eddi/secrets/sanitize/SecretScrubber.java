@@ -311,8 +311,39 @@ public class SecretScrubber {
         return isSecretFieldName(fieldName, null);
     }
 
+    /**
+     * The document-level walk: {@link #scrubJson} and {@link #containsCredential}.
+     */
     private void scrubNode(JsonNode node, String parentFieldName) {
+        maskKeyNamedParameters(node, "");
         scrubNode(node, parentFieldName, false);
+    }
+
+    /**
+     * In the model-parameter maps listed in
+     * {@link ConfigSecretRedactor#KEY_NAMED_CREDENTIAL_PATHS}, any literal under a
+     * name ending in {@code key} ({@code accessKey}, {@code subscriptionKey}) is
+     * redacted — the rule the read redaction and the save-time check apply there.
+     * By path, because the same names are ordinary settings elsewhere (an LLM
+     * task's {@code promptCacheKey}), and the export round trip must stay lossless
+     * there.
+     */
+    private static void maskKeyNamedParameters(JsonNode node, String pattern) {
+        if (node instanceof ObjectNode object) {
+            boolean keyNamed = ConfigSecretRedactor.KEY_NAMED_CREDENTIAL_PATHS.contains(pattern);
+            for (Map.Entry<String, JsonNode> field : object.properties()) {
+                JsonNode value = field.getValue();
+                if (keyNamed && value.isTextual() && ConfigSecretRedactor.isKeyNamedLiteral(field.getKey(), value.asText())) {
+                    field.setValue(new TextNode(REDACTED));
+                } else {
+                    maskKeyNamedParameters(value, pattern.isEmpty() ? field.getKey() : pattern + "." + field.getKey());
+                }
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (JsonNode element : array) {
+                maskKeyNamedParameters(element, pattern + "[]");
+            }
+        }
     }
 
     /**
@@ -455,7 +486,19 @@ public class SecretScrubber {
             while (entries.hasNext()) {
                 Map.Entry<String, JsonNode> entry = entries.next();
                 if (!entry.getValue().isTextual()) {
-                    scrubNode(entry.getValue(), entry.getKey(), true);
+                    if (entry.getValue().isValueNode() && !entry.getValue().isNull()) {
+                        // A number or boolean is sent as its text, so {"sig": 1234} is a
+                        // signature: judged by name like the read path's judgeEmbeddedMap.
+                        // scrubNode only walks objects and arrays and passed it through.
+                        String key = entry.getKey();
+                        boolean credential = isSecretFieldName(key, mapName) || (queryMap && ConfigSecretRedactor.isCredentialQueryName(key))
+                                || (!queryMap && ConfigSecretRedactor.isCredentialHeaderName(key));
+                        if (credential) {
+                            entry.setValue(new TextNode(REDACTED));
+                        }
+                    } else {
+                        scrubNode(entry.getValue(), entry.getKey(), true);
+                    }
                     continue;
                 }
                 String value = entry.getValue().asText();
@@ -709,9 +752,19 @@ public class SecretScrubber {
             }
         }
 
-        // Check 1: Known secret field names
+        // Check 1: Known secret field names — for a literal. A value made only of
+        // references and templates (${vars:x}, ${vars.x}, {properties.key},
+        // ${context:…}), optionally with a scheme word ("Bearer ${vars.t}"), is a
+        // pointer: the read redaction keeps it (ConfigSecretRedactor.isLiteral) and so
+        // does the export now, or the export → import round trip replaced a configured
+        // reference with a placeholder. Whatever sits beside a reference is still
+        // judged — "sk-… ${vars.x}" or "prefix {properties.t}" is a literal and is
+        // masked whole, exactly as the read masks it. Vault references were decided
+        // above, by the stricter scaffolding rule. A pointer is returned as it is, so
+        // the free-text shape scan that follows a null cannot take "Bearer ${vars.t}"
+        // for a bearer token.
         if (isSecretFieldName(fieldName, parentFieldName)) {
-            return REDACTED;
+            return ConfigSecretRedactor.isLiteral(textValue) ? REDACTED : textValue;
         }
 
         // Check 2: a credential embedded in a URL. Neither of the other checks can
@@ -848,6 +901,17 @@ public class SecretScrubber {
                 return true;
             }
         }
+        // Never narrower than the editor read: whatever ConfigSecretRedactor hides
+        // from a GET by its name alone (connectionString, nonAzureApiKey,
+        // secretAccessKey, any *ApiKey / *SecretKey, and in a query-parameter map
+        // key, sig, subscriptionKey, ...) is redacted here too. This scrubber judged
+        // those by entropy and shape instead, so a low-entropy literal such as
+        // nonAzureApiKey = "my-litellm-master-key" was hidden on GET and exported
+        // in clear.
+        if (ConfigSecretRedactor.isCredentialName(fieldName)
+                || (isQueryParamContainer(parentFieldName) && ConfigSecretRedactor.isCredentialQueryName(fieldName))) {
+            return true;
+        }
         if (!isHeaderContainer(parentFieldName)) {
             return false;
         }
@@ -897,6 +961,15 @@ public class SecretScrubber {
     /** Whether an enclosing field name denotes a map of HTTP headers. */
     private static boolean isHeaderContainer(String parentFieldName) {
         return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("headers");
+    }
+
+    /**
+     * Whether an enclosing field name denotes a query-parameter map — the same test
+     * {@link ConfigSecretRedactor} applies, so the two agree on which map's
+     * {@code key} or {@code sig} entry is a credential.
+     */
+    private static boolean isQueryParamContainer(String parentFieldName) {
+        return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("queryparams");
     }
 
     /**

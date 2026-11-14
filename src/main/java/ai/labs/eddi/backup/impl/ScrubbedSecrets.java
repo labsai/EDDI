@@ -5,19 +5,15 @@
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.secrets.sanitize.CredentialDestinations;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
-import ai.labs.eddi.utils.EndpointParameters;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Puts a target's own secret values back into source content that the export's
@@ -164,7 +160,8 @@ final class ScrubbedSecrets {
     /**
      * Whether this source object sends its requests to a different place than its
      * target counterpart: a field naming a destination (any key
-     * {@link EndpointParameters#isEndpointKey} accepts — {@code targetServerUrl},
+     * {@link CredentialDestinations#isDestinationField} accepts, which includes
+     * every {@code EndpointParameters} endpoint key — {@code targetServerUrl},
      * {@code baseUrl}, {@code apiEndpoint}, {@code host}, … — or a {@code path}
      * that is an absolute URL on either side) whose origin differs.
      * <p>
@@ -188,81 +185,19 @@ final class ScrubbedSecrets {
      * different server's address once the config was decoded.
      */
     static boolean changesDestination(Map<?, ?> sourceMap, Map<?, ?> targetMap) {
-        Set<String> keys = new LinkedHashSet<>();
-        sourceMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
-        targetMap.keySet().forEach(key -> keys.add(String.valueOf(key)));
-        for (String key : keys) {
-            Object sourceValue = sourceMap.get(key);
-            Object targetValue = targetMap.get(key);
-            if (sourceValue instanceof String bound && isTargetBound(bound)) {
-                continue;
-            }
-            String sourceText = sourceValue instanceof String text ? text : null;
-            String targetText = targetValue instanceof String text ? text : null;
-            if (!isDestinationField(key, sourceText, targetText) || (sourceValue == null && targetValue == null)) {
-                continue;
-            }
-            if (sourceText == null || targetText == null) {
-                if (!Objects.equals(sourceValue, targetValue)) {
-                    return true;
-                }
-                continue;
-            }
-            if (!Objects.equals(destinationOf(sourceText), destinationOf(targetText))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isDestinationField(String key, String sourceValue, String targetValue) {
-        if (EndpointParameters.isEndpointKey(key)) {
-            return true;
-        }
-        // A relative path stays on the host its targetServerUrl names, which is
-        // compared on its own; an absolute one is a destination in itself.
-        return key.equalsIgnoreCase("path") && (isAbsolute(sourceValue) || isAbsolute(targetValue));
-    }
-
-    /**
-     * Where a value sends a request: the origin ({@code scheme://host:port}) of an
-     * absolute URL — a different path on the same origin is the same destination —
-     * and otherwise the value itself.
-     */
-    private static String destinationOf(String value) {
-        String trimmed = value.trim();
-        if (isAbsolute(trimmed)) {
-            try {
-                URI uri = URI.create(trimmed);
-                if (uri.getHost() != null) {
-                    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-                    return scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + ":" + effectivePort(scheme, uri.getPort());
-                }
-            } catch (IllegalArgumentException unparseable) {
-                // a template or otherwise not a URI: compared as written
-            }
-        }
-        return trimmed;
-    }
-
-    /**
-     * The port a request actually uses: an explicit default ({@code :443} on https)
-     * and an omitted one are the same destination, and treating them as different
-     * would replace a working credential with a placeholder.
-     */
-    private static int effectivePort(String scheme, int port) {
-        if (port != -1) {
-            return port;
-        }
-        return switch (scheme) {
-            case "http", "ws" -> 80;
-            case "https", "wss" -> 443;
-            default -> -1;
-        };
-    }
-
-    private static boolean isAbsolute(String value) {
-        return value != null && value.contains("://");
+        // A changed provider type, port or useTls counts too: an upgrade that kept
+        // the apiKey placeholder and changed type had the target's key restored and
+        // sent to the other vendor's default endpoint. The rule is shared with the
+        // JSON Patch path, so the two cannot disagree on what a destination is.
+        // A target-bound source value counts as unchanged only where merge() really
+        // replaces it by the target's: the target holds a string there and
+        // keepsTarget() agrees. A bound value the target has nothing for is kept as
+        // written by merge(), so it is a destination like any other — skipping it on
+        // isTargetBound() alone let "https://attacker.example/v1?ref=${vault:k}"
+        // through as a "bound" baseUrl the target never had, and the target's apiKey
+        // was restored beside it.
+        return CredentialDestinations.changesDestination(sourceMap, targetMap,
+                (source, target) -> isTargetBound(source) && keepsTarget(source, target));
     }
 
     private static boolean isVaultReference(String text) {

@@ -6,12 +6,14 @@ package ai.labs.eddi.engine.setup;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.llm.rest.RestLlmStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
@@ -22,6 +24,7 @@ import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -82,6 +85,26 @@ public class ApiAgentSyncService {
     private final AgentSetupService setupService;
     private final ObjectMapper comparison = new ObjectMapper();
 
+    /**
+     * The local agent store, for reading the agent this sync writes back without
+     * the read-redaction (see {@link RestAgentStore#readUnredacted}). Same access
+     * check. Field-injected; {@code null} in tests built with {@code new}, which
+     * falls back to the loopback read.
+     */
+    @Inject
+    RestAgentStore localAgentStore;
+
+    /**
+     * The local LLM store, for the same reason: sync rewrites an LLM task's tools
+     * list and API summary and writes the task back, and through the loopback
+     * client an editor's copy carried the marker in place of a literal
+     * {@code apiKey}, so the write was refused after the httpcalls had been
+     * written. Field-injected; {@code null} in tests, which keeps the loopback
+     * read.
+     */
+    @Inject
+    RestLlmStore localLlmStore;
+
     @Inject
     public ApiAgentSyncService(IRestInterfaceFactory restInterfaceFactory, AgentSetupService setupService) {
         this.restInterfaceFactory = restInterfaceFactory;
@@ -141,7 +164,9 @@ public class ApiAgentSyncService {
         if (current == null || current < 1) {
             throw new AgentSyncNotFoundException("Agent not found: " + agentId);
         }
-        AgentConfiguration agent = agentStore.readAgent(agentId, current);
+        AgentConfiguration agent = localAgentStore != null
+                ? localAgentStore.readUnredacted(agentId, current)
+                : agentStore.readAgent(agentId, current);
         if (agent == null || agent.getWorkflows() == null) {
             throw new AgentSyncNotFoundException("Agent not found: " + agentId + " version " + current);
         }
@@ -190,6 +215,16 @@ public class ApiAgentSyncService {
         // ── Regenerate from the new spec ──────────────────────────────────────────
         String authHeader = firstNonBlank(request.apiAuthHeader(), recordedAuthHeader(generatedByGroup.values()));
         String apiAuth = request.apiAuth() != null ? request.apiAuth() : recordedApiAuth(generatedByGroup.values());
+        if (apiAuth != null && apiAuth.contains(ConfigSecretRedactor.MARKER_PREFIX)) {
+            // The recorded header is a plaintext credential this caller reads redacted.
+            // Carrying the marker forward vaulted the MARKER as the new secret (vault on)
+            // or wrote it into the headers (vault off); carrying the stored literal
+            // forward instead would let the caller bind it to a new apiBaseUrl of their
+            // choosing. Neither: the caller supplies the credential.
+            throw new AgentSetupException("The generated httpcalls send a plaintext credential in their " + authHeader
+                    + " header, which is redacted for you. Pass apiAuth (a ${vault:...} reference, or the credential) with the sync, or ask "
+                    + "an eddi-admin to run it. Nothing was changed.");
+        }
         McpApiToolBuilder.ApiBuildResult built;
         try {
             built = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), apiAuth, authHeader,
@@ -214,7 +249,9 @@ public class ApiAgentSyncService {
         for (var step : workflow.getWorkflowSteps()) {
             String location = stepUri(step, LLM_STEP_TYPE);
             if (location != null) {
-                LlmConfiguration llm = llmStore.readLlm(idOf(location), versionOf(location));
+                LlmConfiguration llm = localLlmStore != null
+                        ? localLlmStore.readUnredacted(idOf(location), versionOf(location))
+                        : llmStore.readLlm(idOf(location), versionOf(location));
                 if (llm != null) {
                     llmByLocation.put(location, llm);
                 }

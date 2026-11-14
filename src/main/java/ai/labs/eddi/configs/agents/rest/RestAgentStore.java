@@ -24,12 +24,14 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -48,6 +50,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -157,13 +160,63 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * The agent as stored for an {@code eddi-admin}, and with every plaintext
+     * credential redacted for anyone else — the {@code dream.parameters} of the
+     * consolidation model ({@code apiKey}) and a legacy {@code channels[].config}
+     * ({@code botToken}, {@code signingSecret}). The same rule
+     * {@code RestLlmStore.readLlm} applies; without it an editor with VIEW read an
+     * administrator's literal key straight out of the agent.
+     */
     @Override
     public AgentConfiguration readAgent(String id, Integer version) {
+        AgentConfiguration stored = restVersionInfo.read(id, version);
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, AgentConfiguration.class);
+    }
+
+    /**
+     * {@link #readAgent} without the read-redaction, for server-side work an
+     * editor's request starts that writes the agent back or compares against it —
+     * re-pointing a workflow, the cascade, setup-api sync, upgrade and sync.
+     * Working from the redacted copy would write the marker over the stored
+     * credential (or be refused for carrying it). The same access check applies.
+     */
+    public AgentConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
+    }
+
+    /**
+     * {@link #readUnredacted} when {@code store} is this bean — in production it
+     * always is, the injected interface being its client proxy — and
+     * {@link IRestAgentStore#readAgent} otherwise (a test double, which redacts
+     * nothing).
+     */
+    public static AgentConfiguration readUnredacted(IRestAgentStore store, String id, Integer version) {
+        return store instanceof RestAgentStore local ? local.readUnredacted(id, version) : store.readAgent(id, version);
+    }
+
+    /**
+     * Refuses the redaction marker ({@link RedactionMarkerGuard}) and warns about,
+     * but keeps accepting, a plaintext credential: {@code dream.parameters} and a
+     * legacy channel connector have always taken literals, and refusing them now
+     * would break every stored agent that has one on its next save. The log line
+     * names the paths, never the values.
+     */
+    private static void checkCredentials(AgentConfiguration agentConfiguration) {
+        RedactionMarkerGuard.requireNone(agentConfiguration);
+        List<String> plaintext = ConfigSecretRedactor.plaintextSecretPaths(agentConfiguration, Set.of());
+        if (!plaintext.isEmpty()) {
+            log.warnf("Agent configuration stores %s in plaintext — GET /agentstore/agents/{id} returns it to administrators "
+                    + "(redacted for everyone else) and it is scrubbed from exports. Store the key in the secrets vault and "
+                    + "reference it as ${vault:<key>} instead.", String.join(", ", plaintext));
+        }
     }
 
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
+        checkCredentials(agentConfiguration);
         validateSecurityFlags(agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         // The agent's own EDIT check first: the workflow lookup below answers "exists
@@ -214,7 +267,9 @@ public class RestAgentStore implements IRestAgentStore {
         }
 
         boolean updated = false;
-        AgentConfiguration agentConfig = readAgent(id, version);
+        // Unredacted: the agent is written back, and the redacted copy would carry the
+        // marker in place of a stored credential.
+        AgentConfiguration agentConfig = readUnredacted(id, version);
         List<URI> packages = agentConfig.getWorkflows();
         for (int index = 0; index < packages.size(); index++) {
             URI workflowUri = packages.get(index);
@@ -305,6 +360,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
+        checkCredentials(agentConfiguration);
         validateSecurityFlags(agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
@@ -335,6 +391,9 @@ public class RestAgentStore implements IRestAgentStore {
         version = restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
+            // Read from the store, not through readAgent: the copy keeps the original's
+            // credentials. A marker can only be here if something stored one.
+            RedactionMarkerGuard.requireNone(agentConfig);
             validateSecurityFlags(agentConfig);
             RatingConfigValidator.validate(agentConfig);
             // The copy is an agent a person made, not one create_sub_agent

@@ -68,6 +68,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
         validateServiceJudgeGrants(groupConfiguration);
+        validateConsolidationCredentials(null, null, groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
@@ -93,6 +94,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         HitlConfigValidation.validate(groupConfiguration.getHitlConfig());
         validateMembersAndLimits(groupConfiguration);
         validateServiceJudgeGrants(groupConfiguration);
+        validateConsolidationCredentials(id, version, groupConfiguration);
         rejectNestingCycle(id, groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
@@ -152,6 +154,44 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }
+    }
+
+    /**
+     * A NEW plaintext credential or {@code ${connection:...}} reference in
+     * {@code lessonConfig.consolidation.parameters} is refused, as a SERVICE
+     * judge's is: a group config must not become a plaintext key store, editors
+     * read a redacted copy of it, and the model registry refuses connection
+     * references for model parameters. A value the version being replaced already
+     * holds under the same key is carried over and kept, so a group stored before
+     * this rule still saves. The stored version is read only when there is
+     * something to judge; one that cannot be read counts as holding none (fail
+     * closed).
+     */
+    void validateConsolidationCredentials(String id, Integer version, AgentGroupConfiguration config) {
+        Map<String, String> parameters = consolidationParameters(config);
+        if (parameters.isEmpty() || ServiceJudgeValidation.newModelParameterProblems("", parameters, Map.of()).isEmpty()) {
+            return;
+        }
+        Map<String, String> stored = Map.of();
+        if (id != null && version != null) {
+            try {
+                stored = consolidationParameters(read(id, version));
+            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | RuntimeException e) {
+                LOGGER.debugf("Could not read group %s v%s to compare its consolidation parameters: %s", LogSanitizer.sanitize(id),
+                        version, LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        List<String> problems = ServiceJudgeValidation.newModelParameterProblems("lessonConfig.consolidation.parameters", parameters,
+                stored);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+    }
+
+    private static Map<String, String> consolidationParameters(AgentGroupConfiguration config) {
+        var lessonConfig = config == null ? null : config.getLessonConfig();
+        var consolidation = lessonConfig == null ? null : lessonConfig.consolidation();
+        return consolidation == null || consolidation.parameters() == null ? Map.of() : consolidation.parameters();
     }
 
     /** The assertable half of {@link #validateMembersAndLimits}. Empty = valid. */

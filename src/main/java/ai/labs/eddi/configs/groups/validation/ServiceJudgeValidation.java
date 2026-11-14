@@ -93,18 +93,8 @@ public final class ServiceJudgeValidation {
         if (parameters == null || parameters.isEmpty()) {
             return problems;
         }
-        var secretPaths = new LinkedHashSet<>(ConfigSecretRedactor.plaintextSecretPaths(parameters, Set.of()));
-        // Model builders name their credentials *Key (accessKey, secretAccessKey,
-        // subscriptionKey); the shared redactor does not treat every one of those
-        // as a credential, so this map is held to the stricter rule.
-        parameters.forEach((key, value) -> {
-            if (key.toLowerCase(Locale.ROOT).endsWith("key") && !isReference(value) && !value.contains(CONNECTION_REFERENCE)) {
-                secretPaths.add(key);
-            }
-        });
-        for (String secretPath : secretPaths) {
-            problems.add(path + "." + secretPath + " holds a plaintext credential — store it in the vault and reference it as "
-                    + "${vault:...} (or ${vars:...})");
+        for (String secretPath : plaintextCredentialKeys(parameters)) {
+            problems.add(plaintextProblem(path, secretPath));
         }
         parameters.forEach((key, value) -> {
             if (value != null && value.contains(CONNECTION_REFERENCE)) {
@@ -113,6 +103,66 @@ public final class ServiceJudgeValidation {
             }
         });
         return problems;
+    }
+
+    /**
+     * What a save must refuse in a model-parameter map — for
+     * {@code lessonConfig.consolidation.parameters}, which took any value before
+     * these rules existed: a plaintext credential, and a {@code ${connection:...}}
+     * reference, which the model registry refuses for model parameters at call time
+     * (the judge's rule, {@link #parameterProblems}). A value identical to the one
+     * {@code stored} holds under the same key is carried over, not new, and is let
+     * through: refusing it would make every stored group that has one unsavable.
+     * Only an administrator can send a literal back unchanged (anyone else reads
+     * the marker in its place, which {@code RedactionMarkerGuard} refuses). The
+     * value is never part of a message.
+     *
+     * @param stored
+     *            the same map in the version being replaced, or an empty map for a
+     *            create
+     */
+    public static List<String> newModelParameterProblems(String path, Map<String, String> parameters, Map<String, String> stored) {
+        List<String> problems = new ArrayList<>();
+        if (parameters == null || parameters.isEmpty()) {
+            return problems;
+        }
+        Map<String, String> before = stored == null ? Map.of() : stored;
+        for (String key : plaintextCredentialKeys(parameters)) {
+            String value = parameters.get(key);
+            if (value == null || !value.equals(before.get(key))) {
+                problems.add(plaintextProblem(path, key));
+            }
+        }
+        parameters.forEach((key, value) -> {
+            if (value != null && value.contains(CONNECTION_REFERENCE) && !value.equals(before.get(key))) {
+                problems.add(path + "." + key + " uses a ${connection:...} reference, which model parameters do not accept — "
+                        + "use ${vault:...} or ${vars:...}");
+            }
+        });
+        return problems;
+    }
+
+    /**
+     * The keys of {@code parameters} holding a plaintext credential: the shared
+     * redactor's rule, plus any key ending in {@code key}.
+     */
+    private static Set<String> plaintextCredentialKeys(Map<String, String> parameters) {
+        var secretPaths = new LinkedHashSet<>(ConfigSecretRedactor.plaintextSecretPaths(parameters, Set.of()));
+        // Model builders name their credentials *Key (accessKey, secretAccessKey,
+        // subscriptionKey); the shared redactor does not treat every one of those
+        // as a credential, so this map is held to the stricter rule.
+        parameters.forEach((key, value) -> {
+            if (value != null && key.toLowerCase(Locale.ROOT).endsWith("key") && !isReference(value)
+                    && !value.contains(CONNECTION_REFERENCE)) {
+                secretPaths.add(key);
+            }
+        });
+        return secretPaths;
+    }
+
+    private static String plaintextProblem(String path, String key) {
+        return path + "." + key + " holds a plaintext credential — store it in the vault and reference it as "
+                + "${vault:...} (or ${vars:...})";
     }
 
     /**

@@ -125,8 +125,12 @@ public final class ConfigSecretRedactor {
     private static final Set<String> SCHEME_WORDS = Set.of("bearer", "basic", "digest", "token", "bot", "apikey", "api-key", "key", "ssws",
             "oauth", "negotiate", "hmac");
 
-    /** Whole (normalized) names that hold a credential wherever they appear. */
-    private static final Set<String> CREDENTIAL_NAMES = Set.of("apikey", "apikeys", "token", "secret", "secrets", "password", "passwd", "pwd",
+    /**
+     * Whole (normalized) names that hold a credential wherever they appear.
+     * Package-visible, with the two lists below, for the parity test that holds
+     * {@link SecretScrubber} (the export) to at least these rules.
+     */
+    static final Set<String> CREDENTIAL_NAMES = Set.of("apikey", "apikeys", "token", "secret", "secrets", "password", "passwd", "pwd",
             "passphrase", "credential", "credentials", "authorization", "connectionstring", "nonazureapikey", "secretaccesskey", "privatekey",
             "clientsecret", "signingsecret", "privatekeypem");
 
@@ -136,15 +140,26 @@ public final class ConfigSecretRedactor {
      * tokens ends in {@code tokens}, while {@code botToken}, {@code accessToken}
      * and {@code authToken} end in {@code token}.
      */
-    private static final List<String> CREDENTIAL_SUFFIXES = List.of("apikey", "token", "secret", "password", "passwd", "passphrase",
+    static final List<String> CREDENTIAL_SUFFIXES = List.of("apikey", "token", "secret", "password", "passwd", "passphrase",
             "privatekey", "secretkey", "credential", "credentials");
 
     /** A first word that turns a credential noun into a quantity of them. */
     private static final Set<String> QUANTITY_WORDS = Set.of("max", "min", "num", "number", "total", "budget", "count");
 
     /** Query-parameter names that carry a credential beyond the header rule. */
-    private static final Set<String> CREDENTIAL_QUERY_NAMES = Set.of("key", "sig", "signature", "subscriptionkey", "accesskey",
+    static final Set<String> CREDENTIAL_QUERY_NAMES = Set.of("key", "sig", "signature", "subscriptionkey", "accesskey",
             "appkey", "licensekey", "clientkey", "signingkey");
+
+    /**
+     * Model-parameter maps whose literals are judged by the stricter save-time rule
+     * ({@code ServiceJudgeValidation}): any name ending in {@code key} —
+     * {@code accessKey}, {@code secretAccessKey}, {@code subscriptionKey} — is a
+     * credential there, because model builders name their credentials that way.
+     * Container patterns, {@code []} for any array index. Only these maps: in an
+     * LLM task's parameters the same rule would hide {@code promptCacheKey}.
+     */
+    public static final Set<String> KEY_NAMED_CREDENTIAL_PATHS = Set.of("userMemoryConfig.dream.parameters",
+            "lessonConfig.consolidation.parameters", "phases[].convergence.service.parameters");
 
     /** Field names whose string value is a URL or a path with a query. */
     private static final Set<String> URL_FIELD_NAMES = Set.of("path", "url", "uri");
@@ -260,7 +275,9 @@ public final class ConfigSecretRedactor {
                 }
                 JsonNode value = field.getValue();
                 if (value.isTextual()) {
-                    String replacement = judge(name, containerName, value.asText());
+                    String replacement = KEY_NAMED_CREDENTIAL_PATHS.contains(pattern) && isKeyNamedLiteral(name, value.asText())
+                            ? REDACTED
+                            : judge(name, containerName, value.asText());
                     if (replacement != null) {
                         found.add(childPath);
                         if (rewrite) {
@@ -532,6 +549,16 @@ public final class ConfigSecretRedactor {
         }
         String normalized = normalize(name);
         return UriRedactor.isSensitiveHeaderName(name) || normalized.endsWith("key") || "cookie".equals(normalized);
+    }
+
+    /**
+     * Whether a value in a {@linkplain #KEY_NAMED_CREDENTIAL_PATHS key-named
+     * credential map} is a literal credential: its name ends in {@code key} and it
+     * is not only references and scheme words.
+     */
+    static boolean isKeyNamedLiteral(String name, String value) {
+        return name != null && value != null && !value.isBlank() && !value.contains(MARKER_PREFIX) && normalize(name).endsWith("key")
+                && isLiteral(value);
     }
 
     /** Whether a query parameter's name says it carries a credential. */

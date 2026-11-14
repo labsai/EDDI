@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import jakarta.ws.rs.BadRequestException;
@@ -21,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The import and upgrade paths create every resource type through one method,
- * so their marker check is scoped to the five document types whose REST reads
+ * so their marker check is scoped to the document types whose REST reads
  * produce the marker; elsewhere the same text is content.
  */
 class RedactionMarkerGuardScopeTest {
@@ -39,6 +41,22 @@ class RedactionMarkerGuardScopeTest {
         assertTrue(RedactionMarkerGuard.isRedactedDocumentType(llmWith("sk-fixturefixturefixturefixture")));
         assertThrows(BadRequestException.class, () -> RedactionMarkerGuard.requireNoneIfRedactedType(llmWith(ConfigSecretRedactor.REDACTED)));
         assertDoesNotThrow(() -> RedactionMarkerGuard.requireNoneIfRedactedType(llmWith("${vault:openai}")));
+    }
+
+    @Test
+    @DisplayName("agents and groups are redacted types too: an import or upgrade carrying the marker in them is refused")
+    void agentAndGroupAreRedactedTypes() {
+        var agent = new AgentConfiguration();
+        var connector = new AgentConfiguration.ChannelConnector();
+        connector.setConfig(new LinkedHashMap<>(Map.of("botToken", ConfigSecretRedactor.REDACTED)));
+        agent.setChannels(List.of(connector));
+        var group = new AgentGroupConfiguration();
+        group.setDescription("carries " + ConfigSecretRedactor.IN_STRING_REDACTED);
+
+        assertTrue(RedactionMarkerGuard.isRedactedDocumentType(agent));
+        assertTrue(RedactionMarkerGuard.isRedactedDocumentType(group));
+        assertThrows(BadRequestException.class, () -> RedactionMarkerGuard.requireNoneIfRedactedType(agent));
+        assertThrows(BadRequestException.class, () -> RedactionMarkerGuard.requireNoneIfRedactedType(group));
     }
 
     @Test
