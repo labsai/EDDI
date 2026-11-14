@@ -230,6 +230,7 @@ and the propagation rules are in the
 eddi_tool_cache_hits_total                  # Cache hits
 eddi_tool_cache_misses_total                # Cache misses
 eddi_tool_cache_puts_by_tool_total{tool}    # Cache puts (per tool; there is no untagged variant)
+eddi_tool_cache_skipped_oversized_total{tool}  # Results not cached: longer than eddi.tools.cache.max-entry-chars (counter)
 eddi_tool_cache_hits_by_tool_total{tool}    # Cache hits, per tool
 eddi_tool_cache_misses_by_tool_total{tool}  # Cache misses, per tool
 eddi_tool_cache_get_duration_seconds        # Get latency (timer)
@@ -1159,7 +1160,7 @@ eddi_cluster_events_resync_total            # Full local cache flushes after pos
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_events_dispatch_queue          # Received events waiting to be handled on this node, both lanes (gauge)
 eddi_cluster_events_dropped_total           # Received events a full dispatch lane could not take (each one triggers a resync)
-eddi_cluster_signing_rejected_total         # Cluster messages refused {kind=rpc|rpc-reply|event, reason=unsigned|malformed|unknown_key|bad_signature|expired|replayed}
+eddi_cluster_signing_rejected_total         # Cluster messages refused {kind=rpc|rpc-reply|event, reason=unsigned|malformed|unknown_key|bad_signature|expired|replayed|nonce_capacity}
 eddi_cluster_signing_unsigned_total         # Unsigned cluster messages accepted because eddi.cluster.signing.required=false {kind}
 eddi_cluster_payload_newer_total            # Messages of a newer payload version than this node knows {kind}
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
