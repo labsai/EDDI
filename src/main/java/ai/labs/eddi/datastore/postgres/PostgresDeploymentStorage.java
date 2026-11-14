@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import io.quarkus.arc.DefaultBean;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -16,7 +17,10 @@ import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * PostgreSQL implementation of {@link IDeploymentStorage}.
@@ -26,6 +30,8 @@ import java.util.List;
 @ApplicationScoped
 @DefaultBean
 public class PostgresDeploymentStorage implements IDeploymentStorage {
+
+    private static final Logger LOGGER = Logger.getLogger(PostgresDeploymentStorage.class);
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS deployments (
@@ -86,10 +92,8 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
             ps.setString(2, agentId);
             ps.setInt(3, agentVersion);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return toDeploymentInfo(rs);
-                }
-                return null;
+                // An unreadable row reads as no row (toDeploymentInfo logs it).
+                return rs.next() ? toDeploymentInfo(rs) : null;
             }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read deployment info", e);
@@ -114,7 +118,10 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
             }
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    results.add(toDeploymentInfo(rs));
+                    DeploymentInfo info = toDeploymentInfo(rs);
+                    if (info != null) {
+                        results.add(info);
+                    }
                 }
             }
             return results;
@@ -149,12 +156,70 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
         }
     }
 
+    /**
+     * One row as a {@link DeploymentInfo}, or {@code null} when its status or its
+     * environment is not one this release knows — logged and skipped, so one bad
+     * row cannot fail the read of every deployment (the startup redeploy included).
+     * Both used to go through {@code Enum.valueOf}, which threw for such a row.
+     * <p>
+     * Neither is guessed. Reading an unknown status as {@code deployed} or
+     * {@code undeployed} would deploy or drop an agent nobody asked for. And the
+     * environment is part of the primary key that every later write uses: a row
+     * read as {@code production} while it is stored as, say, {@code unrestricted}
+     * would be redeployed by the sweep, while the undeploy write and the cleanup
+     * delete, keyed on {@code production}, would never reach it. So only the exact
+     * name of an {@link Environment} constant — what {@link #setDeploymentInfo}
+     * stores — is accepted.
+     * <p>
+     * This differs from {@code MongoDeploymentStorage}, which reads through
+     * {@link Environment#fromString} (v5 names and unknown names become
+     * {@code production}); there {@code V6RenameMigration} rewrites v5 rows in
+     * place first. EDDI 5 never ran on PostgreSQL, so this table holds v5 names
+     * only if it was written by a pre-6.0 development build.
+     */
     private DeploymentInfo toDeploymentInfo(ResultSet rs) throws SQLException {
+        String environment = rs.getString("environment");
+        String agentId = rs.getString("AGENT_ID");
+        int agentVersion = rs.getInt("AGENT_VERSION");
+        String status = rs.getString("deployment_status");
+        DeploymentInfo.DeploymentStatus deploymentStatus = parseStatus(status);
+        if (deploymentStatus == null) {
+            LOGGER.warnf("Skipping deployment row agentId=%s version=%d: unknown deployment_status '%s' (expected one of %s)",
+                    sanitize(agentId), agentVersion, sanitize(status), Arrays.toString(DeploymentInfo.DeploymentStatus.values()));
+            return null;
+        }
+        Environment deploymentEnvironment = parseEnvironment(environment);
+        if (deploymentEnvironment == null) {
+            LOGGER.warnf("Skipping deployment row agentId=%s version=%d: unknown environment '%s' (expected one of %s)",
+                    sanitize(agentId), agentVersion, sanitize(environment), Arrays.toString(Environment.values()));
+            return null;
+        }
         DeploymentInfo info = new DeploymentInfo();
-        info.setEnvironment(Environment.valueOf(rs.getString("environment")));
-        info.setAgentId(rs.getString("AGENT_ID"));
-        info.setAgentVersion(rs.getInt("AGENT_VERSION"));
-        info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.valueOf(rs.getString("deployment_status")));
+        info.setEnvironment(deploymentEnvironment);
+        info.setAgentId(agentId);
+        info.setAgentVersion(agentVersion);
+        info.setDeploymentStatus(deploymentStatus);
         return info;
+    }
+
+    /** The environment whose name is exactly {@code environment}, else null. */
+    private static Environment parseEnvironment(String environment) {
+        for (Environment candidate : Environment.values()) {
+            if (candidate.name().equals(environment)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static DeploymentInfo.DeploymentStatus parseStatus(String status) {
+        if (status == null) {
+            return null;
+        }
+        try {
+            return DeploymentInfo.DeploymentStatus.valueOf(status);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
     }
 }

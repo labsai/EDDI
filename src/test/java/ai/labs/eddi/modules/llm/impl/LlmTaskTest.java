@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.LogCaptureSupport;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -547,6 +548,70 @@ class LlmTaskTest {
             assertTrue(LlmTask.producesRenderableOutput("  Hello world  \n"),
                     "Text with content (even with surrounding whitespace) should pass");
         }
+    }
+
+    // ==================== logSizeLimit parsing ====================
+
+    @Test
+    void logSizeLimit_validValuesAreUsed() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(5, LlmTask.resolveLogSizeLimit("5", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("-1", 10, memory), "-1 stays unlimited");
+        assertEquals(0, LlmTask.resolveLogSizeLimit("0", 10, memory), "0 stays no history");
+    }
+
+    @Test
+    void logSizeLimit_surroundingWhitespaceIsTrimmed() {
+        assertEquals(7, LlmTask.resolveLogSizeLimit("  7 \n", 10, mock(IConversationMemory.class)));
+    }
+
+    @Test
+    void logSizeLimit_absentOrBlankFallsBack() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(10, LlmTask.resolveLogSizeLimit(null, 10, memory));
+        assertEquals(10, LlmTask.resolveLogSizeLimit("", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("   ", -1, memory));
+    }
+
+    @Test
+    void logSizeLimit_nonNumericFallsBackInsteadOfThrowing() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getConversationId()).thenReturn("conv-1");
+        assertEquals(10, LlmTask.resolveLogSizeLimit("ten", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("3.5", -1, memory));
+        assertEquals(10, LlmTask.resolveLogSizeLimit("99999999999", 10, memory), "out of int range");
+    }
+
+    /**
+     * The value is the rendered template, so it can carry conversation data
+     * (CWE-532): the WARN names the problem and the length, never the value.
+     */
+    @Test
+    void logSizeLimit_warningNamesTheProblemButNotTheValue() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn("agent-1");
+        when(memory.getConversationId()).thenReturn("conv-1");
+
+        var records = LogCaptureSupport.captureRecordsOf(LlmTask.class, () -> {
+            assertEquals(10, LlmTask.resolveLogSizeLimit("secret-user-text", 10, memory));
+            assertEquals(10, LlmTask.resolveLogSizeLimit("-7", 10, memory));
+        });
+
+        var warnings = records.stream().filter(LogCaptureSupport.CapturedRecord::isWarning).map(LogCaptureSupport.CapturedRecord::message).toList();
+        assertEquals(2, warnings.size(), "one WARN per invalid value: " + records);
+        assertTrue(warnings.get(0).contains("not an integer, 16 characters"), warnings.get(0));
+        assertTrue(warnings.get(0).contains("agent-1") && warnings.get(0).contains("conv-1"), warnings.get(0));
+        assertFalse(warnings.get(0).contains("secret-user-text"), "the rendered value must not be logged: " + warnings.get(0));
+        assertTrue(warnings.get(1).contains("below -1, 2 characters"), warnings.get(1));
+        assertFalse(warnings.get(1).contains("-7"), warnings.get(1));
+    }
+
+    @Test
+    void logSizeLimit_negativeBelowMinusOneFallsBack() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        assertEquals(10, LlmTask.resolveLogSizeLimit("-2", 10, memory));
+        assertEquals(-1, LlmTask.resolveLogSizeLimit("-50", -1, memory));
     }
 
 }
