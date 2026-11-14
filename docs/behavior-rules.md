@@ -310,7 +310,7 @@ Check if another `Behavior Rule` has met it's condition or not in the same `conv
 (...)
 ```
 
-`reference` is **required** and validated when the ruleset is loaded — without it the condition could only fail. A reference that names no rule fails the condition. Several rules may share the referenced name; the condition succeeds if any of them does.
+`reference` is **required** when you save a ruleset — without it the condition can only fail. A ruleset stored without one before this check existed still deploys and imports, with a WARN naming the rule, and the condition keeps failing as it always did. A reference that names no rule fails the condition. Several rules may share the referenced name; the condition succeeds if any of them does.
 
 ### Action Matcher
 
@@ -407,10 +407,17 @@ anything.
 | ------ | ------ | ---------------------------------------------------------------------------------------------------- |
 | `when` | string | Matched against the current deployment environment, ignoring case. A rule without it (or with a blank value) matches in every environment, which is rarely what anyone means — set it |
 
-A `tagMatches` config is refused when the ruleset is saved or deployed, with an error naming the
-rule. It was meant to match the agent's tags, but agents carry no tags, so a rule with it never
-fired. To vary behavior per agent, match a value the client sends with a `contextmatcher`, or give
-the agents different rulesets.
+A `tagMatches` config is refused when you save a ruleset (REST, MCP or the Manager), with an error
+naming the rule. It was meant to match the agent's tags, but agents carry no tags, so a condition
+with it never matched. To vary behavior per agent, match a value the client sends with a
+`contextmatcher`, or give the agents different rulesets.
+
+A ruleset that was stored with `tagMatches` before it was retired still deploys, imports, syncs and
+duplicates. The server logs a WARN naming the ruleset and the rule, and the condition behaves as it
+always did: it never matches. Under a `negation` it therefore always matches, so a rule such as
+`negation { deploymentContext { tagMatches: "high-risk" } }` keeps firing on every turn. Remove the
+field when you next edit the ruleset, because that save is refused until you do. If you remove it,
+the condition starts matching on `when` alone, so check what the rule does without it.
 
 The environment is read from the system property `eddi.deployment.env`, falling back to the
 environment variable `EDDI_DEPLOYMENT_ENV` and then to `development`. Prefer this over passing an

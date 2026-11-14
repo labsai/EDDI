@@ -17,16 +17,26 @@ import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.mongo.RuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.serialization.DocumentBuilder;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import ai.labs.eddi.modules.rules.impl.RuleDeserialization;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.inject.Instance;
@@ -274,6 +284,48 @@ class RestImportServiceReviewFixesTest {
         assertEquals(201, runImport("create", Map.of(IRuleSetStore.class, ruleSetStore)).getStatus());
 
         verify(ruleSetStore, times(1)).create(any());
+    }
+
+    /**
+     * An agent exported before {@code tagMatches} was retired must still import.
+     * The ruleset goes through the real {@link RuleSetStore} save check, which
+     * refuses the retired config for an author's save, but not for an import.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("an exported ruleset with a retired tagMatches still imports")
+    void rulesetWithRetiredTagMatchesImports() throws Exception {
+        String rules = "eddi://ai.labs.rules/rulestore/rulesets/" + RULES_ID;
+        givenArchive(List.of(WORKFLOW_ID), workflowDir -> {
+            Files.writeString(new File(workflowDir, WORKFLOW_ID + ".workflow.json").toPath(), "{\"workflowSteps\":["
+                    + "{\"type\":\"eddi://ai.labs.rules\",\"config\":{\"uri\":\"" + rules + "?version=1\"}}]}");
+            Files.writeString(new File(workflowDir, RULES_ID + ".behavior.json").toPath(), "RULESJSON");
+        });
+        String legacyRuleSet = """
+                { "behaviorGroups": [ { "name": "g", "rules": [
+                  { "name": "Not High Risk", "actions": ["be_relaxed"], "conditions": [
+                    { "type": "negation", "conditions": [
+                      { "type": "deploymentContext", "configs": { "tagMatches": "high-risk" } } ] } ] }
+                ] } ] }
+                """;
+        when(jsonSerialization.deserialize(eq("RULESJSON"), eq(RuleSetConfiguration.class)))
+                .thenAnswer(i -> mapper.readValue(legacyRuleSet, RuleSetConfiguration.class));
+
+        ObjectMapper objectMapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        var storageFactory = mock(IResourceStorageFactory.class);
+        IResourceStorage<RuleSetConfiguration> resourceStorage = mock(IResourceStorage.class);
+        when(storageFactory.create(eq("rulesets"), any(), eq(RuleSetConfiguration.class), any(String[].class))).thenReturn(resourceStorage);
+        IResourceStorage.IResource<RuleSetConfiguration> stored = mock(IResourceStorage.IResource.class);
+        when(stored.getId()).thenReturn("cccc11112222333344445552");
+        when(stored.getVersion()).thenReturn(1);
+        when(resourceStorage.newResource(any(RuleSetConfiguration.class))).thenReturn(stored);
+        var ruleSetStore = new RuleSetStore(storageFactory, new DocumentBuilder(new JsonSerialization(objectMapper)),
+                new RuleDeserialization(objectMapper, mock(IExpressionProvider.class), new JsonSerialization(objectMapper),
+                        mock(IMemoryItemConverter.class), mock(CapabilityRegistryService.class), mock(ITemplatingEngine.class)));
+
+        assertEquals(201, runImport("create", Map.of(IRuleSetStore.class, ruleSetStore)).getStatus());
+
+        verify(resourceStorage).store(stored);
     }
 
     // ==================== fixtures ====================

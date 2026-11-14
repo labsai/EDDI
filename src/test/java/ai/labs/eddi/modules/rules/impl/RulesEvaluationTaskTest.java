@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rules.impl;
 
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -11,9 +12,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -173,7 +177,7 @@ class RulesEvaluationTaskTest {
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
             var behaviorSet = new RuleSet();
-            when(behaviorSerialization.deserialize("{}")).thenReturn(behaviorSet);
+            when(behaviorSerialization.deserialize(eq("{}"), anyString())).thenReturn(behaviorSet);
 
             Object result = task.configure(config, Collections.emptyMap());
             assertNotNull(result);
@@ -203,12 +207,42 @@ class RulesEvaluationTaskTest {
             when(jsonSerialization.serialize(behaviorConfig)).thenReturn("{}");
 
             var behaviorSet = new RuleSet();
-            when(behaviorSerialization.deserialize("{}")).thenReturn(behaviorSet);
+            when(behaviorSerialization.deserialize(eq("{}"), anyString())).thenReturn(behaviorSet);
 
             Object result = task.configure(config, Collections.emptyMap());
             assertNotNull(result);
             var evaluator = (RulesEvaluator) result;
             assertFalse(evaluator.isAppendActions());
+        }
+
+        /**
+         * #1337 refused a stored ruleset with {@code tagMatches} on load, so an agent
+         * that deployed before the upgrade no longer deployed at all. A stored ruleset
+         * is read leniently: it deploys, and the retired config keeps its old behaviour
+         * (here: a negated tagMatches, which always succeeded).
+         */
+        @Test
+        @DisplayName("a stored ruleset with a retired tagMatches still deploys")
+        void configure_storedRulesetWithTagMatches_deploys() throws Exception {
+            var realDeserialization = new RuleDeserialization(new ObjectMapper(), expressionProvider, jsonSerialization,
+                    mock(IMemoryItemConverter.class), mock(CapabilityRegistryService.class), mock(ITemplatingEngine.class));
+            var deployingTask = new RulesEvaluationTask(resourceClientLibrary, jsonSerialization, realDeserialization, expressionProvider);
+            Map<String, Object> config = new HashMap<>();
+            config.put("uri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
+
+            var behaviorConfig = new RuleSetConfiguration();
+            when(resourceClientLibrary.getResource(any(URI.class), eq(RuleSetConfiguration.class))).thenReturn(behaviorConfig);
+            when(jsonSerialization.serialize(behaviorConfig)).thenReturn("""
+                    { "behaviorGroups": [ { "name": "g", "rules": [
+                      { "name": "Not High Risk", "actions": ["be_relaxed"], "conditions": [
+                        { "type": "negation", "conditions": [
+                          { "type": "deploymentContext", "configs": { "tagMatches": "high-risk" } } ] } ] }
+                    ] } ] }
+                    """);
+
+            Object result = assertDoesNotThrow(() -> deployingTask.configure(config, Collections.emptyMap()));
+
+            assertInstanceOf(RulesEvaluator.class, result);
         }
     }
 

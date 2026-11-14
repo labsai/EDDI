@@ -53,6 +53,19 @@ public interface IRuleCondition extends Cloneable {
         // no constraints by default
     }
 
+    /**
+     * Describes a <em>retired</em> config this condition carries, or returns
+     * {@code null}. A retired config is one a ruleset may no longer be saved with,
+     * but that stored rulesets keep: refusing it on load would stop an agent that
+     * deployed before the upgrade from deploying at all. A ruleset carrying one is
+     * refused when an author saves it (REST, MCP), and accepted with a WARN when it
+     * is deployed, imported or synced, in which case the condition must evaluate
+     * exactly as it did before the config was retired.
+     */
+    default String retiredConfiguration() {
+        return null;
+    }
+
     enum ExecutionState {
         SUCCESS, FAIL, NOT_EXECUTED, ERROR
     }

@@ -46,6 +46,7 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -973,7 +974,9 @@ public class UpgradeExecutor {
             // it would replace a credential with the marker. Recorded as this resource
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
-            IResourceId created = store.create(content);
+            // Copied from the sync source, where it exists already: a ruleset among
+            // them keeps a retired condition config, with a WARN, as on deploy.
+            IResourceId created = ExistingRuleSetWrite.call(() -> store.create(content));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1033,7 +1036,9 @@ public class UpgradeExecutor {
             case "behavior" -> new ExtensionStoreOps<>(
                     RuleSetConfiguration.class,
                     IRuleSetStore.class,
-                    (id, version, config) -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config),
+                    // A synced ruleset exists on the source already: a retired condition
+                    // config is accepted with a WARN, as on deploy.
+                    (id, version, config) -> ExistingRuleSetWrite.call(() -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config)),
                     IRestRuleSetStore.resourceURI,
                     IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(

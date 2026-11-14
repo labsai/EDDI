@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.CONDITION_PREFIX;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.String.format;
@@ -57,7 +58,24 @@ public class RuleDeserialization implements IRuleDeserialization {
     }
 
     @Override
-    public RuleSet deserialize(String json) throws DeserializationException {
+    public RuleSet deserialize(String json, String rulesetName) throws DeserializationException {
+        return deserialize(json, rulesetName, false);
+    }
+
+    @Override
+    public void validateForSave(String json) throws DeserializationException {
+        deserialize(json, null, true);
+    }
+
+    /**
+     * @param forSave
+     *            {@code true} when an author is saving the ruleset: a retired
+     *            condition config is refused. {@code false} when a stored ruleset
+     *            is read to run (or an existing one is imported): it is accepted
+     *            with a WARN, so an agent that deployed before the config was
+     *            retired keeps deploying, and behaving, as before.
+     */
+    private RuleSet deserialize(String json, String rulesetName, boolean forSave) throws DeserializationException {
         try {
             RuleSet behaviorSet = new RuleSet();
             RuleSetConfiguration behaviorJson = objectMapper.readerFor(RuleSetConfiguration.class).readValue(json);
@@ -78,7 +96,8 @@ public class RuleDeserialization implements IRuleDeserialization {
                 behaviorGroup.getRules().addAll(groupConfiguration.getRules().stream().map(behaviorRuleJson -> {
                     Rule behaviorRule = new Rule(behaviorRuleJson.getName());
                     behaviorRule.setActions(behaviorRuleJson.getActions());
-                    behaviorRule.setConditions(convert(behaviorRuleJson.getName(), behaviorRuleJson.getConditions(), behaviorSet));
+                    behaviorRule.setConditions(
+                            convert(rulesetName, behaviorRuleJson.getName(), behaviorRuleJson.getConditions(), behaviorSet, forSave));
                     return behaviorRule;
                 }).toList());
 
@@ -91,7 +110,8 @@ public class RuleDeserialization implements IRuleDeserialization {
         }
     }
 
-    private List<IRuleCondition> convert(String ruleName, List<RuleConditionConfiguration> conditionConfigs, RuleSet behaviorSet) {
+    private List<IRuleCondition> convert(String rulesetName, String ruleName, List<RuleConditionConfiguration> conditionConfigs,
+                                         RuleSet behaviorSet, boolean forSave) {
         return conditionConfigs.stream().map(conditionConfiguration -> {
             try {
                 var type = conditionConfiguration.getType();
@@ -112,12 +132,19 @@ public class RuleDeserialization implements IRuleDeserialization {
                         }
                         var conditions = conditionConfiguration.getConditions();
                         if (!isNullOrEmpty(conditions)) {
-                            var behaviorConditions = convert(ruleName, conditions, behaviorSet);
+                            var behaviorConditions = convert(rulesetName, ruleName, conditions, behaviorSet, forSave);
                             List<IRuleCondition> conditionsClone = deepCopy(behaviorConditions);
                             condition.setConditions(conditionsClone);
                         }
                         condition.setContainingRuleSet(behaviorSet);
                         condition.validateConfiguration();
+                        String retired = condition.retiredConfiguration();
+                        if (retired != null) {
+                            if (forSave) {
+                                throw new IllegalArgumentException(retired);
+                            }
+                            warnRetired(rulesetName, ruleName, type, retired);
+                        }
                     } catch (IllegalArgumentException e) {
                         throw new DeserializationException(
                                 format("Invalid '%s' condition in behavior rule '%s': %s", type, ruleName, e.getMessage()), e);
@@ -132,6 +159,17 @@ public class RuleDeserialization implements IRuleDeserialization {
                 throw new IllegalArgumentException("Failed to instantiate rule condition: " + e.getMessage(), e);
             }
         }).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * The ruleset is stored already, so refusing it would stop the agent from
+     * deploying as a whole. The condition keeps evaluating as it did before the
+     * config was retired; the next save of the ruleset refuses it.
+     */
+    private static void warnRetired(String rulesetName, String ruleName, String type, String reason) {
+        log.warnf("Ruleset %s, behavior rule '%s': retired '%s' condition config accepted because the ruleset is already stored;"
+                + " it evaluates as before (the condition never matches). Saving this ruleset is refused until it is fixed: %s",
+                rulesetName == null ? "(unnamed)" : sanitize(rulesetName), sanitize(String.valueOf(ruleName)), sanitize(type), reason);
     }
 
     private IRuleCondition createCondition(String conditionsKey) {
