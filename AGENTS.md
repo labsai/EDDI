@@ -89,6 +89,12 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
    - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
    - Opening the PR and working its review comments to the end is written down in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant.
+   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until all of these hold:
+     - CodeRabbit has reviewed the PR's **current head**. If commits landed after its last review, request another one: `@coderabbitai review` for new commits, `@coderabbitai full review` after a stretch where pushes went unreviewed.
+     - Every CodeRabbit finding — inline comments, nitpicks and outside-diff-range comments in the review body included — is either fixed or answered on the PR.
+     - Every CodeRabbit thread is resolved.
+
+     A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed**. Wait (`@coderabbitai rate limit` shows when capacity returns) and ask again; never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
