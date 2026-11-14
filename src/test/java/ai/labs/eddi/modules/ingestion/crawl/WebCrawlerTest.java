@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.ingestion.crawl;
 import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest.Limits;
 import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest.Politeness;
 import ai.labs.eddi.modules.ingestion.crawl.CrawlRequest.Scope;
+import ai.labs.eddi.modules.ingestion.crawl.PageFetcher.FetchCommand;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler.CrawlSummary;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler.StopReason;
 import org.junit.jupiter.api.DisplayName;
@@ -355,6 +356,30 @@ class WebCrawlerTest {
             new WebCrawler(second).crawl(
                     request(SITE + "/", new Scope(true, false, "/", 3, List.of("/users/**")), Limits.defaults()), new RecordingSink());
             assertFalse(second.wasRequested(excluded), "the exclude must see /users/evil");
+        }
+
+        @Test
+        @DisplayName("an encoded dot before a literal .., and ;parameters, cannot slip past the prefix or an exclude")
+        void mixedDotSegmentsAndPathParametersStayOutOfScope() {
+            String mixed = SITE + "/docs/%2e/../private";
+            String parameterized = SITE + "/docs/private;x=1/secret";
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/docs/", linkTo(parameterized, SITE + "/docs/a"))
+                    .page(SITE + "/docs/a", "<html><body>A</body></html>")
+                    .page(parameterized, "<html><body>EVIL</body></html>");
+
+            new WebCrawler(site).crawl(request(SITE + "/docs/",
+                    new Scope(true, false, "/docs/", 3, List.of("/docs/private/**")), Limits.defaults()), new RecordingSink());
+
+            assertTrue(site.wasRequested(SITE + "/docs/a"));
+            assertFalse(site.wasRequested(parameterized), "/docs/private;x=1/secret is served as /docs/private/secret");
+
+            // The redirect check the crawler hands the fetcher reads the hop as it will
+            // be requested: a Location of /docs/%2e/../private is /private to a server.
+            FetchCommand command = site.requests().stream().filter(c -> c.url().equals(SITE + "/docs/a")).findFirst().orElseThrow();
+            assertFalse(command.redirectAllowed().test(mixed), "a mixed dot-segment redirect leaves /docs/");
+            assertFalse(command.redirectAllowed().test(parameterized), "a parameterized redirect into an exclude");
+            assertTrue(command.redirectAllowed().test(SITE + "/docs/b"), "an ordinary in-scope redirect");
         }
 
         @Test

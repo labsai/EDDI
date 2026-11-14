@@ -205,6 +205,19 @@ class CrawlUrlsTest {
             assertEquals("/private/x", CrawlUrls.path("https://example.com/docs//%2e%2e/private/x"));
             assertEquals("/private/x", CrawlUrls.pathAndQuery("https://example.com/docs//%2e%2e/private/x"));
             assertEquals("/docs/a/", CrawlUrls.path("https://example.com/docs//a/"));
+            // an encoded dot before a literal "..": the server decodes the dot first
+            assertEquals("/private", CrawlUrls.path("https://example.com/docs/%2e/../private"));
+            assertEquals("https://example.com/private", CrawlUrls.canonicalize("https://example.com/docs/%2e/../private"),
+                    "the identity is the served path too, not URI.normalize()'s /docs/private");
+        }
+
+        @Test
+        @DisplayName("path parameters: both the written and the parameter-free reading are available")
+        void pathParameters() {
+            assertEquals("/private;x=1/secret", CrawlUrls.path("https://example.com/private;x=1/secret"));
+            assertEquals("/private/secret", CrawlUrls.pathWithoutParameters("https://example.com/private;x=1/secret"));
+            assertEquals("/private/secret?a=1", CrawlUrls.pathAndQueryWithoutParameters("https://example.com/private;x=1/secret?a=1"));
+            assertEquals("/docs/a", CrawlUrls.pathWithoutParameters("https://example.com/docs/a"));
             assertEquals("/", CrawlUrls.path("https://example.com/%2e%2e/%2e%2e/"));
             assertEquals("/café/", CrawlUrls.path("https://example.com/caf%C3%A9/"), "other encodings still decode");
             assertEquals("/users/evil?x=1", CrawlUrls.pathAndQuery("https://example.com/docs/%2e%2e/users/evil?x=1"));

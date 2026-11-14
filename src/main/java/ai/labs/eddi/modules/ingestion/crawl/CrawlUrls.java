@@ -117,7 +117,8 @@ public final class CrawlUrls {
         }
         String trimmed = stripFragment(url.trim());
         try {
-            URI uri = parseTolerantly(trimmed).normalize();
+            URI parsed = parseTolerantly(trimmed);
+            URI uri = parsed.normalize();
             String scheme = uri.getScheme() == null ? null : uri.getScheme().toLowerCase(Locale.ROOT);
             String host = uri.getHost() == null ? null : uri.getHost().toLowerCase(Locale.ROOT);
             if (scheme == null || host == null) {
@@ -129,7 +130,12 @@ public final class CrawlUrls {
                 port = -1;
             }
 
-            String path = foldIndexFile(uri.getRawPath() == null ? "" : uri.getRawPath());
+            // The path the server serves, not URI.normalize()'s: normalize() resolves a
+            // literal ".." against "%2e", so /docs/%2e/../private read as /docs/private
+            // while a server decoding %2e serves /private.
+            String served = parsed.getRawPath() == null || parsed.getRawPath().isEmpty() ? null : canonicalRawPath(parsed.getRawPath());
+            String rawPath = served != null ? served : uri.getRawPath() == null ? "" : uri.getRawPath();
+            String path = foldIndexFile(rawPath);
             // The root is stripped too, so "https://host/" and "https://host" are one
             // document rather than two copies of a site's front page.
             if (path.endsWith("/")) {
@@ -202,6 +208,20 @@ public final class CrawlUrls {
      * check must treat as out of scope.
      */
     public static String path(String url) {
+        return decodedPath(url, false);
+    }
+
+    /**
+     * {@link #path(String)} with every segment's {@code ;} parameters dropped, as
+     * Tomcat drops them before mapping a request: {@code /private;x=1/secret} is
+     * served as {@code /private/secret}. Scope, exclude and robots decisions read
+     * both forms, so neither spelling slips past a rule.
+     */
+    public static String pathWithoutParameters(String url) {
+        return decodedPath(url, true);
+    }
+
+    private static String decodedPath(String url, boolean stripParameters) {
         try {
             URI uri = new URI(url);
             // Without a host there is no site-relative path to reason about; a bare
@@ -209,7 +229,7 @@ public final class CrawlUrls {
             if (uri.getHost() == null) {
                 return "/";
             }
-            String raw = canonicalRawPath(uri.getRawPath());
+            String raw = canonicalRawPath(uri.getRawPath(), stripParameters);
             if (raw == null) {
                 return null;
             }
@@ -243,6 +263,14 @@ public final class CrawlUrls {
      *         holds an encoded {@code /} or {@code \}
      */
     static String canonicalRawPath(String rawPath) {
+        return canonicalRawPath(rawPath, false);
+    }
+
+    /**
+     * {@link #canonicalRawPath(String)}, with each segment's {@code ;} parameters
+     * dropped when {@code stripParameters}.
+     */
+    static String canonicalRawPath(String rawPath, boolean stripParameters) {
         if (rawPath == null || rawPath.isEmpty()) {
             return "/";
         }
@@ -274,7 +302,7 @@ public final class CrawlUrls {
                     kept.addLast("");
                 }
             } else {
-                kept.addLast(segment);
+                kept.addLast(stripParameters ? name : segment);
             }
         }
         return "/" + String.join("/", kept);
@@ -323,6 +351,18 @@ public final class CrawlUrls {
      * is what gets an installation's traffic blocked.
      */
     public static String pathAndQuery(String url) {
+        return rawPathAndQuery(url, false);
+    }
+
+    /**
+     * {@link #pathAndQuery(String)} with each segment's {@code ;} parameters
+     * dropped — the second reading a robots rule is matched against.
+     */
+    public static String pathAndQueryWithoutParameters(String url) {
+        return rawPathAndQuery(url, true);
+    }
+
+    private static String rawPathAndQuery(String url, boolean stripParameters) {
         try {
             URI uri = parseTolerantly(url);
             if (uri.getHost() == null) {
@@ -331,7 +371,7 @@ public final class CrawlUrls {
             String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
             // The same canonical path the scope checks read, still encoded; an
             // ambiguous one is kept as written (such a URL is never in scope).
-            String canonical = canonicalRawPath(path);
+            String canonical = canonicalRawPath(path, stripParameters);
             path = canonical == null ? path : canonical;
             String query = uri.getRawQuery();
             return query == null || query.isEmpty() ? path : path + "?" + query;
