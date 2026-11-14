@@ -281,6 +281,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
 | `eddi.alerts.test-max-per-minute` | `6` | Test sends (`POST /alerts/rules/test`) one caller may make per minute, per node; each posts to every target of the rule. Over it, `429 TEST_THROTTLED`. `0` or less turns the bound off |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
 
 ---
 

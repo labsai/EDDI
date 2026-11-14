@@ -9,11 +9,13 @@ import ai.labs.eddi.engine.alerts.AlertRuleCache;
 import ai.labs.eddi.engine.alerts.AlertRuleValidator;
 import ai.labs.eddi.engine.alerts.AlertSenders;
 import ai.labs.eddi.engine.alerts.AlertSenders.AlertDeliveryException;
+import ai.labs.eddi.engine.alerts.AlertSettings;
 import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
+import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.api.IRestAlertRules;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -50,6 +52,7 @@ public class RestAlertRules implements IRestAlertRules {
     private final AlertAccess access;
     private final AlertSenders senders;
     private final AlertMaintenanceSchedule maintenanceSchedule;
+    private final AlertSettings settings;
     private final Clock clock;
 
     /**
@@ -61,18 +64,19 @@ public class RestAlertRules implements IRestAlertRules {
 
     @Inject
     public RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access,
-            AlertSenders senders, AlertMaintenanceSchedule maintenanceSchedule) {
-        this(ruleStore, eventStore, ruleCache, access, senders, maintenanceSchedule, Clock.systemUTC());
+            AlertSenders senders, AlertMaintenanceSchedule maintenanceSchedule, AlertSettings settings) {
+        this(ruleStore, eventStore, ruleCache, access, senders, maintenanceSchedule, settings, Clock.systemUTC());
     }
 
     RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access, AlertSenders senders,
-            AlertMaintenanceSchedule maintenanceSchedule, Clock clock) {
+            AlertMaintenanceSchedule maintenanceSchedule, AlertSettings settings, Clock clock) {
         this.ruleStore = ruleStore;
         this.eventStore = eventStore;
         this.ruleCache = ruleCache;
         this.access = access;
         this.senders = senders;
         this.maintenanceSchedule = maintenanceSchedule;
+        this.settings = settings;
         this.clock = clock;
     }
 
@@ -108,6 +112,7 @@ public class RestAlertRules implements IRestAlertRules {
         access.requireWritable(rule);
         access.requireDeliverable(rule);
         rule = access.withAdmission(rule);
+        requireRuleCapacity(rule, null);
         Instant now = clock.instant();
         String caller = access.caller();
         AlertRule stored = ruleStore.create(rule.withId(null).withAudit(caller, now, caller, now));
@@ -125,6 +130,7 @@ public class RestAlertRules implements IRestAlertRules {
         validate(rule);
         access.requireWritable(rule);
         rule = admitted(rule, current);
+        requireRuleCapacity(rule, current);
         String caller = access.caller();
         AlertRule updated = rule.withId(current.id()).withAudit(current.createdBy(), current.createdAt(), caller, clock.instant());
         if (!ruleStore.update(updated)) {
@@ -301,6 +307,41 @@ public class RestAlertRules implements IRestAlertRules {
 
     private AlertRule existing(String ruleId) {
         return ruleStore.read(ruleId).orElseThrow(() -> AlertErrors.notFound(AlertErrors.RULE_NOT_FOUND, "Alert rule not found"));
+    }
+
+    /**
+     * Refuses a save that would give an agent more than
+     * {@code eddi.alerts.max-rules-per-agent} rules listing it, or the rules over
+     * every agent more than as many — each of them is evaluated on every rating and
+     * failed turn of the agents it watches. Only what the save adds to
+     * {@code current} is counted, so rules already over a lowered limit stay
+     * editable. Runs after the access checks: a caller without access learns
+     * nothing about another agent's rules.
+     */
+    private void requireRuleCapacity(AlertRule rule, AlertRule current) {
+        int max = settings.maxRulesPerAgent();
+        AlertScope before = current == null ? null : current.scope();
+        AlertScope scope = rule.scope();
+        if (scope.allAgents()) {
+            if (before == null || !before.allAgents()) {
+                long existing = ruleStore.countAllAgents();
+                if (existing >= max) {
+                    throw AlertErrors.conflict(AlertErrors.RULE_LIMIT_REACHED, "There are already " + existing
+                            + " alert rules over every agent; at most " + max + " (eddi.alerts.max-rules-per-agent)");
+                }
+            }
+            return;
+        }
+        for (String agentId : scope.agentIds()) {
+            if (before != null && before.agentIds().contains(agentId)) {
+                continue;
+            }
+            long existing = ruleStore.count(agentId, false);
+            if (existing >= max) {
+                throw AlertErrors.conflict(AlertErrors.RULE_LIMIT_REACHED, "Agent " + agentId + " already has " + existing
+                        + " alert rules; at most " + max + " per agent (eddi.alerts.max-rules-per-agent)");
+            }
+        }
     }
 
     private static void validate(AlertRule rule) {
