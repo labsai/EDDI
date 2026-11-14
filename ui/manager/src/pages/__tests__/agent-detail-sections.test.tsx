@@ -70,17 +70,19 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
   it("renders security toggles (section auto-opens)", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
+      expect(screen.getByText("Sign group-conversation messages")).toBeInTheDocument();
     });
   });
 
-  it("shows all three security toggle descriptions", async () => {
+  // The backend has two security flags; signMcpInvocations was removed there, so
+  // the section must not offer a toggle for it.
+  it("shows both security toggles and no MCP-signing toggle", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
-      expect(screen.getByText(/Sign MCP invocations/i)).toBeInTheDocument();
-      expect(screen.getByText(/Require peer verification/i)).toBeInTheDocument();
+      expect(screen.getByText("Sign group-conversation messages")).toBeInTheDocument();
+      expect(screen.getByText("Require peer verification")).toBeInTheDocument();
     });
+    expect(screen.queryByText(/Sign MCP invocations/i)).not.toBeInTheDocument();
   });
 
   it("shows identity fields (section auto-opens)", async () => {

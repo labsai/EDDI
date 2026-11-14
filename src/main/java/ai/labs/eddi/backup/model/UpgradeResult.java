@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.net.URI;
 import java.util.List;
 
@@ -39,6 +41,11 @@ import java.util.List;
  * @param compatibilityGeneration
  *            the compatibility generation the written agent version carries;
  *            null when none was written or it could not be read back
+ * @param warnings
+ *            what the run wrote differently from the source, and why — for
+ *            example {@code signInterAgentMessages} turned off because the
+ *            target's own identity cannot sign. Not failures: everything listed
+ *            was written. Omitted from the JSON when empty
  * @since 6.0.0
  */
 public record UpgradeResult(
@@ -49,7 +56,18 @@ public record UpgradeResult(
         int skipped,
         List<ResourceFailure> failures,
         Boolean compatible,
-        Integer compatibilityGeneration) {
+        Integer compatibilityGeneration,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> warnings) {
+
+    public UpgradeResult {
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /** A result with no warnings. */
+    public UpgradeResult(URI agentUri, boolean agentUpdated, int updated, int created, int skipped, List<ResourceFailure> failures,
+            Boolean compatible, Integer compatibilityGeneration) {
+        this(agentUri, agentUpdated, updated, created, skipped, failures, compatible, compatibilityGeneration, List.of());
+    }
 
     /** A result that does not say how the agent version was declared. */
     public UpgradeResult(URI agentUri, boolean agentUpdated, int updated, int created, int skipped, List<ResourceFailure> failures) {

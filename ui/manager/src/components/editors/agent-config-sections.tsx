@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
   Fingerprint,
+  KeyRound,
   Brain,
   Moon,
   Plus,
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import type { Agent, AgentPublicKey, ChannelConnector } from "@/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -127,42 +128,85 @@ function DraftNumberInput({
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
-/** Security flags that the backend rejects (cryptographic signing not yet available). */
-const INERT_SECURITY_FLAGS = ["signInterAgentMessages", "signMcpInvocations", "requirePeerVerification"] as const;
+/** The security flags the backend has; `signMcpInvocations` was removed there. */
+type SecurityFlag = "signInterAgentMessages" | "requirePeerVerification";
+
+/**
+ * The page's "Generate signing key" and "Revoke" actions. Absent hides the
+ * buttons: both endpoints are admin-only, since whoever can mint or retire a
+ * key decides what signs as the agent.
+ */
+export interface SigningKeyAction {
+  onGenerate: () => void;
+  /** Revokes key `keyVersion` (0 = the legacy `identity.publicKey`). */
+  onRevoke: (keyVersion: number) => void;
+  /** True while a key is being generated or revoked. */
+  pending: boolean;
+  /** Why changing keys is not possible right now; the buttons are disabled while set. */
+  disabledReason?: string;
+}
+
+/** `AgentPublicKey.MAX_VERSION`: a declared version above it is malformed and never signs. */
+const MAX_KEY_VERSION = 1_000_000;
+
+/**
+ * The key the agent signs with, as the backend picks it: the highest version
+ * from 1 to {@link MAX_KEY_VERSION}, revoked or not. Undefined when there is
+ * none, and the legacy `identity.publicKey` signs.
+ */
+function newestSigningKey(keys: AgentPublicKey[]): AgentPublicKey | undefined {
+  let newest: AgentPublicKey | undefined;
+  for (const k of keys) {
+    const version = k.version ?? 0;
+    // `>`, not `>=`: of a version declared twice, the backend takes the first.
+    if (version >= 1 && version <= MAX_KEY_VERSION && version > (newest?.version ?? 0)) newest = k;
+  }
+  return newest;
+}
 
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  signingKeyAction,
+}: AgentSectionProps & { signingKeyAction?: SigningKeyAction }) {
   const { t } = useTranslation();
-  const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
-  const hasAnyFlagEnabled = INERT_SECURITY_FLAGS.some((f) => agent.security?.[f]);
+  const keys = agent.identity?.keys ?? [];
+  const legacyKey = agent.identity?.publicKey;
+  const hasSigningKey = keys.length > 0 || !!legacyKey;
+  // The backend refuses a save with signing on unless the key that would sign is
+  // usable. That refusal is certain when there is no such key, or when it is
+  // revoked: the agent signs with its newest key and never falls back to an
+  // older one (`AgentIdentity.signingKeyVersion()`).
+  const signingKey = newestSigningKey(keys);
+  const hasUsableKey = signingKey ? !signingKey.revoked : !!legacyKey;
+  const signingWithoutKey = !!agent.security?.signInterAgentMessages && !hasUsableKey;
+  /** The key the admin asked to revoke, awaiting confirmation. */
+  const [revokeVersion, setRevokeVersion] = useState<number | null>(null);
+  const keyButtonsDisabled = disabled || !!signingKeyAction?.pending || !!signingKeyAction?.disabledReason;
 
-  function handleToggle(field: typeof INERT_SECURITY_FLAGS[number]) {
-    const current = agent.security?.[field] ?? false;
-    if (!current) {
-      // Toggling ON → show confirmation dialog first
-      setPendingFlag(field);
-      return;
-    }
-    // Toggling OFF → safe, no confirmation needed
-    doToggle(field, true);
+  function revokeButton(keyVersion: number) {
+    if (!signingKeyAction) return null;
+    return (
+      <button
+        type="button"
+        onClick={() => setRevokeVersion(keyVersion)}
+        disabled={keyButtonsDisabled}
+        title={signingKeyAction.disabledReason}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+        data-testid={`revoke-signing-key-${keyVersion}`}
+      >
+        {t("agentDetail.revokeSigningKey", "Revoke")}
+      </button>
+    );
   }
 
-  function doToggle(field: typeof INERT_SECURITY_FLAGS[number], currentValue: boolean) {
+  function toggle(field: SecurityFlag) {
     onChange({
       ...agent,
-      security: { ...agent.security, [field]: !currentValue },
+      security: { ...agent.security, [field]: !(agent.security?.[field] ?? false) },
     });
-  }
-
-  function confirmPendingFlag() {
-    if (pendingFlag) {
-      doToggle(pendingFlag, false);
-      setPendingFlag(null);
-    }
   }
 
   return (
@@ -172,7 +216,9 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
       accent="text-rose-500"
       variant="card"
       modified={modified}
-      defaultOpen={!!(agent.security?.signInterAgentMessages || agent.security?.signMcpInvocations || agent.identity?.agentDid)}
+      defaultOpen={
+        !!(agent.security?.signInterAgentMessages || agent.security?.requirePeerVerification || agent.identity?.agentDid) || hasSigningKey
+      }
     >
       {/* Identity */}
       <div className="space-y-3" data-testid="identity-section">
@@ -185,17 +231,14 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <DraftInput
+            {/* Read-only: the identity is engine-owned, and a save keeps the stored one. */}
+            <input
               type="text"
               value={agent.identity?.agentDid ?? ""}
-              onCommit={(v) =>
-                onChange({
-                  ...agent,
-                  identity: { ...agent.identity, agentDid: v || undefined },
-                })
-              }
+              readOnly
               placeholder="did:eddi:agent:..."
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
+              data-testid="identity-agent-did"
             />
           </div>
           <div>
@@ -206,20 +249,36 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               type="text"
               value={agent.identity?.publicKey ?? ""}
               readOnly
-              placeholder={t("agentDetail.publicKeyHint", "Auto-generated on first signing")}
+              placeholder={t("agentDetail.publicKeyHint", "Legacy key; generated keys are listed below")}
               className="h-8 w-full rounded-md border border-input bg-muted/50 px-2 text-xs text-muted-foreground font-mono"
             />
           </div>
         </div>
 
-        {/* Versioned keys (if any exist from multi-key rotation) */}
-        {(agent.identity?.keys?.length ?? 0) > 0 ? (
+        {/* The legacy key and the versioned ones side by side: generating a key
+            keeps the legacy one, which peers still trust for v0 signatures until
+            it is revoked. */}
+        {hasSigningKey && (
           <div className="space-y-1.5">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("agentDetail.publicKeys", "Public Keys")}
             </label>
             <div className="space-y-1">
-              {agent.identity!.keys!.map((k, ki) => (
+              {legacyKey && (
+                <div
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
+                  data-testid="signing-key-legacy"
+                >
+                  <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    {t("agentDetail.legacyKey", "Legacy key (v0)")}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+                    {legacyKey.slice(0, 24)}…
+                  </span>
+                  {revokeButton(0)}
+                </div>
+              )}
+              {keys.map((k, ki) => (
                 <div
                   key={ki}
                   className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
@@ -230,31 +289,68 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
                   <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
                     {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
                   </span>
-                  {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
-                    <span className="text-[9px] text-destructive font-medium">
-                      {t("agentDetail.keyExpired", "Expired")}
+                  {k.revoked ? (
+                    <span className="text-[9px] text-destructive font-medium" data-testid={`signing-key-revoked-${k.version}`}>
+                      {t("agentDetail.keyRevoked", "Revoked")}
                     </span>
+                  ) : (
+                    <>
+                      {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
+                        <span className="text-[9px] text-destructive font-medium">
+                          {t("agentDetail.keyExpired", "Expired")}
+                        </span>
+                      )}
+                      {k.version != null && revokeButton(k.version)}
+                    </>
                   )}
                 </div>
               ))}
             </div>
           </div>
-        ) : agent.identity?.publicKey ? (
-          <div className="space-y-1.5">
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t("agentDetail.publicKeys", "Public Keys")}
-            </label>
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
-              <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                {t("agentDetail.legacyKey", "Legacy key (v0)")}
-              </span>
-              <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
-                {agent.identity.publicKey.slice(0, 24)}…
-              </span>
-            </div>
+        )}
+
+        {signingKeyAction && (
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={signingKeyAction.onGenerate}
+              disabled={keyButtonsDisabled}
+              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+              data-testid="generate-signing-key"
+            >
+              <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("agentDetail.generateSigningKey", "Generate signing key")}
+            </button>
+            <p className="text-[10px] text-muted-foreground" data-testid="generate-signing-key-hint">
+              {signingKeyAction.disabledReason ??
+                t(
+                  "agentDetail.generateSigningKeyHint",
+                  "Creates a new Ed25519 key pair and saves it as a new agent version. The private key stays in the secrets vault; the agent signs with the newest key.",
+                )}
+            </p>
           </div>
-        ) : null}
+        )}
       </div>
+
+      {signingKeyAction && (
+        <AlertDialog
+          open={revokeVersion !== null}
+          onOpenChange={(open) => !open && setRevokeVersion(null)}
+          title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
+          description={t(
+            "agentDetail.revokeSigningKeyDesc",
+            "Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it, so peers stop trusting messages signed with it. A revoked versioned key stays listed, and peer verification does not refuse it yet: a message signed with it, by anyone holding a copy of its private key, can still verify. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
+          )}
+          confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
+          cancelLabel={t("common.cancel", "Cancel")}
+          variant="destructive"
+          onConfirm={() => {
+            if (revokeVersion !== null) signingKeyAction.onRevoke(revokeVersion);
+            setRevokeVersion(null);
+          }}
+          isPending={signingKeyAction.pending}
+        />
+      )}
 
       {/* Security toggles */}
       <div className="space-y-2 border-t border-border pt-3" data-testid="security-toggles">
@@ -263,8 +359,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           {t("agentDetail.securityFlags", "Signing & Verification")}
         </h3>
 
-        {/* Inline warning when any flag is enabled */}
-        {hasAnyFlagEnabled && (
+        {signingWithoutKey && (
           <div
             className="flex items-start gap-2 rounded-lg border border-warn-400/30 bg-warn-50 px-3 py-2.5 dark:bg-warn-900/15 dark:border-warn-700/30"
             data-testid="security-flag-warning"
@@ -272,21 +367,23 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           >
             <AlertTriangle className="h-4 w-4 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
             <p className="text-[11px] text-warn-800 dark:text-warn-300 leading-relaxed">
-              {t("agentDetail.securityFlagWarning", "Cryptographic signing is not yet available in this version. The backend will reject saves with these flags enabled (HTTP 400).")}
+              {t(
+                "agentDetail.signingNeedsKey",
+                "This agent has no usable signing key (none is declared, or the newest one is revoked), so a save with signing on is refused. An admin can generate one above.",
+              )}
             </p>
           </div>
         )}
 
         {([
-          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign inter-agent (A2A) messages"), t("agentDetail.signA2ADesc", "Cryptographically sign outbound A2A messages for tamper-proofing")],
-          ["signMcpInvocations", t("agentDetail.signMcp", "Sign MCP invocations"), t("agentDetail.signMcpDesc", "Attach signatures to MCP tool calls for secure server verification")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Reject inbound A2A tasks from agents that can't prove their identity")],
+          ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input
               type="checkbox"
               checked={agent.security?.[field] ?? false}
-              onChange={() => handleToggle(field)}
+              onChange={() => toggle(field)}
               disabled={disabled}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
               data-testid={`security-flag-${field}`}
@@ -298,17 +395,6 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </label>
         ))}
       </div>
-
-      {/* Confirmation dialog for enabling a security flag */}
-      <AlertDialog
-        open={!!pendingFlag}
-        onOpenChange={(open) => { if (!open) setPendingFlag(null); }}
-        title={t("agentDetail.securityFlagConfirmTitle", "Enable security flag?")}
-        description={t("agentDetail.securityFlagConfirmDesc", "Cryptographic signing is not yet available in this version. Enabling this flag will cause the backend to reject saves with HTTP 400. Are you sure you want to proceed?")}
-        confirmLabel={t("agentDetail.securityFlagConfirmBtn", "Enable anyway")}
-        cancelLabel={t("common.cancel", "Cancel")}
-        onConfirm={confirmPendingFlag}
-      />
     </EditorSection>
   );
 });

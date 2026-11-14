@@ -333,6 +333,8 @@
     "POST /agentstore/agents/{id}",
     "POST /agentstore/agents/{id}/cascade",
     "POST /agentstore/agents/{id}/currentversion",
+    "POST /agentstore/agents/{id}/signing-keys",
+    "POST /agentstore/agents/{id}/signing-keys/{keyVersion}/revoke",
     "POST /agenttests/runs",
     "POST /agenttests/runs/{runId}/cancel",
     "POST /alerts/events/acknowledge",

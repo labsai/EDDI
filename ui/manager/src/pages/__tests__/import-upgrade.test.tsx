@@ -219,4 +219,37 @@ describe("ImportAgentDialog — syncing onto an earlier promotion", () => {
     expect(previews[0]!.get("createNew")).toBe("true");
     expect(previews[0]!.get("targetAgentId")).toBeNull();
   });
+
+  // A first promotion creates the agent with no signing key, so EDDI writes
+  // signInterAgentMessages off and says so only in the result's warnings. The
+  // dialog used to close on the 201, and the agent ran unsigned unnoticed.
+  it("stays open and shows what the sync wrote differently from the source", async () => {
+    const warning = "signInterAgentMessages was turned off: the imported agent is new and has no signing key yet.";
+    server.use(
+      http.post("*/backup/import/sync/preview", () =>
+        HttpResponse.json({
+          sourceAgentId: "remote-agent1", sourceAgentName: "Support Agent",
+          targetAgentId: null, targetAgentName: null,
+          resources: [
+            { sourceId: "agent1", resourceType: "agent", name: "Support Agent", action: "CREATE", targetId: null,
+              targetVersion: null, matchStrategy: null, sourceContent: null, targetContent: null, workflowIndex: -1 },
+          ],
+        })
+      ),
+      http.post("*/backup/import/sync", () =>
+        HttpResponse.json(
+          { agentUri: "eddi://ai.labs.agent/agentstore/agents/new-1?version=1", agentUpdated: true, updated: 0, created: 3,
+            skipped: 0, failures: [], warnings: [warning] },
+          { status: 201 }
+        )
+      )
+    );
+    const user = await toSyncTarget();
+    await user.selectOptions(screen.getByTestId("sync-target-select"), "");
+    await user.click(screen.getByTestId("import-target-next"));
+    await user.click(await screen.findByTestId("import-confirm-merge"));
+
+    expect(await screen.findByTestId("result-warnings")).toHaveTextContent(warning);
+    expect(screen.getByTestId("import-outcome")).toBeInTheDocument();
+  });
 });

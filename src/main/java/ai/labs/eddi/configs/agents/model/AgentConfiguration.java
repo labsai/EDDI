@@ -86,8 +86,9 @@ public class AgentConfiguration {
     private Integer compatibilityGeneration;
 
     /**
-     * Cryptographic identity for inter-agent trust. Auto-generated on agent
-     * creation. The public key is stored here; the private key is in SecretsVault.
+     * Cryptographic identity for inter-agent trust. Empty until an admin generates
+     * a signing key with {@code POST /agentstore/agents/{id}/signing-keys}, which
+     * adds the public key here and stores the private key in the Secrets Vault.
      *
      * @since 6.0.0
      */
@@ -757,6 +758,34 @@ public class AgentConfiguration {
 
         public void setKeys(List<AgentPublicKey> keys) {
             this.keys = keys != null ? keys : new ArrayList<>();
+        }
+
+        /**
+         * The key version this agent signs with: the highest one in {@link #keys}
+         * between 1 and {@link AgentPublicKey#MAX_VERSION}, revoked or not, or 0 — the
+         * legacy {@code publicKey} — when there is none. A revoked newest key is not
+         * skipped: the agent then cannot sign until a new key is generated, rather than
+         * falling back to an older one. The next generated key takes this plus one. Not
+         * a getter, so it stays out of the stored JSON.
+         */
+        public int signingKeyVersion() {
+            if (keys == null || keys.isEmpty()) {
+                return 0;
+            }
+            return keys.stream().mapToInt(AgentPublicKey::version).filter(v -> v >= 1 && v <= AgentPublicKey.MAX_VERSION).max().orElse(0);
+        }
+
+        /**
+         * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
+         * would sign with the legacy {@code publicKey}. Not a getter, so it stays out
+         * of the stored JSON.
+         */
+        public AgentPublicKey signingKey() {
+            int version = signingKeyVersion();
+            if (version == 0) {
+                return null;
+            }
+            return keys.stream().filter(k -> k.version() == version).findFirst().orElse(null);
         }
 
         /**

@@ -126,6 +126,10 @@ export interface StrictWriteDiscipline {
   onFailure?: string; // "digest" | "exclude_all" | "keep_all"
 }
 
+/**
+ * Engine-owned: a save keeps the stored identity whatever the draft holds. Keys
+ * change only through `generateAgentSigningKey` and `revokeAgentSigningKey`.
+ */
 export interface AgentIdentity {
   agentDid?: string;
   publicKey?: string;
@@ -138,11 +142,17 @@ export interface AgentPublicKey {
   publicKeyB64?: string;
   validFromMs?: number;
   validUntilMs?: number;
+  /** Revoked by an admin: valid at no time, whatever its window says. */
+  revoked?: boolean;
 }
 
 export interface SecurityConfig {
+  /**
+   * Sign this agent's group-conversation messages. A save with this on is
+   * refused unless the newest key in `identity.keys` has its private half in
+   * the vault — see `generateAgentSigningKey`.
+   */
   signInterAgentMessages?: boolean;
-  signMcpInvocations?: boolean;
   requirePeerVerification?: boolean;
 }
 
@@ -426,6 +436,37 @@ export function updateAgent(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.compatible === true) params.set("compatible", "true");
   return api.put(`/agentstore/agents/${seg(id)}?${params.toString()}`, agent);
+}
+
+/**
+ * Generates a signing key for the agent (eddi-admin only). The backend stores
+ * the private key in the vault and saves the public key into `identity.keys`
+ * as a NEW agent version, named by `location`; `version` must be the current
+ * one or the call is refused with 409.
+ */
+export function generateAgentSigningKey(
+  id: string,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys?version=${version}`
+  );
+}
+
+/**
+ * Revokes one of the agent's signing keys (eddi-admin only): the backend marks
+ * it revoked in a NEW agent version, named by `location`, and deletes its
+ * private key. `keyVersion` 0 is the legacy `identity.publicKey`, which is
+ * removed. `version` must be the current one or the call is refused with 409.
+ */
+export function revokeAgentSigningKey(
+  id: string,
+  keyVersion: number,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys/${keyVersion}/revoke?version=${version}`
+  );
 }
 
 export function deleteAgent(
