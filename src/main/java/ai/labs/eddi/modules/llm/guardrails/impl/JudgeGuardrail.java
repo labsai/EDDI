@@ -108,7 +108,7 @@ public class JudgeGuardrail implements ContentGuardrail {
 
     static final Pattern CODE = Pattern.compile("[A-Z][A-Z0-9_]{0,39}");
 
-    static final Set<String> OWN_PARAMETERS = Stream
+    public static final Set<String> OWN_PARAMETERS = Stream
             .concat(GuardrailModelClient.COMMON_PARAMETERS.stream(), Stream.of(PARAM_ISSUES, PARAM_JSON_RESPONSE_FORMAT))
             .collect(Collectors.toUnmodifiableSet());
 

@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
@@ -29,6 +30,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -88,6 +91,18 @@ public class RagIngestionService {
     static final String METADATA_KB_ID = KnowledgeBaseStorage.METADATA_KB_ID;
     /** Chunk metadata: the ingestion that wrote the chunk. */
     static final String METADATA_INGESTION_ID = "ingestionId";
+
+    /**
+     * Redacts a failed ingestion's message before it is stored as its status.
+     * Field-injected; null in tests built with {@code new}, which then redact
+     * credential shapes only.
+     */
+    @Inject
+    KnowledgeBaseFailureRedactor failureRedactor;
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
 
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory,
@@ -167,6 +182,10 @@ public class RagIngestionService {
 
     private void processIngestion(String ragConfigId, String kbId, String ingestionId, String documentContent, String documentName,
                                   RagConfiguration ragConfig, boolean replace) {
+        // What the clients this run uses were built with, read while holding them: a
+        // failure is scrubbed of exactly these, even if a rotation has since evicted
+        // the clients and their references resolve to something else.
+        Set<String> clientCredentials = new HashSet<>();
         try {
             ingestionState.put(statusKey(ragConfigId, ingestionId), "processing");
             LOGGER.infof("Starting ingestion %s for KB '%s', document '%s' (replace=%b)", ingestionId, sanitize(kbId), sanitize(documentName),
@@ -186,9 +205,11 @@ public class RagIngestionService {
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
             EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
+            clientCredentials.addAll(ResolvedCredentials.heldBy(resolvedCredentials, model));
             // For writing: an in-memory store built under another embedding
             // configuration is replaced rather than mixed with these vectors.
             EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
+            clientCredentials.addAll(ResolvedCredentials.heldBy(resolvedCredentials, store));
 
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();
@@ -209,8 +230,15 @@ public class RagIngestionService {
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
-            ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + e.getMessage());
-            LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
+            // The status is returned to anyone with VIEW on the knowledge base — on any
+            // node, the cache being shared — and the message is the provider's:
+            // redacted before it is kept.
+            var redacted = KnowledgeBaseFailureRedactor.redactFailure(failureRedactor, ragConfig, e, clientCredentials);
+            ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + redacted.text());
+            // Never the exception object: the log gets the redacted cause chain (or only
+            // its classes), and causes or suppressed exceptions nothing inspected are
+            // named, not printed.
+            LOGGER.errorf("Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), redacted.logText());
         }
     }
 

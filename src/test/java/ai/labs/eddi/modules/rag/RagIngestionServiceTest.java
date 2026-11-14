@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -12,6 +13,8 @@ import ai.labs.eddi.engine.caching.SharedKvCache;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.InMemorySharedKv;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import dev.langchain4j.data.document.Metadata;
@@ -27,10 +30,18 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import dev.langchain4j.data.embedding.Embedding;
 import org.mockito.ArgumentCaptor;
@@ -201,6 +212,169 @@ class RagIngestionServiceTest {
 
         assertTrue(service.getStatus(KB, id).startsWith("failed"), service.getStatus(KB, id));
         assertNotNull(service.getWarning(KB, id), "the status must say the new version is stored alongside the old");
+    }
+
+    /**
+     * Rotation between build and failure: the embedding factory builds a client
+     * from {@code apiKey}, the reference is rotated, and the in-flight client then
+     * fails echoing the secret it holds. The factory captured exactly that secret,
+     * and the ingestion hands it to the redactor; the redactor's own resolution now
+     * returns the rotated value, which would not match.
+     */
+    private String[] ingestAfterRotation(String apiKey, String heldSecret, String echoed) throws Exception {
+        return ingestAfterRotation("openai", apiKey, heldSecret, echoed);
+    }
+
+    private String[] ingestAfterRotation(String provider, String apiKey, String heldSecret, String echoed) throws Exception {
+        Map<String, String> vault = new HashMap<>(Map.of("${vault:kb-key}", heldSecret));
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> {
+            Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
+            resolved.replaceAll((k, v) -> vault.getOrDefault(v, v));
+            return resolved;
+        });
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> vault.getOrDefault(inv.getArgument(0), inv.getArgument(0)));
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var credentials = new ResolvedCredentials();
+        var factory = new EmbeddingModelFactory(variables, secretResolver);
+        factory.useResolvedCredentials(credentials);
+        var config = createConfig();
+        config.setEmbeddingProvider(provider);
+        config.setEmbeddingParameters(Map.of("apiKey", apiKey));
+        EmbeddingModel built = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+        if ("gemini".equals(provider)) {
+            assertEquals("InputTypedEmbeddingModel", built.getClass().getSimpleName(), "Gemini comes back wrapped");
+        }
+        assertEquals(Set.of(heldSecret), credentials.heldBy(built), "the factory captures the secret itself, not the whole value");
+
+        vault.put("${vault:kb-key}", "rotated-" + "t".repeat(12));
+        // The client in flight: it holds what the factory captured for the built one.
+        EmbeddingModel inFlight = mock(EmbeddingModel.class);
+        credentials.record(inFlight, credentials.heldBy(built));
+        when(inFlight.embedAll(anyList())).thenThrow(new IllegalStateException("401: key " + echoed + " was revoked"));
+        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(inFlight);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        var redactor = new KnowledgeBaseFailureRedactor(secretResolver, variables);
+        redactor.resolvedCredentials = credentials;
+        service.failureRedactor = redactor;
+        service.resolvedCredentials = credentials;
+
+        List<String> logged = new CopyOnWriteArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logged.add(String.valueOf(record.getMessage()));
+                if (record.getParameters() != null) {
+                    for (Object parameter : record.getParameters()) {
+                        logged.add(String.valueOf(parameter));
+                    }
+                }
+                if (record.getThrown() != null) {
+                    logged.add(String.valueOf(record.getThrown()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger julLogger = Logger.getLogger(RagIngestionService.class.getName());
+        Level previous = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        String status;
+        try {
+            String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config);
+            long deadline = System.currentTimeMillis() + 5000;
+            while (service.getStatus(KB, id).equals("pending") || service.getStatus(KB, id).equals("processing")) {
+                assertTrue(System.currentTimeMillis() < deadline, "ingestion did not finish");
+                Thread.onSpinWait();
+            }
+            status = service.getStatus(KB, id);
+            // The status is stored before the failure is logged, on the ingestion thread.
+            while (logged.stream().noneMatch(line -> line.contains("failed for KB"))) {
+                assertTrue(System.currentTimeMillis() < deadline + 5000, "the failure was not logged: " + logged);
+                Thread.onSpinWait();
+            }
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previous);
+        }
+        return new String[]{status, String.join("\n", logged)};
+    }
+
+    @Test
+    void rotatedSecretEmbeddedInAValue_isScrubbedFromStatusAndLog() throws Exception {
+        String secret = "embedded-" + "s".repeat(12);
+
+        String[] result = ingestAfterRotation("prefix-${vault:kb-key}", secret, secret);
+
+        assertTrue(result[0].startsWith("failed"), result[0]);
+        assertFalse(result[0].contains(secret), result[0]);
+        assertTrue(result[0].contains("was revoked"), result[0]);
+        assertTrue(result[1].contains("was revoked"), "the redacted provider text is logged: " + result[1]);
+        assertFalse(result[1].contains(secret), result[1]);
+    }
+
+    @Test
+    void rotatedShortSecret_withholdsTheStatusAndLog() throws Exception {
+        String shortSecret = "q".repeat(3);
+
+        String[] result = ingestAfterRotation("${vault:kb-key}", shortSecret, shortSecret);
+
+        assertTrue(result[0].startsWith("failed: The provider's error was withheld"), result[0]);
+        assertFalse(result[0].contains("was revoked"), result[0]);
+        assertFalse(result[1].contains("was revoked"), result[1]);
+        assertFalse(result[1].contains("key " + shortSecret), result[1]);
+    }
+
+    @Test
+    void rotatedShortSecretOfAWrappedModel_withholdsTheStatusAndLog() throws Exception {
+        String shortSecret = "g".repeat(3);
+
+        String[] result = ingestAfterRotation("gemini", "${vault:kb-key}", shortSecret, shortSecret);
+
+        assertTrue(result[0].startsWith("failed: The provider's error was withheld"), result[0]);
+        assertFalse(result[0].contains("was revoked"), result[0]);
+        assertFalse(result[1].contains("was revoked"), result[1]);
+        assertFalse(result[1].contains("key " + shortSecret), result[1]);
+    }
+
+    /**
+     * A failure with no message of its own whose cause quotes a short store
+     * password: the stored status is the generic text, whatever the top-level
+     * message is.
+     */
+    @Test
+    void failureWithANullMessage_andAShortPasswordInItsCause_storesTheGenericStatus() {
+        String shortPassword = "v".repeat(5);
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        service.failureRedactor = new KnowledgeBaseFailureRedactor(secretResolver, variables);
+        when(embeddingModelFactory.getOrCreate(any(), any()))
+                .thenThrow(new RuntimeException((String) null, new IllegalStateException("password authentication failed: " + shortPassword)));
+        var config = createConfig();
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("user", "eddi", "password", shortPassword));
+
+        String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config);
+        long deadline = System.currentTimeMillis() + 5000;
+        while (service.getStatus(KB, id).equals("pending") || service.getStatus(KB, id).equals("processing")) {
+            assertTrue(System.currentTimeMillis() < deadline, "ingestion did not finish");
+            Thread.onSpinWait();
+        }
+
+        String status = service.getStatus(KB, id);
+        assertTrue(status.startsWith("failed: The provider's error was withheld"), status);
+        assertFalse(status.contains(shortPassword), status);
+        assertFalse(status.contains("password authentication failed"), status);
     }
 
     /**

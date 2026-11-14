@@ -440,6 +440,126 @@ public class VaultGrantChecker {
     }
 
     /**
+     * The vault references of one configuration document, run on its own outside
+     * any agent, whose secret is restricted to particular agents — an
+     * {@code allowedAgents} list that is non-empty and has no wildcard.
+     * <p>
+     * A knowledge base searched or ingested into through its standalone endpoints
+     * builds its embedding model and store on the spot, resolving every reference
+     * it names. There is no agent there to hold to the grant, so a secret granted
+     * to {@code agentA} only would otherwise be resolved for any editor of any
+     * knowledge base that names it. The same scan as the deploy gate: every string
+     * value, {@code ${vars:…}} expanded, {@code ${connection:…}} followed.
+     * <p>
+     * Unlike the deploy gate this fails <em>closed</em> on uncertainty, because
+     * there is no later gate: a secret whose grant cannot be read, and a variable,
+     * connection or configuration that cannot be read, are reported too (with the
+     * reason). A secret that does not exist is not — there is nothing to resolve.
+     * With the vault disabled nothing resolves, and nothing is reported.
+     * <p>
+     * Each result carries the agents on the grant that exist, so the caller can let
+     * through whoever may edit one of them: that editor can already make the
+     * granted agent use the secret, so running the knowledge base exposes nothing
+     * new. An agent that cannot be found is left out — a grant naming only deleted
+     * agents lets nobody through.
+     *
+     * @return the restricted references and what could not be verified; empty when
+     *         the configuration may be run by anyone allowed to edit it
+     */
+    public List<RestrictedReference> findAgentRestrictedReferences(Object configuration) {
+        if (configuration == null || !secretProvider.isAvailable()) {
+            return List.of();
+        }
+        Set<String> references = new LinkedHashSet<>();
+        List<String> unreadable = new ArrayList<>();
+        scanForVaultReferences(configuration, references, ConnectionReference.DEFAULT_TENANT, unreadable);
+        scanReferencedConnections(configuration, references, unreadable, unreadable);
+
+        List<RestrictedReference> restricted = new ArrayList<>();
+        for (String reference : references) {
+            SecretReference secret;
+            try {
+                secret = SecretReference.parse(reference);
+            } catch (IllegalArgumentException e) {
+                continue; // Not a reference the resolver would resolve.
+            }
+            if (SecretReference.isReservedKeyName(secret.keyName())) {
+                continue; // The resolver refuses these outright.
+            }
+            SecretMetadata metadata;
+            try {
+                metadata = secretProvider.getMetadata(secret);
+            } catch (ISecretProvider.SecretNotFoundException e) {
+                continue;
+            } catch (Exception e) {
+                LOGGER.debugf("Could not read grant metadata for %s (%s) — treating it as restricted", sanitize(reference),
+                        e.getClass().getSimpleName());
+                restricted.add(RestrictedReference.unverifiable(reference + " (its grant could not be read)"));
+                continue;
+            }
+            if (restrictsAgents(metadata)) {
+                restricted.add(new RestrictedReference(reference, existingAgents(metadata.allowedAgents()), false));
+            }
+        }
+        for (String resource : unreadable) {
+            restricted
+                    .add(RestrictedReference.unverifiable(resource + " (could not be read, so the vault references it may hold cannot be verified)"));
+        }
+        return restricted;
+    }
+
+    /**
+     * A reference {@link #findAgentRestrictedReferences} found.
+     *
+     * @param reference
+     *            the reference, or a description of what could not be verified
+     * @param grantedAgents
+     *            the agents on the grant that exist; empty for an unverifiable
+     *            entry
+     * @param unverifiable
+     *            true when the grant, or a variable, connection or configuration
+     *            the scan needed, could not be read — nobody but an administrator
+     *            passes such an entry
+     */
+    public record RestrictedReference(String reference, List<String> grantedAgents, boolean unverifiable) {
+
+        public RestrictedReference {
+            grantedAgents = grantedAgents == null ? List.of() : List.copyOf(grantedAgents);
+        }
+
+        static RestrictedReference unverifiable(String description) {
+            return new RestrictedReference(description, List.of(), true);
+        }
+    }
+
+    /** The ids in {@code allowedAgents} that name an existing agent. */
+    private List<String> existingAgents(List<String> allowedAgents) {
+        List<String> existing = new ArrayList<>();
+        for (String agentId : allowedAgents) {
+            if (agentId == null || agentId.isBlank()) {
+                continue;
+            }
+            try {
+                if (agentStore.getCurrentResourceId(agentId) != null) {
+                    existing.add(agentId);
+                }
+            } catch (Exception e) {
+                // Deleted, never created, or unreadable: it lets nobody through.
+                LOGGER.debugf("Agent %s on a grant could not be found (%s)", sanitize(agentId), e.getClass().getSimpleName());
+            }
+        }
+        return existing;
+    }
+
+    /** A grant that lists agents and does not include the wildcard. */
+    private static boolean restrictsAgents(SecretMetadata metadata) {
+        if (metadata == null || metadata.allowedAgents() == null || metadata.allowedAgents().isEmpty()) {
+            return false;
+        }
+        return metadata.allowedAgents().stream().noneMatch(WILDCARD::equals);
+    }
+
+    /**
      * The grant metadata of {@code secret}, or {@code null} when the vault is off
      * or the metadata cannot be read. Never a value: {@link SecretMetadata} has no
      * field for one.

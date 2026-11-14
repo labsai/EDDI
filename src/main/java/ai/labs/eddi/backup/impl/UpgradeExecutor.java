@@ -56,6 +56,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.modules.llm.impl.VaultReferencePlacementGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -115,6 +116,19 @@ public class UpgradeExecutor {
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Refuses a {@code ${vault:…}} outside a model's credential parameters. Null
+     * when built outside the container, where the check is skipped. Updates go
+     * through the REST stores, which apply it; the direct create in createExtension
+     * applies it here.
+     */
+    private VaultReferencePlacementGuard vaultReferencePlacementGuard;
+
+    @Inject
+    void useVaultReferencePlacementGuard(VaultReferencePlacementGuard guard) {
+        this.vaultReferencePlacementGuard = guard;
     }
 
     /**
@@ -973,6 +987,11 @@ public class UpgradeExecutor {
             // it would replace a credential with the marker. Recorded as this resource
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
+            // The REST stores refuse a vault reference outside a model's credential
+            // parameters; this direct create must too. Recorded as this resource failing.
+            if (vaultReferencePlacementGuard != null) {
+                vaultReferencePlacementGuard.requireNone(content);
+            }
             IResourceId created = store.create(content);
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);

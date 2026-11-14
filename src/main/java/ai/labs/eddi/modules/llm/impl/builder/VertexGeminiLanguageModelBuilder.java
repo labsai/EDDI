@@ -79,6 +79,32 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     /**
+     * Credentials come from Google's application-default credentials, never from a
+     * parameter; only a {@code customHeaders} entry can carry a configured secret.
+     */
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_CUSTOM_HEADERS);
+    }
+
+    /**
+     * The regional Vertex AI host of the configured {@code location} (or its legacy
+     * {@code publisher} spelling), when no {@code apiEndpoint} is set. Without a
+     * location the client does not build, so there is no default to name.
+     */
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        Map<String, String> p = parameters == null ? Map.of() : parameters;
+        // Read as applyTo reads it: a whitespace-only apiEndpoint is not set, and the
+        // client then uses the regional default, which must be checked.
+        if (stringValue(p, KEY_API_ENDPOINT) != null) {
+            return null;
+        }
+        String location = !isNullOrEmpty(p.get(KEY_LOCATION)) ? p.get(KEY_LOCATION) : p.get(KEY_PUBLISHER);
+        return isNullOrEmpty(location) ? null : "https://" + location.trim() + "-aiplatform.googleapis.com";
+    }
+
+    /**
      * The configured model name, preferring the canonical {@code modelId} and
      * falling back to the legacy {@code modelID} spelling. Returns {@code null}
      * when neither is set.

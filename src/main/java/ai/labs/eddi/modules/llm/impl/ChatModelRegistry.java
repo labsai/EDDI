@@ -12,8 +12,11 @@ import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
+import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.VaultReferencePlacement;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.EndpointParameters;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -31,9 +34,12 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -168,6 +174,13 @@ public class ChatModelRegistry {
     ClusterConfig clusterConfig;
 
     /**
+     * Where the credentials handed to a client are recorded for by-value error
+     * scrubbing. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
+
+    /**
      * Which parameters each model version rejects or ignores. Loaded with the
      * registry, so a malformed catalog fails startup rather than a turn.
      */
@@ -195,6 +208,15 @@ public class ChatModelRegistry {
     }
 
     /**
+     * Task parameters that never reach a builder: the prompts, and settings the
+     * task itself consumes. Removed before the cache key is built, so they are
+     * neither resolved nor subject to {@link VaultReferencePlacement} — a prompt
+     * may quote reference-shaped text.
+     */
+    public static final Set<String> NON_MODEL_PARAMETERS = Set.of(KEY_INCLUDE_FIRST_AGENT_MESSAGE, KEY_SYSTEM_MESSAGE, KEY_PROMPT,
+            KEY_LOG_SIZE_LIMIT, KEY_ADD_TO_OUTPUT, KEY_CONVERT_TO_OBJECT);
+
+    /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
      * name a configured endpoint. Checked before the vault references are resolved,
      * so that a secret restricted to {@code api.openai.com} is never handed to a
@@ -204,32 +226,82 @@ public class ChatModelRegistry {
      * set is checked, not only the one the builder reads: which key that is depends
      * on the provider, so a configuration carrying an allowed {@code baseUrl} and
      * an attacker's {@code endpoint} must not pass on the strength of the one it
-     * does not use. A configuration with none uses the provider's own default
-     * endpoint, which an editor cannot choose — the check exists to stop an
-     * editor-chosen destination, not a vendor's.
+     * does not use. A configuration with none still has a destination: the
+     * provider's own default endpoint, which
+     * {@link ILanguageModelBuilder#defaultEndpoint} names and which is checked the
+     * same way. The editor chooses the provider {@code type}, so a vendor's fixed
+     * host is an editor-chosen destination too.
      *
      * @param params
      *            the builder parameters with global variables resolved and vault
      *            references still in place
      */
-    private void requireSecretsAllowedAt(String type, Map<String, String> params) {
+    private void requireSecretsAllowedAt(String type, ILanguageModelBuilder modelBuilder, Map<String, String> params) {
         for (Map.Entry<String, String> parameter : params.entrySet()) {
             String endpoint = parameter.getValue();
             if (EndpointParameters.isEndpointKey(parameter.getKey()) && endpoint != null && !endpoint.isBlank()) {
                 vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
             }
         }
-        // The builder's own default. For most providers that is one fixed vendor host
-        // (nothing for an editor to choose), but a builder whose default an editor can
-        // steer — an OpenAI-compatible preset's region — names it, and it is held to
-        // the same check before anything is resolved. Checked even when an endpoint
-        // key is set: a key the builder does not read (an OpenAI-compatible preset
-        // reads only baseUrl) must not stand in for the URL it does use. A builder
-        // reports no default once the key it reads is set.
-        var builderProvider = languageModelApiConnectorBuilders.get(type);
-        String defaultEndpoint = builderProvider == null ? null : builderProvider.get().defaultEndpoint(params);
+        // The builder's own default: the vendor's fixed host, or the host a parameter
+        // selects (an OpenAI-compatible preset's region, Bedrock's region). Checked
+        // even when an endpoint key is set: a key the builder does not read (an
+        // OpenAI-compatible preset reads only baseUrl) must not stand in for the URL
+        // it does use. A builder reports no default once the key it reads is set.
+        // A fixed vendor host is not exempt: the editor picks the type, so a key
+        // restricted to one vendor must not go to another by switching the type and
+        // leaving the endpoint out. A secret without allowedHosts passes as before.
+        String defaultEndpoint = modelBuilder.defaultEndpoint(params);
         if (defaultEndpoint != null && !defaultEndpoint.isBlank()) {
             vaultHostAllowlist.requireAllowed(params, defaultEndpoint, "LLM provider '" + type + "'");
+        }
+    }
+
+    /**
+     * Refuses the build when a vault reference sits in a parameter the builder does
+     * not treat as a credential — see {@link VaultReferencePlacement}. Runs after
+     * global variables are expanded (a variable may hold a reference) and before
+     * anything is resolved, so neither the model nor its telemetry ever sees the
+     * plaintext.
+     */
+    private static void requireReferencesInCredentialKeys(String type, ILanguageModelBuilder modelBuilder, Map<String, String> params) {
+        VaultReferencePlacement.require(params, modelBuilder.secretParameters(), "LLM provider '" + type + "'");
+    }
+
+    /**
+     * Resolves the vault references of {@code params} and puts the plaintext of
+     * each into {@code captured}, at the point of substitution — see
+     * {@link SecretCapture}, shared with the embedding-model and store factories.
+     */
+    private Map<String, String> resolveCapturing(Map<String, String> params, List<String> captured) {
+        return SecretCapture.resolve(secretResolver, params, captured, Set.of());
+    }
+    /**
+     * Remembers the plaintexts just handed to a client, so the task-error and
+     * fallback paths can scrub a provider error of them by value. See
+     * {@link ResolvedCredentials}.
+     */
+    private void recordCredentials(List<String> captured) {
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(captured);
+        }
+    }
+
+    /**
+     * Builds the model with the plaintexts it holds: every failure it raises is
+     * pinned to them ({@code ResolvedCredentials#pin}), so the task-error digest,
+     * the fallback summary and the lifecycle error output, each handed that
+     * failure, remove them — also after this model was evicted or its reference
+     * rotated, and without depending on when the model is collected.
+     */
+    private void recordCredentials(Object model, List<String> captured) {
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(model, captured);
+        }
+        if (model instanceof ObservableChatModel observable) {
+            observable.pinFailuresTo(resolvedCredentials, captured);
+        } else if (model instanceof ObservableStreamingChatModel observable) {
+            observable.pinFailuresTo(resolvedCredentials, captured);
         }
     }
 
@@ -338,14 +410,18 @@ public class ChatModelRegistry {
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
-        requireSecretsAllowedAt(type, resolvedParams);
-        resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-        resolvedParams = adaptToModel(type, resolvedParams);
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
+        requireReferencesInCredentialKeys(type, modelBuilder, resolvedParams);
+        requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
+        List<String> captured = new ArrayList<>();
+        resolvedParams = SecretResolver.requireResolved(resolveCapturing(resolvedParams, captured), "LLM provider '" + type + "'");
+        recordCredentials(captured);
+        resolvedParams = adaptToModel(type, resolvedParams);
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
         var model = ObservableChatModel.wrap(rawModel, type, timeoutMs, logReq, logResp, telemetryListener,
                 telemetryProvider(type, resolvedParams));
+        recordCredentials(model, captured);
         publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
         return model;
@@ -394,14 +470,18 @@ public class ChatModelRegistry {
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
-            requireSecretsAllowedAt(type, resolvedParams);
-            resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
-            resolvedParams = adaptToModel(type, resolvedParams);
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
+            requireReferencesInCredentialKeys(type, modelBuilder, resolvedParams);
+            requireSecretsAllowedAt(type, modelBuilder, resolvedParams);
+            List<String> captured = new ArrayList<>();
+            resolvedParams = SecretResolver.requireResolved(resolveCapturing(resolvedParams, captured), "LLM provider '" + type + "'");
+            recordCredentials(captured);
+            resolvedParams = adaptToModel(type, resolvedParams);
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);
             var model = ObservableStreamingChatModel.wrap(rawModel, type, logReq, logResp, telemetryListener,
                     telemetryProvider(type, resolvedParams));
+            recordCredentials(model, captured);
             publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
         } catch (UnsupportedOperationException e) {
@@ -489,12 +569,7 @@ public class ChatModelRegistry {
      */
     private Map<String, String> filterParams(Map<String, String> processedParams) {
         var returnMap = new HashMap<>(processedParams);
-        returnMap.remove(KEY_INCLUDE_FIRST_AGENT_MESSAGE);
-        returnMap.remove(KEY_SYSTEM_MESSAGE);
-        returnMap.remove(KEY_PROMPT);
-        returnMap.remove(KEY_LOG_SIZE_LIMIT);
-        returnMap.remove(KEY_ADD_TO_OUTPUT);
-        returnMap.remove(KEY_CONVERT_TO_OBJECT);
+        NON_MODEL_PARAMETERS.forEach(returnMap::remove);
         normalizeTimeout(returnMap);
         return returnMap;
     }

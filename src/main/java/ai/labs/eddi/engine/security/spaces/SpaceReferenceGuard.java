@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.engine.security.spaces;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.secrets.VaultGrantChecker;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.HashSet;
@@ -40,6 +43,15 @@ public class SpaceReferenceGuard {
 
     private final VaultGrantChecker checker;
     private final ResourceAccessGuard accessGuard;
+
+    /**
+     * {@code eddi.vault.grant-enforcement}, applied to the agent grants of a
+     * configuration run outside any agent. Field-injected; null in tests built with
+     * {@code new}, which parses to the shipped default, {@code enforce}.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME)
+    String grantEnforcement;
 
     @Inject
     public SpaceReferenceGuard(VaultGrantChecker checker, ResourceAccessGuard accessGuard) {
@@ -86,7 +98,13 @@ public class SpaceReferenceGuard {
      *             naming the space tenants the caller does not belong to
      */
     public void requireMayUse(Object configuration, String what) {
-        if (configuration == null || !accessGuard.settings().isEnforcing() || accessGuard.isAdmin()) {
+        if (configuration == null || accessGuard.isAdmin()) {
+            return;
+        }
+        // Before the workspace check, and whether or not workspaces are enforced: a
+        // secret's agent grant binds on every deployment, not only a multi-space one.
+        requireNoAgentRestrictedSecrets(configuration, what);
+        if (!accessGuard.settings().isEnforcing()) {
             return;
         }
         Set<String> referenced;
@@ -104,6 +122,84 @@ public class SpaceReferenceGuard {
                 sanitize(String.valueOf(foreign)), sanitize(accessGuard.currentPrincipal()));
         throw new ForbiddenException("This " + what + " uses secrets or variables of a space you are not a member of ("
                 + String.join(", ", foreign) + "). Only a member of that space may run it — ask one to, or remove the references.");
+    }
+
+    /**
+     * Refuses to run a configuration outside any agent when it names a secret whose
+     * {@code allowedAgents} restricts it to particular agents.
+     * <p>
+     * On the agent path that grant is enforced when the agent is deployed
+     * ({@link VaultGrantChecker#findUngrantedReferences}). A knowledge base run
+     * through its standalone endpoints has no agent, so nothing held it to the
+     * grant: any editor with EDIT on any knowledge base could name a secret granted
+     * to one agent and have the server resolve it.
+     * <p>
+     * A restricted secret is therefore permitted only to a caller who may EDIT at
+     * least one existing agent on its grant: that caller can already make the
+     * granted agent use the secret, so running the knowledge base exposes nothing
+     * new — this is how the editor who maintains an agent and its knowledge base
+     * keeps searching and ingesting into it. Anyone else is refused, without being
+     * told which agents the grant names. An administrator is exempt. Without
+     * workspace enforcement every editor may edit every agent, so the check then
+     * passes for any existing granted agent. A secret open to every agent
+     * ({@code ["*"]}, or no list) is unaffected, and so is the ingestion an agent's
+     * own retrieval or a scheduled run performs, which does not pass through here.
+     * <p>
+     * Follows {@code eddi.vault.grant-enforcement}: {@code off} does not check,
+     * {@code warn} logs and lets the call through, {@code enforce} (the default)
+     * refuses. A grant or configuration that cannot be read is refused: unlike the
+     * deploy gate there is no later check to fall back on.
+     *
+     * @throws ForbiddenException
+     *             naming the restricted secrets
+     */
+    private void requireNoAgentRestrictedSecrets(Object configuration, String what) {
+        VaultGrantGate.Mode mode = VaultGrantGate.Mode.parseStrict(grantEnforcement);
+        if (mode == VaultGrantGate.Mode.OFF) {
+            return;
+        }
+        List<String> restricted;
+        try {
+            restricted = checker.findAgentRestrictedReferences(configuration).stream().filter(this::callerMayNotUse)
+                    .map(VaultGrantChecker.RestrictedReference::reference).toList();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Use of a %s refused: its vault references could not be checked against their agent grants: %s", sanitize(what),
+                    sanitize(e.getMessage()));
+            throw new ForbiddenException("This " + what + "'s vault references could not be checked against their agent grants. Try again "
+                    + "once they can be read, or ask an administrator.");
+        }
+        if (restricted.isEmpty()) {
+            return;
+        }
+        String names = String.join(", ", restricted);
+        if (mode == VaultGrantGate.Mode.WARN) {
+            LOGGER.warnf("A %s run outside any agent by '%s' uses vault secret(s) restricted to particular agents: %s. Allowed "
+                    + "(eddi.vault.grant-enforcement=warn); set it to 'enforce' to refuse.", sanitize(what),
+                    sanitize(accessGuard.currentPrincipal()), sanitize(names));
+            return;
+        }
+        LOGGER.warnf("Use of a %s refused: '%s' may edit none of the agents granted the vault secret(s) %s", sanitize(what),
+                sanitize(accessGuard.currentPrincipal()), sanitize(names));
+        // The refusal names no reference: one may have been reached through a global
+        // variable or a connection the caller cannot read, and its expanded form names
+        // a secret (and a tenant) the caller would otherwise never learn. The log line
+        // above, read by an operator, carries them.
+        throw new ForbiddenException("This " + what + " uses " + restricted.size() + " vault secret(s) whose grant (allowedAgents) names "
+                + "particular agents, or whose grant could not be read. Run here, outside any agent, it may be used only by someone who "
+                + "may edit one of those agents, or by an administrator. Ask one to run it, grant the secret to every agent "
+                + "(allowedAgents [\"*\"]), or use a secret meant for this " + what + ".");
+    }
+
+    /**
+     * Whether the caller is refused {@code restricted}: an entry that could not be
+     * verified always is; otherwise unless the caller may EDIT an agent on the
+     * grant.
+     */
+    private boolean callerMayNotUse(VaultGrantChecker.RestrictedReference restricted) {
+        if (restricted.unverifiable()) {
+            return true;
+        }
+        return restricted.grantedAgents().stream().noneMatch(agentId -> accessGuard.hasAccess(agentId, AccessLevel.EDIT));
     }
 
     /**

@@ -105,6 +105,27 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_PROMPT_CACHE_RETENTION, KEY_CUSTOM_HEADERS, KEY_CUSTOM_QUERY_PARAMS, KEY_CUSTOM_PARAMETERS);
     }
 
+    /** langchain4j's endpoint when no {@code baseUrl} is configured. */
+    static final String DEFAULT_ENDPOINT = "https://api.openai.com/v1";
+
+    /**
+     * {@code customQueryParams} included: some OpenAI-compatible gateways
+     * authenticate with a query key ({@code ?api-key=…}), and refusing a reference
+     * there would leave a plaintext key in the configuration as the only option. A
+     * provider error that echoes it is scrubbed by value (see
+     * {@code ResolvedCredentials}), and the task-error and fallback digests strip
+     * URLs.
+     */
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_API_KEY, KEY_CUSTOM_HEADERS, KEY_CUSTOM_QUERY_PARAMS);
+    }
+
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_BASE_URL, DEFAULT_ENDPOINT);
+    }
+
     /**
      * Every setting the builders read. Absent or unusable values are {@code null}
      * so the provider's own default stays in place.

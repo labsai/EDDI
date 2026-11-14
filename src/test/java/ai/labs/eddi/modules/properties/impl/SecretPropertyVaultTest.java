@@ -4,18 +4,23 @@
  */
 package ai.labs.eddi.modules.properties.impl;
 
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.security.spaces.SpaceTenants;
+import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -32,6 +37,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * The vaulting every {@code scope: "secret"} property path shares — the
@@ -118,6 +124,83 @@ class SecretPropertyVaultTest {
         assertFalse(AutoVaultedSecrets.isEmbeddable("a{b"));
         assertFalse(AutoVaultedSecrets.isEmbeddable("a$b"));
         assertFalse(AutoVaultedSecrets.isEmbeddable("a\nb"));
+    }
+
+    @Nested
+    @DisplayName("the vault tenant (security review 2026-11, finding 4)")
+    class VaultTenant {
+
+        private static final String OWN_SPACE = "team:research";
+        private static final String FOREIGN_SPACE = "team:finance";
+
+        private WorkspaceSettings workspaceSettings;
+
+        @BeforeEach
+        void inASpace() throws Exception {
+            workspaceSettings = mock(WorkspaceSettings.class);
+            when(workspaceSettings.isEnforcing()).thenReturn(true);
+            var descriptor = new DocumentDescriptor();
+            descriptor.setSpaceId(OWN_SPACE);
+            IDocumentDescriptorStore descriptorStore = mock(IDocumentDescriptorStore.class);
+            when(descriptorStore.readCurrentDescriptor("agent-1")).thenReturn(descriptor);
+            vault.workspaceSettings = workspaceSettings;
+            vault.descriptorStore = descriptorStore;
+        }
+
+        private ConversationMemory askingForTenant(String tenantId) {
+            var memory = conversation("alice");
+            memory.getConversationProperties().put("tenantId", new Property("tenantId", tenantId, Scope.conversation));
+            return memory;
+        }
+
+        private SecretReference stored() throws Exception {
+            var ref = ArgumentCaptor.forClass(SecretReference.class);
+            verify(secretProvider).store(ref.capture(), anyString(), anyString(), anyList());
+            return ref.getValue();
+        }
+
+        @Test
+        @DisplayName("the exploit: a tenantId property naming another space's tenant is ignored")
+        void foreignSpaceTenantIsIgnored() throws Exception {
+            vault.vault(askingForTenant(SpaceTenants.tenantFor(FOREIGN_SPACE)), "apiKey", "value");
+
+            assertEquals(SecretReference.DEFAULT_TENANT, stored().tenantId());
+        }
+
+        @Test
+        @DisplayName("an administrator-made tenant is not reachable through the property either")
+        void otherTenantIsIgnored() throws Exception {
+            vault.vault(askingForTenant("acme"), "apiKey", "value");
+
+            assertEquals(SecretReference.DEFAULT_TENANT, stored().tenantId());
+        }
+
+        @Test
+        @DisplayName("the agent's own space's tenant is honoured")
+        void ownSpaceTenantIsHonoured() throws Exception {
+            String own = SpaceTenants.tenantFor(OWN_SPACE);
+
+            Property property = vault.vault(askingForTenant(own), "apiKey", "value");
+
+            assertEquals(own, stored().tenantId());
+            assertTrue(property.getValueString().startsWith("${vault:" + own + "/"), property.getValueString());
+        }
+
+        @Test
+        @DisplayName("without workspace enforcement the property is honoured as before, and without it the tenant is default")
+        void unchangedWithoutEnforcement() throws Exception {
+            when(workspaceSettings.isEnforcing()).thenReturn(false);
+            vault.vault(askingForTenant("acme"), "apiKey", "value");
+            assertEquals("acme", stored().tenantId());
+        }
+
+        @Test
+        @DisplayName("no property, default tenant")
+        void defaultWithoutProperty() throws Exception {
+            vault.vault(conversation("alice"), "apiKey", "value");
+
+            assertEquals(SecretReference.DEFAULT_TENANT, stored().tenantId());
+        }
     }
 
     @Test

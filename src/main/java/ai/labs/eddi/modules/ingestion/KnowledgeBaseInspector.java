@@ -10,13 +10,16 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.UnsupportedFeatureException;
+import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -25,10 +28,12 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -77,6 +82,10 @@ public class KnowledgeBaseInspector {
         this.embeddingStoreFactory = embeddingStoreFactory;
         this.embeddingModelFactory = embeddingModelFactory;
     }
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
 
     /** One document a source has ingested, as its ingestion state records it. */
     public record DocumentSummary(
@@ -186,10 +195,29 @@ public class KnowledgeBaseInspector {
                 .toList();
     }
 
+    /**
+     * Pins every failure to the credentials of the clients it used, read while
+     * holding them (see {@link ResolvedCredentials#pin}): the REST layer redacts
+     * the failure with exactly those, even if a rotation has since evicted the
+     * clients and their references resolve to something else.
+     */
     private List<EmbeddingMatch<TextSegment>> search(String ragConfigId, RagConfiguration knowledgeBase, String text,
                                                      Filter narrowing, int maxResults, double minScore) {
-        Embedding queryVector = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY)
-                .embed(text).content();
+        Set<String> clientCredentials = new HashSet<>();
+        try {
+            return searchWith(ragConfigId, knowledgeBase, text, narrowing, maxResults, minScore, clientCredentials);
+        } catch (RuntimeException e) {
+            ResolvedCredentials.pin(resolvedCredentials, e, clientCredentials);
+            throw e;
+        }
+    }
+
+    private List<EmbeddingMatch<TextSegment>> searchWith(String ragConfigId, RagConfiguration knowledgeBase, String text,
+                                                         Filter narrowing, int maxResults, double minScore,
+                                                         Set<String> clientCredentials) {
+        EmbeddingModel model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY);
+        clientCredentials.addAll(ResolvedCredentials.heldBy(resolvedCredentials, model));
+        Embedding queryVector = model.embed(text).content();
         // Retrieval's own isolation, always: a knowledge base in the per-id layout
         // only ever sees the chunks tagged with its own id, even in a shared table.
         Filter isolation = EmbeddingStoreFactory.retrievalFilter(ragConfigId, knowledgeBase);
@@ -201,8 +229,10 @@ public class KnowledgeBaseInspector {
                 .minScore(minScore)
                 .filter(filter)
                 .build();
+        EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase);
+        clientCredentials.addAll(ResolvedCredentials.heldBy(resolvedCredentials, store));
         try {
-            return embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase).search(request).matches();
+            return store.search(request).matches();
         } catch (UnsupportedFeatureException e) {
             LOGGER.infof("The vector store of knowledge base %s cannot filter by metadata: %s",
                     LogSanitizer.sanitize(ragConfigId), e.getMessage());

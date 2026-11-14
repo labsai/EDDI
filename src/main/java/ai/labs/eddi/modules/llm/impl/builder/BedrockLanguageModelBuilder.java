@@ -92,6 +92,25 @@ public class BedrockLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_SEND_THINKING, KEY_CUSTOM_HEADERS);
     }
 
+    /** langchain4j's region when none is configured. */
+    static final String DEFAULT_REGION = "us-east-1";
+
+    /**
+     * Credentials come from the AWS credential chain, never from a parameter; only
+     * a {@code customHeaders} entry can carry a configured secret.
+     */
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_CUSTOM_HEADERS);
+    }
+
+    /** The Bedrock runtime host of the configured (or default) region. */
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        String region = parameters == null ? null : parameters.get(KEY_REGION);
+        return "https://bedrock-runtime." + (isNullOrEmpty(region) ? DEFAULT_REGION : region.trim()) + ".amazonaws.com";
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         var builder = BedrockChatModel.builder();

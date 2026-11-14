@@ -7,11 +7,14 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.model.StoreParameters;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -240,6 +243,16 @@ public class EmbeddingStoreFactory {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Where the credentials handed to a store client are recorded for by-value
+     * error scrubbing. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
+
+    /** Store parameters naming who authenticates: resolved, never captured. */
+    private static final Set<String> IDENTITY_PARAMETERS = Set.of("user", "userName");
 
     @Inject
     public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -661,15 +674,22 @@ public class EmbeddingStoreFactory {
         LOGGER.infof("Building embedding store: type=%s, knowledgeBase=%s, namespace=%s", sanitize(storeType), sanitize(ragConfigId),
                 KnowledgeBaseStorage.usesIdNamespace(config) ? KnowledgeBaseStorage.NAMESPACE_ID : KnowledgeBaseStorage.NAMESPACE_NAME);
 
-        return switch (storeType) {
-            case "pgvector" -> buildPgVector(config, ragConfigId);
-            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId);
-            case "elasticsearch" -> buildElasticsearch(config, ragConfigId);
-            case "qdrant" -> buildQdrant(config, ragConfigId);
-            case "chroma" -> buildChroma(config, ragConfigId);
+        List<String> captured = new ArrayList<>();
+        EmbeddingStore<TextSegment> store = switch (storeType) {
+            case "pgvector" -> buildPgVector(config, ragConfigId, captured);
+            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId, captured);
+            case "elasticsearch" -> buildElasticsearch(config, ragConfigId, captured);
+            case "qdrant" -> buildQdrant(config, ragConfigId, captured);
+            case "chroma" -> buildChroma(config, ragConfigId, captured);
             default -> throw new IllegalArgumentException(
                     "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
+        // What the client holds, for a caller that holds it to pin to its failure
+        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(store, captured);
+        }
+        return store;
     }
 
     // ──────────────────────────────────────────────────
@@ -694,8 +714,8 @@ public class EmbeddingStoreFactory {
      * text-embedding-3-small)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId, List<String> captured) {
+        Map<String, String> params = resolveParams(config, captured);
 
         String host = requirePlainHost(params.getOrDefault("host", "localhost"), "pgvector");
         int port = parseIntParam(params, "port", 5432);
@@ -732,8 +752,8 @@ public class EmbeddingStoreFactory {
      * "vector_index")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId, List<String> captured) {
+        Map<String, String> params = resolveParams(config, captured);
 
         String connectionString = requireParam(params, "connectionString", "mongodb-atlas");
         guardConnectionStringHosts(connectionString);
@@ -775,8 +795,8 @@ public class EmbeddingStoreFactory {
      */
     @SuppressWarnings("removal") // serverUrl/apiKey/userName/password deprecated in favor of
                                  // restClient(RestClient), but usable without direct ES REST client dependency
-    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId, List<String> captured) {
+        Map<String, String> params = resolveParams(config, captured);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
         targetPolicy.validateUrl(serverUrl);
@@ -815,8 +835,8 @@ public class EmbeddingStoreFactory {
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId, List<String> captured) {
+        Map<String, String> params = resolveParams(config, captured);
 
         String host = requirePlainHost(params.getOrDefault("host", "localhost"), "qdrant");
         int port = parseIntParam(params, "port", 6334);
@@ -852,8 +872,8 @@ public class EmbeddingStoreFactory {
      * the knowledge base, see KnowledgeBaseStorage)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId, List<String> captured) {
+        Map<String, String> params = resolveParams(config, captured);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
         targetPolicy.validateUrl(baseUrl);
@@ -886,13 +906,22 @@ public class EmbeddingStoreFactory {
     /**
      * Resolves global variable and vault references in store parameters.
      */
-    private Map<String, String> resolveParams(RagConfiguration config) {
+    private Map<String, String> resolveParams(RagConfiguration config, List<String> captured) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(resolved);
+        // A vault reference only in the store's credential parameters, checked after
+        // variable expansion and before anything is resolved: resolved into
+        // 'database' or 'indexName' it comes back in the store's own error, which RAG
+        // search and the ingestion status return to the caller.
+        StoreParameters.requireCredentialsOnly(config.getStoreType(), resolved);
         String usedFor = "vector store '" + config.getStoreType() + "'";
         Set<String> references = VaultHostAllowlist.referencesIn(resolved.values());
-        Map<String, String> params = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), usedFor);
+        // Each secret captured as substituted (SecretCapture). Who authenticates is
+        // not a secret: captured, a short user name would withhold every failure that
+        // mentions it.
+        Map<String, String> params = SecretResolver.requireResolved(SecretCapture.resolve(secretResolver, resolved, captured, IDENTITY_PARAMETERS),
+                usedFor);
         if (vaultHostAllowlist != null && !references.isEmpty()) {
             // After resolution, not before: a MongoDB connection string is commonly the
             // secret itself, so its hosts are only known once it is decrypted. Nothing

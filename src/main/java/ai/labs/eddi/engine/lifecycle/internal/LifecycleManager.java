@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.secrets.ResolvedCredentials;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.utils.JsonStringField;
 
@@ -45,6 +46,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
+import java.util.function.UnaryOperator;
 
 import org.jboss.logging.Logger;
 import java.net.UnknownHostException;
@@ -187,6 +189,26 @@ public class LifecycleManager implements ILifecycleManager {
      * component cache lookups.
      */
     private final IResourceStore.IResourceId workflowId;
+
+    /**
+     * The credentials handed to model clients, scrubbed by value from the
+     * task-error digest. Set by the workflow builder; null in tests built with
+     * {@code new}.
+     */
+    private ResolvedCredentials resolvedCredentials;
+
+    /** See {@link #resolvedCredentials}. */
+    public void useResolvedCredentials(ResolvedCredentials resolvedCredentials) {
+        this.resolvedCredentials = resolvedCredentials;
+    }
+
+    /**
+     * The by-value scrubber for a text describing {@code failure}: the recorded
+     * credentials, plus those the failing client pinned to it.
+     */
+    private UnaryOperator<String> scrubberFor(Throwable failure) {
+        return text -> ResolvedCredentials.scrubFailure(resolvedCredentials, failure, text);
+    }
 
     public LifecycleManager(IComponentCache componentCache, IResourceStore.IResourceId workflowId) {
         this.componentCache = componentCache;
@@ -526,7 +548,7 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Classify error for metrics, audit, and admin dashboards
                 String errorType = classifyError(e);
-                String errorSummary = summarizeForAudit(e);
+                String errorSummary = summarizeForAudit(e, scrubberFor(e));
                 long failDurationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
 
                 // The span carries the REDACTED summary, never the raw exception message:
@@ -1065,8 +1087,10 @@ public class LifecycleManager implements ILifecycleManager {
                                    Map<String, Object> outputBefore, List<String> actionsBefore,
                                    String onFailureMode) {
 
+        // The summary the audit and digest carry, not the raw message: a provider can
+        // quote the credential it rejected.
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
-                task.getId(), task.getType(), onFailureMode, exception.getMessage());
+                task.getId(), task.getType(), onFailureMode, summarizeForAudit(exception, scrubberFor(exception)));
 
         // 1. Mark new or overwritten IData entries as uncommitted.
         // An entry is "dirty" if its key didn't exist before OR if the
@@ -1189,7 +1213,8 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     private String reportFailureToCallerUnguarded(ConversationStep step, ILifecycleTask task, Exception exception) {
-        String digestText = String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
+        String summary = summarizeException(exception, scrubberFor(exception));
+        String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
         errorOutput.put("taskId", task.getId().name());
@@ -1201,7 +1226,7 @@ public class LifecycleManager implements ILifecycleManager {
         // The machine-readable half, for the caller's `error` object. The message is
         // the same redacted digest the text carries, never the raw exception.
         LlmFailure failure = LlmFailureClassifier.classify(exception);
-        TurnError turnError = TurnError.of(failure, summarizeException(exception));
+        TurnError turnError = TurnError.of(failure, summary);
         errorOutput.put(TurnError.KEY_CODE, turnError.code());
         errorOutput.put(TurnError.KEY_RETRYABLE, turnError.retryable());
         if (turnError.retryAfterMs() != null) {
@@ -1218,8 +1243,19 @@ public class LifecycleManager implements ILifecycleManager {
      * leaves the server.
      */
     static String summarizeException(Throwable e) {
+        return summarizeException(e, UnaryOperator.identity());
+    }
+
+    /**
+     * {@link #summarizeException(Throwable)} with {@code scrubber} applied before
+     * the pattern redaction and the truncation: it removes, by value, the
+     * credentials handed to model clients (see {@link ResolvedCredentials}), which
+     * a provider may echo in its error and which pattern redaction misses when they
+     * carry no recognisable prefix.
+     */
+    static String summarizeException(Throwable e, UnaryOperator<String> scrubber) {
         try {
-            return summarizeUnguarded(e);
+            return summarizeUnguarded(e, scrubber);
         } catch (StackOverflowError | RuntimeException failure) {
             // This runs inside the failure handler: whatever the summary trips over
             // must not replace the failure being reported (security review L14).
@@ -1227,8 +1263,8 @@ public class LifecycleManager implements ILifecycleManager {
         }
     }
 
-    private static String summarizeUnguarded(Throwable e) {
-        String msg = describeFailure(e);
+    private static String summarizeUnguarded(Throwable e, UnaryOperator<String> scrubber) {
+        String msg = scrubber.apply(describeFailure(e));
 
         // Strip common noise patterns
         msg = msg.replaceAll("https?://[^\\s]+", "[url]");
@@ -1377,7 +1413,15 @@ public class LifecycleManager implements ILifecycleManager {
      * are scrubbed via {@link SecretRedactionFilter}.
      */
     static String summarizeForAudit(Throwable e) {
-        String msg = describeFailure(e);
+        return summarizeForAudit(e, UnaryOperator.identity());
+    }
+
+    /**
+     * {@link #summarizeForAudit(Throwable)} with {@code scrubber} — the by-value
+     * removal of the credentials handed to model clients — applied first.
+     */
+    public static String summarizeForAudit(Throwable e, UnaryOperator<String> scrubber) {
+        String msg = scrubber.apply(describeFailure(e));
         // Redact before truncating — cutting first can split a secret so the
         // pattern no longer matches, leaving a fragment behind.
         msg = SecretRedactionFilter.redact(msg);

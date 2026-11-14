@@ -62,16 +62,39 @@ public interface ILanguageModelBuilder {
     }
 
     /**
-     * The endpoint this builder will send to when the configuration names no
-     * endpoint parameter ({@code EndpointParameters}), if an editor can still steer
-     * that destination through other parameters — or {@code null}.
+     * The parameter keys that carry a credential, and so are the only ones a
+     * {@code ${vault:…}} reference may sit in.
      * <p>
-     * A provider with one fixed vendor endpoint returns {@code null}: the editor
-     * cannot choose where it goes, so a secret's {@code allowedHosts} has nothing
-     * to judge. A builder whose default depends on a parameter (an
-     * OpenAI-compatible preset's {@code region}) returns the URL it would use, so
-     * the registry can check it against every referenced secret before resolving
-     * them.
+     * {@code ChatModelRegistry} refuses a configuration with a vault reference in
+     * any other key before it resolves anything. A secret resolved into
+     * {@code modelName} is not used as a credential — it is sent as data, and comes
+     * back in the provider's "model X does not exist" error, in the client-visible
+     * {@code taskErrors} and in the {@code gen_ai.request.model} span attribute. An
+     * editor with their own working key could otherwise read any secret of the
+     * vault back that way.
+     * <p>
+     * The empty default fails closed: a builder that does not declare its
+     * credential keys accepts no vault reference at all.
+     */
+    default Set<String> secretParameters() {
+        return Set.of();
+    }
+
+    /**
+     * The endpoint this builder will send to when the configuration names none of
+     * the endpoint parameters it reads ({@code EndpointParameters}) — or
+     * {@code null} when there is no such default.
+     * <p>
+     * Every builder with a default destination names it: the vendor's fixed host
+     * ({@code api.openai.com}), the host a parameter selects (an OpenAI-compatible
+     * preset's {@code region}, Bedrock's {@code region}, Vertex's
+     * {@code location}). The registry checks it against every referenced secret's
+     * {@code allowedHosts} before resolving them. A fixed vendor host is not
+     * exempt: the editor chooses the provider {@code type}, so a secret restricted
+     * to one vendor would otherwise be sent to any other vendor's host by choosing
+     * that vendor's type and leaving the endpoint out.
+     * <p>
+     * A builder reports no default once the endpoint key it reads is set.
      *
      * @param parameters
      *            the builder parameters with global variables resolved and vault
@@ -79,5 +102,15 @@ public interface ILanguageModelBuilder {
      */
     default String defaultEndpoint(Map<String, String> parameters) {
         return null;
+    }
+
+    /**
+     * {@code value} when {@code key} is not set to a non-blank value in
+     * {@code parameters}, else {@code null} — the shape of most
+     * {@link #defaultEndpoint} implementations.
+     */
+    static String unlessSet(Map<String, String> parameters, String key, String value) {
+        String configured = parameters == null ? null : parameters.get(key);
+        return configured == null || configured.isBlank() ? value : null;
     }
 }

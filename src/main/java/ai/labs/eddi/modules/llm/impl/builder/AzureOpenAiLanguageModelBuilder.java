@@ -99,6 +99,37 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     /**
+     * Where the Azure SDK sends a request when no {@code endpoint} is configured:
+     * in {@code nonAzureApiKey} mode, OpenAI's own API. With an Azure key and no
+     * endpoint the client does not build at all, so this is the only destination a
+     * configuration without one can have.
+     */
+    static final String NON_AZURE_ENDPOINT = "https://api.openai.com/v1";
+
+    @Override
+    public Set<String> secretParameters() {
+        return Set.of(KEY_API_KEY, KEY_NON_AZURE_API_KEY, KEY_CUSTOM_HEADERS);
+    }
+
+    /**
+     * OpenAI's API whenever {@code nonAzureApiKey} is set — the client's
+     * {@code nonAzureApiKey(...)} replaces a configured {@code endpoint} with it,
+     * so an allowed Azure {@code endpoint} must not stand in for where the key goes
+     * — and also when no {@code endpoint} is set, the only destination such a
+     * configuration can have. Otherwise the configured {@code endpoint}, which the
+     * registry checks as an endpoint key.
+     */
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        // The same test read() applies before calling nonAzureApiKey(...): a
+        // whitespace-only value still switches the client to OpenAI.
+        if (parameters != null && !isNullOrEmpty(parameters.get(KEY_NON_AZURE_API_KEY))) {
+            return NON_AZURE_ENDPOINT;
+        }
+        return ILanguageModelBuilder.unlessSet(parameters, KEY_ENDPOINT, NON_AZURE_ENDPOINT);
+    }
+
+    /**
      * Every setting the builders read; {@code null} leaves the provider default.
      * {@code baseModel} is deliberately absent: it never reaches the client.
      */
