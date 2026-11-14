@@ -45,14 +45,17 @@ import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.health.IHealthDailyStore;
 import ai.labs.eddi.engine.health.IHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.IHealthMarkerStore;
+import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthDailyStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthMarkerStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthOutcomeStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthTurnStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthDailyStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthDirtyDayStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthMarkerStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthOutcomeStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
@@ -477,6 +480,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IHealthMarkerStore healthMarkerStore(Instance<MongoHealthMarkerStore> mongo, Instance<PostgresHealthMarkerStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthOutcomeStore healthOutcomeStore(Instance<MongoHealthOutcomeStore> mongo, Instance<PostgresHealthOutcomeStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

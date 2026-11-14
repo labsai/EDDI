@@ -132,7 +132,8 @@ class McpRoleTierParityTest {
     private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
     /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
-    private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health");
+    private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health",
+            "list_agent_health_sessions", "suggest_outcome_mappings");
 
     /**
      * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
@@ -240,7 +241,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(110, measured.size());
+        assertEquals(112, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -332,7 +333,9 @@ class McpRoleTierParityTest {
         mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
         mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
         mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
-        mirrors.put(IRestAgentHealth.class, McpRoles.HEALTH_READ); // read_agent_health, compare_agent_versions_health
+        // read_agent_health, compare_agent_versions_health, list_agent_health_sessions,
+        // suggest_outcome_mappings
+        mirrors.put(IRestAgentHealth.class, McpRoles.HEALTH_READ);
         mirrors.put(IRestHealthPortfolio.class, McpRoles.HEALTH_READ); // list_agent_health
 
         for (var entry : mirrors.entrySet()) {

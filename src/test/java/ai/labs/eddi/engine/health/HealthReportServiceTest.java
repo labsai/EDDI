@@ -28,6 +28,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.RatingSummary;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
+import ai.labs.eddi.engine.health.report.HealthReports;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -46,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -265,5 +268,39 @@ class HealthReportServiceTest {
         when(daily.firstDayByVersion(eq("agent"), any())).thenReturn(Map.of());
         HealthCompare unknown = service.compare("agent", 3, 4, 14, null, false);
         assertEquals(TODAY.toString(), unknown.to().window().from());
+    }
+
+    @Test
+    @DisplayName("M4: while the outcome evaluation has not reached the period's end, outcome measures say so and the hint names the day")
+    void outcomesStillEvaluating() {
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        when(outcomes.counts(any(), anyBoolean(), any()))
+                .thenReturn(List.of(new HealthOutcomeCount(null, null, "ASSUMED_RESOLVED", "silence", true, false, 40, 80)));
+        when(outcomes.watermark()).thenReturn(Optional.of(Instant.parse("2026-10-20T08:00:00Z")));
+        service.withOutcomes(outcomes);
+        HealthPeriods.Window window = new HealthPeriods.Window(TODAY.minusDays(6), TODAY);
+        assertEquals("Outcomes are still being evaluated (through 2026-10-20)", service.outcomesPendingHint(window));
+        HealthReports.AgentHealth report = service.report(new HealthReportService.Scope("agent", window, null, null), "A", false);
+        HealthReports.EffectivenessSection effectiveness = (HealthReports.EffectivenessSection) report.sections().get("effectiveness");
+        HealthReports.Measure resolution = effectiveness.measures().get(0);
+        assertEquals(1.0, resolution.value(), "the value so far is shown");
+        assertEquals("Outcomes are still being evaluated (through 2026-10-20)", resolution.hint());
+
+        // A window that ended before the watermark is complete.
+        assertEquals(null, service.outcomesPendingHint(new HealthPeriods.Window(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 18))));
+    }
+
+    @Test
+    @DisplayName("M4: caught up within the slack, or never run, are told apart")
+    void outcomesCaughtUp() {
+        IHealthOutcomeStore outcomes = mock(IHealthOutcomeStore.class);
+        when(outcomes.watermark()).thenReturn(Optional.of(NOW.minusSeconds(120)));
+        service.withOutcomes(outcomes);
+        assertEquals(null, service.outcomesPendingHint(new HealthPeriods.Window(TODAY.minusDays(6), TODAY)));
+        IHealthOutcomeStore never = mock(IHealthOutcomeStore.class);
+        when(never.watermark()).thenReturn(Optional.empty());
+        HealthReportService fresh = new HealthReportService(turns, daily, dirty, markers, ratings, testRuns, deployments, HealthSettings.defaults(),
+                Clock.fixed(NOW, ZoneOffset.UTC)).withOutcomes(never);
+        assertEquals("Outcomes are still being evaluated", fresh.outcomesPendingHint(new HealthPeriods.Window(TODAY.minusDays(6), TODAY)));
     }
 }

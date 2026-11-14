@@ -19594,7 +19594,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_health_rollup_lag_seconds` — age of the oldest agent day waiting for the `health-rollup` job, and `eddi_health_rollup_pending` — how many wait, both as the node's last pass left them. The lag should stay below a few `eddi.health.rollup-interval` (5 minutes by default); while it grows, the health views fall behind the turns.",
+          "description": "`eddi_health_rollup_lag_seconds` — age of the oldest agent day waiting for the `health-rollup` job, and `eddi_health_rollup_pending` — how many wait, both as the node's last pass left them. The lag should stay below a few `eddi.health.rollup-interval` (5 minutes by default); while it grows, the health views fall behind the turns. `eddi_health_outcomes_lag_seconds` — how far the session-outcome evaluation's watermark is behind the clock (high during the backfill after an upgrade, then about a minute).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -19623,6 +19623,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "pending days"
+            },
+            {
+              "refId": "C",
+              "expr": "max(eddi_health_outcomes_lag_seconds{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "outcome lag (s)"
             }
           ],
           "fieldConfig": {
@@ -19681,7 +19692,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_health_rollup_days_total` — agent days recomputed, `eddi_health_rollup_rows_total` — daily rows written, `eddi_health_rollup_failures_total` — agent days whose rollup failed (retried on the next pass; should stay at zero), and the mean pass duration from `eddi_health_rollup_duration_seconds`.",
+          "description": "`eddi_health_rollup_days_total` — agent days recomputed, `eddi_health_rollup_rows_total` — daily rows written, `eddi_health_rollup_failures_total` — agent days whose rollup failed (retried on the next pass; should stay at zero), the mean pass duration from `eddi_health_rollup_duration_seconds`, and the outcome evaluation that runs first in every pass: `eddi_health_outcomes_sessions_total` — session outcome rows written, `eddi_health_outcomes_failures_total` — conversations whose evaluation failed (should stay at zero), and `eddi_health_outcomes_rating_overflow_total` by `result` — rating changes the outcome hand-off queue had no room for: `deferred` (marked once it catches up) or `dropped` (lost; should stay at zero).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -19732,6 +19743,39 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "mean pass (s)"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(eddi_health_outcomes_sessions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "sessions judged/s"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(rate(eddi_health_outcomes_failures_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "outcome failures/s"
+            },
+            {
+              "refId": "G",
+              "expr": "sum by (result) (rate(eddi_health_outcomes_rating_overflow_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rating marks {{result}}/s"
             }
           ],
           "fieldConfig": {

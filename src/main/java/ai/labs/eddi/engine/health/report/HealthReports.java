@@ -133,4 +133,28 @@ public final class HealthReports {
             return new Portfolio(items, platformIncidents, nextCursor, truncated);
         }
     }
+
+    /**
+     * One session of the drill-down — ids, counts and the outcome, no user id and
+     * no content.
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record SessionRow(String conversationId, int sessionNo, String startedAt, String endedAt, Integer agentVersion, String origin,
+            boolean engaged, String outcome, String evidence, boolean provisional, int turns, double costUsd, int failures) {
+    }
+
+    /** {@code GET /agents/{agentId}/health/sessions}. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record SessionPage(List<SessionRow> items, String nextCursor) {
+    }
+
+    /** One action that often ends sessions and is not mapped to an outcome yet. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record OutcomeSuggestion(String action, String suggested, long sessionsEndingWith, String reason) {
+    }
+
+    /** {@code GET /agents/{agentId}/health/outcome-suggestions}. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record OutcomeSuggestions(List<OutcomeSuggestion> items) {
+    }
 }

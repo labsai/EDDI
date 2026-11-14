@@ -1866,4 +1866,21 @@ public class AgentConfiguration {
             this.notify = notify;
         }
     }
+
+    /**
+     * How Agent Health judges this version's conversations — outcome mappings, the
+     * silence assumption, inactivity windows, the self-report tool (see
+     * {@link HealthConfig}). Absent applies every default.
+     *
+     * @since 6.7.0
+     */
+    private HealthConfig healthConfig;
+
+    public HealthConfig getHealthConfig() {
+        return healthConfig;
+    }
+
+    public void setHealthConfig(HealthConfig healthConfig) {
+        this.healthConfig = healthConfig;
+    }
 }

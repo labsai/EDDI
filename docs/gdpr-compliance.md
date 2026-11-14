@@ -215,6 +215,16 @@ principal, not a user: erasing or exporting it is refused with 400.
     (730 days) removes them; they hold no user id or content. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
+19. **Agent Health session outcomes** (`agentHealthOutcomes`) — **permanently deleted** by the
+    `agentHealthOutcomes` participant: every session row whose user is the erased user. A row holds
+    the conversation id, session number, agent and version, origin, times, counts, the session's
+    outcome and its evidence, and the action names of its last turn — no text. Rows also go when
+    their conversation is deleted, and expire with the turn rows (`eddi.health.facts-retention`).
+    They are derived from turn rows, which the erasure deletes too; the outcome evaluation writes
+    nothing for a fenced user and deletes again what it wrote while the fence went up, and the daily
+    orphan sweep covers rows evaluated just before a conversation was deleted. The export carries
+    them under `sessions` in the `agentHealthOutcomes` section of `additionalData`, newest first, at
+    most 10,000; past that the section says `"truncated": true`
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -241,6 +251,9 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
 - Agent Health turn rows of the user's conversations (`agentHealthTurns`: conversation, step,
   agent and version, origin, time, cost, tokens, duration, outcome, LLM failure classes, tool and
   guardrail counts, actions; capped at 10,000)
+- Agent Health session outcomes of the user's conversations (`agentHealthOutcomes`: conversation,
+  session number, agent and version, origin, start and end, turns, cost, failed turns, outcome,
+  evidence, the last turn's actions; capped at 10,000)
 - Conversation ratings the user gave (`conversationRatings`: conversation and step,
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)

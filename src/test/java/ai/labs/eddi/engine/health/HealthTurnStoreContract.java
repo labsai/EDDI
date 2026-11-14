@@ -255,4 +255,68 @@ public interface HealthTurnStoreContract {
         store().forEachConversationUpdatedSince(T0.plusSeconds(3_600), 100, none::add);
         assertTrue(none.isEmpty(), none.toString());
     }
+
+    @Test
+    @DisplayName("H3: a self-reported outcome round-trips; rows of a step range come oldest first, the first ones when capped, markers excluded")
+    default void rowsFromStep() {
+        HealthTurn reported = row("c1", 2, "e2", T0.plusSeconds(20), 0.1, false);
+        reported = new HealthTurn(reported.conversationId(), reported.stepIndex(), reported.executionId(), reported.agentId(),
+                reported.agentVersion(), reported.previousAgentVersion(), reported.userId(), reported.origin(), reported.day(),
+                reported.timestamp(), reported.updatedAt(), reported.costUsd(), reported.discardedCostUsd(), reported.inputTokens(),
+                reported.outputTokens(), reported.totalTokens(), reported.durationMs(), reported.errorKind(), reported.paused(),
+                reported.failures(), reported.fallbackServed(), reported.toolCalls(), reported.toolFailures(), reported.toolRefusals(),
+                reported.guardrailTrips(), reported.userInput(), reported.agentOutput(), reported.lastOutputWasQuestion(), reported.actions(),
+                false, "RESOLVED");
+        store().upsert(row("c1", 0, "e0", T0, 0.1, false));
+        store().upsert(row("c1", 1, "e1", T0.plusSeconds(10), 0.1, false));
+        store().upsert(reported);
+        store().upsert(row("c1", 3, "e3", T0.plusSeconds(30), 0.1, false));
+        store().markDiscarded(row("c1", 4, "e4", T0.plusSeconds(40), 0.1, false), List.of("ghost"));
+
+        List<HealthTurn> fromOne = store().findByConversationSteps("c1", 1, null, 10);
+        assertEquals(List.of(1, 2, 3), fromOne.stream().map(HealthTurn::stepIndex).toList());
+        assertEquals("RESOLVED", fromOne.get(1).selfReportedOutcome());
+        assertEquals(null, fromOne.get(0).selfReportedOutcome());
+        assertEquals(List.of(0, 1), store().findByConversationSteps("c1", 0, null, 2).stream().map(HealthTurn::stepIndex).toList(),
+                "capped: the first rows, oldest first");
+        assertEquals(List.of(1, 2), store().findByConversationSteps("c1", 1, 3, 10).stream().map(HealthTurn::stepIndex).toList(),
+                "the end step is exclusive");
+    }
+
+    @Test
+    @DisplayName("H3: conversationsUpdatedBetween orders conversations by their newest write in the range and respects the limit")
+    default void conversationsUpdatedBetween() {
+        store().upsert(row("a", 0, "a0", T0, 0.1, false));
+        store().upsert(row("a", 1, "a1", T0.plusSeconds(30), 0.1, false));
+        store().upsert(row("b", 0, "b0", T0.plusSeconds(10), 0.1, false));
+        store().upsert(row("c", 0, "c0", T0.plusSeconds(20), 0.1, false));
+        store().upsert(row("late", 0, "l0", T0.plusSeconds(100), 0.1, false));
+        store().markDiscarded(row("m", 1, "m1", T0.plusSeconds(5), 0.1, false), List.of("ghost"));
+
+        var page = store().conversationsUpdatedBetween(T0, null, T0.plusSeconds(60), 10);
+        assertEquals(List.of("b", "c", "a"), page.stream().map(a -> a.conversationId()).toList(), "markers have no rows to judge");
+        assertEquals(T0.plusSeconds(30), page.get(2).lastUpdatedAt());
+        assertEquals(List.of("b", "c"), store().conversationsUpdatedBetween(T0, null, T0.plusSeconds(60), 2).stream().map(a -> a.conversationId())
+                .toList());
+        assertEquals(List.of("c", "a"), store().conversationsUpdatedBetween(T0.plusSeconds(20), null, T0.plusSeconds(60), 10).stream()
+                .map(a -> a.conversationId()).toList(), "the since bound is inclusive");
+    }
+
+    @Test
+    @DisplayName("H3: a full page of conversations sharing one newest write continues after the (time, conversation) pair — no repeat, no gap")
+    default void conversationsUpdatedBetweenSameInstant() {
+        for (String c : List.of("d", "a", "c", "b", "e")) {
+            store().upsert(row(c, 0, c + "0", T0.plusSeconds(10), 0.1, false));
+        }
+        store().upsert(row("f", 0, "f0", T0.plusSeconds(20), 0.1, false));
+        Instant until = T0.plusSeconds(60);
+
+        var first = store().conversationsUpdatedBetween(T0, null, until, 2);
+        assertEquals(List.of("a", "b"), first.stream().map(a -> a.conversationId()).toList());
+        var second = store().conversationsUpdatedBetween(first.get(1).lastUpdatedAt(), "b", until, 2);
+        assertEquals(List.of("c", "d"), second.stream().map(a -> a.conversationId()).toList(), "after b at the same instant");
+        var third = store().conversationsUpdatedBetween(second.get(1).lastUpdatedAt(), "d", until, 2);
+        assertEquals(List.of("e", "f"), third.stream().map(a -> a.conversationId()).toList(), "then the later instant");
+        assertEquals(List.of(), store().conversationsUpdatedBetween(T0.plusSeconds(20), "f", until, 2));
+    }
 }

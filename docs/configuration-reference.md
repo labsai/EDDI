@@ -300,6 +300,10 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 | `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept; swept daily |
 | `eddi.health.cache-ttl` | `60s` | How long the health views cache what they read from the stores (per query and agent, never per caller); `0` switches the cache off |
 | `eddi.health.apdex-t` | `4s` | The Apdex threshold T: a turn of at most T satisfies, one of at most 4T is tolerated. Applies to days rolled up after a change |
+| `eddi.health.session-window` | `24h` | The inactivity window after which a session closes, for every origin but e-mail — what splits a conversation into the sessions outcomes are judged on. An agent overrides it per origin with `healthConfig.inactivityWindowHours` |
+| `eddi.health.email-session-window` | `72h` | The same for e-mail conversations |
+| `eddi.health.outcome-feed-overlap` | `15m` | How far behind its watermark the outcome evaluation re-reads conversations every pass. Turn rows are ordered by their capture time, set before they wait on a node's health queue, so a row can land after the watermark passed it; the overlap catches one up to this late, at the cost of re-judging that many minutes of conversations each pass. A later row is judged with its conversation's next change or when its session is due. `0` re-reads nothing |
+| `eddi.health.min-outcome-coverage` | `0.5` | The outcome coverage (closed sessions with an outcome other than `ENDED_QUIETLY`) below which the effectiveness rates are withheld — `value: null` with a hint |
 
 ---
 

@@ -268,6 +268,54 @@ The checks are applied against the agent **version the conversation runs on**:
 enabling ratings in v3 does not let people rate conversations that ran on v2. A
 save with out-of-range values answers 400 naming the field.
 
+## `healthConfig` — how Agent Health judges conversations
+
+`healthConfig` on the **agent** configuration says how [Agent Health](agent-health.md#conversation-outcomes)
+decides how a session ended. It is **versioned** and travels with the agent in
+export, import and agent sync, like `ratingConfig`; a session is judged by the
+`healthConfig` of the version it ran on — its mapping and silence setting those
+of the version of its last turn, its inactivity window that of the version it
+ran on when it was split and closed — so changing it in v9 never re-judges
+sessions that ran on v8. Absent, every default applies.
+
+```json
+"healthConfig": {
+  "outcomes": { "order_confirmed": "RESOLVED", "handoff_human": "ESCALATED", "out_of_scope": "DEFLECTED" },
+  "assumeResolvedOnSilence": true,
+  "inactivityWindowHours": { "email": 96 },
+  "selfReportTool": false
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `outcomes` | `{}` | Action → `RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED` or `ABANDONED`. A session in which the agent emitted a mapped action ends with that outcome (evidence `agent_action` — the strongest signal there is today); with several, the last one counts. At most 100 mappings, action names ≤ 128 characters. `CONVERSATION_END` and `STOP_CONVERSATION` may be mapped (unmapped they count as `ASSUMED_RESOLVED` from `agent_closed`); `CONVERSATION_START`, `PAUSE_CONVERSATION` and `CONTINUE_CONVERSATION` cannot — they say nothing about how a conversation went |
+| `assumeResolvedOnSilence` | `true` | A session that went quiet after a successful last turn — no mapped outcome, no open question, no negative rating — counts as `ASSUMED_RESOLVED` with evidence `silence`. `false` records `ENDED_QUIETLY` instead. Either way the resolution rate shows how much rests on silence |
+| `inactivityWindowHours` | `{}` | Origin → hours of quiet after which a session closes (1–720), overriding the deployment's 24 h (`eddi.health.session-window`) and e-mail's 72 h (`eddi.health.email-session-window`) |
+| `selfReportTool` | `false` | Offer the model the built-in tool `report_conversation_outcome` (`RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED`; no reason text). The LLM task must also set `enableBuiltInTools: true`, and name `report_conversation_outcome` in `builtInToolsWhitelist` if it uses one. Its claims are weak evidence (`self_reported`), below a mapped action and never counted as confirmed |
+
+**What the defaults do.** With no `healthConfig` an agent still gets outcomes: a
+session the agent ended with `CONVERSATION_END` / `STOP_CONVERSATION` counts as
+`ASSUMED_RESOLVED` (`agent_closed`), one that went quiet after a good answer as
+`ASSUMED_RESOLVED` (`silence`), one whose last turn failed as `FAILED`, and one
+left on an open question as `ABANDONED`. Mapping the actions that mean *done*
+or *handed over* turns those assumptions into confirmed outcomes —
+`GET /agents/{agentId}/health/outcome-suggestions` lists the actions that end
+most sessions and are not mapped yet.
+
+The save is refused (400 naming the field) for an unknown outcome, a reserved
+action that cannot be mapped, an empty or overlong action name, more than 100
+mappings, or a window of an unknown origin or outside 1–720 hours. A `create`
+or `merge` ZIP import runs the same checks before it writes anything, snippets
+and connections included, and is refused with the same 400. An `upgrade` import
+or a sync that adopts the source agent's settings runs every check the agent
+update applies to them (these, plus HITL, ratings, continuation, Dream and
+security flags) before its first write, and is refused with the same 400:
+nothing is written, and a batch sync reports it on that agent's row. No
+`healthConfig` that a save accepted is refused either way. An agent
+stored without them — written by hand, say — is read leniently: an invalid
+entry is ignored.
+
 ## ZIP Structure for Agent Import
 
 Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID unless the id is at least 18 characters long and is either all hex (an ObjectId-style id) or a canonical 8-4-4-4-12 UUID — dashes are accepted nowhere else — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
