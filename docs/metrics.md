@@ -1081,12 +1081,14 @@ on active users; a steady rise means cycles keep racing live conversations, and 
 a quieter hour helps. An assessment Dream could not write for the same reason
 (`contradictionResolution`) counts here too.
 
-The three `eddi_dream_contradictions_*` counters other than `found` stay at zero under the
-default `contradictionResolution: keep_newest`, which only detects. With `mark_contested` or
-`supersede_older`, `contested` and `superseded` count entries newly marked — an entry already
-marked is not counted again — and `cleared` counts entries returned to `ACCEPTED` because the
-other side of the disagreement was rewritten, deleted or retired. See
-[user-memory.md](user-memory.md#contradiction-resolution).
+`contested` and `superseded` stay at zero under the default
+`contradictionResolution: keep_newest`, which only detects. With `mark_contested` or
+`supersede_older`, they count entries newly marked — an entry already marked is not counted
+again. `cleared` counts entries returned to `ACCEPTED` because the other side of the
+disagreement was rewritten, deleted or retired, and it is **not** limited to those two
+strategies: a stale verdict is lifted under every strategy, `keep_newest` included, so after
+switching back to the default `cleared` still rises while the next cycles lift the flags the
+earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolution).
 
 ### Conversation Summarization Metrics
 

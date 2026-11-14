@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -70,6 +71,14 @@ public class UserMemoryTool {
      * {@code maxWritesPerTurn}.
      */
     private final TurnCounter writesThisTurn;
+    /**
+     * Told the key of every fact {@code rememberFact} wrote. The store records a
+     * write {@code ACCEPTED}, so the conversation drops the key from its
+     * {@code contestedMemories} marker: the tool writes to the store directly and
+     * the conversation property is left as it was, so the end-of-turn persistence
+     * that lifts the marker for property writes never sees this one.
+     */
+    private final Consumer<String> keyWritten;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config) {
@@ -98,6 +107,20 @@ public class UserMemoryTool {
      */
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, writesThisTurn, key -> {
+        });
+    }
+
+    /**
+     * @param keyWritten
+     *            called with the key of each fact this tool wrote, after the write
+     *            stood; {@code null} for none
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn,
+            Consumer<String> keyWritten) {
+        this.keyWritten = keyWritten != null ? keyWritten : key -> {
+        };
         this.writesThisTurn = writesThisTurn != null ? writesThisTurn : TurnCounter.local();
         this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
@@ -285,6 +308,7 @@ public class UserMemoryTool {
                 }
             }
             writesThisTurn.increment();
+            keyWritten.accept(trimmedKey);
 
             LOGGER.debugf("[MEMORY] Tool rememberFact: user='%s', key='%s', category='%s', visibility='%s'", userId, key, normalizedCategory, vis);
 
@@ -378,9 +402,17 @@ public class UserMemoryTool {
                 return TURN_DISCARDED_REFUSAL;
             }
 
+            // The linked versions go first, the forgotten entry last. Each delete is its
+            // own statement on both stores, so a failure (or a crash) part way through
+            // leaves whatever was not yet deleted; in this order that is the forgotten
+            // entry and the versions still linked to it, which a retry finds and walks
+            // again. The other way round, a failure after the first delete left older
+            // versions whose replacement was gone — the loader served one again as the
+            // only entry for the key, and a retry starting from it could not reach the
+            // rest of the chain, so it answered "Forgotten" with a version still stored.
+            int linked = forgetSupersessionChain(key, target);
             store.deleteEntry(target.id());
             writesThisTurn.increment();
-            int linked = forgetSupersessionChain(key, target);
             LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s', linkedVersions=%d", userId, key, linked);
 
             return "✅ Forgotten: %s".formatted(key);
@@ -444,8 +476,11 @@ public class UserMemoryTool {
                 }
             }
         }
+        // Farthest first: every version in the chain was reached through one found
+        // before it, so deleting in reverse discovery order keeps what is left
+        // connected to the forgotten entry if this loop stops part way.
         int deleted = 0;
-        for (UserMemoryEntry e : chain) {
+        for (UserMemoryEntry e : chain.reversed()) {
             if (store.deleteEntryIfUnchanged(e.id(), e.updatedAt())) {
                 deleted++;
             }
