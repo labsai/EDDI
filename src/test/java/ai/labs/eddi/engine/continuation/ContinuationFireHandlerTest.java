@@ -18,6 +18,10 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +31,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -269,6 +275,98 @@ class ContinuationFireHandlerTest {
             turnSettles(ConversationState.READY, false);
 
             assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            assertEquals(1.0, run());
+        }
+
+        private ConversationMemorySnapshot ownedOnAgent() throws Exception {
+            var stored = stored(ConversationState.READY);
+            stored.setUserId("owner");
+            stored.setAgentId("agent-1");
+            doReturn(stored).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            return stored;
+        }
+
+        private ResourceAccessGuard enforcingGuard(ResourceAccessGuard.UseCheck answer) {
+            var guard = mock(ResourceAccessGuard.class);
+            var settings = mock(WorkspaceSettings.class);
+            when(settings.isEnforcing()).thenReturn(true);
+            when(guard.settings()).thenReturn(settings);
+            when(guard.checkPrincipalUse(eq("agent-1"), eq("owner"), any(), eq(false))).thenReturn(answer);
+            var directory = mock(UserDirectory.class);
+            when(directory.isActive()).thenReturn(true);
+            when(directory.lookup(List.of("owner"))).thenReturn(Map.of("owner",
+                    new DirectoryUser("owner", "sub", "owner", null, false, null, List.of("team:ops"), null, null)));
+            handler.resourceAccessGuard = guard;
+            handler.userDirectory = directory;
+            return guard;
+        }
+
+        private Map<String, Object> booked(int number, Boolean byAdmin) {
+            var md = new LinkedHashMap<>(metadata(number));
+            md.put(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY, byAdmin);
+            return md;
+        }
+
+        @Test
+        @DisplayName("enforced workspaces: an owner whose USE on the agent was revoked gets no further continuation")
+        void revokedOwnerStopsTheChain() throws Exception {
+            ownedOnAgent();
+            enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+
+            var result = handler.fire(booked(2, false), "owner", "", TIMEOUT);
+
+            assertEquals(FireStatus.COMPLETED.name(), result.status(), "the chain stops, it is not retried");
+            assertTrue(result.error().contains("may no longer use its agent"), result.error());
+            verifyNoInteractions(conversationService);
+            assertEquals(1.0, refused(ConversationContinuations.REASON_ACCESS_REVOKED));
+        }
+
+        @Test
+        @DisplayName("the re-check counts the owner's teams from their last sign-in, and an allowed owner runs")
+        void allowedOwnerRunsWithTeamShares() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.ALLOWED);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
+            verify(guard).checkPrincipalUse("agent-1", "owner", List.of("team:ops"), false);
+            assertEquals(1.0, run());
+        }
+
+        @Test
+        @DisplayName("a descriptor store that cannot answer fails the fire for a retry instead of running unchecked")
+        void unverifiableAccessIsRetried() throws Exception {
+            ownedOnAgent();
+            enforcingGuard(ResourceAccessGuard.UseCheck.UNKNOWN);
+
+            assertEquals(FireStatus.FAILED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("an administrator's chain continues on an agent nobody shared with them, and hands the marker on")
+        void adminOwnedChainContinues() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            when(guard.checkPrincipalUse(eq("agent-1"), eq("owner"), any(), eq(true))).thenReturn(ResourceAccessGuard.UseCheck.ALLOWED);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(booked(1, true), "owner", "", TIMEOUT).status());
+            verify(guard).checkPrincipalUse("agent-1", "owner", List.of("team:ops"), true);
+            ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+            verify(conversationService).say(any(), any(), any(), any(), input.capture(), anyBoolean(), any());
+            assertEquals(Boolean.TRUE, input.getValue().getContinuationBookedByAdmin());
+        }
+
+        @Test
+        @DisplayName("a chain booked before the marker existed is not re-checked, so it keeps running")
+        void legacyChainWithoutMarkerContinues() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            verify(guard, never()).checkPrincipalUse(any(), any(), any(), anyBoolean());
             assertEquals(1.0, run());
         }
 

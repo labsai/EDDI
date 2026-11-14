@@ -18,6 +18,8 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +33,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -222,6 +225,54 @@ class ConversationContinuationsTest {
             assertEquals(1, schedule.getMetadata().get(ConversationContinuations.METADATA_NUMBER_KEY));
             assertEquals(4, schedule.getMetadata().get(ConversationContinuations.METADATA_MAX_KEY));
             assertEquals(1.0, meters.find(ConversationContinuations.METRIC_SCHEDULED).counter().count());
+        }
+
+        private Object bookedMarker(ConversationMemory memory) throws Exception {
+            continuations.decide(memory);
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(captor.capture());
+            return captor.getValue().getMetadata().getOrDefault(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY, "absent");
+        }
+
+        @Test
+        @DisplayName("booked by an administrator in their own conversation: the schedule records it")
+        void adminBookingIsRecorded() throws Exception {
+            var context = new CallerIdentityContext(null, null);
+            continuations.callerIdentityContext = context;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            context.bind(new CallerIdentity(null, "user-1", null, Map.of(), true));
+            try {
+                assertEquals(Boolean.TRUE, bookedMarker(memory));
+            } finally {
+                context.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("booked by anyone else: recorded as not an administrator's")
+        void ordinaryBookingIsRecordedAsSuch() throws Exception {
+            continuations.callerIdentityContext = new CallerIdentityContext(null, null);
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            assertEquals(Boolean.FALSE, bookedMarker(memory));
+        }
+
+        @Test
+        @DisplayName("a continuation turn hands on its chain's marker, and a legacy chain stays unmarked")
+        void continuationTurnInheritsTheMarker() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            var input = new InputData("", Map.of());
+            input.setContinuationNumber(1);
+            input.setContinuationBookedByAdmin(true);
+            ConversationContinuations.recordContinuationTurn(memory.getCurrentStep(), input);
+            assertEquals(Boolean.TRUE, bookedMarker(memory));
+
+            reset(scheduleStore);
+            var legacy = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            var legacyInput = new InputData("", Map.of());
+            legacyInput.setContinuationNumber(1);
+            ConversationContinuations.recordContinuationTurn(legacy.getCurrentStep(), legacyInput);
+            assertEquals("absent", bookedMarker(legacy));
         }
 
         @Test

@@ -133,7 +133,7 @@ Status codes are discriminating: `400` invalid body (missing verdict, note > 4 K
     "outcomeUnknown": []
   }
   ```
-  `arguments` is always the **redacted, capped** value (`argumentsRedacted`) — the raw arguments never appear in this response. `outcomeUnknown` lists callIds that have an `EXECUTING` journal entry — i.e. a prior approval crashed mid-execution and the outcome is genuinely unknown; it is empty in the common case.
+  `arguments` is always the **redacted, capped** value (`argumentsRedacted`) — the raw arguments never appear in this response. `argsTruncated: true` means the approver cannot be shown the call in full — its arguments exceeded the 32 KB display cap (or the 256 KB stored cap) — and such a call is **never executed**: approving it yields `NOT_EXECUTED`, and it cannot be amended. Only what was shown can run, so a model cannot pad a call past the cap to hide its decisive fields; the Slack and email cards append the same notice. `outcomeUnknown` lists callIds that have an `EXECUTING` journal entry — i.e. a prior approval crashed mid-execution and the outcome is genuinely unknown; it is empty in the common case.
 - **`RULE`** (a behavior-rule `PAUSE_CONVERSATION`, including legacy snapshots with no `hitlPauseType` recorded):
   ```json
   {"type": "RULE", "reason": "Account deletion requires manager sign-off", "actions": ["PAUSE_CONVERSATION", "notify_manager"]}
@@ -362,6 +362,9 @@ The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail
 | `pendingMessage` | string, ≤ 500 chars | `null` | End-user-facing message stored as **public output** at pause commit (so a chat UI shows the user *why* the turn stalled). `{toolNames}` is substituted. |
 | `inGroupTurns` | `REJECT` | `REJECT` | Behavior when a member agent's tool call is gated inside a group turn. `INBOX` is **reserved** (rejected with a 400 in v1). See [Group members](#group-members). |
 | `rules` | list of objects | `null` | Per-tool friction overrides. See [Per-tool approval rules](#per-tool-approval-rules). |
+| `deciders` | `OWNER_OR_ROLE` \| `ROLE_ONLY` | `OWNER_OR_ROLE` | Who may decide this agent's tool-call pauses. `ROLE_ONLY`: an `eddi-admin` or `eddi-approver` (and the Slack / email approver lists) only — the conversation's owner gets `403`. See [Who May Decide](#who-may-decide). |
+| `allowArgumentAmendments` | boolean | `true` | `false` refuses `toolDecisions[].amendedArguments` with `400`: a decider may approve the call as shown or reject it, not substitute arguments. The tool-call twin of `hitlConfig.review.allowAnswerEdits`. |
+| `requirePauseId` | boolean | `false` | A person's decision on a tool-call pause must name the `pauseId` it was made for, or it is refused with `400`. Deployment-wide: `eddi.hitl.require-pause-id`. |
 
 All values are validated at **save time** and on ZIP import (`HitlConfigValidation.validateToolApprovals`): bad patterns (with the offending index), a pattern in both `requireApproval` and `exempt`, duplicates, `exempt` without `requireApproval`, out-of-range integers, a reserved `INBOX`, a finite policy without a valid `approvalTimeout`, and overlong reason/message all yield an actionable 400 — the gate never degrades silently at runtime.
 
@@ -547,7 +550,7 @@ Approved tool executions are protected by a write-ahead journal (`IHitlToolJourn
 
 ### Slack
 
-The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a `TOOL_CALL` pause posts an interactive approval card that additionally renders one context block per pending call — `toolName` plus its **redacted, 300-char-truncated arguments** (max 5 calls, then `+N more`) — so a reviewer sees *what* they are approving. The raw argument value is never accessed. The in-thread pause notice stays pause-reason-only. Slack buttons decide the whole batch; a single-call batch can also be **edited and approved** in a Slack modal ([HITL Review & Audit](hitl-review-and-audit.md#slack-edit-and-reject-modals)). Per-call verdicts for several calls require the REST resume body or the MCP `resume_conversation` tool's `toolDecisionsJson`. See [Slack Integration](#slack-integration).
+The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a `TOOL_CALL` pause posts an interactive approval card that additionally renders one context block per pending call — `toolName` plus its **redacted, 300-char-truncated arguments** (max 5 calls, then `+N more`) — so a reviewer sees *what* they are approving. A call whose arguments are longer than the card shows says so on the card and points to the full view (the Manager's approval inbox or `approval-status`): the card's Approve button decides the whole call, not just the part on the card. The raw argument value is never accessed. The in-thread pause notice stays pause-reason-only. Slack buttons decide the whole batch; a single-call batch can also be **edited and approved** in a Slack modal ([HITL Review & Audit](hitl-review-and-audit.md#slack-edit-and-reject-modals)). Per-call verdicts for several calls require the REST resume body or the MCP `resume_conversation` tool's `toolDecisionsJson`. See [Slack Integration](#slack-integration).
 
 ### Group members
 
@@ -635,6 +638,29 @@ Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` �
 Approve/reject/cancel/status require, in order: the **conversation owner**, the **`eddi-admin`** role, or the dedicated **`eddi-approver`** role. Ownerless (legacy/internal) conversations fail **closed** for non-admin/non-approver callers. `decidedBy` is set server-side from the authenticated identity — with an authenticated caller it cannot be spoofed via the request body. The one exception is a deployment where nobody is authenticated: there a body `decidedBy` is recorded as `unverified:<value>` (see [Reply and approver on resume](#reply-and-approver-on-resume)). Approvers and admins see all entries in the pending-approvals listings; other users only their own.
 
 **An owner's resume is a turn.** Under enforced workspaces an owner who is neither admin nor approver must still be allowed to `USE` the conversation's agent to resume it (REST and MCP alike), the check every `say` makes — a revoked share stops the resume too. Admins and approvers decide by their role.
+
+**Narrowing who decides a tool call.** By default the user whose turn hit a tool gate may approve it — and rewrite its arguments. That is the right default for an assistant acting for its own user, and the wrong one when the call has side effects beyond them: a model steered by injected content (a web page, an email, a tool result) asks for the call *in that user's turn*, and the user is the easiest person to talk into approving it. Three `toolApprovals` fields close this, all off by default so existing agents behave exactly as before:
+
+- **`deciders: ROLE_ONLY`** — only an `eddi-admin` or `eddi-approver` may decide (REST `/resume` and MCP `resume_conversation` share the check in `HitlAccessGuard`; the Slack and email approver lists decide as before). The owner keeps the pending-approval listing and `approval-status` — they may see that a decision is pending, not make it — and may still cancel. Read from the paused batch's persisted effective config, so it is the config that gated the call. **Recommended for any tool with real-world side effects** (payments, outbound messages, writes to other systems).
+- **`allowArgumentAmendments: false`** — `amendedArguments` is refused with `400`; the decider approves what was shown or rejects it.
+- **`requirePauseId: true`** (or deployment-wide `eddi.hitl.require-pause-id=true`) — a person's decision must name the `pauseId` from `approval-status`; without it the decision would land on whatever pause is current, which after a resume and re-pause is a request the decider never saw. Refused with `400`, and the pause is left untouched. Engine decisions (`system:timeout`, `system:no-progress`, `system:group`) are exempt. The deployment-wide switch also applies to group approvals.
+
+A task-level `toolApprovals` can narrow these three but never widen them (`ROLE_ONLY`, `false` and `true` win respectively) — in **both** `eddi.hitl.tool.task-approvals.mode`s. They are exempt from `replace` semantics: under `replace` every other field comes from the task block alone, these three still keep an agent-level restriction.
+
+Every route to a decision applies `deciders`: REST `/resume` and `/resume/stream` and MCP `resume_conversation` go through `HitlAccessGuard`; Slack decides only for its configured approver list (a conversation owner not on it is refused, as before); email notifications carry no decision. A member agent's gated tool call inside a group discussion is never decided by a person at all — the group rejects it (`system:group`) and the member answers without the tool — so the group approve endpoints cannot bypass `ROLE_ONLY`. System decisions (timeouts with `AUTO_APPROVE` / `AUTO_REJECT`, no-progress) are not affected by `deciders`.
+
+```json
+{
+  "hitlConfig": {
+    "toolApprovals": {
+      "requireApproval": ["transfer_funds", "http.post:*"],
+      "deciders": "ROLE_ONLY",
+      "allowArgumentAmendments": false,
+      "requirePauseId": true
+    }
+  }
+}
+```
 
 **Approver cancel scope:** `POST /agents/{conversationId}/cancel` and the MCP `cancel_conversation` tool also stop a turn that is *executing*, and the approver role is not a licence to stop other users' running turns. An approver-only caller (not the owner, not an admin) may cancel a conversation only while it is `AWAITING_HUMAN` — the decision the role exists for. Their cancel is a single compare-and-set from that state, so the entitlement check and the cancel are one operation and a resume that lands in between cannot turn it into a stop of a running turn; on a conversation in any other state it is refused with `403` (`FORBIDDEN` over MCP), exactly as it would be without the role. The owner and admins are unchanged and can cancel an executing turn as before. Group discussions follow the same rule on `POST /groups/{groupId}/conversations/{gcId}/cancel` and the MCP `cancel_group_discussion` tool: an approver-only caller may cancel only a discussion that is `AWAITING_APPROVAL` or `AWAITING_HUMAN_INPUT` (one compare-and-set on that state), gets `403` / `FORBIDDEN` on a running one, and receives the resulting state rather than the transcript. The HITL timeouts of a group (approval `ABORT`, human-turn `ABORT` and `SKIP_TURN`) are bound the same way to the pause they were armed for: a late fire neither cancels a discussion that has moved on nor skips a newer human turn.
 

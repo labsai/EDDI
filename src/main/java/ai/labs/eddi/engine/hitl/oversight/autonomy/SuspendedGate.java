@@ -151,6 +151,9 @@ public final class SuspendedGate {
         copy.setPendingMessage(cfg.getPendingMessage());
         copy.setInGroupTurns(cfg.getInGroupTurns());
         copy.setRules(cfg.getRules());
+        copy.setDeciders(cfg.getDeciders());
+        copy.setAllowArgumentAmendments(cfg.getAllowArgumentAmendments());
+        copy.setRequirePauseId(cfg.getRequirePauseId());
         return copy;
     }
 }

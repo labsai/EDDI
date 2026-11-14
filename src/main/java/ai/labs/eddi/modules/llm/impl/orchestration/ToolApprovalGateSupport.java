@@ -380,7 +380,17 @@ public class ToolApprovalGateSupport {
             }
 
             String redacted = SecretRedactionFilter.redact(rawArgs);
-            call.setArgumentsRedacted(capUtf8(redacted, PendingToolCallBatch.ARGS_REDACTED_MAX_BYTES));
+            String shown = capUtf8(redacted, PendingToolCallBatch.ARGS_REDACTED_MAX_BYTES);
+            call.setArgumentsRedacted(shown);
+            // The approver reads argumentsRedacted, never argumentsRaw. If that copy
+            // was cut to the display cap, the approver did not see the whole call —
+            // a model could put benign fields first, pad past the cap and hide the
+            // fields that matter behind it. Approval must not execute what was not
+            // shown, so this is marked truncated exactly like a raw-cap overflow: the
+            // resume yields NOT_EXECUTED and amendments are refused.
+            if (redacted != null && shown.length() < redacted.length()) {
+                call.setArgsTruncated(true);
+            }
 
             // gateReason: the matched pattern (by call id), fall back to bare name.
             String reason = req.id() != null ? gateResult.gateReasonByCallId().get(req.id()) : null;

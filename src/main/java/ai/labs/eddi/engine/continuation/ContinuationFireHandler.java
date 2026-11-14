@@ -14,6 +14,9 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -56,7 +59,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * <b>What stops a continuation.</b> Answered {@code COMPLETED} (the schedule is
  * done, nothing is retried) and counted as refused: the conversation ended,
- * waits for a human, no longer exists, or is restricted (GDPR Art. 18); the
+ * waits for a human, no longer exists, or is restricted (GDPR Art. 18); its
+ * owner may no longer {@code USE} the agent (enforced workspaces); the
  * continuation already ran; the continuation turn was interrupted (a cancel or
  * the watchdog — the chain stops). Answered {@code FAILED} — retried with the
  * schedule backoff and finally dead-lettered, like any lost turn — when it
@@ -102,6 +106,18 @@ public class ContinuationFireHandler {
     private final IConversationMemoryStore conversationMemoryStore;
     private final ConversationContinuations continuations;
 
+    /**
+     * The owner's {@code USE} re-check ({@link #refusalForAccess}). Field-injected
+     * so the tests that build this handler with its constructor keep working; null
+     * there, where no re-check runs.
+     */
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
+
+    /** Where the owner's team subjects come from; null in the same tests. */
+    @Inject
+    UserDirectory userDirectory;
+
     @Inject
     public ContinuationFireHandler(IConversationService conversationService, IConversationMemoryStore conversationMemoryStore,
             ConversationContinuations continuations) {
@@ -129,12 +145,15 @@ public class ContinuationFireHandler {
         if (conversationId == null || number == null || number < 1) {
             return Result.stopped("the schedule names no conversation or continuation number");
         }
+        // Absent on a chain booked before the marker existed: that chain is not
+        // re-checked (see refusalForAccess).
+        Boolean bookedByAdmin = metadata.get(ConversationContinuations.METADATA_BOOKED_BY_ADMIN_KEY) instanceof Boolean b ? b : null;
         try {
-            Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
+            Result refused = refusalBeforeRun(conversationId, number, scheduleUserId, bookedByAdmin);
             if (refused != null) {
                 return refused;
             }
-            return run(conversationId, number, max, scheduleUserId, input, timeout);
+            return run(conversationId, number, max, scheduleUserId, input, timeout, bookedByAdmin);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Result.failed("Interrupted while waiting for continuation " + number);
@@ -148,7 +167,7 @@ public class ContinuationFireHandler {
      * other than the schedule's user, ended, paused, or already ran this
      * continuation. {@code null} when the turn may run.
      */
-    private Result refusalBeforeRun(String conversationId, int number, String scheduleUserId)
+    private Result refusalBeforeRun(String conversationId, int number, String scheduleUserId, Boolean bookedByAdmin)
             throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot;
         try {
@@ -168,7 +187,71 @@ public class ContinuationFireHandler {
         if (ConversationContinuations.ranIn(snapshot, number)) {
             return stop(ConversationContinuations.REASON_DUPLICATE, conversationId, "continuation " + number + " already ran");
         }
+        Result revoked = refusalForAccess(conversationId, snapshot, bookedByAdmin);
+        if (revoked != null) {
+            return revoked;
+        }
         return refusalForState(conversationId, snapshot.getConversationState());
+    }
+
+    /**
+     * The {@code USE} re-check every other scheduled fire gets
+     * ({@code ScheduleFireExecutor#creatorUseCheck}), asked for the conversation's
+     * owner: continuations are routed past that check because the engine, not a
+     * person, created their schedule — which used to mean nobody re-checked at all,
+     * so a user whose access to the agent was revoked still had the rest of the
+     * chain run on it.
+     * <p>
+     * The owner's team subjects are the ones their most recent sign-in listed in
+     * the user directory, so a share with one of their teams still counts. With no
+     * directory record of them there is nothing to decide a team share by, and the
+     * fire is left alone — the same rule {@code creatorUseCheck} applies to a
+     * schedule without an access snapshot. Denied: the chain stops
+     * ({@link ConversationContinuations#REASON_ACCESS_REVOKED}). A descriptor store
+     * that cannot answer fails the fire, so it is retried rather than run
+     * unchecked. With workspaces off everything is admitted, as everywhere else.
+     * <p>
+     * A chain an administrator booked in their own conversation is admitted, as
+     * {@code creatorAdmin} admits a schedule: the schedule records it
+     * ({@link ConversationContinuations#METADATA_BOOKED_BY_ADMIN_KEY}). A chain
+     * booked before that marker existed carries none and is not re-checked —
+     * stopping it would break long jobs already running.
+     */
+    private Result refusalForAccess(String conversationId, ConversationMemorySnapshot snapshot, Boolean bookedByAdmin) {
+        String owner = snapshot.getUserId();
+        String agentId = snapshot.getAgentId();
+        if (bookedByAdmin == null || resourceAccessGuard == null || owner == null || owner.isBlank() || agentId == null || agentId.isBlank()) {
+            return null;
+        }
+        List<String> teams = ownerTeams(owner);
+        if (teams == null) {
+            return null;
+        }
+        ResourceAccessGuard.UseCheck check = resourceAccessGuard.checkPrincipalUse(agentId, owner, teams, bookedByAdmin);
+        if (check == ResourceAccessGuard.UseCheck.DENIED) {
+            return stop(ConversationContinuations.REASON_ACCESS_REVOKED, conversationId,
+                    "the conversation's owner may no longer use its agent");
+        }
+        if (check == ResourceAccessGuard.UseCheck.UNKNOWN) {
+            return Result.failed("Could not verify that the conversation's owner may still use its agent");
+        }
+        return null;
+    }
+
+    /**
+     * The owner's team subjects at their last sign-in, or {@code null} when the
+     * directory has no record of them. Only consulted under enforced workspaces
+     * (with them off {@code checkPrincipalUse} admits everything first).
+     */
+    private List<String> ownerTeams(String owner) {
+        if (!resourceAccessGuard.settings().isEnforcing()) {
+            return List.of();
+        }
+        if (userDirectory == null || !userDirectory.isActive()) {
+            return null;
+        }
+        DirectoryUser seen = userDirectory.lookup(List.of(owner)).get(owner);
+        return seen != null ? seen.teams() : null;
     }
 
     private Result refusalForState(String conversationId, ConversationState state) {
@@ -182,12 +265,13 @@ public class ContinuationFireHandler {
         return null;
     }
 
-    private Result run(String conversationId, int number, Integer max, String scheduleUserId, String input, Duration timeout)
+    private Result run(String conversationId, int number, Integer max, String scheduleUserId, String input, Duration timeout,
+                       Boolean bookedByAdmin)
             throws Exception {
         var latch = new CountDownLatch(1);
         var outcome = new AtomicReference<SimpleConversationMemorySnapshot>();
         var skipped = new AtomicBoolean(false);
-        conversationService.say(conversationId, false, true, List.of(), inputData(number, max, input), false,
+        conversationService.say(conversationId, false, true, List.of(), inputData(number, max, input, bookedByAdmin), false,
                 new IConversationService.ConversationResponseHandler() {
                     @Override
                     public void onComplete(SimpleConversationMemorySnapshot snapshot) {
@@ -209,7 +293,7 @@ public class ContinuationFireHandler {
         }
         ConversationState state = outcome.get() != null ? outcome.get().getConversationState() : null;
         if (skipped.get()) {
-            return afterSkip(conversationId, number, scheduleUserId, state);
+            return afterSkip(conversationId, number, scheduleUserId, state, bookedByAdmin);
         }
         if (state == ConversationState.ERROR) {
             return Result.failed("Continuation " + number + " failed (state ERROR)");
@@ -261,9 +345,10 @@ public class ContinuationFireHandler {
      * recorded, or a conversation that was paused or busy when the turn's lease
      * came. The stored document decides which.
      */
-    private Result afterSkip(String conversationId, int number, String scheduleUserId, ConversationState skippedIn)
+    private Result afterSkip(String conversationId, int number, String scheduleUserId, ConversationState skippedIn,
+                             Boolean bookedByAdmin)
             throws IResourceStore.ResourceStoreException {
-        Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
+        Result refused = refusalBeforeRun(conversationId, number, scheduleUserId, bookedByAdmin);
         if (refused != null) {
             return refused;
         }
@@ -304,6 +389,15 @@ public class ContinuationFireHandler {
      * number, and the automatic {@code Idempotency-Key}.
      */
     public static InputData inputData(int number, Integer max, String input) {
+        return inputData(number, max, input, null);
+    }
+
+    /**
+     * {@link #inputData(int, Integer, String)}, carrying the chain's
+     * booked-by-administrator marker on to the turn, which hands it to the next
+     * continuation it books ({@code ConversationContinuations#bookedByAdmin}).
+     */
+    public static InputData inputData(int number, Integer max, String input, Boolean bookedByAdmin) {
         Map<String, Object> marker = new LinkedHashMap<>();
         marker.put("number", number);
         if (max != null) {
@@ -313,6 +407,7 @@ public class ContinuationFireHandler {
         context.put(ConversationContinuations.CONTEXT_KEY, new Context(Context.ContextType.object, marker));
         var inputData = new InputData(input != null ? input : "", context);
         inputData.setContinuationNumber(number);
+        inputData.setContinuationBookedByAdmin(bookedByAdmin);
         inputData.setIdempotencyKey(IDEMPOTENCY_KEY_PREFIX + number);
         return inputData;
     }

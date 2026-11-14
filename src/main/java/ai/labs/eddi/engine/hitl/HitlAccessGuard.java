@@ -5,11 +5,16 @@
 package ai.labs.eddi.engine.hitl;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -40,6 +45,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class HitlAccessGuard {
 
     private static final Logger LOGGER = Logger.getLogger(HitlAccessGuard.class);
+
+    /** {@code ConversationPauseException.PauseOrigin.TOOL_CALL}, as persisted. */
+    private static final String TOOL_CALL_PAUSE = "TOOL_CALL";
 
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
@@ -144,10 +152,48 @@ public class HitlAccessGuard {
         if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
             return ownerId;
         }
+        requireOwnerMayDecide(conversationId);
         if (conversationAccessGuardInstance != null && conversationAccessGuardInstance.isResolvable()) {
             conversationAccessGuardInstance.get().requireConversationTurnAccess(conversationId);
         }
         return ownerId;
+    }
+
+    /**
+     * Refuses the owner (a caller who is neither admin nor approver) a decision on
+     * a tool-call pause whose effective {@code toolApprovals.deciders} is
+     * {@code ROLE_ONLY}.
+     * <p>
+     * The pause exists because the model — possibly steered by injected content —
+     * wants to run a gated call in this user's turn; letting that same user approve
+     * it, arguments included, makes the gate advisory. Read from the paused batch's
+     * persisted {@code effectiveToolApprovals}, the exact config that gated it.
+     * Only the decision is refused: the owner keeps the pending-approval listing
+     * and the approval-status reads ({@link #requireConversationHitlAccess}), and
+     * may still cancel. A conversation whose pause cannot be read is refused rather
+     * than decided unchecked; a missing one is left for the resume to 404.
+     */
+    private void requireOwnerMayDecide(String conversationId) {
+        ConversationMemorySnapshot paused;
+        try {
+            ConversationMemoryTail tail = conversationService.getConversationMemoryTail(conversationId);
+            paused = tail != null ? tail.snapshot() : null;
+        } catch (ResourceNotFoundException e) {
+            return;
+        } catch (ResourceStoreException | RuntimeException e) {
+            LOGGER.warnf("Could not read the pause of conversation %s to check who may decide it", sanitize(conversationId));
+            throw new ForbiddenException("Access denied: unable to verify who may decide this approval");
+        }
+        if (paused == null || paused.getConversationState() != ConversationState.AWAITING_HUMAN
+                || !TOOL_CALL_PAUSE.equals(paused.getHitlPauseType())) {
+            return;
+        }
+        PendingToolCallBatch batch = paused.getHitlPendingToolCalls();
+        if (batch != null && ToolApprovalsConfig.roleOnly(batch.getEffectiveToolApprovals())) {
+            LOGGER.infof("Owner decision on tool-call pause of conversation %s refused: deciders=ROLE_ONLY", sanitize(conversationId));
+            throw new ForbiddenException("Access denied: this agent's tool calls are approved by an approver or an administrator, "
+                    + "not by the conversation's owner");
+        }
     }
 
     /**

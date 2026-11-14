@@ -123,7 +123,7 @@ public final class TaskToolApprovalsResolver {
             return agentLevel;
         }
         if (mode == Mode.REPLACE) {
-            return taskLevel;
+            return replaceKeepingDecisionRestrictions(agentLevel, taskLevel);
         }
         ToolApprovalsConfig agent = agentLevel != null ? agentLevel : new ToolApprovalsConfig();
 
@@ -141,6 +141,7 @@ public final class TaskToolApprovalsResolver {
         merged.setPendingMessage(firstNonBlank(taskLevel.getPendingMessage(), agent.getPendingMessage()));
         merged.setInGroupTurns(firstNonBlank(taskLevel.getInGroupTurns(), agent.getInGroupTurns()));
         merged.setRules(mergeRules(agent.getRules(), taskLevel.getRules(), merged.getTimeoutPolicy()));
+        applyDecisionRestrictions(merged, agent, taskLevel);
         // Earned-autonomy suspensions are an agent-level runtime overlay; a task only
         // strengthens.
         merged.setSuspendedPatterns(agent.getSuspendedPatterns());
@@ -247,6 +248,60 @@ public final class TaskToolApprovalsResolver {
 
     private static String firstNonBlank(String preferred, String fallback) {
         return preferred != null && !preferred.isBlank() ? preferred : fallback;
+    }
+
+    /**
+     * Who may decide, and how — {@code deciders}, {@code allowArgumentAmendments},
+     * {@code requirePauseId}: the stricter of the two sides, in <em>every</em>
+     * mode. These are security restrictions on the decision, not tuning of the
+     * gate, so a task-level config may narrow them but never loosen an agent-level
+     * one.
+     */
+    private static void applyDecisionRestrictions(ToolApprovalsConfig target, ToolApprovalsConfig agent, ToolApprovalsConfig task) {
+        target.setDeciders(ToolApprovalsConfig.roleOnly(agent) || ToolApprovalsConfig.roleOnly(task)
+                ? ToolApprovalsConfig.Deciders.ROLE_ONLY
+                : firstNonNull(task.getDeciders(), agent != null ? agent.getDeciders() : null));
+        target.setAllowArgumentAmendments(ToolApprovalsConfig.amendmentsAllowed(agent) && ToolApprovalsConfig.amendmentsAllowed(task)
+                ? firstNonNull(task.getAllowArgumentAmendments(), agent != null ? agent.getAllowArgumentAmendments() : null)
+                : Boolean.FALSE);
+        target.setRequirePauseId(ToolApprovalsConfig.pauseIdRequired(agent) || ToolApprovalsConfig.pauseIdRequired(task)
+                ? Boolean.TRUE
+                : firstNonNull(task.getRequirePauseId(), agent != null ? agent.getRequirePauseId() : null));
+    }
+
+    /**
+     * {@code replace} mode: the task config wholesale, except the three decision
+     * restrictions ({@link #applyDecisionRestrictions}), which are exempt from
+     * replace semantics. The task config itself when the agent restricts nothing
+     * the task does not already; otherwise a copy, so a stored config is never
+     * mutated.
+     */
+    private static ToolApprovalsConfig replaceKeepingDecisionRestrictions(ToolApprovalsConfig agent, ToolApprovalsConfig task) {
+        boolean agentStricter = (ToolApprovalsConfig.roleOnly(agent) && !ToolApprovalsConfig.roleOnly(task))
+                || (!ToolApprovalsConfig.amendmentsAllowed(agent) && ToolApprovalsConfig.amendmentsAllowed(task))
+                || (ToolApprovalsConfig.pauseIdRequired(agent) && !ToolApprovalsConfig.pauseIdRequired(task));
+        if (!agentStricter) {
+            return task;
+        }
+        var copy = new ToolApprovalsConfig();
+        copy.setRequireApproval(task.getRequireApproval());
+        copy.setExempt(task.getExempt());
+        copy.setMaxPausesPerTurn(task.getMaxPausesPerTurn());
+        copy.setMaxAutoApprovalsPerTurn(task.getMaxAutoApprovalsPerTurn());
+        copy.setOnNoProgress(task.getOnNoProgress());
+        copy.setApprovalTimeout(task.getApprovalTimeout());
+        copy.setTimeoutPolicy(task.getTimeoutPolicy());
+        copy.setPauseReason(task.getPauseReason());
+        copy.setPendingMessage(task.getPendingMessage());
+        copy.setInGroupTurns(task.getInGroupTurns());
+        copy.setRules(task.getRules());
+        copy.setSuspendedPatterns(task.getSuspendedPatterns());
+        applyDecisionRestrictions(copy, agent, task);
+        return copy;
+    }
+
+    private static <T> T firstNonNull(T preferred, T fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
 }

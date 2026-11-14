@@ -110,6 +110,11 @@ replay committed but its entry could not be removed (the node died in between), 
 is answered from the stored outcome instead of running the turn twice, within the
 `eddi.turns.idempotency.ttl-seconds` window.
 
+The replayed turn runs with **no caller identity**, like a scheduled turn: it is the conversation
+owner's input, not the administrator's, so it never gets the administrator's `${caller:token}` or
+`X-EDDI-Connection-Credential` values — caller-bound calls in it fail closed. Per-user connection
+grants still resolve against the conversation's stored owner.
+
 | Status | Meaning |
 |---|---|
 | `204` | Replay submitted; the entry disappears when the turn commits. |

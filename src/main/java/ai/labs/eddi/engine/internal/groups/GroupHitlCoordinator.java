@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchExcep
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupPlanMismatchException;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.HitlPauseIdPolicy;
 import ai.labs.eddi.engine.hitl.HitlPlanBinding;
 import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -633,6 +634,11 @@ public class GroupHitlCoordinator {
         if (request.getDecision() != null && !request.getDecision().appliesToPause(gc.getPausedAt())) {
             throw new GroupPauseMismatchException("The pending approval changed since this decision was made — "
                     + "review the current pause and decide again");
+        }
+        // eddi.hitl.require-pause-id: a person's decision must name the pause it was
+        // made for, or it would approve whatever the discussion is paused on now.
+        if (HitlPauseIdPolicy.refuses(request.getDecision(), HitlPauseIdPolicy.requiredDeploymentWide())) {
+            throw new IllegalArgumentException(HitlPauseIdPolicy.message());
         }
 
         // The pause as it was, for the decision's audit entry — captured before the

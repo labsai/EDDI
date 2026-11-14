@@ -135,7 +135,15 @@ and the turn deadline.
 A continuation schedule names a conversation, and its fire runs a turn there. So the marker is
 refused on every schedule write from outside (REST create, update and ZIP import answer `400`), and
 a fire runs only when the schedule's `userId` — the owner the engine stamped when it armed it — is
-the conversation's owner; anything else completes without a turn (`owner_mismatch`).
+the conversation's owner; anything else completes without a turn (`owner_mismatch`). Under enforced
+workspaces every fire also re-checks that the owner may still `USE` the agent — the check every other
+scheduled fire gets — counting the teams their last sign-in listed in the user directory; a revoked
+grant or share stops the chain (`access_revoked`), and a descriptor store that cannot answer fails the
+fire so it is retried. An owner the directory has no record of is not re-checked. Like a schedule's
+`creatorAdmin`, the continuation schedule records whether the chain was booked by an administrator in
+their own conversation (`bookedByAdmin`, taken from the live caller and handed on from link to link),
+and such a chain keeps running. A chain booked before this marker existed carries none and is not
+re-checked.
 
 ### Once only
 

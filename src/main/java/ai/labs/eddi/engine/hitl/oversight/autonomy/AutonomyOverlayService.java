@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.oversight.autonomy;
 
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.oversight.OversightSettings;
+import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -119,6 +120,24 @@ public class AutonomyOverlayService {
             return cfg;
         }
         return service.apply(memory.getAgentId(), cfg);
+    }
+
+    /**
+     * The gate an LLM task runs under: the agent- and task-level tool-approval
+     * configs combined per {@code eddi.hitl.tool.task-approvals.mode}
+     * ({@link TaskToolApprovalsResolver}), then the agent's suspensions on top.
+     * <p>
+     * The one place the live tool loop ({@code LlmTask}) and the resumed one
+     * ({@code ToolLoopResumer}) both resolve it, so the two cannot drift. They did:
+     * the resume applied only the resolver, and under {@code mode=replace} a
+     * task-level config replaces the agent-level carrier — and with it the
+     * suspension overlay — so after any approval a call matching a suspended
+     * pattern ran ungated for the rest of the turn.
+     */
+    public static ToolApprovalsConfig resolveEffective(AutonomyOverlayService service, IConversationMemory memory,
+                                                       ToolApprovalsConfig taskToolApprovals) {
+        ToolApprovalsConfig resolved = TaskToolApprovalsResolver.resolve(memory.getAgentToolApprovalsConfig(), taskToolApprovals);
+        return applyTo(service, memory, resolved);
     }
 
     /**
