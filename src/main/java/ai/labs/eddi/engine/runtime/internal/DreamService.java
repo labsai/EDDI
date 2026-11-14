@@ -17,10 +17,12 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.SummaryCitations;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -654,8 +656,11 @@ public class DreamService {
                 break;
             }
 
-            // 2. Build content: JSON array of entries
-            String content = buildEntriesJson(groupEntries);
+            // 2. Build content: JSON array of entries. With citeSources each entry is
+            // numbered ("ref") and the model is asked to cite those numbers.
+            boolean cite = config.isCiteSources();
+            String content = cite ? buildCitedEntriesJson(groupEntries) : buildEntriesJson(groupEntries);
+            String instructions = consolidationInstructions(config, groupEntries.size()) + (cite ? CITATION_INSTRUCTIONS : "");
 
             // 3. Call LLM. Dream is a background job with no parent LLM task to
             // inherit credentials from, so the model parameters come from the
@@ -677,7 +682,7 @@ public class DreamService {
             SummarizationService.SummarizationResult llmResult;
             try {
                 llmResult = summarizationService.summarizeWithUsage(
-                        content, consolidationInstructions(config, groupEntries.size()),
+                        content, instructions,
                         config.getLlmProvider(), config.getLlmModel(),
                         config.getParameters());
             } catch (Exception e) {
@@ -709,12 +714,62 @@ public class DreamService {
             // consolidated entries with the same key would upsert onto the same
             // document, the second silently overwriting the first — so they are
             // merged here, never dropped.
-            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(parseConsolidatedEntries(llmResult.summary()));
+            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(
+                    cite ? parseCitedConsolidatedEntries(llmResult.summary()) : parseConsolidatedEntries(llmResult.summary()));
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
                         "user='%s', group='%s'. Preserving original entries.", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
                 continue;
+            }
+
+            // 4b. citeSources: every consolidated entry must cite the originals it came
+            // from, and every number it states must appear in them verbatim. The
+            // originals are deleted below, so by default a failing group is skipped.
+            if (cite) {
+                SummaryCitations.Result check = checkCitations(consolidated, groupEntries);
+                String outcome = SummaryCitations.OUTCOME_PASSED;
+                if (!check.valid()) {
+                    var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(),
+                            SummaryCitations.OnValidationFailure.fallback_to_previous);
+                    LOGGER.warnf("[DREAM] Consolidation of group '%s' for user='%s' failed the citation check (%d problem(s)); "
+                            + "onValidationFailure=%s", LogSanitizer.sanitize(group.getKey()), LogSanitizer.sanitize(userId),
+                            check.problems().size(), policy);
+                    // The problems quote the model's text and the user's memory keys: content,
+                    // so DEBUG only, sanitised and capped.
+                    LOGGER.debugf("[DREAM] Citation problems for group '%s': %s", LogSanitizer.sanitize(group.getKey()),
+                            LogSanitizer.sanitize(check.describe()));
+                    outcome = policy == SummaryCitations.OnValidationFailure.keep ? SummaryCitations.OUTCOME_KEPT : SummaryCitations.OUTCOME_FALLBACK;
+                    // A retry is a consolidation call like any other: bounded by the same
+                    // three ceilings, and its cost counts toward maxCostPerRun.
+                    if (policy == SummaryCitations.OnValidationFailure.retry_once && estimatedCostAccumulated < config.getMaxCostPerRun()
+                            && !(config.isMaxSummarizationCallsSet() && llmCallsMade >= config.getMaxSummarizationCalls())
+                            && !tenantBudgetSpent(userId)) {
+                        try {
+                            var second = summarizationService.summarizeWithUsage(content, instructions + citationRetryFeedback(check),
+                                    config.getLlmProvider(), config.getLlmModel(), config.getParameters());
+                            llmCallsMade++;
+                            estimatedCostAccumulated += estimateCost(second, content.length(), config.getInputPricePer1M(),
+                                    config.getOutputPricePer1M());
+                            meterTenantCost(second, content.length(), config);
+                            List<ConsolidatedEntry> retried = mergeDuplicateKeys(parseCitedConsolidatedEntries(second.summary()));
+                            if (!retried.isEmpty() && checkCitations(retried, groupEntries).valid()) {
+                                consolidated = retried;
+                                outcome = SummaryCitations.OUTCOME_RETRIED;
+                            }
+                        } catch (Exception e) {
+                            // The first call of this group succeeded, so this is no configuration
+                            // fault to abort the phase over: the group is skipped, as on any failure.
+                            summarizationFailedCounter.increment();
+                            LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed (%s). Original entries are preserved.",
+                                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getClass().getSimpleName());
+                        }
+                    }
+                }
+                SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_DREAM, outcome);
+                if (SummaryCitations.OUTCOME_FALLBACK.equals(outcome)) {
+                    continue;
+                }
             }
 
             // 5. Validate: consolidated must be fewer than originals
@@ -841,12 +896,13 @@ public class DreamService {
             Set<String> overwrittenOriginalIds = new LinkedHashSet<>();
             try {
                 for (var entry : consolidated) {
-                    var toWrite = new UserMemoryEntry(
+                    var consolidatedEntry = new UserMemoryEntry(
                             null, userId, entry.key(), entry.value(),
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
                             earliestCreated, Instant.now());
+                    var toWrite = cite ? consolidatedEntry.withSourceEntryIds(sourceEntryIds(entry, groupEntries)) : consolidatedEntry;
                     // An entry that reuses an original is meant to overwrite it. Any other
                     // entry must be new: the collision check above ran before this write,
                     // so a memory a conversation, REST or MCP created with this key in the
@@ -1286,7 +1342,158 @@ public class DreamService {
      * Parse the LLM consolidation response into structured entries. Handles
      * markdown fences ({@code ```json ... ```}) and extracts the JSON array.
      */
-    record ConsolidatedEntry(String key, String value) {
+    record ConsolidatedEntry(String key, String value, List<Integer> sources) {
+
+        /**
+         * {@code sources} are the refs the entry cites ({@code citeSources} only); an
+         * element the model wrote that is no ref is kept as {@code null}, so the check
+         * can name it.
+         */
+        ConsolidatedEntry {
+            sources = sources == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(sources));
+        }
+
+        ConsolidatedEntry(String key, String value) {
+            this(key, value, List.of());
+        }
+    }
+
+    /**
+     * Appended to the consolidation instructions when {@code citeSources} is on.
+     */
+    static final String CITATION_INSTRUCTIONS = "\n\nEvery input entry has a numeric \"ref\". Every object in your answer must also "
+            + "carry \"sources\": the refs of the input entries it consolidates, for example "
+            + "[{\"key\": \"...\", \"value\": \"...\", \"sources\": [0, 2]}]. "
+            + "Copy every number exactly as it appears in its sources: the same digits, separators, sign and percent sign. "
+            + "Do not round, convert, add up or otherwise compute numbers. "
+            + "Where the sources are ambiguous or do not say, write \"unclear in source\" instead of guessing.";
+
+    /**
+     * Appended to the instructions of a {@code retry_once} consolidation call. It
+     * restates the Dream answer contract: the rolling summary's feedback asks for
+     * cited bullet points, which a model can follow with prose that this parser
+     * rejects, wasting the paid retry.
+     */
+    static String citationRetryFeedback(SummaryCitations.Result result) {
+        return "\n\nYour previous answer failed the citation check:\n" + result.describe()
+                + "Answer again with only the JSON array: [{\"key\": \"...\", \"value\": \"...\", \"sources\": [0, 2]}]. "
+                + "Every object must carry \"sources\" with the refs of the input entries it consolidates, and every number in "
+                + "\"value\" must appear exactly as written in the entries it cites. Do not add any text outside the JSON array.";
+    }
+
+    /**
+     * The {@code citeSources} check of a group's answer: each consolidated entry
+     * against the originals it cites, by ref. A source's text is its key and value,
+     * as the model was given them.
+     */
+    static SummaryCitations.Result checkCitations(List<ConsolidatedEntry> consolidated, List<UserMemoryEntry> originals) {
+        List<String> sourceTexts = originals.stream().map(o -> o.key() + ": " + o.value()).toList();
+        List<String> problems = new ArrayList<>();
+        for (ConsolidatedEntry entry : consolidated) {
+            problems.addAll(SummaryCitations.checkConsolidatedEntry(entry.key(), entry.value(), entry.sources(), sourceTexts).problems());
+        }
+        return new SummaryCitations.Result(problems);
+    }
+
+    /**
+     * The ids a consolidated entry records: those of the originals it cites, refs
+     * that exist only; every original of the group when that leaves none (an answer
+     * kept under {@code onValidationFailure: keep}) — the group is still where the
+     * entry came from.
+     */
+    static List<String> sourceEntryIds(ConsolidatedEntry entry, List<UserMemoryEntry> originals) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Integer ref : entry.sources()) {
+            if (ref != null && ref >= 0 && ref < originals.size() && originals.get(ref).id() != null) {
+                ids.add(originals.get(ref).id());
+            }
+        }
+        if (ids.isEmpty()) {
+            originals.stream().map(UserMemoryEntry::id).filter(Objects::nonNull).forEach(ids::add);
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /**
+     * {@link #parseConsolidatedEntries} for a {@code citeSources} answer, which
+     * carries a {@code sources} array the plain parser (a list of string maps)
+     * would reject. Key and value are read as the plain parser reads them — scalars
+     * as text, and any object or array there rejects the whole answer. Other fields
+     * are ignored.
+     */
+    List<ConsolidatedEntry> parseCitedConsolidatedEntries(String llmResponse) {
+        String array = jsonArrayOf(llmResponse);
+        if (array == null) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(array);
+            if (root == null || !root.isArray()) {
+                return List.of();
+            }
+            List<ConsolidatedEntry> result = new ArrayList<>();
+            for (JsonNode node : root) {
+                if (!node.isObject() || node.path("key").isContainerNode() || node.path("value").isContainerNode()) {
+                    return List.of();
+                }
+                String key = scalarText(node.get("key"));
+                String value = scalarText(node.get("value"));
+                if (key == null || key.isBlank() || value == null || value.isBlank()) {
+                    continue;
+                }
+                result.add(new ConsolidatedEntry(truncate(key.strip(), MAX_KEY_LENGTH), value.strip(), refs(node.get("sources"))));
+            }
+            return result;
+        } catch (Exception e) {
+            // The parser's message quotes the model's answer, i.e. user content: DEBUG
+            // only.
+            LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Parse failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
+            return List.of();
+        }
+    }
+
+    private static String scalarText(JsonNode node) {
+        return node == null || node.isNull() ? null : node.asText();
+    }
+
+    /**
+     * The cited refs; an element that is not a small non-negative integer is null.
+     */
+    private static List<Integer> refs(JsonNode sources) {
+        if (sources == null || sources.isNull()) {
+            return List.of();
+        }
+        List<Integer> refs = new ArrayList<>();
+        Iterable<JsonNode> items = sources.isArray() ? sources : List.of(sources);
+        for (JsonNode ref : items) {
+            if (ref.isIntegralNumber() && ref.canConvertToInt()) {
+                refs.add(ref.intValue());
+            } else if (ref.isTextual() && ref.textValue().strip().matches("\\d{1,9}")) {
+                refs.add(Integer.parseInt(ref.textValue().strip()));
+            } else {
+                refs.add(null);
+            }
+        }
+        return refs;
+    }
+
+    /** The JSON array in a model answer, fences and surrounding text removed. */
+    private static String jsonArrayOf(String llmResponse) {
+        if (llmResponse == null || llmResponse.isBlank()) {
+            return null;
+        }
+        String cleaned = llmResponse.strip();
+        if (cleaned.startsWith("```")) {
+            int firstNewline = cleaned.indexOf('\n');
+            int lastFence = cleaned.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                cleaned = cleaned.substring(firstNewline + 1, lastFence).strip();
+            }
+        }
+        int start = cleaned.indexOf('[');
+        int end = cleaned.lastIndexOf(']');
+        return start < 0 || end <= start ? null : cleaned.substring(start, end + 1);
     }
 
     List<ConsolidatedEntry> parseConsolidatedEntries(String llmResponse) {
@@ -1383,6 +1590,7 @@ public class DreamService {
         // by string concatenation copied the whole prefix per duplicate (quadratic in
         // a response full of repeated keys) and only checked the cap at the end.
         Map<String, StringBuilder> byKey = new LinkedHashMap<>();
+        Map<String, LinkedHashSet<Integer>> sourcesByKey = new HashMap<>();
         for (ConsolidatedEntry entry : entries) {
             String value = entry.value() == null ? "" : entry.value();
             StringBuilder merged = byKey.get(entry.key());
@@ -1392,13 +1600,15 @@ public class DreamService {
             } else if (!value.contentEquals(merged)) {
                 merged.append("; ").append(value);
             }
+            sourcesByKey.computeIfAbsent(entry.key(), k -> new LinkedHashSet<>()).addAll(entry.sources());
             if (merged.length() > MAX_VALUE_LENGTH) {
                 LOGGER.warnf("[DREAM] A consolidated value exceeds %d characters; keeping the originals rather than cutting it.",
                         MAX_VALUE_LENGTH);
                 return List.of();
             }
         }
-        return byKey.entrySet().stream().map(e -> new ConsolidatedEntry(e.getKey(), e.getValue().toString())).toList();
+        return byKey.entrySet().stream()
+                .map(e -> new ConsolidatedEntry(e.getKey(), e.getValue().toString(), new ArrayList<>(sourcesByKey.get(e.getKey())))).toList();
     }
 
     /**
@@ -1514,6 +1724,38 @@ public class DreamService {
      * Build a JSON array string from memory entries for the LLM prompt. Uses the
      * injected {@link ObjectMapper} for proper serialization.
      */
+    /**
+     * {@link #buildEntriesJson} with each entry numbered by its position — the ref
+     * a {@code citeSources} answer cites. Small integers rather than the stored
+     * ids: a model copies {@code 2} reliably, an ObjectId much less so.
+     */
+    private String buildCitedEntriesJson(List<UserMemoryEntry> entries) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("ref", i);
+            item.put("key", entries.get(i).key());
+            item.put("value", String.valueOf(entries.get(i).value()));
+            list.add(item);
+        }
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(list);
+        } catch (Exception e) {
+            LOGGER.warnf("[DREAM] Failed to serialize entries to JSON (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Serialization failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
+            var sb = new StringBuilder("[");
+            for (int i = 0; i < entries.size(); i++) {
+                var entry = entries.get(i);
+                sb.append("{\"ref\": ").append(i).append(", \"key\": \"").append(escapeJson(entry.key())).append("\", \"value\": \"")
+                        .append(escapeJson(String.valueOf(entry.value()))).append("\"}");
+                if (i < entries.size() - 1)
+                    sb.append(",");
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+    }
+
     private String buildEntriesJson(List<UserMemoryEntry> entries) {
         var list = entries.stream()
                 .map(e -> Map.of("key", e.key(), "value", String.valueOf(e.value())))
@@ -1607,5 +1849,10 @@ public class DreamService {
         public boolean isSuccess() {
             return error == null;
         }
+    }
+
+    /** At most 300 characters of a diagnostic message, null-safe. */
+    private static String cap(String message) {
+        return message != null && message.length() > 300 ? message.substring(0, 300) + "…" : message;
     }
 }

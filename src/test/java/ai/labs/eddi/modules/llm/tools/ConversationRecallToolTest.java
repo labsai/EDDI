@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -302,5 +304,69 @@ class ConversationRecallToolTest {
         assertTrue(result.contains("**Turn 3 — User:** User [REDACTED:pii]"), result);
         assertFalse(result.contains("User message 3"), result);
         assertTrue(result.contains("User message 2"), result);
+    }
+
+    @Test
+    void recallConversationDetail_aSummaryCitationReturnsEveryTurnItNames() {
+        var tool = new ConversationRecallTool(createOutputs(15), 12, 20);
+
+        String result = tool.recallConversationDetail("[turns 2-3, 7]");
+
+        assertTrue(result.startsWith("**Recalled conversation turns 2-3, 7:**"), result);
+        assertTrue(result.contains("User message 2") && result.contains("User message 3") && result.contains("User message 7"), result);
+        assertFalse(result.contains("User message 4"), result);
+    }
+
+    @Test
+    void recallConversationDetail_citedTurnsAreDeduplicatedOrderedAndCapped() {
+        var tool = new ConversationRecallTool(createOutputs(15), 12, 3);
+
+        String result = tool.recallConversationDetail("[steps 9, 2-3; 3-4]");
+
+        // 9 is cited first and kept; 2 and 3 fill the cap; 4 is left out
+        assertTrue(result.startsWith("**Recalled conversation turns 2-3, 9:**"), result);
+        assertFalse(result.contains("User message 4"), result);
+        assertTrue(result.contains("1 more cited turns were not returned"), result);
+    }
+
+    @Test
+    void recallConversationDetail_citedTurnsPastTheSummaryAreClamped() {
+        var tool = new ConversationRecallTool(createOutputs(15), 5, 20);
+
+        String result = tool.recallConversationDetail("[turns 3-40]");
+
+        assertTrue(result.startsWith("**Recalled conversation turns 3-4:**"), result);
+        assertFalse(result.contains("User message 5"), result);
+    }
+
+    /** Summary covers turns 0-4 (summaryThroughStep 5); 15 outputs exist. */
+    @ParameterizedTest
+    @ValueSource(strings = {"[turn 5]", "[turn 6]", "[turns 5-9]", "[turn 999999999]", "[turn 99999999999]", "[turn -1]",
+            "[turn abc]", "[turns four]"})
+    void recallConversationDetail_aCitationOutsideTheSummarizedTurnsNamesNoTurn(String citation) {
+        var tool = new ConversationRecallTool(createOutputs(15), 5, 20);
+
+        String result = tool.recallConversationDetail(citation);
+
+        assertFalse(result.contains("User message 4"), "must not be clamped onto the last summarized turn: " + result);
+        assertFalse(result.contains("— User:"), "no turn is attributed: " + result);
+    }
+
+    @Test
+    void recallConversationDetail_aCitationBeyondTheSummaryDoesNotHideAValidOne() {
+        var tool = new ConversationRecallTool(createOutputs(15), 5, 20);
+
+        String result = tool.recallConversationDetail("[turns 2, 40]");
+
+        assertTrue(result.startsWith("**Recalled conversation turns 2:**"), result);
+        assertFalse(result.contains("User message 4"), result);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[turn 0]", "[turn 4]"})
+    void recallConversationDetail_theFirstAndLastSummarizedTurnsAreValid(String citation) {
+        var tool = new ConversationRecallTool(createOutputs(15), 5, 20);
+
+        assertTrue(tool.recallConversationDetail(citation).contains("**Turn " + citation.charAt(6) + " —"));
     }
 }
