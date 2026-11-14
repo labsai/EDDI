@@ -1167,7 +1167,7 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host` (default `localhost`; one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port` (default `5432`), `database` (default `eddi`), `user` (default `eddi`), `table`, `dimension` (default `1536` — must match the embedding model's vector size). `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host` (default `localhost`; one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port` (default `5432`), `database` (default `eddi`), `user` (default `eddi`), `table`, `dimension` (default `1536` — must match the embedding model's vector size). `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation). Index and throughput settings — `layout`, `vectorIndex`, `hnswM`, `hnswEfConstruction`, `hnswEfSearch`, `insertBatchSize` — are in [pgvector at scale](#pgvector-at-scale) |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName` (default `eddi`), `collectionName`, `indexName` (default `vector_index`) |
 | `elasticsearch` | — | `serverUrl` (default: `http://localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
@@ -1209,6 +1209,73 @@ parameter rather than ignoring it.
 > `storeType` still **defaults to** `in-memory`, so persistence is opt-in: `pgvector` is the
 > recommended choice, and — with `in-memory` and `chroma` — one of the three stores whose
 > document-replacement semantics are verified (see [Ingestion Sources](#ingestion-sources)).
+
+
+### pgvector at scale
+
+A pgvector knowledge base whose table EDDI creates gets the **v2 layout**, built for tables of
+millions of chunks:
+
+- an **HNSW index** on the embedding (cosine distance, the operator retrieval orders by), so a query
+  reads a few hundred index entries instead of scanning every row;
+- metadata stored as **`jsonb`** with b-tree indexes on `(documentId, sourceKey)` and
+  `(sourceKey, runId)` — the keys every document replacement and every post-run sweep filters on —
+  so re-ingesting a changed document deletes its old chunks through an index instead of a full scan;
+- inserts in **batches** of `insertBatchSize` rows, so a large document is several short
+  transactions rather than one long one;
+- **pooled connections**, shared by every knowledge base on the same server and login
+  (`host`, `port`, `database`, `user`, password) instead of a new connection for every search,
+  insert and delete. A pool opens at most `eddi.rag.pgvector.pool.max-size` connections (default
+  `10`, see the [configuration reference](configuration-reference.md#knowledge-bases-rag)) and closes
+  idle ones after two minutes.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `layout` | `auto` | `auto`: an existing table keeps the layout it has, a new table is created in `v2`. `v1` creates a new table the way EDDI did before (json metadata, no index). An explicit value that contradicts an existing table is refused |
+| `vectorIndex` | `hnsw` | `none` builds no vector index, so a new table searches exactly. An HNSW index that already exists stays in place and still serves searches; drop it by hand to return to exact search — for a small knowledge base, or to load a large one first and add the index by hand afterwards |
+| `hnswM` | `16` | HNSW graph degree (2–100). Higher: better recall, larger index, slower inserts. Applies when the index is created |
+| `hnswEfConstruction` | `64` | HNSW build-time candidate list (4–1000, at least 2 × `hnswM`). Applies when the index is created |
+| `hnswEfSearch` | `40` | HNSW query-time candidate list (1–1000), set on each connection the store borrows. Raise it if retrieval misses relevant chunks; it must be at least `maxResults` to return that many |
+| `insertBatchSize` | `500` | Rows per INSERT transaction (1–10000). Also applies to tables in the `v1` layout |
+
+**Existing tables are not changed.** A knowledge base whose table already exists — every pgvector
+knowledge base created before this layout — keeps reading and writing it exactly as before: EDDI
+recognises the old layout by its `json` metadata column, adds no index to it and converts nothing,
+because building an HNSW index over millions of rows blocks writes to the table for as long as it
+takes. Such a knowledge base still gets pooled connections and batched inserts. To move one to
+the v2 layout, re-embed it into a new table: set `storeParameters.table` to a new name (or, for a
+knowledge base still in the 6.5.0 name layout, migrate it to `"storeNamespace": "id"` — see
+[Knowledge base isolation](#knowledge-base-isolation)), then run its sources again. The old table
+is left in place; drop it once nothing uses it. Asking for `"layout": "v2"` on an existing v1 table
+is refused with that explanation rather than silently ignored.
+
+Limits worth knowing:
+
+- pgvector cannot build an HNSW index over more than **2000 dimensions**. A `v2` table with a larger
+  `dimension` (OpenAI `text-embedding-3-large` at its full 3072, for example) is created without the
+  vector index and logs a warning; retrieval then scans every row. Use the model's `dimensions`
+  setting to stay at or below 2000 for an indexed knowledge base.
+- HNSW needs **pgvector 0.5.0** or later. On an older server the index cannot be built; EDDI logs a
+  warning and the knowledge base works with exact scans, as before.
+- Retrieval filters on `kbId` after the index scan. On a table of its own (the default) that filter
+  matches every row and costs nothing. On a table **shared** by several knowledge bases, a query can
+  return fewer than `maxResults` chunks when the nearest `hnswEfSearch` candidates belong to another
+  knowledge base — raise `hnswEfSearch`, or give each knowledge base its own table.
+- `hnsw.ef_search` is a session setting; it is applied every time a connection is borrowed, one
+  extra statement per operation, because connections are shared by knowledge bases that may set
+  different values.
+
+Changing `hnswM` or `hnswEfConstruction` on an existing v2 table does not rebuild its index; drop
+the table's HNSW index by hand and EDDI recreates it with the new values the next time it
+builds the store — a build that blocks writes to a large table while it runs. To avoid that, create
+it yourself under the name EDDI looks for, with `CREATE INDEX CONCURRENTLY <index> ON <table> USING hnsw
+(embedding vector_cosine_ops) WITH (m = …, ef_construction = …)`; EDDI then finds it and leaves it alone.
+`<index>` is **unqualified** — an index lives in its table's schema — while `<table>` is qualified as the
+table is (`rag.kb`). It is the lower-case table name without its schema plus `_hnsw_idx`; when that
+would exceed 63 characters EDDI shortens it and adds a digest, so take it from the log line
+`pgvector table <table>: HNSW index name is <index>` written whenever the store is built. If a
+concurrent build fails, PostgreSQL leaves an invalid index under that name: EDDI refuses to build the
+store, naming the index, until you `DROP INDEX` it and build again.
 
 ## Capabilities
 
