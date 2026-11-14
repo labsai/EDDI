@@ -87,7 +87,7 @@ The audit ledger exposes a **read-only** REST API. No create, update, or delete 
 GET /auditstore/{conversationId}?skip=0&limit=100
 ```
 
-Returns audit entries for a conversation, newest first. On this and the other read endpoints `limit` defaults to `100` and is capped at `1000`; a non-positive value falls back to the default.
+Returns audit entries for a conversation, newest first. On this and the other entry-listing endpoints (not the verification endpoints below, which have their own default and ceiling) `limit` defaults to `100` and is capped at `1000`; a non-positive value falls back to the default.
 
 ### Get Audit Trail by Agent
 
