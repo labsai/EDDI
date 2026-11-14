@@ -1867,8 +1867,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setFollowRedirects(false);
         }
         Map<String, String> queryParams = requestConfig.getQueryParams();
+        List<String> optionalQueryParams = requestConfig.getOptionalQueryParams() != null ? requestConfig.getOptionalQueryParams() : List.of();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            // An optional parameter the caller left out: send nothing, so the server
+            // applies its own default (see Request#getOptionalQueryParams). Judged on
+            // the rendered template, before any reference resolution, so a value that
+            // is a reference is never dropped.
+            if (optionalQueryParams.contains(queryParam) && (qpValue == null || qpValue.isEmpty())) {
+                continue;
+            }
             // Resolve global variable references, then vault references in query params
             qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
                     templateDataObjects, conversationProperties);

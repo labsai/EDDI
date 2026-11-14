@@ -1388,8 +1388,8 @@ your tool schemas do not cover it, not as a routine first step:
   eddi.connections.public-base-url) and approves nothing. There is no "notify
   all approvers" switch — approver roles live in the identity provider, so name
   a shared mailbox. Docs: "hitl" (section "Email notifications"); metrics
-  eddi_email_outbound_total{outcome: sent, retry, failed, suppressed,
-  not_allowed, rate_limited} and eddi_email_ledger_pending.
+  eddi_email_outbound_total (label outcome: sent, retry, failed, suppressed,
+  not_allowed or rate_limited) and eddi_email_ledger_pending.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;
@@ -1722,11 +1722,12 @@ your tool schemas do not cover it, not as a routine first step:
   config an author wrote, not in a body you send. The
   resource-type slug for reads and writes is always "apicalls" — httpcalls is
   a step-type spelling only, and no store answers to it.
-- An apicalls entry's forEach {pathToTargetArray (a plain dot path such as
-  properties.orderIds, required), iterationObjectName (default "item", bound
-  to the element itself), templateFilterExpression, maxItems (default 100,
-  ceiling 1000), maxConcurrency (default 1, 1..16), onItemFailure ("continue"
-  default, or "fail"), maxTotalResponseSizeInBytes} sends the call once per
+- An apicalls entry's forEach object — fields pathToTargetArray (a plain dot
+  path such as properties.orderIds, required), iterationObjectName (default
+  "item", bound to the element itself), templateFilterExpression, maxItems
+  (default 100, ceiling 1000), maxConcurrency (default 1, 1..16),
+  onItemFailure ("continue" default, or "fail") and
+  maxTotalResponseSizeInBytes — sends the call once per
   element and stores one array under responseObjectName: per item index, ok,
   httpCode, body, error, timedOut, sent, attempts, bodyDropped, in source
   order. postResponse runs with 200 when every item succeeded and 207 when any
