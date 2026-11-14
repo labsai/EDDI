@@ -225,6 +225,10 @@ public class ConverseWithAgentTool {
                                     @P("The message to send to the agent") String message,
                                     @P("Optional conversation ID for continuing a multi-turn conversation") String conversationId) {
 
+        // Outside the try: a timeout settles what the delegated turn spent so far.
+        double costBefore = 0.0;
+        OptionalDouble messageAllowance = OptionalDouble.empty();
+        String delegatedConversation = null;
         try {
             // --- Validate parameters ---
             if (agentId == null || agentId.isBlank()) {
@@ -298,7 +302,6 @@ public class ConverseWithAgentTool {
             // directly and never pass through this tool.
             // What the callee's conversation had spent before this turn — the base the
             // charge-back below is measured from. Zero for a conversation started here.
-            double costBefore = 0.0;
             if (conversationId != null && !conversationId.isBlank()) {
                 OwnershipCheck ownership = checkOwnedByBoundUser(conversationId);
                 if (ownership.refusal() != null) {
@@ -326,7 +329,7 @@ public class ConverseWithAgentTool {
 
             // --- Start new conversation if no conversationId provided ---
             boolean startedHere = false;
-            OptionalDouble messageAllowance = remaining;
+            messageAllowance = remaining;
             if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
@@ -369,6 +372,7 @@ public class ConverseWithAgentTool {
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final AtomicBoolean skipped = new AtomicBoolean();
             final String convId = conversationId;
+            delegatedConversation = convId;
 
             // Finding H7: a busy-skip (onSkipped, e.g. IN_PROGRESS) must NOT be
             // treated as a fresh response — the default onSkipped→onComplete would
@@ -445,6 +449,10 @@ public class ConverseWithAgentTool {
             return pausedForApprovalMessage(conversationId, null);
         } catch (TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
+            // The delegated turn may still be running: charge what it has recorded so
+            // far, and hold the rest of its allowance for this turn, so repeated
+            // timeouts cannot hand the same money out again.
+            DelegationBudget.settleUnfinished(budget, conversationService, delegatedConversation, costBefore, messageAllowance, true);
             // The number has to come from the same config the wait used, or the
             // message tells the model a limit that was never applied — which is how
             // a stale "(60s limit)" survived the timeout becoming configurable.

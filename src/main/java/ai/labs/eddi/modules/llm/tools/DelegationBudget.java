@@ -60,6 +60,34 @@ public interface DelegationBudget {
     void charge(double usd);
 
     /**
+     * Holds {@code usd} against the caller's ceiling for the rest of this turn
+     * without recording it as spent — for a delegated turn the caller stopped
+     * waiting for, which may still spend up to the allowance it was handed. The
+     * same money then cannot be handed out again in this turn. Default: nothing.
+     */
+    default void reserve(double usd) {
+    }
+
+    /**
+     * Settles a delegated turn whose outcome the caller did not get (a timeout, a
+     * failure after the start): charges what the callee's conversation has recorded
+     * since {@code costBefore} — read now — and, when {@code stillRunning},
+     * reserves the rest of {@code allowance}.
+     */
+    static void settleUnfinished(DelegationBudget budget, IConversationService conversationService, String conversationId,
+                                 double costBefore, OptionalDouble allowance, boolean stillRunning) {
+        if (budget == null || conversationId == null) {
+            return;
+        }
+        double now = costOf(conversationService, conversationId, costBefore);
+        double observed = Double.isFinite(now - costBefore) && now - costBefore > 0.0 ? now - costBefore : 0.0;
+        budget.charge(observed);
+        if (stillRunning && allowance != null && allowance.isPresent()) {
+            budget.reserve(Math.max(0.0, allowance.getAsDouble() - observed));
+        }
+    }
+
+    /**
      * Adds the remaining allowance to a delegation's context, when a ceiling
      * applies.
      */

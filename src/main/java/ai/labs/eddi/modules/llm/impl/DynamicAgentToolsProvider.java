@@ -341,14 +341,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             Supplier<String> creationGate = standaloneConversation
                     ? () -> {
                         String ended = standalone.endedRefusal(callerConversationId);
-                        return ended != null ? ended : standalone.capRefusal(userId);
+                        // Check and reservation in one step, so concurrent creations of the
+                        // same user cannot all pass the last free slot.
+                        return ended != null ? ended : standalone.reserveCreation(userId);
                     }
                     : null;
+            Runnable releaseGate = standaloneConversation ? () -> standalone.releaseCreation(userId) : null;
             Predicate<String> afterCreate = standaloneConversation ? agentId -> standalone.tearDownIfEnded(callerConversationId, agentId) : null;
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
                     sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId, delegationBudget, creationGate,
-                    afterCreate));
+                    afterCreate, releaseGate));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;

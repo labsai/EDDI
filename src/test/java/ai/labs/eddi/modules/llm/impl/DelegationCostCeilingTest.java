@@ -241,4 +241,31 @@ class DelegationCostCeilingTest {
                 .parseDouble(String.valueOf(input.getValue().getContext().get(ClientContextGuard.KEY_DELEGATION_MAX_COST).getValue()));
         assertEquals(0.05, messageAllowance, 1e-9);
     }
+
+    @Test
+    @DisplayName("a timed-out delegation is charged what it recorded so far, and the rest of its allowance is held for the turn")
+    void timeoutChargesAndReserves() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        var config = new DynamicAgentConfig();
+        config.setEnabled(true);
+        config.setAllowDelegation(true);
+        config.setDelegationTimeoutSeconds(1);
+        // The callee never answers; by the time the caller gives up it has spent 0.1.
+        doAnswer(invocation -> null).when(conversationService)
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        var running = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        running.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.1));
+        when(conversationService.getConversationMemorySnapshot("conv-b"))
+                .thenReturn(new ConversationMemorySnapshot(), ConversationMemoryUtilities.convertConversationMemory(running));
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config, 0, null, null, new MemoryDelegationBudget(memory));
+
+        String result = tool.converseWithAgent("agent-b", "hello", null);
+
+        assertTrue(result.contains("Timeout"), result);
+        assertEquals(0.1, ((Number) memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST).getResult()).doubleValue(), 1e-9);
+        // 0.5 allowance: 0.1 charged, 0.4 held — nothing left to hand out again this
+        // turn.
+        assertEquals(0.0, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9);
+    }
 }

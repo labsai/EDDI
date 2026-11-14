@@ -18,7 +18,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -613,6 +617,31 @@ class DynamicAgentToolsTest {
 
             assertEquals("0.25", input.getValue().getContext().get(ClientContextGuard.KEY_DELEGATION_MAX_COST).getValue());
             assertEquals(0.1, budget.charged, 1e-9);
+        }
+
+        @Test
+        @DisplayName("a start turn that spent before the initial message failed is still charged")
+        void createSubAgent_failedMessageChargesTheStart() throws Exception {
+            var budget = new RecordingBudget(0.5);
+            var budgeted = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-parent", null, budget);
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-agent-1").build());
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenReturn(new ConversationResult("conv-123", null));
+            var started = new ConversationMemory("abcdef0123456789abcdef01", "sub-agent-1", 1, "user-1");
+            started.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.2));
+            when(conversationService.getConversationMemorySnapshot("conv-123"))
+                    .thenReturn(ConversationMemoryUtilities.convertConversationMemory(started));
+            doThrow(new IllegalStateException("message failed")).when(conversationService)
+                    .say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            String result = budgeted.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertTrue(result.contains("Initial message failed"), result);
+            assertEquals(0.2, budget.charged, 1e-9);
         }
 
         @Test

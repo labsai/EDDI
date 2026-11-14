@@ -52,6 +52,22 @@ final class MemoryDelegationBudget implements DelegationBudget {
         return OptionalDouble.of(Math.max(0.0, ceiling.getAsDouble() - spent));
     }
 
+    /**
+     * Held in the conversation's {@link SpendReservations}, which every ceiling
+     * check of this turn counts, and never released: the turn's memory carries it
+     * until the turn ends. Not persisted — a later turn sees only what was charged.
+     */
+    @Override
+    public void reserve(double usd) {
+        if (memory == null || !Double.isFinite(usd) || !(usd > 0.0)) {
+            return;
+        }
+        SpendReservations reservations = memory.getSpendReservations();
+        if (reservations != null) {
+            reservations.tryReserve(0.0, Double.MAX_VALUE, usd);
+        }
+    }
+
     @Override
     public void charge(double usd) {
         // !(usd > 0.0): NaN fails every comparison, and one NaN would disable every

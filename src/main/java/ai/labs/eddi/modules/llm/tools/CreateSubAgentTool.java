@@ -32,6 +32,7 @@ import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -80,6 +81,8 @@ public class CreateSubAgentTool {
      * Asked after setup; {@code true} means the agent was torn down. May be null.
      */
     private final Predicate<String> afterCreate;
+    /** Run after setup when the gate admitted the creation. May be null. */
+    private final Runnable releaseGate;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -173,6 +176,31 @@ public class CreateSubAgentTool {
             DelegationBudget budget,
             Supplier<String> creationGate,
             Predicate<String> afterCreate) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, creationGate, afterCreate, null);
+    }
+
+    /**
+     * @param releaseGate
+     *            run once setup has finished, success or failure, when the
+     *            {@code creationGate} admitted the creation — gives back the slot
+     *            it reserved ({@code StandaloneDynamicAgents#releaseCreation}).
+     *            {@code null} runs nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate,
+            Predicate<String> afterCreate,
+            Runnable releaseGate) {
+        this.releaseGate = releaseGate;
         this.afterCreate = afterCreate;
         this.creationGate = creationGate;
         this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
@@ -446,6 +474,12 @@ public class CreateSubAgentTool {
                     throw new AgentSetupException(e.getMessage() + " — nothing was inherited: " + reason);
                 }
                 throw e;
+            } finally {
+                // The agent is deployed (and counted) or setup failed: either way the
+                // reserved slot is no longer pending.
+                if (releaseGate != null) {
+                    releaseGate.run();
+                }
             }
             String agentId = result.agentId();
             if (afterCreate != null && afterCreate.test(agentId)) {
@@ -470,6 +504,8 @@ public class CreateSubAgentTool {
                 // conversation's ceiling, so it is not sent.
                 response = "[Initial message not sent: this conversation's cost ceiling is reached]";
             } else if (initialMessage != null && !initialMessage.isBlank()) {
+                boolean charged = false;
+                OptionalDouble messageAllowance = remaining;
                 try {
                     // The creating conversation's remaining allowance holds the sub-agent's
                     // first turn (and its start), as for converse_with_agent.
@@ -481,12 +517,12 @@ public class CreateSubAgentTool {
 
                     // One allowance for both turns: the start turn's spend is not handed to
                     // the message turn again.
-                    OptionalDouble messageAllowance = remaining;
                     if (remaining.isPresent()) {
                         double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
                         messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
                         if (!(messageAllowance.getAsDouble() > 0.0)) {
                             budget.charge(startCost);
+                            charged = true;
                             throw new IllegalStateException("this conversation's cost ceiling was reached while the sub-agent started");
                         }
                     }
@@ -525,6 +561,7 @@ public class CreateSubAgentTool {
                     // Charge-back: the new conversation's whole spend so far is this
                     // tool's doing.
                     budget.charge(DelegationBudget.spentSince(0.0, snapshot));
+                    charged = true;
                     // Finding 25: a sub-agent that pauses for approval on its first
                     // message must report the pending approval, not "[no response]".
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -548,10 +585,19 @@ public class CreateSubAgentTool {
                         response = extractResponse(snapshot);
                     }
                 } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                    if (!charged) {
+                        DelegationBudget.settleUnfinished(budget, conversationService, conversationId, 0.0, messageAllowance, false);
+                    }
                     response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
                             + " is awaiting human approval; a reviewer must decide via POST /agents/"
                             + conversationId + "/resume before it can continue.";
                 } catch (Exception e) {
+                    if (!charged) {
+                        // The start turn may have run (and spent) before the message failed;
+                        // a timed-out message may still be spending.
+                        DelegationBudget.settleUnfinished(budget, conversationService, conversationId, 0.0, messageAllowance,
+                                e instanceof TimeoutException);
+                    }
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
                             agentId, e.getMessage());
                     response = "[Initial message failed: " + e.getMessage() + "]";
