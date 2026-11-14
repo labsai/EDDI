@@ -332,6 +332,10 @@ public class AgentSetupService {
         String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
 
         var createdResources = new LinkedHashMap<String, Object>();
+        // Always the live writer: this path has no dry run. Written through it anyway,
+        // so every document is created, recorded for rollback and named by the same
+        // code createApiAgent uses.
+        ResourceWriter writer = writerFor(false);
 
         // --- Step 0: Resolve the API key against the vault ---
         // Outside the try, for the same reason the HITL config is validated above: an
@@ -341,61 +345,42 @@ public class AgentSetupService {
         // reading a 400 wants "vaultKeyName 'x' does not exist", not that sentence
         // wrapped in "Failed to set up agent".
         String llmEndpoint = "ollama".equals(params.providerType) && isNullOrBlank(request.baseUrl()) ? ollamaDefaultBaseUrl : request.baseUrl();
-        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
+        String effectiveApiKey = writer.vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
                 new HostRule(request.allowedHosts(), SetupSecretHosts.forLlm(params.providerType, llmEndpoint), "apiKey"));
 
         try {
             // --- Step 1: Create Parser ---
             var parserConfig = createParserConfig();
-            Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
-            String parserLocation = parserResponse.getHeaderString("Location");
-            String parserId = extractIdFromLocation(parserLocation);
-            int parserVersion = extractVersionFromLocation(parserLocation);
-            createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(parserId, parserVersion, request.agentName());
+            String parserLocation = writer.createDescribed(createdResources, "parserLocation", PARSER_PREFIX,
+                    () -> getRestStore(IRestParserStore.class).createParser(parserConfig), request.agentName());
 
             // --- Step 2: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
-            String behaviorLocation = behaviorResponse.getHeaderString("Location");
-            String behaviorId = extractIdFromLocation(behaviorLocation);
-            int behaviorVersion = extractVersionFromLocation(behaviorLocation);
-            createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(behaviorId, behaviorVersion, request.agentName());
+            String behaviorLocation = writer.createDescribed(createdResources, "behaviorLocation", RULES_PREFIX,
+                    () -> getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig), request.agentName());
 
             // --- Step 3: Create LLM Configuration ---
             var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, request.systemPrompt(), toolsEnabled,
                     request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
-            Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
-            String langchainLocation = llmResponse.getHeaderString("Location");
-            String langchainId = extractIdFromLocation(langchainLocation);
-            int langchainVersion = extractVersionFromLocation(langchainLocation);
-            createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(langchainId, langchainVersion, request.agentName());
+            String langchainLocation = writer.createDescribed(createdResources, "langchainLocation", LLM_PREFIX,
+                    () -> getRestStore(IRestLlmStore.class).createLlm(llmConfig), request.agentName());
 
             // --- Step 4: Create MCP Calls Configurations (if MCP server URLs provided) ---
-            List<String> mcpCallsLocations = createMcpCallsResources(request.mcpServerUrls(), request.agentName(), createdResources);
+            List<String> mcpCallsLocations = createMcpCallsResources(writer, request.mcpServerUrls(), request.agentName(), createdResources,
+                    new ArrayList<>());
 
             // --- Step 5: Create Output Set (if intro message provided) ---
             String outputLocation = null;
             if (request.introMessage() != null && !request.introMessage().isBlank()) {
                 var outputConfig = createOutputConfig(request.introMessage());
-                Response outputResponse = getRestStore(IRestOutputStore.class).createOutputSet(outputConfig);
-                outputLocation = outputResponse.getHeaderString("Location");
-                String outputId = extractIdFromLocation(outputLocation);
-                int outputVersion = extractVersionFromLocation(outputLocation);
-                createdResources.put("outputLocation", outputLocation);
-                patchDescriptor(outputId, outputVersion, request.agentName());
+                outputLocation = writer.createDescribed(createdResources, "outputLocation", OUTPUT_PREFIX,
+                        () -> getRestStore(IRestOutputStore.class).createOutputSet(outputConfig), request.agentName());
             }
 
             // --- Step 6: Create Workflow ---
             var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, null, mcpCallsLocations, langchainLocation, outputLocation);
-            Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
-            String workflowLocation = workflowResponse.getHeaderString("Location");
-            String workflowId = extractIdFromLocation(workflowLocation);
-            int workflowVersion = extractVersionFromLocation(workflowLocation);
-            createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(workflowId, workflowVersion, request.agentName());
+            String workflowLocation = writer.createDescribed(createdResources, "packageLocation", WORKFLOW_PREFIX,
+                    () -> getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig), request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -407,12 +392,10 @@ public class AgentSetupService {
             agentConfig.setHitlConfig(request.hitlConfig());
             // On v1 for the same reason as the gate: teardown reads the current version.
             agentConfig.setDynamicOrigin(dynamicOrigin);
-            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
-            String agentLocation = agentResponse.getHeaderString("Location");
+            String agentLocation = writer.createDescribed(createdResources, "agentLocation", AGENT_PREFIX,
+                    () -> getRestStore(IRestAgentStore.class).createAgent(agentConfig), request.agentName());
             String agentId = extractIdFromLocation(agentLocation);
             int agentVersion = extractVersionFromLocation(agentLocation);
-            createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.agentName());
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
@@ -435,8 +418,8 @@ public class AgentSetupService {
             // No separate AgentSetupException arm here, unlike createApiAgent: nothing
             // inside this try declares one, and every vault error is raised at step 0
             // above, outside it. A catch for an unreachable case is not symmetry.
-            rollbackCreatedResources(createdResources, request.agentName(), e);
-            throw new AgentSetupException("Failed to set up agent: " + e.getMessage(), e);
+            writer.rollback(createdResources, request.agentName(), e);
+            throw AgentSetupInternalException.internalFailure("Failed to set up agent", e);
         }
     }
 
@@ -709,15 +692,13 @@ public class AgentSetupService {
 
             // --- Step 3: Create Parser ---
             var parserConfig = createParserConfig();
-            String parserLocation = writer.create(PARSER_PREFIX, () -> getRestStore(IRestParserStore.class).createParser(parserConfig));
-            writer.record(createdResources, "parserLocation", parserLocation);
-            writer.describe(parserLocation, request.agentName());
+            String parserLocation = writer.createDescribed(createdResources, "parserLocation", PARSER_PREFIX,
+                    () -> getRestStore(IRestParserStore.class).createParser(parserConfig), request.agentName());
 
             // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
-            String behaviorLocation = writer.create(RULES_PREFIX, () -> getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig));
-            writer.record(createdResources, "behaviorLocation", behaviorLocation);
-            writer.describe(behaviorLocation, request.agentName());
+            String behaviorLocation = writer.createDescribed(createdResources, "behaviorLocation", RULES_PREFIX,
+                    () -> getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig), request.agentName());
 
             String enrichedPrompt = enrichSystemPrompt(request.systemPrompt(), buildResult.apiSummary());
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
@@ -735,20 +716,19 @@ public class AgentSetupService {
             if (request.maxToolIterations() != null) {
                 llmConfig.tasks().getFirst().setMaxToolIterations(request.maxToolIterations());
             }
-            String langchainLocation = writer.create(LLM_PREFIX, () -> getRestStore(IRestLlmStore.class).createLlm(llmConfig));
-            writer.record(createdResources, "langchainLocation", langchainLocation);
-            writer.describe(langchainLocation, request.agentName());
+            String langchainLocation = writer.createDescribed(createdResources, "langchainLocation", LLM_PREFIX,
+                    () -> getRestStore(IRestLlmStore.class).createLlm(llmConfig), request.agentName());
 
             // --- Step 5b: Create MCP Calls Configurations (if MCP URLs provided) ---
             var mcpConfigs = new ArrayList<McpCallsConfiguration>();
-            List<String> mcpCallsLocations = writer.mcpCalls(request.mcpServerUrls(), request.agentName(), createdResources, mcpConfigs);
+            List<String> mcpCallsLocations = createMcpCallsResources(writer, request.mcpServerUrls(), request.agentName(), createdResources,
+                    mcpConfigs);
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
             var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, mcpCallsLocations, langchainLocation,
                     null);
-            String workflowLocation = writer.create(WORKFLOW_PREFIX, () -> getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig));
-            writer.record(createdResources, "packageLocation", workflowLocation);
-            writer.describe(workflowLocation, request.agentName());
+            String workflowLocation = writer.createDescribed(createdResources, "packageLocation", WORKFLOW_PREFIX,
+                    () -> getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig), request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -776,12 +756,10 @@ public class AgentSetupService {
                         .model(params.modelId).endpointCount(generated.endpointCount()).groups(groupNames).deployed(false)
                         .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey)).resources(preview).build();
             }, () -> {
-                Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
-                String agentLocation = agentResponse.getHeaderString("Location");
+                String agentLocation = writer.createDescribed(createdResources, "agentLocation", AGENT_PREFIX,
+                        () -> getRestStore(IRestAgentStore.class).createAgent(agentConfig), request.agentName());
                 String agentId = extractIdFromLocation(agentLocation);
                 int agentVersion = extractVersionFromLocation(agentLocation);
-                createdResources.put("agentLocation", agentLocation);
-                patchDescriptor(agentId, agentVersion, request.agentName());
 
                 // --- Step 8: Deploy ---
                 var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
@@ -807,7 +785,7 @@ public class AgentSetupService {
             throw e;
         } catch (Exception e) {
             writer.rollback(createdResources, request.agentName(), e);
-            throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Failed to create API agent", e);
         }
     }
 
@@ -826,7 +804,9 @@ public class AgentSetupService {
     static final String RULES_PREFIX = "eddi://ai.labs.rules/rulestore/rulesets/";
     static final String LLM_PREFIX = "eddi://ai.labs.llm/llmstore/llms/";
     static final String MCPCALLS_PREFIX = "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/";
+    static final String OUTPUT_PREFIX = "eddi://ai.labs.output/outputstore/outputsets/";
     static final String WORKFLOW_PREFIX = "eddi://ai.labs.workflow/workflowstore/workflows/";
+    static final String AGENT_PREFIX = "eddi://ai.labs.agent/agentstore/agents/";
 
     /** Counter for the generate-only and re-sync decisions. */
     static final String SETUP_API_METRIC = "eddi.setup.api";
@@ -848,9 +828,9 @@ public class AgentSetupService {
     }
 
     /**
-     * Every write {@code createApiAgent} and the re-sync make — documents, vault
-     * entries, descriptors, rollback — goes through one of these, so a dry run runs
-     * every line of a real setup and skips exactly the writes.
+     * Every write {@code setupAgent}, {@code createApiAgent} and the re-sync make —
+     * documents, vault entries, descriptors, rollback — goes through one of these,
+     * so a dry run runs every line of a real setup and skips exactly the writes.
      * <p>
      * Two implementations, chosen once by {@link #writerFor}: the live one writes,
      * the preview one returns what would have been written (a placeholder location
@@ -864,15 +844,25 @@ public class AgentSetupService {
 
         abstract void record(Map<String, Object> createdResources, String key, Object location);
 
+        /**
+         * Creates one document, records it under {@code key} and names its descriptor
+         * after the agent: the three steps every document a setup owns outright takes.
+         * Recorded before it is described, so a failure from then on still rolls it
+         * back.
+         */
+        final String createDescribed(Map<String, Object> createdResources, String key, String storePrefix, Supplier<Response> creator,
+                                     String name) {
+            String location = create(storePrefix, creator);
+            record(createdResources, key, location);
+            describe(location, name);
+            return location;
+        }
+
         abstract String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
                 throws AgentSetupException;
 
         abstract String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts)
                 throws AgentSetupException;
-
-        abstract List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources,
-                                       List<McpCallsConfiguration> previewed)
-                throws Exception;
 
         /**
          * The live writer runs {@code live}; the preview writer returns
@@ -923,12 +913,6 @@ public class AgentSetupService {
         @Override
         String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts) throws AgentSetupException {
             return AgentSetupService.this.vaultApiAuth(apiAuth, agentName, createdResources, hosts);
-        }
-
-        @Override
-        List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources, List<McpCallsConfiguration> previewed)
-                throws Exception {
-            return createMcpCallsResources(mcpServerUrls, agentName, createdResources);
         }
 
         @Override
@@ -1001,12 +985,6 @@ public class AgentSetupService {
                 allowedHostsFor(hosts);
             }
             return previewApiAuth(apiAuth);
-        }
-
-        @Override
-        List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources,
-                              List<McpCallsConfiguration> previewed) {
-            return previewMcpCallsResources(mcpServerUrls, this, previewed);
         }
 
         @Override
@@ -1091,22 +1069,6 @@ public class AgentSetupService {
         return names;
     }
 
-    /** {@link #createMcpCallsResources} for a dry run: built, not created. */
-    private List<String> previewMcpCallsResources(String mcpServerUrls, ResourceWriter writer, List<McpCallsConfiguration> configs) {
-        if (mcpServerUrls == null || mcpServerUrls.isBlank()) {
-            return null;
-        }
-        var locations = new ArrayList<String>();
-        for (String url : mcpServerUrls.split(",")) {
-            String trimmed = url.trim();
-            if (trimmed.isEmpty())
-                continue;
-            configs.add(createMcpCallsConfig(trimmed));
-            locations.add(writer.create(MCPCALLS_PREFIX, () -> null));
-        }
-        return locations;
-    }
-
     /**
      * Ceiling for a caller-supplied {@code maxToolIterations}. Each iteration is a
      * full LLM round-trip carrying the tool context, so the value multiplies both
@@ -1164,18 +1126,19 @@ public class AgentSetupService {
     }
 
     /**
-     * Creates one McpCalls resource per comma-separated server URL, recording each
-     * location in {@code createdResources}. Returns null when no URLs were given,
-     * which is what {@code createWorkflowConfig} expects for "no MCP step".
+     * Creates one McpCalls resource per comma-separated server URL through
+     * {@code writer}, recording each location in {@code createdResources} and
+     * adding each configuration to {@code built} (what a dry run shows in their
+     * place). Returns null when no URLs were given, which is what
+     * {@code createWorkflowConfig} expects for "no MCP step".
      * <p>
      * Shared by {@code setupAgent} and {@code createApiAgent} so an API agent can
      * hold both the tools generated from its OpenAPI spec and an MCP server's —
      * previously only the former, which made "REST plus MCP" unreachable through
      * the wizard.
      */
-
-    private List<String> createMcpCallsResources(String mcpServerUrls, String agentName, Map<String, Object> createdResources)
-            throws Exception {
+    private List<String> createMcpCallsResources(ResourceWriter writer, String mcpServerUrls, String agentName,
+                                                 Map<String, Object> createdResources, List<McpCallsConfiguration> built) {
         if (mcpServerUrls == null || mcpServerUrls.isBlank()) {
             return null;
         }
@@ -1185,11 +1148,9 @@ public class AgentSetupService {
             if (trimmed.isEmpty())
                 continue;
             var mcpConfig = createMcpCallsConfig(trimmed);
-            Response mcpResponse = getRestStore(IRestMcpCallsStore.class).createMcpCalls(mcpConfig);
-            String mcpLocation = mcpResponse.getHeaderString("Location");
-            locations.add(mcpLocation);
-            createdResources.put("mcpCallsLocation_" + locations.size(), mcpLocation);
-            patchDescriptor(extractIdFromLocation(mcpLocation), extractVersionFromLocation(mcpLocation), agentName);
+            built.add(mcpConfig);
+            locations.add(writer.createDescribed(createdResources, "mcpCallsLocation_" + (locations.size() + 1), MCPCALLS_PREFIX,
+                    () -> getRestStore(IRestMcpCallsStore.class).createMcpCalls(mcpConfig), agentName));
         }
         return locations;
     }
@@ -1760,8 +1721,9 @@ public class AgentSetupService {
             // The provider's detail stays in the server log: it can name internal
             // infrastructure, and the caller needs only what to do next.
             LOGGER.error("Failed to vault API key for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
-            throw new AgentSetupException("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
-                    + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
+            throw AgentSetupInternalException
+                    .internalFailure("The API key could not be stored in the secrets vault. Refusing to store it in plaintext on an "
+                            + "instance with the vault enabled — retry, or pass vaultKeyName.", e);
         }
     }
 
@@ -1815,8 +1777,9 @@ public class AgentSetupService {
         } catch (ISecretProvider.SecretProviderException e) {
             // As for the API key: the provider's detail stays in the server log.
             LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
-            throw new AgentSetupException("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
-                    + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
+            throw AgentSetupInternalException
+                    .internalFailure("apiAuth could not be stored in the secrets vault. Refusing to write it into the generated "
+                            + "httpcalls in plaintext — retry, or pass a ${vault:…} or ${connection:…} reference.", e);
         }
     }
 
@@ -1845,7 +1808,7 @@ public class AgentSetupService {
         } catch (ISecretProvider.SecretNotFoundException e) {
             existing = null;
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not read vault key '" + ref.keyName() + "'", e);
         }
         return useNamedVaultKey(ref, existing, key, agentName, createdResources, hosts);
     }
@@ -1901,8 +1864,7 @@ public class AgentSetupService {
                 // A keyed checksum needs the checksum key, which may have to be read and
                 // unwrapped first. A failure there means "could not compare", not "does
                 // not match" — so it must not fall through to the mismatch message.
-                throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': "
-                        + e.getClass().getSimpleName(), e);
+                throw AgentSetupInternalException.internalFailure("Could not verify the value of vault key '" + ref.keyName() + "'", e);
             }
             if (!matches) {
                 throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' already holds a value that does not match the "
@@ -1939,7 +1901,7 @@ public class AgentSetupService {
             // depends only on what it holds.
             return reuseConcurrentlyCreatedKey(ref, key, agentName, createdResources);
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not store the API key under vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not store the API key under vault key '" + ref.keyName() + "'", e);
         }
     }
 
@@ -1963,13 +1925,13 @@ public class AgentSetupService {
             // over by writing: report it and let the caller retry.
             throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created and removed concurrently. Retry the setup.", e);
         } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+            throw AgentSetupInternalException.internalFailure("Could not read vault key '" + ref.keyName() + "'", e);
         }
         boolean sameValue;
         try {
             sameValue = winner.checksum() != null && secretProvider.matchesChecksum(ref.tenantId(), winner.checksum(), expectedPlaintext);
         } catch (RuntimeException e) {
-            throw new AgentSetupException("Could not verify the value of vault key '" + ref.keyName() + "': " + e.getClass().getSimpleName(), e);
+            throw AgentSetupInternalException.internalFailure("Could not verify the value of vault key '" + ref.keyName() + "'", e);
         }
         if (!sameValue) {
             throw new AgentSetupException("Vault key '" + ref.keyName() + "' was created concurrently by another setup and holds a "
@@ -2806,6 +2768,41 @@ public class AgentSetupService {
     public static class AgentSetupForbiddenException extends AgentSetupException {
         public AgentSetupForbiddenException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Setup failed for a reason that is not the caller's: a store, the vault or the
+     * deployment threw something unexpected. Mapped to 500, not the 400 a plain
+     * {@link AgentSetupException} gets.
+     * <p>
+     * The cause's message is never part of this message. It was written for an
+     * operator, not the caller — a database timeout names the replica it waited
+     * for, a vault provider echoes its backend's error — so
+     * {@link #internalFailure} logs the full cause at ERROR under a correlation id,
+     * and the message carries only a sentence safe to show plus that id. The cause
+     * is still attached, for code that inspects it.
+     */
+    public static class AgentSetupInternalException extends AgentSetupException {
+        private final String correlationId;
+
+        private AgentSetupInternalException(String message, Throwable cause, String correlationId) {
+            super(message, cause);
+            this.correlationId = correlationId;
+        }
+
+        /**
+         * Logs {@code cause} under a fresh correlation id and returns the exception to
+         * throw. {@code safeMessage} must not contain any text taken from the cause.
+         */
+        public static AgentSetupInternalException internalFailure(String safeMessage, Throwable cause) {
+            String correlationId = UUID.randomUUID().toString();
+            LOGGER.errorf(cause, "%s [correlationId=%s]", LogSanitizer.sanitize(safeMessage), correlationId);
+            return new AgentSetupInternalException(safeMessage + " (correlationId: " + correlationId + ")", cause, correlationId);
+        }
+
+        public String correlationId() {
+            return correlationId;
         }
     }
 }
