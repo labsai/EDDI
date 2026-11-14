@@ -1590,7 +1590,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // fail on it for good.
             boolean checksumReset = discardUnopenableChecksumKey();
             LOGGER.warnf("[VAULT] The configured master key was adopted as the vault's master key.%s%s %d tenant(s) hold DEKs it cannot open "
-                    + "and need POST /secretstore/secrets/{tenantId}/reset: %s", systemReset ? " System values were reset." : "",
+                    + "and need POST /secretstore/secrets/{tenantId}/reset?confirm=true: %s", systemReset ? " System values were reset." : "",
                     checksumReset ? " The checksum key was reset." : "", unreadable.size(), sanitize(String.valueOf(unreadable)));
             return new MasterKeyAdoption(List.copyOf(unreadable), systemReset, checksumReset);
         } catch (PersistenceException e) {
@@ -1736,7 +1736,7 @@ public class VaultSecretProvider implements ISecretProvider {
                     + "is lost. " + (pendingMigration
                             ? ""
                             : "Only if the previous master key is lost for good: " + secretInfo + " POST /secretstore/secrets/" + safeTenantId
-                                    + "/reset clears this tenant."),
+                                    + "/reset?confirm=true clears this tenant."),
                     cause);
         }
         throw new SecretProviderException(
@@ -1748,7 +1748,7 @@ public class VaultSecretProvider implements ISecretProvider {
                         + "(2) If you have both old and new keys, use POST /secretstore/secrets/admin/rotate-kek "
                         + "to migrate all encrypted data to the new key. "
                         + "(3) To start fresh (deletes all secrets for this tenant), use "
-                        + "POST /secretstore/secrets/" + safeTenantId + "/reset to clear the vault for this tenant. "
+                        + "POST /secretstore/secrets/" + safeTenantId + "/reset?confirm=true to clear the vault for this tenant. "
                         + "(4) If the previous master key is lost for good, POST /secretstore/secrets/admin/adopt-master-key?confirm=true "
                         + "makes the current key the vault's key, so new DEKs can be created again.",
                 cause);

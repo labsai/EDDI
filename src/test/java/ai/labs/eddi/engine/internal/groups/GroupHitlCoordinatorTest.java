@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -541,6 +542,29 @@ class GroupHitlCoordinatorTest {
         assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(5_000L)), pauseId.getValue(),
                 "the approve CAS must name the pause that was read, not just the state");
         verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void approve_stampsLastModifiedInTheResumeWrite() throws Exception {
+        // Startup crash recovery cancels a running discussion last written before the
+        // process started; the approve that starts a new leg must therefore move
+        // lastModified, as the human-turn and tie-break resumes already do.
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(5_000L);
+        gc.setLastModified(Instant.ofEpochMilli(5_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var written = new AtomicReference<Instant>();
+        doAnswer(invocation -> {
+            written.set(invocation.<GroupConversation>getArgument(0).getLastModified());
+            throw new IResourceStore.ResourceModifiedException("stop after the resume write");
+        }).when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
+        Instant before = Instant.now();
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, new GroupApprovalRequest(), null));
+
+        assertNotNull(written.get(), "the resume write must carry a lastModified");
+        assertFalse(written.get().isBefore(before), "the resume write must stamp lastModified, not keep the pause's");
     }
 
     @Test

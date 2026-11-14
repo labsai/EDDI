@@ -22,8 +22,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupPlanMismatchException;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
@@ -244,8 +247,11 @@ public class GroupHitlCoordinator {
         counterGroupHitlPause.increment();
 
         if (listener != null) {
+            // The plan hash travels to listeners (Slack puts it in its buttons) but not
+            // into the SSE frame, whose shape is unchanged.
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt(), gc.getHitlApprovalContext()));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity, gc.getPausedAt(), gc.getHitlApprovalContext(),
+                    HitlPlanHash.forGroup(gc)));
         }
     }
 
@@ -639,6 +645,7 @@ public class GroupHitlCoordinator {
         // Apply task-level approvals if present
         // Phase 5a: Load rejection policy from config
         boolean retryOnReject = false;
+        boolean groupConfigReadFailed = false;
         try {
             var resId = groupStore.getCurrentResourceId(gc.getGroupId());
             if (resId != null) {
@@ -650,8 +657,29 @@ public class GroupHitlCoordinator {
                 }
             }
         } catch (Exception e) {
+            groupConfigReadFailed = true;
             LOGGER.warnf("Could not load rejection policy for %s, defaulting to FAIL: %s",
                     groupConversationId, e.getMessage());
+        }
+
+        // Plan binding (HitlPlanHash#forGroup): a decision for another plan — or, under
+        // strict binding, a human decision without one — is refused here, before
+        // anything is mutated. A group plan is derived from the stored discussion, so
+        // re-deriving it now IS the check that what is approved is what was shown.
+        if (request.getDecision() != null) {
+            HitlDecision decision = request.getDecision();
+            HitlPlanBinding.requireWellFormed(decision);
+            String planHash = HitlPlanHash.forGroup(gc);
+            final AgentGroupConfiguration.HitlConfig strictConfig = groupHitlConfig;
+            final boolean strictReadFailed = groupConfigReadFailed;
+            try {
+                HitlPlanBinding.Outcome outcome = HitlPlanBinding.check(groupConversationId, decision, planHash,
+                        () -> groupConversationService.planHashStrict() || strictReadFailed
+                                || (strictConfig != null && Boolean.TRUE.equals(strictConfig.getRequirePlanHash())));
+                decision.bindPlan(planHash, outcome.name());
+            } catch (HitlPlanBinding.PlanMismatch mismatch) {
+                throw new GroupPlanMismatchException(mismatch.getMessage());
+            }
         }
 
         // Review fields (taskDecisions, edits, reason codes) are validated before
@@ -816,6 +844,9 @@ public class GroupHitlCoordinator {
         gc.setHitlApprovalTimeout(null);
         gc.setHitlApprovalContext(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
+        // A new leg starts here: startup crash recovery treats a running discussion
+        // last written before the process started as a dead leg.
+        gc.setLastModified(Instant.now());
 
         // Zero-match outcomes are distinguished by the store: a concurrent DELETE
         // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
