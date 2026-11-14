@@ -1426,6 +1426,8 @@ An omitted whitelist therefore means the standard built-in tools plus user memor
 | `directiveAppliesToSources` | all | Narrow directive handling to provenance tags (`builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`); provenance marking is never narrowed |
 | `exemptTools` | none | Dispatch names exempt from directive handling |
 
+Directive handling sees the **whole** result, before [`toolResponseLimits`](#tool-response-limits) cuts it. The pages `paginate` stores (fetched later through the built-in `fetch_page`) and the text `summarize` sends to its model are already screened under the tool's own source, and a summary is screened again before the model sees it. So `block` also withholds a result whose directive sits in the part a `headTail` or `truncate` cut drops. The `tool_result` trace entry shows the screened text, without the envelope.
+
 See also [MCP Client](mcp-client.md).
 
 Every built-in parameter carries a description in the tool schema the model receives (for example
@@ -2110,7 +2112,7 @@ default: without it a result is passed through at full length.
 | `headTail` | The first 70% and the last 30% of the limit are kept, with a `[TRUNCATED: …]` note in place of the middle. The end of a result is where exit codes, error messages and totals usually are |
 | `truncate` | Only the start is kept, followed by the note. The default before 6.7; set it explicitly to keep that behaviour                                                              |
 | `paginate` | The first page is returned with a `responseId` the model pages through with `fetch_page`. Falls back to `truncate` outside a conversation or above 500,000 characters        |
-| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit                   |
+| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit. A task `type` written as `${vars:...}` is resolved first, as for the task itself |
 
 An unknown strategy name is treated as `truncate`.
 

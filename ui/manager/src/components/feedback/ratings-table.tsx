@@ -209,7 +209,7 @@ function NoteDialog({
   const tooLong = note.length > RATING_LIMITS.maxReviewNoteLength;
   return (
     <AccessibleDialog open onClose={onClose} title={t("feedback.noteTitle", "Internal note")} testId="rating-note-dialog">
-      <div className="space-y-3">
+      <div className="space-y-3 p-5">
         <p className="text-sm text-muted-foreground">
           {t("feedback.noteHelp", "Seen only by the people running this agent — never by the person who rated.")}
         </p>

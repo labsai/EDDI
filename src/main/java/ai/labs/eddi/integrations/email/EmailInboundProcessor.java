@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.mail.InboundMail;
@@ -171,22 +172,12 @@ public class EmailInboundProcessor {
     private final ITemplatingEngine templatingEngine;
     private final Instance<IAttachmentStore> attachmentStore;
     private final EmailOwnerNotifier ownerNotifier;
-
-    /**
-     * Records refused mail by reason category (email plan §17). Field-injected so
-     * the constructor stays the one the tests use; null there, and then nothing is
-     * audited.
-     */
-    @Inject
-    Instance<AuditLedgerService> auditLedger;
-
-    /**
-     * Conversation mode's replies. Field-injected so the constructor stays the one
-     * the tests use; null there, and then no reply is ever attempted.
-     */
-    @Inject
-    EmailReplySender replies;
-
+    /** Conversation mode's replies, and the delivery reports for them. */
+    private final EmailReplySender replies;
+    /** Records refused mail by reason category (email plan §17). */
+    private final Instance<AuditLedgerService> auditLedger;
+    /** Names a refused mail's sender in the audit ledger. */
+    private final GdprPseudonymizer pseudonymizer;
     private final EmailMetrics metrics;
     private final Duration strandedAfter;
     private final Duration retention;
@@ -195,8 +186,8 @@ public class EmailInboundProcessor {
     public EmailInboundProcessor(IEmailMessageLedger ledger, IEmailMailboxStateStore stateStore, MimeMessageParser parser,
             SenderAuthenticator authenticator, IConversationService conversationService, IGroupConversationService groupConversationService,
             IUserConversationStore userConversationStore, ITemplatingEngine templatingEngine, Instance<IAttachmentStore> attachmentStore,
-            EmailOwnerNotifier ownerNotifier, MeterRegistry meterRegistry,
-            @ConfigProperty(name = "eddi.email.inbound.stranded-after", defaultValue = "30m") Duration strandedAfter,
+            EmailOwnerNotifier ownerNotifier, EmailReplySender replies, Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer,
+            MeterRegistry meterRegistry, @ConfigProperty(name = "eddi.email.inbound.stranded-after", defaultValue = "30m") Duration strandedAfter,
             @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention) {
         this.ledger = ledger;
         this.stateStore = stateStore;
@@ -208,6 +199,9 @@ public class EmailInboundProcessor {
         this.templatingEngine = templatingEngine;
         this.attachmentStore = attachmentStore;
         this.ownerNotifier = ownerNotifier;
+        this.replies = replies;
+        this.auditLedger = auditLedger;
+        this.pseudonymizer = pseudonymizer;
         this.metrics = new EmailMetrics(meterRegistry);
         this.strandedAfter = strandedAfter == null || strandedAfter.isNegative() || strandedAfter.isZero() ? Duration.ofMinutes(30) : strandedAfter;
         this.retention = retention == null || retention.isNegative() || retention.isZero() ? Duration.ofDays(30) : retention;
@@ -648,7 +642,7 @@ public class EmailInboundProcessor {
         } catch (RuntimeException e) {
             LOGGER.warnf("Email integration %s: the cost of mail %s could not be recorded: %s", sanitize(integrationId), row.id(), e.getMessage());
         }
-        if (!skipped && ctx.settings().replies() && replies != null) {
+        if (!skipped && ctx.settings().replies()) {
             try {
                 LedgerEntry current = ledger.findById(row.id()).orElse(row);
                 replies.onTurnCompleted(integrationId, ctx.settings(), current, conversationId, snapshot, now);
@@ -881,9 +875,6 @@ public class EmailInboundProcessor {
         return new IGroupConversationService.GroupDiscussionEventListener() {
             @Override
             public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-                if (replies == null) {
-                    return;
-                }
                 try {
                     // The row names the discussion once startAndDiscussAsync returned; a
                     // discussion that finished faster than that is keyed by the mail alone.
@@ -900,9 +891,6 @@ public class EmailInboundProcessor {
 
     /** Hands a delivery report to the reply sender; never throws. */
     private boolean applyDeliveryReport(String integrationId, InboundMail mail, Instant now) {
-        if (replies == null) {
-            return false;
-        }
         try {
             return replies.applyDeliveryReport(integrationId, mail.deliveryReport(), now);
         } catch (RuntimeException e) {
@@ -1027,11 +1015,16 @@ public class EmailInboundProcessor {
 
     /**
      * One audit entry per refused mail: integration, reason category, ledger row,
-     * Message-ID and the sender's domain plus a SHA-256 of the address — never the
-     * address itself (the audit ledger is write-once) and never content.
+     * Message-ID and the sender's domain plus its {@link GdprPseudonymizer}
+     * pseudonym — never the address itself (the audit ledger is write-once) and
+     * never content. The pseudonym is keyed (or salted per deployment), so a reader
+     * of the ledger cannot confirm a sender by hashing a list of candidate
+     * addresses — unless the deployment has neither a key nor a salt, where
+     * {@link GdprPseudonymizer} falls back to an unsalted hash. It is the token
+     * HITL notifications, replies and GDPR erasure write for that address.
      */
     private void audit(IntegrationContext ctx, LedgerEntry row, String reason, String sender) {
-        if (auditLedger == null || !auditLedger.isResolvable()) {
+        if (!auditLedger.isResolvable()) {
             return;
         }
         try {
@@ -1049,7 +1042,7 @@ public class EmailInboundProcessor {
             detail.put("messageId", row.messageId());
             if (sender != null && sender.indexOf('@') > 0) {
                 detail.put("senderDomain", sender.substring(sender.lastIndexOf('@') + 1));
-                detail.put("senderHash", "sha256:" + sha256Hex(sender.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)));
+                detail.put("senderPseudonym", pseudonymizer.pseudonymFor(sender.toLowerCase(Locale.ROOT)));
             }
             service.submit(new AuditEntry(UUID.randomUUID().toString(), null, null, null, null, null, -1, "email.inbound", "email", -1, 0L, Map.of(),
                     detail, null, null, List.of(), 0.0, Instant.now(), null, null));

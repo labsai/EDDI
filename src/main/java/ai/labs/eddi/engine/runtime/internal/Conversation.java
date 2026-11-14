@@ -380,7 +380,7 @@ public class Conversation implements IConversation {
      * value is deliberately not exposed: it may be another agent's private
      * ({@code self}) memory. Rewriting a key removes it from the marker.
      */
-    public static final String KEY_CONTESTED_MEMORIES = "contestedMemories";
+    public static final String KEY_CONTESTED_MEMORIES = ContestedMemoryMarker.KEY;
 
     private static boolean precedes(UserMemoryEntry a, UserMemoryEntry b) {
         int byScope = Integer.compare(scopeRank(a.visibility()), scopeRank(b.visibility()));
@@ -1016,26 +1016,11 @@ public class Conversation implements IConversation {
     /**
      * A key written back to the store is a new statement of the fact, which the
      * store records as {@code ACCEPTED} — so it is no longer contested in this
-     * conversation either.
+     * conversation either. The {@code rememberFact} tool lifts its own writes the
+     * same way, as it makes them.
      */
     private void liftContestedMarkers(Set<String> writtenKeys) {
-        if (writtenKeys.isEmpty()) {
-            return;
-        }
-        IConversationProperties properties = conversationMemory.getConversationProperties();
-        Property marker = properties.get(KEY_CONTESTED_MEMORIES);
-        if (marker == null || marker.getScope() == Scope.longTerm || marker.getValueObject() == null) {
-            return;
-        }
-        Map<String, Object> remaining = new LinkedHashMap<>(marker.getValueObject());
-        if (!remaining.keySet().removeAll(writtenKeys)) {
-            return;
-        }
-        if (remaining.isEmpty()) {
-            properties.remove(KEY_CONTESTED_MEMORIES);
-        } else {
-            properties.put(KEY_CONTESTED_MEMORIES, new Property(KEY_CONTESTED_MEMORIES, remaining, Scope.conversation));
-        }
+        ContestedMemoryMarker.lift(conversationMemory.getConversationProperties(), writtenKeys);
     }
 
     /**
@@ -1570,6 +1555,10 @@ public class Conversation implements IConversation {
             persistRevisionCandidate(e);
         }
         conversationMemory.setHitlRevisionCandidate(null);
+        // Computed when the pause is committed (ConversationHitlService
+        // #populateHitlTimeoutBookmark), after the turn's secret scrub has rewritten
+        // the batch: a hash taken here would cover arguments the store never sees.
+        conversationMemory.setHitlPlanHash(null);
     }
 
     /**
@@ -1998,6 +1987,10 @@ public class Conversation implements IConversation {
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_note", decision.getNote()));
             if (decision.getDecidedBy() != null)
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_by", decision.getDecidedBy()));
+            // The plan this decision was admitted against, for the audit entries of the
+            // tasks the resume runs (LifecycleManager#buildAuditEntry reads it).
+            if (conversationMemory.getHitlPlanHash() != null)
+                conversationMemory.getCurrentStep().storeData(new Data<>(MemoryKeys.HITL_PLAN_HASH.key(), conversationMemory.getHitlPlanHash()));
 
             // Decision visibility (Phase 1b): make verdict accessible in templates
             // and behavior rules. ConversationOutput → {memory.current.hitlDecision},
@@ -2188,6 +2181,7 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
         conversationMemory.setHitlApprovalContext(null);
+        conversationMemory.setHitlPlanHash(null);
     }
 
     /**

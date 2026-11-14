@@ -34,8 +34,16 @@ See [User Memory → Contradiction resolution](../user-memory.md#contradiction-r
   held back from summarization (`acceptedOnly`).
 - **Loading** — `Conversation.mostSpecificPerKey` drops a superseded entry when its key has a non-superseded visible
   entry; contested entries load as usual plus a conversation-scoped `contestedMemories` map (`key → true`). Persisting a
-  rewritten key drops it from the marker. `UserMemoryTool` marks contested/superseded lines in recall and search, and a
-  re-statement of a contested value is a write (it confirms the fact).
+  rewritten key drops it from the marker, and so does a `rememberFact` write of the key (the tool writes the store
+  directly, so end-of-turn persistence never saw it and the marker outlived the user's confirmation; lifting lives in
+  `ContestedMemoryMarker`, review finding on PR #1295). `UserMemoryTool` marks contested/superseded lines in recall and search, and a
+  re-statement of a contested value is a write (it confirms the fact). `forgetFact` deletes the whole supersession chain
+  of the forgotten entry (every same-key entry linked through `supersededBy`, in either direction), limited to entries
+  this agent may see and delete; before, forgetting the newest version left the `SUPERSEDED` one behind, and the loader
+  served its older value again as the reader's only entry for the key (review finding on PR #1295). The linked versions
+  are deleted before the forgotten entry, farthest first, so a failure part way leaves the forgotten entry and a chain
+  still connected to it for a retry; deleting the entry first left older versions whose replacement was gone, served
+  again and unreachable by a retry's chain walk (review finding on PR #1295).
 - **Metrics** — `eddi.dream.contradictions.contested`, `.superseded`, `.cleared`, charted with a legend on the Full Metrics dashboard
   (Kubernetes copy re-synced) and listed in [metrics.md](../metrics.md). GDPR export carries the new fields
   ([gdpr-compliance.md](../gdpr-compliance.md)).
