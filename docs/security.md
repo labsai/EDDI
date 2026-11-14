@@ -653,7 +653,7 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `eddi.security.ssrf-protection.*`, resolved the host again after checking it,
 > followed same-scheme redirects unchecked and read the body without a limit.
 > A recursive schema across remote documents is cut where it recurses (an empty
-> schema), a relative or `#` reference inside a schema whose `$id` names another base is refused (that base is not tracked), siblings beside a `$ref` are merged keeping the stricter bound, the bundled document is capped at 32 M characters while it is written, and a schema `$id` is dropped, since every reference is already
+> schema), a relative or `#` reference inside a schema whose `$id` names another base is refused (that base is not tracked), siblings beside a `$ref` are merged keeping the stricter bound, a `$ref` inside literal data (`example`, `examples` arrays, `default`, `const`, `enum`, an Example `value`, `x-` extensions) is kept as a value and never fetched, a discriminator `mapping` in a referenced document is rewritten to the mapped schema moved into the root's `components.schemas`, the bundled document is capped at 32 M characters while it is written, and a schema `$id` is dropped, since every reference is already
 > resolved. A discriminator `mapping` value is resolved by the parser like a
 > `$ref`, so one outside the document is refused. Backstop: the parser runs
 > with a remote-reference deny list of `*`, which its checker applies to every

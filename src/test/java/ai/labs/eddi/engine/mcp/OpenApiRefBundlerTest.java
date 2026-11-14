@@ -15,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -352,6 +354,83 @@ class OpenApiRefBundlerTest {
         assertEquals("[\"b\",\"c\"]", tight.get("enum").toString());
         assertEquals("[\"x\",\"y\"]", tight.get("required").toString());
         assertEquals(100, properties.get("loose").get("maxLength").asInt(), "a looser holder bound does not widen the target's");
+    }
+
+    @Test
+    @DisplayName("a $ref inside example, default or extension data is a value: kept as written, never fetched")
+    void refInsideLiteralDataIsNotFetched() throws Exception {
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", "{\"Pet\":{\"type\":\"string\"}}"));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"type":"object",
+                   "example":{"$ref":"https://example.com/value.json"},
+                   "default":{"$ref":"https://example.com/default.json"},
+                   "examples":[{"$ref":"https://example.com/listed.json"}],
+                   "x-meta":{"$ref":"https://example.com/extension.json"},
+                   "properties":{"example":{"$ref":"https://example.com/defs.json#/Pet"}}}}}}
+                """;
+
+        JsonNode schema = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher)).at("/components/schemas/S");
+
+        assertEquals("https://example.com/value.json", schema.at("/example/$ref").asText(), "the example payload is preserved");
+        assertEquals("https://example.com/extension.json", schema.at("/x-meta/$ref").asText());
+        assertEquals("string", schema.at("/properties/example/type").asText(), "a PROPERTY named example is still a schema");
+        verify(fetcher, times(1)).fetchSpec(anyString());
+        verify(fetcher).fetchSpec("https://example.com/defs.json");
+
+        // with nothing else to inline, the literal ref neither triggers a fetch nor a
+        // refusal
+        String onlyLiteral = "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"T\",\"version\":\"1\"},\"paths\":{},"
+                + "\"components\":{\"schemas\":{\"S\":{\"type\":\"object\",\"example\":{\"$ref\":\"https://example.com/value.json\"}}}}}";
+        OpenApiSpecFetcher untouched = mock(OpenApiSpecFetcher.class);
+        assertSame(onlyLiteral, OpenApiRefBundler.bundle(onlyLiteral, null, untouched));
+        verify(untouched, never()).fetchSpec(anyString());
+    }
+
+    @Test
+    @DisplayName("a discriminator mapping in a referenced document is moved into the root and rewritten to the moved schema")
+    void remoteDiscriminatorMappingRelocated() throws Exception {
+        String defs = """
+                {"components":{"schemas":{
+                  "Base":{"oneOf":[{"$ref":"#/components/schemas/Dog"}],
+                          "discriminator":{"propertyName":"kind","mapping":{"dog":"#/components/schemas/Dog","cat":"Cat"}}},
+                  "Dog":{"type":"object","properties":{"kind":{"type":"string"},"bark":{"type":"boolean"}}},
+                  "Cat":{"type":"object","properties":{"kind":{"type":"string"}}}}}}
+                """;
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"Dog":{"type":"string"},
+                   "Pet":{"$ref":"https://example.com/defs.json#/components/schemas/Base"}}}}
+                """;
+
+        JsonNode schemas = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher)).at("/components/schemas");
+
+        JsonNode mapping = schemas.at("/Pet/discriminator/mapping");
+        assertEquals("#/components/schemas/Dog_2", mapping.get("dog").asText(), "the root's own Dog keeps its name");
+        assertEquals("#/components/schemas/Cat", mapping.get("cat").asText());
+        assertEquals("boolean", schemas.at("/Dog_2/properties/bark/type").asText());
+        assertEquals("string", schemas.at("/Cat/properties/kind/type").asText());
+        assertEquals("string", schemas.at("/Dog/type").asText());
+    }
+
+    @Test
+    @DisplayName("intersecting two large enums is linear")
+    void largeEnumIntersectionIsFast() throws Exception {
+        StringBuilder target = new StringBuilder();
+        StringBuilder holder = new StringBuilder();
+        for (int i = 0; i < 100_000; i++) {
+            target.append(i == 0 ? "" : ",").append("\"t").append(i).append('"');
+            holder.append(i == 0 ? "" : ",").append("\"h").append(i).append('"');
+        }
+        OpenApiSpecFetcher fetcher = fetcherServing(
+                Map.of("https://example.com/defs.json", "{\"E\":{\"type\":\"string\",\"enum\":[" + target + "]}}"));
+        String spec = "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"T\",\"version\":\"1\"},\"paths\":{},\"components\":{\"schemas\":{\"S\":"
+                + "{\"$ref\":\"https://example.com/defs.json#/E\",\"enum\":[" + holder + ",\"t7\"]}}}}";
+
+        String bundled = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> OpenApiRefBundler.bundle(spec, null, fetcher));
+
+        assertEquals("[\"t7\"]", JSON.readTree(bundled).at("/components/schemas/S/enum").toString());
     }
 
     @Test

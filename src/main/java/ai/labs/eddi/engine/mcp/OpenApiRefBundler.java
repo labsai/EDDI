@@ -20,10 +20,12 @@ import java.net.URISyntaxException;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -95,6 +97,15 @@ final class OpenApiRefBundler {
      * How many enclosing objects carry an {@code $id} that changes the base URI.
      */
     private int foreignBaseDepth;
+    /**
+     * Schemas a remote discriminator mapping names, moved into the root: key to
+     * name.
+     */
+    private final Map<String, String> relocatedNames = new HashMap<>();
+    /** Their expanded content, by the root component name they were given. */
+    private final ObjectNode relocated = NODES.objectNode();
+    /** Component schema names the root document already has. */
+    private final Set<String> rootSchemaNames = new HashSet<>();
 
     private record Doc(String url, JsonNode tree, boolean root) {
     }
@@ -138,7 +149,9 @@ final class OpenApiRefBundler {
             return content;
         }
         var bundler = new OpenApiRefBundler(fetcher, location == null ? null : withoutFragment(URI.create(location)));
+        root.path("components").path("schemas").properties().forEach(entry -> bundler.rootSchemaNames.add(entry.getKey()));
         JsonNode bundled = bundler.expand(root, new Doc(bundler.rootUrl, root, true), new ArrayDeque<>());
+        bundler.attachRelocated(bundled);
         requireInternalRefsOnly(bundled);
         // Written through a bounded writer, not into one String: inlining shares a
         // referenced value instead of copying it, so the node cap does not measure
@@ -191,25 +204,67 @@ final class OpenApiRefBundler {
      * Whether {@code root} holds an external {@code $ref} or a textual {@code $id}.
      */
     private static boolean needsBundling(JsonNode root) {
-        Deque<JsonNode> pending = new ArrayDeque<>();
-        pending.push(root);
-        while (!pending.isEmpty()) {
-            JsonNode node = pending.pop();
-            if (node.isObject()) {
-                JsonNode ref = node.get("$ref");
-                if (ref != null && ref.isTextual() && !ref.asText().trim().startsWith("#")) {
-                    return true;
-                }
-                JsonNode id = node.get("$id");
-                if (id != null && id.isTextual()) {
-                    return true;
+        boolean[] found = {false};
+        forEachKeywordObject(root, false, node -> {
+            JsonNode ref = node.get("$ref");
+            JsonNode id = node.get("$id");
+            if (ref != null && ref.isTextual() && !ref.asText().trim().startsWith("#") || id != null && id.isTextual()) {
+                found[0] = true;
+            }
+        });
+        return found[0];
+    }
+
+    /**
+     * Fields whose value is the spec author's data, not OpenAPI structure: an
+     * {@code example}, {@code default}, {@code const} or {@code enum} value, an
+     * Example Object's {@code value}, a JSON Schema {@code examples} array, and any
+     * {@code x-} extension. A {@code $ref} inside one is a value like any other —
+     * an example payload may well hold one — and is neither a reference nor
+     * fetched.
+     */
+    private static final Set<String> LITERAL_FIELDS = Set.of("example", "default", "const", "enum", "value");
+
+    /**
+     * Fields whose value maps names to OpenAPI objects: inside one, a key is a name
+     * (a property may be called {@code example}), never a keyword.
+     */
+    private static final Set<String> NAME_MAPS = Set.of("properties", "patternProperties", "$defs", "definitions", "dependentSchemas",
+            "schemas", "parameters", "responses", "examples", "headers", "requestBodies", "securitySchemes", "links", "callbacks",
+            "pathItems", "paths", "webhooks", "content", "encoding", "variables");
+
+    static boolean isLiteralField(String name, JsonNode value, boolean inNameMap) {
+        if (inNameMap) {
+            // A key of a name map is a name - a schema may be called "x-tenant" - and its
+            // value is checked like any other object.
+            return false;
+        }
+        return name.startsWith("x-") || LITERAL_FIELDS.contains(name) || "examples".equals(name) && value.isArray();
+    }
+
+    private static boolean isNameMap(String name, JsonNode value, boolean inNameMap) {
+        return !inNameMap && value.isObject() && NAME_MAPS.contains(name);
+    }
+
+    /**
+     * Visits every object of {@code node} that holds OpenAPI keywords — not a name
+     * map, not inside literal data — in one pass.
+     */
+    private static void forEachKeywordObject(JsonNode node, boolean nameMap, Consumer<JsonNode> visit) {
+        if (node.isObject()) {
+            if (!nameMap) {
+                visit.accept(node);
+            }
+            for (Map.Entry<String, JsonNode> field : node.properties()) {
+                if (!isLiteralField(field.getKey(), field.getValue(), nameMap)) {
+                    forEachKeywordObject(field.getValue(), isNameMap(field.getKey(), field.getValue(), nameMap), visit);
                 }
             }
-            if (node.isContainerNode()) {
-                node.forEach(pending::push);
+        } else if (node.isArray()) {
+            for (JsonNode element : node) {
+                forEachKeywordObject(element, false, visit);
             }
         }
-        return false;
     }
 
     /**
@@ -232,29 +287,21 @@ final class OpenApiRefBundler {
      * since it names a schema and not a node that could take its place.
      */
     private static void requireInternalRefsOnly(JsonNode root) {
-        Deque<JsonNode> pending = new ArrayDeque<>();
-        pending.push(root);
-        while (!pending.isEmpty()) {
-            JsonNode node = pending.pop();
-            if (node.isObject()) {
-                JsonNode ref = node.get("$ref");
-                if (ref != null && ref.isValueNode() && !ref.asText().trim().startsWith("#")) {
-                    throw new IllegalArgumentException("OpenAPI spec still holds an external $ref after inlining; refused");
-                }
-                JsonNode mapping = node.path("discriminator").path("mapping");
-                if (mapping.isObject()) {
-                    for (JsonNode value : mapping) {
-                        if (value.isValueNode() && !isInternalMappingValue(value.asText().trim())) {
-                            throw new IllegalArgumentException("OpenAPI spec has a discriminator mapping to '" + value.asText().trim()
-                                    + "', outside the document: only #/... references and component names are allowed there");
-                        }
+        forEachKeywordObject(root, false, node -> {
+            JsonNode ref = node.get("$ref");
+            if (ref != null && ref.isValueNode() && !ref.asText().trim().startsWith("#")) {
+                throw new IllegalArgumentException("OpenAPI spec still holds an external $ref after inlining; refused");
+            }
+            JsonNode mapping = node.path("discriminator").path("mapping");
+            if (mapping.isObject()) {
+                for (JsonNode value : mapping) {
+                    if (value.isValueNode() && !isInternalMappingValue(value.asText().trim())) {
+                        throw new IllegalArgumentException("OpenAPI spec has a discriminator mapping to '" + value.asText().trim()
+                                + "', outside the document: only #/... references and component names are allowed there");
                     }
                 }
             }
-            if (node.isContainerNode()) {
-                node.forEach(pending::push);
-            }
-        }
+        });
     }
 
     /**
@@ -268,9 +315,22 @@ final class OpenApiRefBundler {
     }
 
     private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain) {
+        return expand(node, doc, chain, false);
+    }
+
+    private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain, boolean nameMap) {
         if (++expandedNodes > MAX_EXPANDED_NODES) {
             throw new IllegalArgumentException(
                     "OpenAPI spec expands to more than " + MAX_EXPANDED_NODES + " nodes once its $refs are inlined; refused");
+        }
+        if (node.isObject() && nameMap) {
+            // A map of names: every value is an OpenAPI object of its own, and no key is
+            // a keyword ($ref, $id, example, ... are names here).
+            ObjectNode out = NODES.objectNode();
+            for (Map.Entry<String, JsonNode> field : node.properties()) {
+                out.set(field.getKey(), expand(field.getValue(), doc, chain, false));
+            }
+            return out;
         }
         if (node.isObject()) {
             JsonNode id = node.get("$id");
@@ -297,10 +357,16 @@ final class OpenApiRefBundler {
                 }
                 ObjectNode out = NODES.objectNode();
                 for (Map.Entry<String, JsonNode> field : node.properties()) {
-                    if ("$id".equals(field.getKey()) && field.getValue().isTextual()) {
+                    String name = field.getKey();
+                    JsonNode value = field.getValue();
+                    if ("$id".equals(name) && value.isTextual()) {
                         continue;
                     }
-                    out.set(field.getKey(), expand(field.getValue(), doc, chain));
+                    // Literal data is copied as it is: a $ref in an example is not a reference.
+                    out.set(name, isLiteralField(name, value, false) ? value : expand(value, doc, chain, isNameMap(name, value, false)));
+                }
+                if (!doc.root()) {
+                    relocateDiscriminatorMapping(out, doc, chain);
                 }
                 return out;
             } finally {
@@ -312,7 +378,7 @@ final class OpenApiRefBundler {
         if (node.isArray()) {
             ArrayNode out = NODES.arrayNode(node.size());
             for (JsonNode element : node) {
-                out.add(expand(element, doc, chain));
+                out.add(expand(element, doc, chain, false));
             }
             return out;
         }
@@ -392,7 +458,9 @@ final class OpenApiRefBundler {
             if ("$ref".equals(name) || "$id".equals(name) && field.getValue().isTextual()) {
                 continue;
             }
-            JsonNode sibling = expand(field.getValue(), doc, chain);
+            JsonNode sibling = isLiteralField(name, field.getValue(), false)
+                    ? field.getValue()
+                    : expand(field.getValue(), doc, chain, isNameMap(name, field.getValue(), false));
             JsonNode existing = into.get(name);
             into.set(name, existing == null ? sibling : stricter(name, existing, sibling));
         }
@@ -418,18 +486,102 @@ final class OpenApiRefBundler {
             return merged;
         }
         if ("enum".equals(name) && target.isArray() && holder.isArray()) {
+            // Indexed, so two large disjoint enums cost n + m, not n x m comparisons;
+            // the holder's order is kept.
+            Set<JsonNode> allowed = new HashSet<>();
+            target.forEach(allowed::add);
             ArrayNode both = NODES.arrayNode();
             for (JsonNode value : holder) {
-                for (JsonNode allowed : target) {
-                    if (allowed.equals(value)) {
-                        both.add(value);
-                        break;
-                    }
+                if (allowed.contains(value)) {
+                    both.add(value);
                 }
             }
             return both;
         }
         return holder;
+    }
+
+    /**
+     * Rewrites the discriminator mapping of an object copied in from a referenced
+     * document. Its values name schemas of THAT document ({@code #/components/...}
+     * there, or a bare component name), which the root does not have: each mapped
+     * schema is moved into the root's {@code components.schemas} under a name of
+     * its own, and the value is rewritten to point at it.
+     */
+    private void relocateDiscriminatorMapping(ObjectNode out, Doc doc, Deque<String> chain) {
+        JsonNode discriminator = out.get("discriminator");
+        JsonNode mapping = discriminator == null ? null : discriminator.get("mapping");
+        if (!(discriminator instanceof ObjectNode discriminatorNode) || mapping == null || !mapping.isObject()) {
+            return;
+        }
+        ObjectNode rewritten = NODES.objectNode();
+        for (Map.Entry<String, JsonNode> entry : mapping.properties()) {
+            if (!entry.getValue().isTextual()) {
+                rewritten.set(entry.getKey(), entry.getValue());
+                continue;
+            }
+            String value = entry.getValue().asText().trim();
+            boolean bareName = !value.startsWith("#") && value.indexOf('.') < 0 && value.indexOf('/') < 0;
+            rewritten.put(entry.getKey(), relocate(bareName ? "#/components/schemas/" + value : value, doc, chain));
+        }
+        discriminatorNode.set("mapping", rewritten);
+    }
+
+    /**
+     * The root reference a mapped schema of {@code doc} is reached by once moved.
+     */
+    private String relocate(String ref, Doc doc, Deque<String> chain) {
+        URI target = absolute(ref, doc);
+        String docUrl = withoutFragment(target);
+        String fragment = target.getFragment() == null ? "" : target.getFragment();
+        if (docUrl.equals(rootUrl)) {
+            return "#" + fragment;
+        }
+        String key = docUrl + "#" + fragment;
+        String existing = relocatedNames.get(key);
+        if (existing != null) {
+            return "#/components/schemas/" + existing;
+        }
+        String name = relocatedName(fragment);
+        // Recorded before expanding, so a mapped schema whose own mapping names this
+        // one again reuses the name instead of recursing.
+        relocatedNames.put(key, name);
+        relocated.set(name, NODES.objectNode());
+        ObjectNode holder = NODES.objectNode();
+        holder.put("$ref", ref);
+        JsonNode schema = resolveRef(ref, holder, doc, chain);
+        relocated.set(name, schema == null ? NODES.objectNode() : schema);
+        return "#/components/schemas/" + name;
+    }
+
+    /** A component name from the fragment's last segment, unique in the root. */
+    private String relocatedName(String fragment) {
+        String last = fragment.substring(fragment.lastIndexOf('/') + 1).replace("~1", "/").replace("~0", "~");
+        StringBuilder base = new StringBuilder(last.length());
+        for (int i = 0; i < last.length(); i++) {
+            char c = last.charAt(i);
+            base.append(Character.isLetterOrDigit(c) || c == '.' || c == '_' || c == '-' ? c : '_');
+        }
+        String stem = base.isEmpty() ? "Schema" : base.toString();
+        String name = stem;
+        for (int n = 2; rootSchemaNames.contains(name) || relocated.has(name); n++) {
+            name = stem + "_" + n;
+        }
+        return name;
+    }
+
+    /**
+     * Adds the relocated schemas to the bundled root's {@code components.schemas}.
+     */
+    private void attachRelocated(JsonNode bundled) {
+        if (relocated.isEmpty() || !(bundled instanceof ObjectNode root)) {
+            return;
+        }
+        JsonNode components = root.get("components");
+        ObjectNode componentsNode = components instanceof ObjectNode object ? object : root.putObject("components");
+        JsonNode schemas = componentsNode.get("schemas");
+        ObjectNode schemasNode = schemas instanceof ObjectNode object ? object : componentsNode.putObject("schemas");
+        relocated.properties().forEach(entry -> schemasNode.set(entry.getKey(), entry.getValue()));
     }
 
     /**
