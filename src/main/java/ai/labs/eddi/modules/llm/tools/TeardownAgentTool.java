@@ -20,7 +20,6 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -222,19 +221,23 @@ public class TeardownAgentTool {
         }
         // The agent's guard, cluster-wide: a teardown on another node holds it across
         // reading this flag, undeploying and deleting.
-        Optional<SubAgentLocks.Guard> guard = SubAgentLocks.acquire(leaseManager, agentId);
-        if (guard.isEmpty()) {
-            return "⚠️ Cannot %s agent '%s' — the agent is being torn down or changed elsewhere, try again."
-                    .formatted(retained ? "retain" : "un-retain", agentId);
-        }
-        try (SubAgentLocks.Guard held = guard.get()) {
+        String unavailable = "⚠️ Cannot %s agent '%s' — the agent is being torn down or changed elsewhere, try again."
+                .formatted(retained ? "retain" : "un-retain", agentId);
+        return SubAgentLocks.withGuard(leaseManager, agentId, held -> {
+            if (!held.coordinated()) {
+                // Clustered, but the lease manager is degraded (an unfenced, node-local
+                // handle): a teardown on another node cannot be ruled out, so the flag
+                // is not written — the same fail-safe as teardown skipping the agent.
+                return "⚠️ Cannot %s agent '%s' — cluster coordination is unavailable, try again."
+                        .formatted(retained ? "retain" : "un-retain", agentId);
+            }
             // Re-checked under the guard: a teardown that took it first may have
             // decided to delete it meanwhile (and, once done, the agent is gone).
             if (SubAgentLocks.isTearingDown(agentId)) {
                 return tearingDown;
             }
             return writeRetainedFlagLocked(agentId, retained);
-        }
+        }, () -> unavailable);
     }
 
     private String writeRetainedFlagLocked(String agentId, boolean retained) {

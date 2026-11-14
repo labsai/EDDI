@@ -9,11 +9,12 @@ import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -23,8 +24,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * Teardown reads the agent's retain flag and then undeploys and deletes it. A
  * retain written in between would report success for an agent that is deleted
- * anyway — on any node. So both take {@link #acquire the agent's guard}: an
- * in-node striped lock (the fast path between threads of one node) and the
+ * anyway — on any node. So both run {@link #withGuard under the agent's guard}:
+ * an in-node striped lock (the fast path between threads of one node) and the
  * cluster lease {@value #LEASE_PREFIX}{@code <agentId>} of the
  * {@link IConversationLeaseManager} (the same leases that serialise
  * conversation turns: renewed while held, expiring with a node that dies).
@@ -59,15 +60,16 @@ public final class SubAgentLocks {
     private SubAgentLocks() {
     }
 
-    /** A held guard; closing releases the lease and the in-node lock. */
-    public static final class Guard implements AutoCloseable {
-        private final ReentrantLock lock;
+    /**
+     * The view of a held guard that {@link #withGuard}'s body gets: whether it
+     * still excludes the other nodes. Owns nothing — {@link #withGuard} takes and
+     * releases the lock and the lease itself.
+     */
+    public static final class Guard {
         private final IConversationLeaseManager leaseManager;
         private final LeaseHandle lease;
-        private boolean closed;
 
-        private Guard(ReentrantLock lock, IConversationLeaseManager leaseManager, LeaseHandle lease) {
-            this.lock = lock;
+        private Guard(IConversationLeaseManager leaseManager, LeaseHandle lease) {
             this.leaseManager = leaseManager;
             this.lease = lease;
         }
@@ -90,56 +92,55 @@ public final class SubAgentLocks {
         public boolean coordinated() {
             return leaseManager == null || !leaseManager.isClustered() || (lease != null && lease.fence() != null);
         }
-
-        @Override
-        public void close() {
-            if (closed) {
-                return;
-            }
-            closed = true;
-            try {
-                if (leaseManager != null && lease != null) {
-                    leaseManager.release(lease);
-                }
-            } finally {
-                lock.unlock();
-            }
-        }
     }
 
     /**
-     * Takes {@code agentId}'s guard: the in-node lock, then the cluster lease, each
-     * within {@link #WAIT}.
+     * Runs {@code body} holding {@code agentId}'s guard: the in-node lock, then the
+     * cluster lease, each taken within {@link #WAIT} and both released when the
+     * body returns or throws. Lock and unlock live in this one method.
      *
      * @param leaseManager
      *            the cluster lease manager; {@code null} guards this node only
-     * @return the held guard, or empty when either could not be had in time
+     * @param ifUnavailable
+     *            what to return when either could not be had in time (or the wait
+     *            was interrupted; the interrupt is restored)
+     * @return what {@code body} returned, or {@code ifUnavailable}'s value
      */
-    public static Optional<Guard> acquire(IConversationLeaseManager leaseManager, String agentId) {
+    public static <T> T withGuard(IConversationLeaseManager leaseManager, String agentId, Function<Guard, T> body,
+                                  Supplier<T> ifUnavailable) {
         ReentrantLock lock = lockFor(agentId);
         try {
             if (!lock.tryLock(WAIT.toMillis(), TimeUnit.MILLISECONDS)) {
-                return Optional.empty();
+                return ifUnavailable.get();
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return Optional.empty();
-        }
-        if (leaseManager == null) {
-            return Optional.of(new Guard(lock, null, null));
+            return ifUnavailable.get();
         }
         try {
-            LeaseHandle lease = leaseManager.acquireKey(LEASE_PREFIX + agentId, WAIT).toCompletableFuture()
-                    .get(WAIT.toMillis() + 1_000, TimeUnit.MILLISECONDS);
-            return Optional.of(new Guard(lock, leaseManager, lease));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            if (leaseManager == null) {
+                return body.apply(new Guard(null, null));
+            }
+            LeaseHandle lease;
+            try {
+                lease = leaseManager.acquireKey(LEASE_PREFIX + agentId, WAIT).toCompletableFuture().get(WAIT.toMillis() + 1_000,
+                        TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return ifUnavailable.get();
+            } catch (Exception e) {
+                LOGGER.debugf("[DYNAMIC] Lease of sub-agent '%s' not acquired: %s", sanitize(agentId), e.getMessage());
+                return ifUnavailable.get();
+            }
+            try {
+                return body.apply(new Guard(leaseManager, lease));
+            } finally {
+                if (lease != null) {
+                    leaseManager.release(lease);
+                }
+            }
+        } finally {
             lock.unlock();
-            return Optional.empty();
-        } catch (Exception e) {
-            LOGGER.debugf("[DYNAMIC] Lease of sub-agent '%s' not acquired: %s", sanitize(agentId), e.getMessage());
-            lock.unlock();
-            return Optional.empty();
         }
     }
 

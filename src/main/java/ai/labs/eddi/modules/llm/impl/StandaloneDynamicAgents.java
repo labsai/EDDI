@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -407,24 +406,25 @@ public class StandaloneDynamicAgents {
         // Held across reading the flag, undeploying and deleting, cluster-wide: a
         // retain_agent in between (on any node) would otherwise report success for an
         // agent deleted anyway.
-        Optional<SubAgentLocks.Guard> guard = SubAgentLocks.acquire(leaseManager, agentId);
-        if (guard.isEmpty()) {
-            // Never delete unprotected: a retain may be in flight elsewhere. The agent
-            // is left for the next cleanup of this conversation.
-            LOGGER.warnf("[DYNAMIC] Sub-agent '%s' is being changed elsewhere — not torn down this time (conversation %s)",
-                    sanitize(agentId), sanitize(conversationId));
-            return;
-        }
-        try (SubAgentLocks.Guard held = guard.get()) {
-            if (!held.coordinated()) {
-                // Clustered, but the lease manager is degraded (NATS unreachable) and
-                // handed out a node-local handle: another node's retain cannot be ruled
-                // out, so the agent is kept (fail safe) for a later cleanup.
-                LOGGER.warnf("[DYNAMIC] Cluster lease of sub-agent '%s' is unfenced (degraded) — not torn down this time (conversation %s)",
+        try {
+            boolean guarded = SubAgentLocks.withGuard(leaseManager, agentId, held -> {
+                if (!held.coordinated()) {
+                    // Clustered, but the lease manager is degraded (NATS unreachable) and
+                    // handed out a node-local handle: another node's retain cannot be ruled
+                    // out, so the agent is kept (fail safe) for a later cleanup.
+                    LOGGER.warnf("[DYNAMIC] Cluster lease of sub-agent '%s' is unfenced (degraded) — not torn down this time (conversation %s)",
+                            sanitize(agentId), sanitize(conversationId));
+                    return true;
+                }
+                teardownLocked(agentId, conversationId, held);
+                return true;
+            }, () -> false);
+            if (!guarded) {
+                // Never delete unprotected: a retain may be in flight elsewhere. The agent
+                // is left for the next cleanup of this conversation.
+                LOGGER.warnf("[DYNAMIC] Sub-agent '%s' is being changed elsewhere — not torn down this time (conversation %s)",
                         sanitize(agentId), sanitize(conversationId));
-                return;
             }
-            teardownLocked(agentId, conversationId, held);
         } finally {
             SubAgentLocks.clearTearingDown(agentId);
         }

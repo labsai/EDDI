@@ -1237,7 +1237,8 @@ down or changed elsewhere, try again"; a teardown that cannot get it leaves that
 agent for the next cleanup instead of deleting it unprotected. Teardown fails safe
 in three more cases, keeping the agent: the cluster lease is degraded (NATS
 unreachable, so the lease manager hands out an unfenced, node-local handle; retain
-and unretain still proceed then), the lease is lost before the undeploy or before
+and unretain are then refused too, with "cluster coordination is unavailable, try
+again"), the lease is lost before the undeploy or before
 the delete, or the agent was retained or changed while it was undeployed (the flag
 and version are read again right before the delete; an agent kept at that point is
 undeployed but intact). One window remains: the agent store offers no

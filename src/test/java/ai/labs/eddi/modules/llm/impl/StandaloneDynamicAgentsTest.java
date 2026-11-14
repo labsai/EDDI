@@ -514,8 +514,8 @@ class StandaloneDynamicAgentsTest {
     }
 
     @Test
-    @DisplayName("clustered but degraded (an unfenced handle): teardown keeps the agent, retain may still write its flag")
-    void degradedHandleSkipsTeardownButAllowsRetain() throws Exception {
+    @DisplayName("clustered but degraded (an unfenced handle): teardown keeps the agent and retain is refused, its flag not written")
+    void degradedHandleSkipsTeardownAndRefusesRetain() throws Exception {
         IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
         when(leases.isClustered()).thenReturn(true);
         when(leases.acquireKey(anyString(), any(Duration.class)))
@@ -532,7 +532,24 @@ class StandaloneDynamicAgentsTest {
                 ConcurrentHashMap.newKeySet(), ConcurrentHashMap.newKeySet(), CONVERSATION, null, leases);
         String reply = retainTool.retainAgent("sub-1");
 
-        assertFalse(reply.contains("changed elsewhere"), reply);
+        assertTrue(reply.contains("cluster coordination is unavailable"), reply);
+        verify(agentStore, never()).update(eq("sub-1"), any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("clustering off: the local lease manager's unfenced handle is no obstacle — retain writes its flag")
+    void unclusteredUnfencedHandleAllowsRetain() throws Exception {
+        IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
+        when(leases.isClustered()).thenReturn(false);
+        when(leases.acquireKey(anyString(), any(Duration.class)))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(unfencedHandle()));
+        agent("sub-1", released());
+        var retainTool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, new CopyOnWriteArrayList<>(List.of("sub-1")),
+                ConcurrentHashMap.newKeySet(), ConcurrentHashMap.newKeySet(), CONVERSATION, null, leases);
+
+        String reply = retainTool.retainAgent("sub-1");
+
+        assertFalse(reply.contains("coordination"), reply);
         verify(agentStore).update(eq("sub-1"), any(), any(), anyBoolean());
     }
 
