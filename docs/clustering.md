@@ -217,8 +217,7 @@ holds — how a GDPR sweep or export on one node reaches records another node wr
 bucket keys are hashed and cannot be enumerated by principal; split into 16 entries per
 principal of at most 625 task and 625 context ids each, about 330 KB at the 256-character
 id limit, so no entry nears the NATS payload limit of 1 MB that would keep it on the writing
-node only), `TOOL_PAGES`, `DEDUP`,
-`CHANNEL` and `RAG_INGESTION`; object store: `ARCHIVES`;
+node only), `TOOL_PAGES`, `DEDUP`, `CHANNEL` and `RAG_INGESTION`; object store: `ARCHIVES`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
 `eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
 
