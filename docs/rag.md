@@ -1228,7 +1228,7 @@ millions of chunks:
 | Parameter | Default | Meaning |
 |---|---|---|
 | `layout` | `auto` | `auto`: an existing table keeps the layout it has, a new table is created in `v2`. `v1` creates a new table the way EDDI did before (json metadata, no index). An explicit value that contradicts an existing table is refused |
-| `vectorIndex` | `hnsw` | `none` builds no vector index (exact search) — for a small knowledge base, or to load a large one first and add the index by hand afterwards |
+| `vectorIndex` | `hnsw` | `none` builds no vector index, so a new table searches exactly. An HNSW index that already exists stays in place and still serves searches; drop it by hand to return to exact search — for a small knowledge base, or to load a large one first and add the index by hand afterwards |
 | `hnswM` | `16` | HNSW graph degree (2–100). Higher: better recall, larger index, slower inserts. Applies when the index is created |
 | `hnswEfConstruction` | `64` | HNSW build-time candidate list (4–1000, at least 2 × `hnswM`). Applies when the index is created |
 | `hnswEfSearch` | `40` | HNSW query-time candidate list (1–1000), set on each connection the store borrows. Raise it if retrieval misses relevant chunks; it must be at least `maxResults` to return that many |
@@ -1262,10 +1262,16 @@ Limits worth knowing:
   different values.
 
 Changing `hnswM` or `hnswEfConstruction` on an existing v2 table does not rebuild its index; drop
-the `<table>_hnsw_idx` index by hand and EDDI recreates it with the new values the next time it
+the table's HNSW index by hand and EDDI recreates it with the new values the next time it
 builds the store — a build that blocks writes to a large table while it runs. To avoid that, create
-it yourself under the same name with `CREATE INDEX CONCURRENTLY <table>_hnsw_idx ON <table> USING hnsw
+it yourself under the name EDDI looks for, with `CREATE INDEX CONCURRENTLY <index> ON <table> USING hnsw
 (embedding vector_cosine_ops) WITH (m = …, ef_construction = …)`; EDDI then finds it and leaves it alone.
+`<index>` is **unqualified** — an index lives in its table's schema — while `<table>` is qualified as the
+table is (`rag.kb`). It is the lower-case table name without its schema plus `_hnsw_idx`; when that
+would exceed 63 characters EDDI shortens it and adds a digest, so take it from the log line
+`pgvector table <table>: HNSW index name is <index>` written whenever the store is built. If a
+concurrent build fails, PostgreSQL leaves an invalid index under that name: EDDI refuses to build the
+store, naming the index, until you `DROP INDEX` it and build again.
 
 ## Capabilities
 

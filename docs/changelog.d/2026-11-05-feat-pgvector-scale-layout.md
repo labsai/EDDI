@@ -86,6 +86,20 @@ million chunks retrieval took seconds and each document replacement scanned the 
   index name): `CREATE INDEX IF NOT EXISTS` takes a `SHARE` lock before it finds the index, so on every
   store build it would queue behind open write transactions. `IF NOT EXISTS` stays for concurrent builds.
 
+- **Review follow-ups (CodeRabbit)**: an index that exists but is invalid (a failed `CREATE INDEX
+  CONCURRENTLY`) or sits on another table is refused with `DROP INDEX` instructions instead of being taken as
+  usable; the table layout is re-checked after the store has created the table, so two racing builds that ask
+  for different layouts fail rather than run with the wrong metadata handling; the HNSW index name is logged,
+  and `docs/rag.md` explains the unqualified-index-name rule for `CREATE INDEX CONCURRENTLY` and that
+  `vectorIndex: none` does not remove an existing index.
+
+- **Review follow-ups (CodeRabbit)**: an index that exists but is invalid (a failed `CREATE INDEX
+  CONCURRENTLY`) or sits on another table is refused with `DROP INDEX` instructions instead of being taken as
+  usable; the table layout is re-checked after the store has created the table, so two racing builds that ask
+  for different layouts fail rather than run with the wrong metadata handling; the HNSW index name is logged,
+  and `docs/rag.md` explains the unqualified-index-name rule for `CREATE INDEX CONCURRENTLY` and that
+  `vectorIndex: none` does not remove an existing index.
+
 ### Follow-ups
 
 - A Manager one-click "move to the v2 layout" action (re-embed into a new table) — out of scope here.

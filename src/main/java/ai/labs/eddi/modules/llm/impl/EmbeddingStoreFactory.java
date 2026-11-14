@@ -757,6 +757,15 @@ public class EmbeddingStoreFactory {
                 .metadataStorageConfig(PgVectorSchema.metadataStorageConfig(layout));
         var store = new EddiPgVectorEmbeddingStore(builder, indexed ? settings.efSearch() : null, settings.insertBatchSize());
 
+        // The layout above was resolved before the store created the table, with no
+        // lock between the two: a build racing this one for the same table may have
+        // created it in another layout. Look again, now that it exists.
+        try (Connection connection = dataSource.getConnection()) {
+            PgVectorSchema.resolveLayout(layout, PgVectorSchema.inspect(connection, table), table);
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not check table " + sanitize(table) + ": " + sanitize(e.getMessage()), e);
+        }
+
         if (layout == PgVectorSchema.Layout.V2) {
             try (Connection connection = dataSource.getConnection()) {
                 PgVectorSchema.createIndexes(connection, table, settings, dimension);

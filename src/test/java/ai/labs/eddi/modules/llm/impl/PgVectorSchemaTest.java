@@ -334,13 +334,32 @@ class PgVectorSchemaTest {
             List<String> binds = new ArrayList<>();
             Connection qualified = capturingConnection(sql, binds, false);
             assertFalse(PgVectorSchema.indexExists(qualified, "Rag.KB", PgVectorSchema.SUFFIX_HNSW));
-            assertEquals("SELECT to_regclass(?) IS NOT NULL", sql.get(0));
+            assertTrue(sql.get(0).contains("FROM (SELECT to_regclass(?) AS oid, to_regclass(?) AS tbl) r"), sql.get(0));
             assertEquals("\"rag\".\"kb_hnsw_idx\"", binds.get(0));
 
             Connection plain = capturingConnection(sql, binds, true);
             assertTrue(PgVectorSchema.indexExists(plain, "KB", PgVectorSchema.SUFFIX_HNSW));
-            assertEquals("SELECT to_regclass(quote_ident(current_schema()) || '.' || ?) IS NOT NULL", sql.get(1));
+            assertTrue(sql.get(1).contains("FROM (SELECT to_regclass(quote_ident(current_schema()) || '.' || ?) AS oid, "), sql.get(1));
             assertEquals("\"kb_hnsw_idx\"", binds.get(1));
+        }
+
+        @Test
+        @DisplayName("an index that exists but is invalid, or is on another table, is reported with recovery steps, not accepted")
+        void invalidIndexRefused() throws SQLException {
+            for (boolean[] state : new boolean[][]{{false, true}, {true, false}}) {
+                Connection connection = mock(Connection.class);
+                PreparedStatement ps = mock(PreparedStatement.class);
+                ResultSet rs = mock(ResultSet.class);
+                when(connection.prepareStatement(anyString())).thenReturn(ps);
+                when(ps.executeQuery()).thenReturn(rs);
+                when(rs.next()).thenReturn(true);
+                when(rs.getBoolean(1)).thenReturn(true);
+                when(rs.getBoolean(2)).thenReturn(state[0]);
+                when(rs.getBoolean(3)).thenReturn(state[1]);
+                IllegalStateException e = assertThrows(IllegalStateException.class,
+                        () -> PgVectorSchema.indexExists(connection, "rag.kb", PgVectorSchema.SUFFIX_HNSW));
+                assertTrue(e.getMessage().contains("DROP INDEX rag.kb_hnsw_idx"), e.getMessage());
+            }
         }
 
         @Test
@@ -393,6 +412,8 @@ class PgVectorSchemaTest {
                     boolean found = List.of(existing).contains(bound[0]);
                     when(rs.next()).thenReturn(true);
                     when(rs.getBoolean(1)).thenReturn(found);
+                    when(rs.getBoolean(2)).thenReturn(true);
+                    when(rs.getBoolean(3)).thenReturn(true);
                     return rs;
                 });
                 return ps;
@@ -416,6 +437,8 @@ class PgVectorSchemaTest {
                 ResultSet rs = mock(ResultSet.class);
                 when(rs.next()).thenReturn(true);
                 when(rs.getBoolean(1)).thenReturn(result);
+                when(rs.getBoolean(2)).thenReturn(true);
+                when(rs.getBoolean(3)).thenReturn(true);
                 when(ps.executeQuery()).thenReturn(rs);
                 return ps;
             });

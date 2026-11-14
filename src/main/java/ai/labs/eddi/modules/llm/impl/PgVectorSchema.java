@@ -446,6 +446,7 @@ final class PgVectorSchema {
                     sanitize(table), dimension, MAX_HNSW_DIMENSIONS, MAX_HNSW_DIMENSIONS);
             return;
         }
+        LOGGER.infof("pgvector table %s: HNSW index name is %s", sanitize(table), sanitize(indexName(table, SUFFIX_HNSW)));
         String hnswSql = hnswIndexSql(table, settings.m(), settings.efConstruction());
         try (Statement statement = connection.createStatement()) {
             if (!indexExists(connection, table, SUFFIX_HNSW)) {
@@ -460,18 +461,49 @@ final class PgVectorSchema {
     /**
      * Whether the index {@link #indexName(String, String) indexName(table, suffix)}
      * exists in {@code table}'s schema — the schema named in {@code table}, else
-     * {@code current_schema()}, as for {@link #inspect}. The name is bound, never
+     * {@code current_schema()}, as for {@link #inspect}. The names are bound, never
      * spliced into the SQL.
+     * <p>
+     * An index that exists is also checked: it must be valid and belong to
+     * {@code table}. A {@code CREATE INDEX CONCURRENTLY} that failed leaves an
+     * invalid index under its name, which {@code to_regclass} still resolves — so
+     * treating the name alone as proof would skip the build for ever and leave
+     * retrieval without an index.
+     *
+     * @throws IllegalStateException
+     *             when the index exists but is invalid, or is on another table; the
+     *             message says how to recover
      */
     static boolean indexExists(Connection connection, String table, String suffix) throws SQLException {
         String trimmed = table.trim();
         boolean qualified = isQualified(trimmed);
-        String index = quotedIdentifier(indexName(trimmed, suffix));
+        String indexPart = indexName(trimmed, suffix);
+        String index = quotedIdentifier(indexPart);
         String name = qualified ? quotedIdentifier(trimmed.substring(0, trimmed.lastIndexOf('.'))) + "." + index : index;
-        try (PreparedStatement statement = connection.prepareStatement("SELECT " + regclass(qualified) + " IS NOT NULL")) {
+        String sql = "SELECT r.oid IS NOT NULL, (SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = r.oid), "
+                + "(SELECT i.indrelid = r.tbl FROM pg_index i WHERE i.indexrelid = r.oid) FROM (SELECT " + regclass(qualified)
+                + " AS oid, " + regclass(qualified) + " AS tbl) r";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, name);
+            statement.setString(2, trimmed);
             try (ResultSet rs = statement.executeQuery()) {
-                return rs.next() && rs.getBoolean(1);
+                if (!rs.next() || !rs.getBoolean(1)) {
+                    return false;
+                }
+                boolean valid = rs.getBoolean(2);
+                boolean onTable = rs.getBoolean(3);
+                if (!valid || !onTable) {
+                    String qualifiedIndex = qualified
+                            ? trimmed.substring(0, trimmed.lastIndexOf('.')).toLowerCase(Locale.ROOT) + "." + indexPart
+                            : indexPart;
+                    throw new IllegalStateException(String.format(
+                            "pgvector index %s on table %s is %s, so it is not used and EDDI will not create it again. Drop it "
+                                    + "(DROP INDEX %s) and rebuild the store; to build it without blocking writes, run CREATE INDEX "
+                                    + "CONCURRENTLY under that name first",
+                            sanitize(qualifiedIndex), sanitize(table), valid ? "not an index of that table" : "invalid (an earlier build failed)",
+                            sanitize(qualifiedIndex)));
+                }
+                return true;
             }
         }
     }
