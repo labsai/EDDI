@@ -1138,7 +1138,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
 | `allowedProviders` | `null` (any) | Whitelist of LLM providers |
-| `allowedModels` | `null` (any) | Per-provider model whitelist |
+| `allowedModels` | `null` (the parent's model only) | Per-provider model whitelist. Without one, a sub-agent runs on the parent's own provider and model — any other choice is refused; list a model here to allow it |
 
 Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
 
@@ -1174,12 +1174,80 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
 `createSubAgent` takes `provider` and `model` as optional arguments. What is not
 given is inherited from the creating agent, in this order:
 
-1. **Provider** — the parent's, when `inheritParentModel` is on.
+1. **Provider** — the parent's, when `inheritParentModel` is on or no
+   `allowedModels` is configured.
 2. **Model** — the parent's, but only if the effective provider is *still* the
    parent's. An anthropic parent creating an `ollama` sub-agent does not hand it
    a Claude model name.
-3. **API key** — the parent's `${vault:...}` **reference**, again only when the
-   provider matches, because a vault reference names one provider's secret.
+3. **API key** — the parent's `${vault:...}` **reference**, only when
+   `inheritParentModel` is on and the provider matches, because a vault reference
+   names one provider's secret. With `inheritParentModel: false` nothing is
+   inherited, not even for the parent's own provider.
+
+**Without `allowedModels`, the parent's model is the only model.** A sub-agent
+with another provider or model is refused with a message naming
+`dynamicAgents.allowedModels`; when the parent's configuration cannot be read,
+only the defaults (which inherit no key) are accepted. Before, an absent
+`allowedModels` meant "any model", so a steered model could put a sub-agent on
+the provider's most expensive model on the parent's key. An explicit allow-list
+works as before.
+
+#### Cost ceilings across delegations
+
+A delegated turn — `converse_with_agent`, or `create_sub_agent`'s initial message
+— runs in a conversation of its own, and its spend is held to the caller's
+ceilings:
+
+- **Passed down.** What the caller has left under its effective ceiling
+  (`maxCostPerConversationUsd`, tightened by a schedule's `maxCostPerFire` or by a
+  delegation that reached the caller) travels as the reserved context
+  `delegationMaxCostUsd`; the callee's turn is held to it, or to its own ceiling
+  when that is tighter. A caller with nothing left does not delegate at all.
+- **Charged back.** After the turn, what the callee's conversation spent is added
+  to the caller's current step as `audit:delegated_cost`, which every
+  conversation total and ceiling counts — the tool loop stops at its next round
+  once it is over. The tenant's monthly counter is not charged again: the
+  callee's own turn already was.
+
+A new callee conversation's start turn and its message turn share one allowance:
+what the start turn spent is subtracted before the message turn is sent. A message
+that is skipped on a continued conversation is not charged. A delegation that times out is charged what the callee had recorded when the caller gave up, and the rest of the allowance it handed down is held for the remainder of that caller turn, so the same money is not handed out twice in the turn. That hold is not persisted: spend the callee makes after the caller's turn has ended is not charged back to the caller's conversation (it is still metered to the tenant, and the callee stays held to the allowance passed down).
+
+#### Sub-agents outside a group discussion
+
+`create_sub_agent` also works in a standalone conversation. There, its agents are
+torn down — undeployed and permanently deleted — when the conversation that
+created them **ends** (an explicit end, `CONVERSATION_END`) or is **deleted**,
+unless the model retained them with `retain_agent`. Only an agent whose
+`dynamicOrigin` names that conversation and no discussion, and is not marked
+retained there (`retain: true` at creation, or `retain_agent` since; `unretain_agent`
+clears it), is touched — and the
+end finds such agents by that origin too, so one a turn created but never stored
+is not missed. An ended conversation creates no further sub-agents. A user may
+have at most `eddi.dynamic-agents.standalone.max-live-per-user` (default 20)
+such agents deployed at once, across all their conversations; at the cap the
+tool refuses with a message naming `teardown_agent`.
+
+Retaining and tearing down are coordinated **cluster-wide**: the teardown holds
+the agent's lease (`subagent.<agentId>`, in the same lease store that serialises
+conversation turns) while it reads the retain flag, undeploys and deletes, and
+`retain_agent` / `unretain_agent` take the same lease to write the flag. A retain
+that cannot get it within a short wait is refused with "the agent is being torn
+down or changed elsewhere, try again"; a teardown that cannot get it leaves that
+agent for the next cleanup instead of deleting it unprotected. Teardown fails safe
+in three more cases, keeping the agent: the cluster lease is degraded (NATS
+unreachable, so the lease manager hands out an unfenced, node-local handle; retain
+and unretain are then refused too, with "cluster coordination is unavailable, try
+again"), the lease is lost before the undeploy or before
+the delete, or the agent was retained or changed while it was undeployed (the flag
+and version are read again right before the delete; an agent kept at that point is
+undeployed but intact). One window remains: the agent store offers no
+version-checked permanent delete, so a delete that takes longer than the lease's
+safety margin (two heartbeats between its local validity and its server-side
+expiry) could overlap a retain on another node. With clustering off, a per-node
+lock does the same job. The per-user cap, by contrast, stays
+best-effort across nodes (see `eddi.dynamic-agents.standalone.max-live-per-user`
+in the [configuration reference](configuration-reference.md)).
 
 **Only a vault reference is inherited, never a plaintext key.** When the vault is
 unconfigured, `vaultApiKey` falls back to storing the key in clear; copying such a

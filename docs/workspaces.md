@@ -489,8 +489,12 @@ read them. An agent can opt in to review:
 "conversationReview": { "enabled": true, "notice": "The support team may read this conversation to improve the agent." }
 ```
 
-Then the people who maintain the agent (`EDIT` on it) may read its
-conversations, and **only read** them — and only the dialogue: the simple log
+Then the people who maintain the agent may read its conversations: they hold an
+authoring role (`eddi-admin` or `eddi-editor`) and, with workspaces enforced,
+`EDIT` on the agent as well. Membership of the agent's team space alone is not
+enough — a team space grants `EDIT` to every member whatever their role, and a
+chat-only `eddi-user`, viewer or approver in it does not review. They may
+**only read** them — and only the dialogue: the simple log
 (`/conversationstore/conversations/simple/{id}`), without the detailed view and
 without the conversation's properties, which carry the person's long-term
 memory from other conversations. The raw memory document stays owner-only.

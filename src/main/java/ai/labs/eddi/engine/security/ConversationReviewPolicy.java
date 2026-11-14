@@ -33,9 +33,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>the agent <em>version the conversation ran on</em> had review enabled —
  * so the person chatting was shown the notice, and switching review on later
  * never exposes what was said before;</li>
- * <li>the caller holds {@code EDIT} on the agent now — its owner, anybody it
- * was shared with at edit level, members of the team space it is filed in.
- * Losing that access ends review access with it.</li>
+ * <li>the caller holds an authoring role ({@code eddi-admin} or
+ * {@code eddi-editor}) and {@code EDIT} on the agent now — its owner, anybody
+ * it was shared with at edit level, members of the team space it is filed in.
+ * Losing either ends review access with it.</li>
  * </ol>
  */
 @ApplicationScoped
@@ -141,15 +142,26 @@ public class ConversationReviewPolicy {
     }
 
     /**
-     * Whether the caller holds {@code EDIT} on the agent now.
+     * Whether the caller maintains the agent now: holds an authoring role
+     * ({@code eddi-admin} or {@code eddi-editor}) and, under workspace enforcement,
+     * {@code EDIT} on the agent as well.
      * <p>
      * Without workspace enforcement every caller "holds" everything, including a
      * chat-only {@code eddi-user}. There, maintaining an agent means what it always
      * meant: being allowed to author agents at all.
+     * <p>
+     * Under enforcement the role is required too: a team space grants {@code EDIT}
+     * to every member regardless of role, so without it a chat-only
+     * {@code eddi-user}, viewer or approver filed in the space could read other
+     * people's conversations with any review-enabled agent there.
      */
     public boolean maintains(String agentId) {
+        boolean author = accessGuard.isAdmin() || (identity != null && identity.hasRole("eddi-editor"));
+        if (!author) {
+            return false;
+        }
         if (!accessGuard.settings().isEnforcing()) {
-            return accessGuard.isAdmin() || (identity != null && identity.hasRole("eddi-editor"));
+            return true;
         }
         try {
             accessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");

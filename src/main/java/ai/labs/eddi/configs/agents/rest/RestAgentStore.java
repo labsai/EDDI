@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -171,6 +172,9 @@ public class RestAgentStore implements IRestAgentStore {
         // able to use as an oracle for arbitrary workflow ids.
         restVersionInfo.requireEditAccess(id);
         requireWorkflowsExist(agentConfiguration);
+        // Resolved once: the version the carry-over check reads is the version updated.
+        version = restVersionInfo.validateParameters(id, version);
+        requireMayAuthorProvider(agentConfiguration, readQuietly(id, version));
         // dynamicOrigin is engine-written provenance that teardown_agent and group
         // cleanup rely on before they delete an agent. Keep what is stored, never
         // what the body says: an editor must not be able to erase the marker (the
@@ -303,11 +307,36 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * The agent's Dream settings name an LLM provider: a restricted one needs an
+     * administrator unless the replaced version already had it — see
+     * {@link LlmProviderAuthorPolicy}.
+     */
+    private void requireMayAuthorProvider(AgentConfiguration candidate, AgentConfiguration stored) {
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(candidate, stored, "agent");
+        }
+    }
+
+    private AgentConfiguration readQuietly(String id, Integer version) {
+        try {
+            return agentStore.read(id, version);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
+        requireMayAuthorProvider(agentConfiguration, null);
 
         // createDocument() because the id and version are what this method needs.
         // NOT because Response.getLocation() is broken for eddi:// URIs — it is not;
@@ -337,6 +366,7 @@ public class RestAgentStore implements IRestAgentStore {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             validateSecurityFlags(agentConfig);
             RatingConfigValidator.validate(agentConfig);
+            requireMayAuthorProvider(agentConfig, null);
             // The copy is an agent a person made, not one create_sub_agent
             // provisioned: it must not inherit the original's provenance.
             agentConfig.setDynamicOrigin(null);

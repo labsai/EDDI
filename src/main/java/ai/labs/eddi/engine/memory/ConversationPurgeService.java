@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.modules.llm.impl.StandaloneDynamicAgents;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -61,6 +62,13 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<ISecretProvider> secretProvider;
+
+    /**
+     * Tears down the standalone sub-agents of a deleted conversation.
+     * Field-injected for the same reason; null when the service is built by hand.
+     */
+    @Inject
+    Instance<StandaloneDynamicAgents> standaloneDynamicAgents;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -185,6 +193,12 @@ public class ConversationPurgeService {
         if (!deleteDependentData(conversationId)) {
             throw new ResourceStoreException("Could not delete every attachment, memory checkpoint and tool-journal entry of conversation "
                     + conversationId + "; the conversation was not deleted. Retry the delete.");
+        }
+        // While the snapshot still names them: the standalone sub-agents this
+        // conversation created and did not retain go with it. Best effort — a failure
+        // leaves the agent deployed and is logged, and does not keep the conversation.
+        if (standaloneDynamicAgents != null && standaloneDynamicAgents.isResolvable()) {
+            standaloneDynamicAgents.get().cleanup(conversationId);
         }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);

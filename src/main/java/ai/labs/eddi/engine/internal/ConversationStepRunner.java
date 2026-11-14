@@ -936,14 +936,19 @@ class ConversationStepRunner {
                                 LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
                                         + "discarding its outcome (no pause persisted/armed)", conversationId);
                                 if (dispatcherGaveUp.getAsBoolean()) {
-                                    // Abandoned by the watchdog: inert (see the method doc).
+                                    // Abandoned by the watchdog: inert (see the method doc) — but
+                                    // an end-signalled turn still owes the teardown of the
+                                    // sub-agents it created, which only its live memory knows.
+                                    // Nothing is stored, no state is written.
                                     refreshCachedState(conversationId);
+                                    tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                                     return;
                                 }
                                 if (discardLeaseLostTurn(conversationId, conversationMemory)) {
                                     return;
                                 }
                                 settleCancelledTurn(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                                 return;
                             }
                             boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
@@ -1043,6 +1048,11 @@ class ConversationStepRunner {
                                 conversationService.decideContinuation(conversationMemory);
                                 storeConversationMemory(conversationMemory, environment);
                                 conversationService.armContinuation(conversationId, conversationMemory, environment);
+                                if (conversationMemory.getConversationState() == ConversationState.ENDED) {
+                                    // The turn ended the conversation (CONVERSATION_END): its
+                                    // standalone sub-agents go with it, as on an explicit end.
+                                    conversationService.tearDownStandaloneSubAgents(conversationId, conversationMemory);
+                                }
                             }
                         } catch (ConversationFencedException e) {
                             // Cluster mode: another node took the conversation over while this
@@ -1150,14 +1160,17 @@ class ConversationStepRunner {
                             if (dispatcherGaveUp.getAsBoolean()) {
                                 // The late outcome of a turn the watchdog abandoned: inert (see the
                                 // method doc). The watchdog recorded its state; the next turn of
-                                // the conversation may already have committed its own.
+                                // the conversation may already have committed its own. Only
+                                // the teardown an end owes runs, from the live memory.
                                 refreshCachedState(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                             } else if (conversationMemory.isCancelled() && !discardLeaseLostTurn(conversationId, conversationMemory)) {
                                 // Same settlement as a cancelled turn that completed: the
                                 // pipeline's own failure handling may have cached ERROR on its
                                 // way out, and for a /cancel or GDPR stop of a say turn nothing
                                 // else records a state (the say path never persists IN_PROGRESS).
                                 settleCancelledTurn(conversationId);
+                                tearDownSubAgentsIfEnded(conversationId, conversationMemory);
                             }
                         } else if (t instanceof IConversation.ConversationNotReadyException) {
                             String msg = "Conversation not ready! (conversationId=%s)";
@@ -1240,6 +1253,27 @@ class ConversationStepRunner {
      * persisted state is still READY — so without this a cancelled turn that failed
      * left the conversation READY, and one that completed was handled here already.
      */
+    /**
+     * A cancelled turn whose conversation was really ended (an explicit end raises
+     * the same cancel flag): the sub-agents it created exist only in this live
+     * memory, which is never stored, so the end's own cleanup — which reads the
+     * stored snapshot — cannot see them. Tear them down from here, now that the
+     * turn has stopped creating any. A plain cancel leaves the conversation open
+     * and its agents in place.
+     */
+    void tearDownSubAgentsIfEnded(String conversationId, IConversationMemory conversationMemory) {
+        try {
+            // The end marks the conversation before it signals the cancel and stores
+            // ENDED after: a turn settling in between sees the mark, not the state.
+            if (conversationService.isEnding(conversationId) || conversationService.wasEndSignalled(conversationMemory)
+                    || conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED) {
+                conversationService.tearDownStandaloneSubAgents(conversationId, conversationMemory);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not tear down the sub-agents of ended conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
     void settleCancelledTurn(String conversationId) {
         try {
             ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);

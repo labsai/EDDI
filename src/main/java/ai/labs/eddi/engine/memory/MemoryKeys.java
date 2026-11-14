@@ -232,6 +232,24 @@ public final class MemoryKeys {
     public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
 
     /**
+     * Priced spend ({@code Double}) of the conversations this step delegated to —
+     * {@code converse_with_agent} and a {@code create_sub_agent} initial message —
+     * charged back onto the delegating step once the callee's turn is over. The
+     * callee's own turn already charged the tenant's monthly counter, so this is
+     * never metered again ({@code TurnCostMeter} reads {@link #AUDIT_COST} only);
+     * it counts towards the delegating conversation's
+     * {@code maxCostPerConversationUsd} and a schedule's {@code maxCostPerFire},
+     * like {@link #AUDIT_DISCARDED_COST}. Without it a delegation's spend escaped
+     * every ceiling of the caller.
+     * <p>
+     * Deliberately NOT {@code "audit:cost:..."}: step lookups by key are prefix
+     * matches (see {@link #AUDIT_METERED_COST}).
+     *
+     * @since 6.7.0
+     */
+    public static final String AUDIT_DELEGATED_COST = "audit:delegated_cost";
+
+    /**
      * How the step's model spend was priced: {@code {calls, unpricedCalls, sources,
      * cacheReadTokens, cacheWriteTokens}}. Deliberately not prefixed
      * {@code audit:cost} — step lookups prefix-match. Copied into the audit entry's

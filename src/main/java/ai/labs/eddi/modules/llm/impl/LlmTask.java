@@ -663,7 +663,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
         // Resolve global variable references in task type BEFORE any model
         // lookups — used by token estimator, sync model, and streaming model.
-        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        var resolvedType = ProviderTypes.resolve(globalVariableResolver, task.getType());
 
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
@@ -2287,7 +2287,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
         // === Rebuild the chat model for THIS task only (normal-path parity) ===
         Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
-        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        var resolvedType = ProviderTypes.resolve(globalVariableResolver, task.getType());
         // M-L1: a pause raised inside a cascade step resumes on THAT step's model.
         // Rebuilding the task's base model continued an escalated step's tool loop
         // on the cheaper model the cascade had already judged not good enough.
@@ -2779,7 +2779,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             return null;
         }
         Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
-        String resolvedType = globalVariableResolver.resolveValue(task.getType());
+        String resolvedType = ProviderTypes.resolve(globalVariableResolver, task.getType());
         // The answer came from a cascade step: the revision goes to that step's model.
         Integer stepIndex = candidate.getCascadeStepIndex();
         var cascade = task.getModelCascade();

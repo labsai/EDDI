@@ -665,6 +665,26 @@ class LanguageModelBuildersTest {
             assertTrue(state.contains("workingDirectory=null"), state);
         }
 
+        @Test
+        @DisplayName("with eddi.llm.jlama.model-dir set, paths outside it are not used, whoever wrote the config")
+        void pathsAreConfinedToTheBaseDirectory() {
+            Path base = Path.of("jlama-base").toAbsolutePath().normalize();
+            Map<String, String> outside = new HashMap<>();
+            outside.put("modelCachePath", "../../escape");
+            outside.put("workingDirectory", base.getParent().resolve("elsewhere").toString());
+            outside.put("modelName", "some-model");
+
+            String confined = JlamaLanguageModelBuilder.applyTo(JlamaChatModel.builder(), outside, base).toString();
+            assertTrue(confined.contains("modelCachePath=" + base), confined);
+            assertTrue(confined.contains("workingDirectory=null"), confined);
+            assertTrue(confined.contains("modelName=some-model"), "the other parameters still apply: " + confined);
+
+            Map<String, String> inside = Map.of("modelCachePath", "models", "workingDirectory", base.resolve("work").toString());
+            String kept = JlamaLanguageModelBuilder.applyTo(JlamaChatModel.builder(), inside, base).toString();
+            assertTrue(kept.contains("modelCachePath=" + base.resolve("models")), kept);
+            assertTrue(kept.contains("workingDirectory=" + base.resolve("work")), kept);
+        }
+
         /**
          * Every key this builder declares must actually reach the Jlama builder.
          * {@code recognisedParameters()} is what suppresses the "parameter has no

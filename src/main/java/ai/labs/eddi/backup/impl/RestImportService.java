@@ -53,6 +53,7 @@ import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
@@ -208,6 +209,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Who may write restricted LLM providers, Jlama paths and content logging. Null
+     * when built outside the container, where the check is skipped. Same split as
+     * the caller-token policy: the REST stores apply it to updates, the direct
+     * creates below apply it here.
+     */
+    private LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
+    @Inject
+    void useLlmProviderAuthorPolicy(LlmProviderAuthorPolicy policy) {
+        this.llmProviderAuthorPolicy = policy;
     }
 
     /**
@@ -1527,11 +1541,25 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // of leaving a rollback that cannot run.
                 callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
             }
+            if (llmProviderAuthorPolicy != null) {
+                // Same reasoning for restricted LLM settings: an editor may replace an
+                // administrator's Bedrock config (removing it is allowed), but writing it
+                // back over the import's version is a restricted setting the import's
+                // version does not carry. Refuse before the first write, while nothing
+                // needs rolling back.
+                llmProviderAuthorPolicy.requireMayAuthor(previous, document, "existing (restorable) " + localId);
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",
                         storeClass.getSimpleName(), LogSanitizer.sanitize(localId));
             }
+        }
+
+        if (tracked != null && llmProviderAuthorPolicy != null) {
+            // A later write of the same resource: the rollback writes the ORIGINAL back
+            // over this one, so it must be restorable over this document too.
+            llmProviderAuthorPolicy.requireMayAuthor(tracked.original, document, "existing (restorable) " + localId);
         }
 
         Response response = restUpdate.update(localId, localVersion, document);
@@ -1542,7 +1570,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (tracked != null) {
             tracked.latestImportedVersion = newVersion;
         } else {
-            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion);
+            var update = transaction.recordTrackedUpdate(storeClass, localId, newVersion, previous);
             T original = previous;
             DocumentDescriptor originalDescriptor = previousDescriptor;
             transaction.recordCompensation(() -> restorePreviousVersion(storeClass, resourceUri, localId,
@@ -1704,6 +1732,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Outside the try: a 403 must fail the import (and roll it back), not be
             // reported as a store failure.
             callerTokenAuthorPolicy.requireMayAuthor(document, "imported");
+        }
+        if (llmProviderAuthorPolicy != null) {
+            // A new resource: nothing stored to carry a setting over from.
+            llmProviderAuthorPolicy.requireMayAuthor(document, null, "imported");
         }
         try {
             IResourceStore<T> store = resolveStore(storeClass);
@@ -2967,9 +2999,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
          */
         static final class TrackedUpdate {
             int latestImportedVersion;
+            /** What the first update replaced — what a rollback writes back. */
+            final Object original;
 
-            TrackedUpdate(int latestImportedVersion) {
+            TrackedUpdate(int latestImportedVersion, Object original) {
                 this.latestImportedVersion = latestImportedVersion;
+                this.original = original;
             }
         }
 
@@ -2982,8 +3017,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return updated.get(storeClass.getName() + "/" + id);
         }
 
-        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion) {
-            var update = new TrackedUpdate(importedVersion);
+        TrackedUpdate recordTrackedUpdate(Class<?> storeClass, String id, int importedVersion, Object original) {
+            var update = new TrackedUpdate(importedVersion, original);
             updated.put(storeClass.getName() + "/" + id, update);
             return update;
         }

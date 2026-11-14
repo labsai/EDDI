@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -399,19 +400,62 @@ public class LlmSpendGate {
      * {@link #conversationCost} total, undone and discarded steps included, less
      * the current step's own {@code audit:cost} — plus the allowance, so the
      * allowance is per fire even on a persistent conversation; the tighter of the
-     * two wins. The tool loop asks the same question between rounds.
+     * two wins. A turn reached by delegation carries the delegating conversation's
+     * remaining allowance ({@link #delegationAllowance}), read the same way; with
+     * both present the smaller allowance applies. The tool loop asks the same
+     * question between rounds.
      */
     static OptionalDouble effectiveCeiling(IConversationMemory memory) {
         OptionalDouble agentCeiling = memory.getConversationCostCeilingUsd();
-        double allowance = maxCostPerFire(memory);
+        double allowance = tighterAllowance(maxCostPerFire(memory), delegationAllowance(memory));
         if (!(allowance > 0)) {
             return agentCeiling;
         }
-        double fireCeiling = conversationCost(memory) - currentStepCost(memory) + allowance;
+        // A computed ceiling: the spend before this turn plus the allowance. Never
+        // negative — and if it were (not finite), it would mean nothing is left, not
+        // that no ceiling applies: ceilingApplies() reads a negative value as "no
+        // ceiling", which only a genuinely absent configuration may mean.
+        double fireCeiling = spendBeforeThisTurn(memory) + allowance;
+        if (!Double.isFinite(fireCeiling) || fireCeiling < 0.0) {
+            fireCeiling = 0.0;
+        }
         if (ceilingApplies(agentCeiling) && agentCeiling.getAsDouble() <= fireCeiling) {
             return agentCeiling;
         }
         return OptionalDouble.of(fireCeiling);
+    }
+
+    /**
+     * What the conversation had spent before this turn: {@link #conversationCost}
+     * less the current step's {@code audit:cost} and {@code audit:delegated_cost},
+     * summed from the previous steps directly. Taking one total minus another read
+     * a moment later could go negative when a charge-back landed on the current
+     * step between the two reads; summing only steps nothing writes to any more
+     * cannot.
+     */
+    static double spendBeforeThisTurn(IConversationMemory memory) {
+        var previous = memory.getPreviousSteps();
+        if (previous == null) {
+            // A memory without a step stack (test doubles): the difference, floored.
+            return Math.max(0.0, conversationCost(memory) - currentStepCost(memory));
+        }
+        double total = 0.0;
+        for (String key : SPEND_KEYS) {
+            for (IData<Object> cost : previous.<Object>getExactDataPerStep(key)) {
+                total += positive(cost);
+            }
+        }
+        var current = memory.getCurrentStep();
+        if (current != null) {
+            total += positive(current.getData(MemoryKeys.AUDIT_DISCARDED_COST));
+        }
+        var undone = memory.getRedoCache();
+        if (undone != null) {
+            for (IConversationStep step : undone) {
+                total += ConversationMemory.recordedSpend(step);
+            }
+        }
+        return total;
     }
 
     /**
@@ -421,9 +465,36 @@ public class LlmSpendGate {
      * that set it, not to later turns of the same conversation.
      */
     static double maxCostPerFire(IConversationMemory memory) {
+        return contextAllowance(memory, ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+    }
+
+    /**
+     * The allowance a delegating conversation handed this turn — what it had left
+     * under its own ceiling when it delegated (context
+     * {@value ClientContextGuard#KEY_DELEGATION_MAX_COST}, written by
+     * {@code converse_with_agent} and {@code create_sub_agent}; reserved, so a
+     * client cannot set it). {@code 0} when the turn was not reached by a capped
+     * delegation. Same per-turn reading as {@link #maxCostPerFire}.
+     */
+    static double delegationAllowance(IConversationMemory memory) {
+        return contextAllowance(memory, ClientContextGuard.KEY_DELEGATION_MAX_COST);
+    }
+
+    /** The tighter of two allowances, where {@code 0} (or less) means none. */
+    private static double tighterAllowance(double first, double second) {
+        if (!(first > 0)) {
+            return second;
+        }
+        if (!(second > 0)) {
+            return first;
+        }
+        return Math.min(first, second);
+    }
+
+    private static double contextAllowance(IConversationMemory memory, String contextKey) {
         try {
             var step = memory.getCurrentStep();
-            IData<Object> data = step == null ? null : step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+            IData<Object> data = step == null ? null : step.getData("context:" + contextKey);
             if (data == null || !(data.getResult() instanceof Context context) || context.getValue() == null) {
                 return 0.0;
             }
@@ -431,23 +502,37 @@ public class LlmSpendGate {
             double allowance = value instanceof Number n ? n.doubleValue() : Double.parseDouble(String.valueOf(value));
             return Double.isFinite(allowance) ? allowance : 0.0;
         } catch (RuntimeException e) {
-            LOGGER.debugf("maxCostPerFire context could not be read: %s", e.getMessage());
+            LOGGER.debugf("%s context could not be read: %s", contextKey, e.getMessage());
             return 0.0;
         }
     }
 
-    /** What the current step has spent so far — its {@code audit:cost}. */
+    /**
+     * What the current step has spent so far — its {@code audit:cost} and the
+     * {@code audit:delegated_cost} charged back onto it. Both belong to this turn,
+     * so neither may raise the baseline a per-turn allowance is added to: a callee
+     * that delegated $0.20 of a $0.25 allowance has $0.05 left, not $0.25.
+     */
     private static double currentStepCost(IConversationMemory memory) {
         var step = memory.getCurrentStep();
-        IData<Object> cost = step == null ? null : step.getData(MemoryKeys.AUDIT_COST);
-        return cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : 0.0;
+        if (step == null) {
+            return 0.0;
+        }
+        return positive(step.getData(MemoryKeys.AUDIT_COST)) + positive(step.getData(MemoryKeys.AUDIT_DELEGATED_COST));
+    }
+
+    private static double positive(IData<Object> cost) {
+        return cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0.0
+                ? n.doubleValue()
+                : 0.0;
     }
 
     /**
      * The spend keys {@link #conversationCost} sums — the two {@code recordedSpend}
      * sums.
      */
-    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST);
+    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST,
+            MemoryKeys.AUDIT_DELEGATED_COST);
 
     /**
      * The conversation's priced spend so far — monotonic: an undo cannot lower it.

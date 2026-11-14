@@ -11,6 +11,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import dev.langchain4j.agent.tool.P;
@@ -72,6 +73,10 @@ public class TeardownAgentTool {
     private final String conversationId;
     /** The calling conversation's discussion, or null; also accepted as a match. */
     private final String groupConversationId;
+    /**
+     * Guards each agent's retain flag cluster-wide; {@code null}: this node only.
+     */
+    private final IConversationLeaseManager leaseManager;
 
     /**
      * {@code deploymentStore} may be null; teardown then leaves the deployment
@@ -90,6 +95,26 @@ public class TeardownAgentTool {
             Set<String> tornDownAgentIds,
             String conversationId,
             String groupConversationId) {
+        this(agentFactory, agentStore, deploymentStore, createdAgentIds, retainedAgentIds, tornDownAgentIds, conversationId,
+                groupConversationId, null);
+    }
+
+    /**
+     * @param leaseManager
+     *            the cluster lease manager that serialises retain / unretain with
+     *            teardown of the same agent on every node; {@code null} guards this
+     *            node only
+     */
+    public TeardownAgentTool(IAgentFactory agentFactory,
+            IAgentStore agentStore,
+            IDeploymentStore deploymentStore,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            Set<String> tornDownAgentIds,
+            String conversationId,
+            String groupConversationId,
+            IConversationLeaseManager leaseManager) {
+        this.leaseManager = leaseManager;
         this.conversationId = conversationId;
         this.groupConversationId = groupConversationId;
         this.agentFactory = agentFactory;
@@ -182,6 +207,63 @@ public class TeardownAgentTool {
      * Undeploy-only is gated as well as delete: taking someone else's production
      * agent offline is the same trespass, just reversible.
      */
+    /**
+     * Writes {@code retained} into the agent's own {@code dynamicOrigin}, the
+     * authority both cleanup paths read. Only for an agent whose origin names this
+     * conversation or discussion.
+     *
+     * @return a refusal for the model, or {@code null} when written
+     */
+    private String writeRetainedFlag(String agentId, boolean retained) {
+        String tearingDown = "⚠️ Cannot %s agent '%s' — the agent is being torn down.".formatted(retained ? "retain" : "un-retain", agentId);
+        if (SubAgentLocks.isTearingDown(agentId)) {
+            return tearingDown;
+        }
+        // The agent's guard, cluster-wide: a teardown on another node holds it across
+        // reading this flag, undeploying and deleting.
+        String unavailable = "⚠️ Cannot %s agent '%s' — the agent is being torn down or changed elsewhere, try again."
+                .formatted(retained ? "retain" : "un-retain", agentId);
+        return SubAgentLocks.withGuard(leaseManager, agentId, held -> {
+            if (!held.coordinated()) {
+                // Clustered, but the lease manager is degraded (an unfenced, node-local
+                // handle): a teardown on another node cannot be ruled out, so the flag
+                // is not written — the same fail-safe as teardown skipping the agent.
+                return "⚠️ Cannot %s agent '%s' — cluster coordination is unavailable, try again."
+                        .formatted(retained ? "retain" : "un-retain", agentId);
+            }
+            // Re-checked under the guard: a teardown that took it first may have
+            // decided to delete it meanwhile (and, once done, the agent is gone).
+            if (SubAgentLocks.isTearingDown(agentId)) {
+                return tearingDown;
+            }
+            return writeRetainedFlagLocked(agentId, retained);
+        }, () -> unavailable);
+    }
+
+    private String writeRetainedFlagLocked(String agentId, boolean retained) {
+        String refusal = refuseUnlessCreatedHere(agentId);
+        if (refusal != null) {
+            return refusal;
+        }
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = agentStore.read(agentId, current.getVersion());
+            // Written whenever it is not already exactly this value — an absent (legacy)
+            // flag is written too, so the agent's own flag decides from now on.
+            if (Boolean.valueOf(retained).equals(configuration.getDynamicOrigin().getRetained())) {
+                return null;
+            }
+            configuration.getDynamicOrigin().setRetained(retained);
+            // Compatible: only the provenance changed, nothing a running conversation uses.
+            agentStore.update(agentId, current.getVersion(), configuration, true);
+            return null;
+        } catch (Exception e) {
+            LOGGER.warnf("[TEARDOWN] Could not record the retain flag on agent '%s': %s", sanitize(agentId), e.getMessage());
+            return "⚠️ Could not %s agent '%s' right now — its retain flag could not be stored. Try again later."
+                    .formatted(retained ? "retain" : "un-retain", agentId);
+        }
+    }
+
     private String refuseUnlessCreatedHere(String agentId) {
         DynamicOrigin origin;
         try {
@@ -286,6 +368,13 @@ public class TeardownAgentTool {
                 return "ℹ️ Agent '%s' is already marked as retained.".formatted(agentId);
             }
 
+            // The flag on the agent itself is what cleanup decides by: it is durable at
+            // once, whereas this conversation's memory reaches the store only when the
+            // turn does — an end in between would otherwise delete the agent.
+            String refusal = writeRetainedFlag(agentId, true);
+            if (refusal != null) {
+                return refusal;
+            }
             retainedAgentIds.add(agentId);
             LOGGER.infof("[TEARDOWN] Retained agent '%s'", agentId);
 
@@ -305,6 +394,10 @@ public class TeardownAgentTool {
         }
         if (!retainedAgentIds.contains(agentId)) {
             return "⚠️ Agent '%s' is not currently retained.".formatted(agentId);
+        }
+        String refusal = writeRetainedFlag(agentId, false);
+        if (refusal != null) {
+            return refusal;
         }
         retainedAgentIds.remove(agentId);
         return "✅ Retention flag removed from agent '%s'. It will be cleaned up when the discussion ends.".formatted(agentId);

@@ -130,6 +130,8 @@ This is the standard way to use the LLM task - just connect to an LLM and start 
 | `maxTokens`                | string  | Maximum output tokens per response — see [Output Token Limits](#output-token-limits) | Provider-specific |
 | `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
 
+> **Who may set these.** With authorization on, only an `eddi-admin` may turn `logRequests`, `logResponses` or `logRequestsAndResponses` on, choose `bedrock`, `gemini-vertex`, `oracle-genai` or `jlama` (they authenticate with the server's own identity, or download models into the JVM), or set Jlama's `modelCachePath` / `workingDirectory` outside `eddi.llm.jlama.model-dir`. Editors may edit other fields of such a config an administrator stored. See [Security](security.md#llm-provider-settings-only-an-administrator-may-author).
+
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
 >
 > **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — and the response line are both written at **DEBUG**, so `logRequests: true` / `logResponses: true` show nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
@@ -536,7 +538,9 @@ is exactly why each is worth setting explicitly.
   the pod does, so every restart, rollout and reschedule re-downloads them from Hugging
   Face before the first turn can be answered. Point it at a mounted volume. (The download
   happens on the *first turn*, not at deploy time, so a mistake here surfaces long after
-  the agent was configured and saved.)
+  the agent was configured and saved.) Operators can set the volume once with
+  `eddi.llm.jlama.model-dir`: every agent's path is then confined to it, and an agent
+  that sets none uses it.
 - **Thread count — give the pod a CPU *limit*, not a parameter.** Jlama runs inference on
   a process-global `PhysicalCoreExecutor` sized at `max(2, availableProcessors() / 2)`.
   `availableProcessors()` honours a container CPU **limit**, so `limits.cpu: 4` yields two

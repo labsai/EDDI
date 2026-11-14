@@ -371,6 +371,30 @@ public class AgentConfiguration {
         }
 
         /**
+         * Whether {@code create_sub_agent} was asked to retain the agent when it
+         * created it. Stored with the agent, so an end that cleans up by origin keeps
+         * it even when the turn that created it was never stored (where the
+         * conversation's own retain flags live). Tri-state: {@code null} for an agent
+         * created before this field existed, whose retention is then read from the
+         * conversation's memory as before.
+         */
+        private Boolean retained;
+
+        public Boolean getRetained() {
+            return retained;
+        }
+
+        public void setRetained(Boolean retained) {
+            this.retained = retained;
+        }
+
+        /** Whether the flag says retained; {@code false} when it is absent. */
+        @JsonIgnore
+        public boolean isRetained() {
+            return Boolean.TRUE.equals(retained);
+        }
+
+        /**
          * Whether this origin names {@code conversationId} as the creating
          * conversation, or {@code groupConversationId} as the discussion it ran in. A
          * {@code null} argument never matches.

@@ -341,6 +341,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile CallerIdentityContext callerIdentityContext;
 
     /**
+     * The per-user cap on sub-agents created outside a group discussion.
+     * Field-injected for the same reason as the fields above; null under direct
+     * construction, where no cap applies.
+     */
+    @Inject
+    volatile StandaloneDynamicAgents standaloneDynamicAgents;
+
+    /**
      * Re-applies a task's input guardrails to the earlier turns the recall tool
      * returns ({@link ContextualToolsProvider}). Field-injected for the same reason
      * as the fields above; null under direct construction, where recalled turns are
@@ -1288,12 +1296,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // run on another executor. Admin-ness is only ever taken from the principal's
         // own identity — isAdminActingAs compares the user id too.
         CallerIdentity caller = identityContext != null ? identityContext.current() : null;
-        return new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
+        var provider = new DynamicAgentToolsProvider(agentSetupService, capabilityRegistryService, conversationService,
                 agentFactory, agentStore, deploymentStore, liveDiscussionRegistry, agentGroupStore,
                 guard != null
                         ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
                                 caller != null && caller.isAdminActingAs(principal))
                         : null);
+        provider.standaloneAgents = standaloneDynamicAgents;
+        return provider;
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

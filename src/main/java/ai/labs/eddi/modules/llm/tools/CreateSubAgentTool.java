@@ -9,12 +9,14 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.llm.impl.ProviderTypes;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
@@ -23,12 +25,17 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Objects;
@@ -66,6 +73,16 @@ public class CreateSubAgentTool {
     private final String callerConversationId;
     /** The group discussion that conversation belongs to, or null. */
     private final String groupConversationId;
+    /** The creating conversation's cost ceiling. Never null. */
+    private final DelegationBudget budget;
+    /** Asked before setup; a non-null answer refuses. May be null. */
+    private final Supplier<String> creationGate;
+    /**
+     * Asked after setup; {@code true} means the agent was torn down. May be null.
+     */
+    private final Predicate<String> afterCreate;
+    /** Run after setup when the gate admitted the creation. May be null. */
+    private final Runnable releaseGate;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -95,6 +112,98 @@ public class CreateSubAgentTool {
             Set<String> retainedAgentIds,
             String callerConversationId,
             String groupConversationId) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, null);
+    }
+
+    /**
+     * @param budget
+     *            the creating conversation's cost ceiling, applied to the initial
+     *            message's turn ({@link DelegationBudget}); {@code null} means none
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, null);
+    }
+
+    /**
+     * @param creationGate
+     *            asked before an agent is set up: a refusal the model is shown, or
+     *            {@code null} to proceed — the per-user cap on standalone
+     *            sub-agents ({@code StandaloneDynamicAgents#capRefusal}).
+     *            {@code null} asks nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, creationGate, null);
+    }
+
+    /**
+     * @param afterCreate
+     *            asked with the new agent's id once it is set up: {@code true} when
+     *            it was torn down at once because the conversation ended meanwhile
+     *            ({@code StandaloneDynamicAgents#tearDownIfEnded}). {@code null}
+     *            asks nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate,
+            Predicate<String> afterCreate) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, creationGate, afterCreate, null);
+    }
+
+    /**
+     * @param releaseGate
+     *            run once setup has finished, success or failure, when the
+     *            {@code creationGate} admitted the creation — gives back the slot
+     *            it reserved ({@code StandaloneDynamicAgents#releaseCreation}).
+     *            {@code null} runs nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate,
+            Predicate<String> afterCreate,
+            Runnable releaseGate) {
+        this.releaseGate = releaseGate;
+        this.afterCreate = afterCreate;
+        this.creationGate = creationGate;
+        this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
         this.callerConversationId = callerConversationId;
         this.groupConversationId = groupConversationId;
         this.agentSetupService = agentSetupService;
@@ -168,13 +277,18 @@ public class CreateSubAgentTool {
             // AgentSetupService#resolveParentLlmProfile.
             var parentProfile = agentSetupService.resolveParentLlmProfile(parentAgentId);
             boolean inherit = config.isInheritParentModel() && parentProfile != null;
+            // Without an allowedModels policy the sub-agent runs on the parent's own
+            // provider and model: nothing else was authorised, and a free choice let a
+            // steered model put a sub-agent on the provider's most expensive model.
+            boolean modelPolicy = config.getAllowedModels() != null && !config.getAllowedModels().isEmpty();
+            boolean defaultToParent = parentProfile != null && (inherit || !modelPolicy);
 
             // TRIMMED before anything compares it. AgentSetupService.resolveParams
             // trims, so " openai " is accepted downstream as openai while an untrimmed
             // guardrail here would reject it against allowedProviders=["openai"] and
             // fail to match the parent for credential inheritance — the policy and the
             // deployment disagreeing about the same string.
-            String requestedProvider = (provider == null || provider.isBlank()) && inherit
+            String requestedProvider = (provider == null || provider.isBlank()) && defaultToParent
                     ? parentProfile.provider()
                     : provider;
             requestedProvider = requestedProvider != null ? requestedProvider.trim() : null;
@@ -192,6 +306,14 @@ public class CreateSubAgentTool {
             // has no parameter for and a parent cannot hand down yet. Refused here, with
             // a message the model can act on, rather than as setup's bare 'requires
             // baseUrl' after the guardrails have run.
+            // A provider that authenticates with the server's own cloud identity (or
+            // runs models in the JVM) is never the model's choice: only the parent's
+            // own, already admin-authored, provider may be one.
+            if (ProviderTypes.isRestricted(resolvedProvider)
+                    && (parentProfile == null || !resolvedProvider.equalsIgnoreCase(parentProfile.provider()))) {
+                return ("⚠️ Provider '%s' is restricted to administrators (eddi.llm.restricted-providers) and is not the parent's "
+                        + "provider, so a sub-agent cannot use it.").formatted(resolvedProvider);
+            }
             if (OpenAiCompatibleEndpoint.isType(resolvedProvider)) {
                 return "⚠️ Dynamic sub-agents cannot target a self-hosted OpenAI-compatible endpoint (provider 'openai-compatible') yet: "
                         + "it needs a baseUrl, which this tool cannot pass. Pick another provider, or ask an administrator to create "
@@ -204,7 +326,7 @@ public class CreateSubAgentTool {
             // with the parent's Claude model — and because Ollama needs no key, nothing
             // downstream rejects it and the failure surfaces only at model load.
             String requestedModel = model;
-            if ((requestedModel == null || requestedModel.isBlank()) && inherit
+            if ((requestedModel == null || requestedModel.isBlank()) && defaultToParent
                     && resolvedProvider.equalsIgnoreCase(parentProfile.provider())) {
                 requestedModel = parentProfile.model();
             }
@@ -220,7 +342,10 @@ public class CreateSubAgentTool {
             // A vault reference names ONE provider's secret. Handing the parent's
             // anthropic reference to an openai sub-agent both breaks it at model load
             // and writes a reference to the parent's secret into an unrelated config.
-            String inheritedApiKey = parentProfile != null
+            // And only when inheritance is on: inheritParentModel=false used to hand
+            // over the parent's key all the same whenever the provider matched, so the
+            // switch that reads as "do not inherit" still spent the parent's key.
+            String inheritedApiKey = inherit
                     && resolvedProvider.equalsIgnoreCase(parentProfile.provider())
                             ? parentProfile.apiKeyReference()
                             : null;
@@ -251,7 +376,23 @@ public class CreateSubAgentTool {
             // resolvedModel always carries a value now (the effective default when the
             // caller named none), so there is no "no model requested" escape from this
             // guard any more.
-            if (config.getAllowedModels() != null && !config.getAllowedModels().isEmpty()) {
+            if (!modelPolicy) {
+                // No allowedModels: the parent's own provider and model, or nothing. A
+                // parent whose configuration could not be read leaves only the defaults
+                // — which carry no inherited key — so an explicit choice is refused.
+                if (parentProfile != null) {
+                    if (!resolvedProvider.equalsIgnoreCase(parentProfile.provider()) || parentProfile.model() == null
+                            || !resolvedModel.equalsIgnoreCase(parentProfile.model())) {
+                        return ("⚠️ Without an allowedModels policy a sub-agent runs on the parent's own model ('%s' on '%s'). "
+                                + "Omit provider and model, or ask an administrator to list '%s' for '%s' in dynamicAgents.allowedModels.")
+                                .formatted(parentProfile.model(), parentProfile.provider(), resolvedModel, resolvedProvider);
+                    }
+                } else if ((provider != null && !provider.isBlank()) || (model != null && !model.isBlank())) {
+                    return "⚠️ The parent agent's LLM configuration could not be read, and without an allowedModels policy a "
+                            + "sub-agent may only run on the parent's own model. Omit provider and model, or ask an administrator "
+                            + "to configure dynamicAgents.allowedModels.";
+                }
+            } else {
                 List<String> allowedForProvider = allowedModelsFor(resolvedProvider);
 
                 if (requestedProvider != null && !requestedProvider.isBlank()) {
@@ -280,6 +421,13 @@ public class CreateSubAgentTool {
                     return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
                             .formatted(resolvedModel, resolvedProvider, allowedForProvider);
                 }
+            }
+
+            // --- Guardrail: the per-user cap on standalone sub-agents ---
+            // Last, after every cheap check: it counts deployments.
+            String gateRefusal = creationGate != null ? creationGate.get() : null;
+            if (gateRefusal != null) {
+                return gateRefusal;
             }
 
             // --- Build and execute setup ---
@@ -315,7 +463,7 @@ public class CreateSubAgentTool {
             SetupResult result;
             try {
                 result = agentSetupService.setupAgent(request,
-                        new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId));
+                        origin(Boolean.TRUE.equals(retain)));
             } catch (AgentSetupException e) {
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.
@@ -326,8 +474,19 @@ public class CreateSubAgentTool {
                     throw new AgentSetupException(e.getMessage() + " — nothing was inherited: " + reason);
                 }
                 throw e;
+            } finally {
+                // The agent is deployed (and counted) or setup failed: either way the
+                // reserved slot is no longer pending.
+                if (releaseGate != null) {
+                    releaseGate.run();
+                }
             }
             String agentId = result.agentId();
+            if (afterCreate != null && afterCreate.test(agentId)) {
+                // The conversation ended while the agent was being set up, possibly after
+                // the end's own cleanup ran: torn down at once rather than left deployed.
+                return "⚠️ This conversation ended while the sub-agent was being created; it was torn down.";
+            }
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {
                 retainedAgentIds.add(agentId);
@@ -339,14 +498,48 @@ public class CreateSubAgentTool {
             // --- Optional: send initial message ---
             String conversationId = null;
             String response = null;
-            if (initialMessage != null && !initialMessage.isBlank()) {
+            // Admitted only when there is a message to send: it holds the allowance for
+            // the initial turn, so a parallel delegation of this turn cannot reuse it.
+            // Never null: without a message there is nothing to hold (Hold.NONE).
+            DelegationBudget.Hold hold = initialMessage != null && !initialMessage.isBlank() ? budget.admit() : DelegationBudget.Hold.NONE;
+            OptionalDouble remaining = hold.allowance();
+            if (initialMessage != null && !initialMessage.isBlank() && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+                hold.release();
+                // The sub-agent exists; its first turn would spend past the creating
+                // conversation's ceiling, so it is not sent.
+                response = "[Initial message not sent: this conversation's cost ceiling is reached]";
+            } else if (initialMessage != null && !initialMessage.isBlank()) {
+                boolean charged = false;
+                OptionalDouble messageAllowance = remaining;
                 try {
+                    // The creating conversation's remaining allowance holds the sub-agent's
+                    // first turn (and its start), as for converse_with_agent.
+                    Map<String, Context> ceilingContext = new HashMap<>();
+                    DelegationBudget.addCeiling(ceilingContext, remaining);
                     ConversationResult convResult = conversationService.startConversation(
-                            DEFAULT_ENV, agentId, userId, Collections.emptyMap());
+                            DEFAULT_ENV, agentId, userId, ceilingContext.isEmpty() ? Collections.emptyMap() : ceilingContext);
                     conversationId = convResult.conversationId();
+
+                    // One allowance for both turns: the start turn's spend is not handed to
+                    // the message turn again.
+                    if (remaining.isPresent()) {
+                        double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
+                        messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
+                        if (!(messageAllowance.getAsDouble() > 0.0)) {
+                            budget.charge(startCost);
+                            hold.release();
+                            charged = true;
+                            throw new IllegalStateException("this conversation's cost ceiling was reached while the sub-agent started");
+                        }
+                    }
 
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
+                    if (!ceilingContext.isEmpty()) {
+                        Map<String, Context> messageContext = new HashMap<>(ceilingContext);
+                        DelegationBudget.addCeiling(messageContext, messageAllowance);
+                        inputData.setContext(messageContext);
+                    }
 
                     CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
                     final AtomicBoolean skipped = new AtomicBoolean();
@@ -371,6 +564,11 @@ public class CreateSubAgentTool {
                             });
 
                     var snapshot = responseFuture.get(60, TimeUnit.SECONDS);
+                    // Charge-back: the new conversation's whole spend so far is this
+                    // tool's doing.
+                    budget.charge(DelegationBudget.spentSince(0.0, snapshot));
+                    hold.release();
+                    charged = true;
                     // Finding 25: a sub-agent that pauses for approval on its first
                     // message must report the pending approval, not "[no response]".
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -394,10 +592,23 @@ public class CreateSubAgentTool {
                         response = extractResponse(snapshot);
                     }
                 } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                    if (!charged) {
+                        DelegationBudget.settleUnfinished(budget, hold, conversationService, conversationId, 0.0, remaining, false);
+                    }
                     response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
                             + " is awaiting human approval; a reviewer must decide via POST /agents/"
                             + conversationId + "/resume before it can continue.";
                 } catch (Exception e) {
+                    if (!charged) {
+                        // The start turn may have run (and spent) before the message failed;
+                        // a timed-out message may still be spending.
+                        // The original allowance: the observed spend already includes the start turn.
+                        DelegationBudget.settleUnfinished(budget, hold, conversationService, conversationId, 0.0, remaining,
+                                e instanceof TimeoutException || e instanceof InterruptedException);
+                    }
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
                             agentId, e.getMessage());
                     response = "[Initial message failed: " + e.getMessage() + "]";
@@ -434,6 +645,17 @@ public class CreateSubAgentTool {
             LOGGER.errorf("[SUB-AGENT] Unexpected error creating sub-agent: %s", e.getMessage());
             return "❌ Unexpected error: " + e.getMessage();
         }
+    }
+
+    /**
+     * The provenance stamped on the created agent, with the retain flag: an end
+     * that finds the agent by its origin keeps a retained one even when the turn
+     * that created it was never stored.
+     */
+    private DynamicOrigin origin(boolean retained) {
+        var origin = new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId);
+        origin.setRetained(retained);
+        return origin;
     }
 
     /**

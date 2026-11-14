@@ -565,7 +565,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
      * {@code ConversationMemoryUtilities#conversationCost} sums them in.
      */
     private static final String SPEND_VALUES_PATH = "'$.%s[*].workflows[*].lifecycleTasks[*] "
-            + "? (@.key == \"audit:cost\" || @.key == \"audit:discarded_cost\").result'";
+            + "? (@.key == \"audit:cost\" || @.key == \"audit:discarded_cost\" || @.key == \"audit:delegated_cost\").result'";
 
     /**
      * The tail read — see {@link ConversationMemoryTail}. Cuts the two history

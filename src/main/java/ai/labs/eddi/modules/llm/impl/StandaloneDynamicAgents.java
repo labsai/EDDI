@@ -1,0 +1,509 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.llm.impl;
+
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.modules.llm.tools.SubAgentLocks;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
+/**
+ * The lifecycle of agents {@code create_sub_agent} deploys <em>outside</em> a
+ * group discussion. A discussion tears its created agents down when it ends
+ * ({@code GroupLifecycleOps#cleanupEphemeralAgents}); a standalone conversation
+ * had nothing of the kind, so every agent the model did not tear down itself
+ * stayed deployed to production for good — five per conversation by default, on
+ * the operator's key, for every conversation a user opened.
+ * <ul>
+ * <li>{@link #cleanup} — when the creating conversation ends or is deleted,
+ * every agent it created and did not retain is undeployed and permanently
+ * deleted. Only an agent whose own {@code dynamicOrigin} names this
+ * conversation and <em>no</em> discussion is touched: a discussion's agents are
+ * the group engine's to clean up, and an agent without a verifiable origin is
+ * left alone (the tracked list alone is not proof — the same rule
+ * {@code teardown_agent} applies).</li>
+ * <li>{@link #capRefusal} — a cap on the standalone agents one user may have
+ * deployed at once ({@code eddi.dynamic-agents.standalone.max-live-per-user},
+ * default 20), the backstop for conversations that never end.</li>
+ * </ul>
+ * Never throws: a cleanup that fails is logged and leaves the agent deployed,
+ * as it was before.
+ */
+@ApplicationScoped
+public class StandaloneDynamicAgents {
+
+    private static final Logger LOGGER = Logger.getLogger(StandaloneDynamicAgents.class);
+    private static final Environment DEFAULT_ENV = Environment.production;
+
+    /** Default of {@code eddi.dynamic-agents.standalone.max-live-per-user}. */
+    public static final int DEFAULT_MAX_LIVE_PER_USER = 20;
+
+    private final IAgentStore agentStore;
+    private final IAgentFactory agentFactory;
+    private final IDeploymentStore deploymentStore;
+    private final IConversationMemoryStore conversationMemoryStore;
+    private final int maxLivePerUser;
+    private final IConversationLeaseManager leaseManager;
+
+    @Inject
+    public StandaloneDynamicAgents(IAgentStore agentStore, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore,
+            @ConfigProperty(name = "eddi.dynamic-agents.standalone.max-live-per-user", defaultValue = "20") int maxLivePerUser,
+            Instance<IConversationLeaseManager> leaseManager) {
+        this(agentStore, agentFactory, deploymentStore, conversationMemoryStore, maxLivePerUser,
+                leaseManager != null && leaseManager.isResolvable() ? leaseManager.get() : null);
+    }
+
+    /**
+     * @param leaseManager
+     *            the cluster lease manager guarding each sub-agent's retain flag
+     *            against teardown on other nodes; {@code null} guards this node
+     *            only
+     */
+    public StandaloneDynamicAgents(IAgentStore agentStore, IAgentFactory agentFactory, IDeploymentStore deploymentStore,
+            IConversationMemoryStore conversationMemoryStore, int maxLivePerUser, IConversationLeaseManager leaseManager) {
+        this.agentStore = agentStore;
+        this.agentFactory = agentFactory;
+        this.deploymentStore = deploymentStore;
+        this.conversationMemoryStore = conversationMemoryStore;
+        this.maxLivePerUser = maxLivePerUser;
+        this.leaseManager = leaseManager;
+    }
+
+    /**
+     * The lease manager that guards sub-agents cluster-wide, or {@code null}.
+     */
+    public IConversationLeaseManager leaseManager() {
+        return leaseManager;
+    }
+
+    /**
+     * Why this user may not create another standalone agent now, or {@code null}
+     * when they may. A cap of {@code 0} or less switches the cap off. Fails closed:
+     * when the deployments cannot be counted, creation is refused.
+     */
+    public String capRefusal(String userId) {
+        return capRefusal(userId, 0);
+    }
+
+    /**
+     * Creations that passed the cap on this node and whose setup has not finished,
+     * per user: counted with the deployed agents, so concurrent creations cannot
+     * all pass the same free slot. Across nodes the cap stays best-effort — two
+     * nodes may each admit the last slot once.
+     */
+    private final ConcurrentHashMap<String, AtomicInteger> pendingCreations = new ConcurrentHashMap<>();
+
+    /**
+     * As {@link #capRefusal(String)}, and when admitted, reserves the slot until
+     * {@link #releaseCreation} — check and reservation are one step per user.
+     */
+    public String reserveCreation(String userId) {
+        if (maxLivePerUser <= 0) {
+            return null;
+        }
+        AtomicInteger pending = pendingCreations.computeIfAbsent(userId == null ? "" : userId, key -> new AtomicInteger());
+        synchronized (pending) {
+            String refusal = capRefusal(userId, pending.get());
+            if (refusal == null) {
+                pending.incrementAndGet();
+            }
+            return refusal;
+        }
+    }
+
+    /**
+     * Gives back a slot {@link #reserveCreation} took, once setup has finished
+     * either way.
+     */
+    public void releaseCreation(String userId) {
+        if (maxLivePerUser <= 0) {
+            return;
+        }
+        AtomicInteger pending = pendingCreations.get(userId == null ? "" : userId);
+        if (pending != null) {
+            synchronized (pending) {
+                if (pending.get() > 0) {
+                    pending.decrementAndGet();
+                }
+            }
+        }
+    }
+
+    private String capRefusal(String userId, int pendingCreations) {
+        if (maxLivePerUser <= 0) {
+            return null;
+        }
+        long live;
+        try {
+            live = liveStandaloneAgents(userId) + pendingCreations;
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not count the standalone sub-agents of user '%s' — refusing creation: %s", sanitize(userId),
+                    sanitize(e.getMessage()));
+            return "⚠️ Your deployed sub-agents could not be counted right now, so no new one was created. Try again later.";
+        }
+        if (live >= maxLivePerUser) {
+            return ("⚠️ You already have %d sub-agents deployed outside group discussions, the most allowed (%d). "
+                    + "Tear one down with teardown_agent, or end the conversations that created them, before creating another.")
+                    .formatted(live, maxLivePerUser);
+        }
+        return null;
+    }
+
+    /**
+     * How many standalone sub-agents created for {@code userId} are deployed now.
+     */
+    long liveStandaloneAgents(String userId) throws IResourceStore.ResourceStoreException {
+        if (userId == null) {
+            return 0;
+        }
+        List<DeploymentInfo> deployed = deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed);
+        Set<String> agentIds = new LinkedHashSet<>();
+        for (DeploymentInfo info : deployed) {
+            if (info != null && info.getAgentId() != null) {
+                agentIds.add(info.getAgentId());
+            }
+        }
+        long live = 0;
+        for (String agentId : agentIds) {
+            // Not originOf: its fail-safe null would leave an unreadable agent out of
+            // the count and admit a creation over the cap.
+            DynamicOrigin origin = originForCount(agentId);
+            if (origin != null && origin.getCreatedInGroupConversationId() == null && userId.equals(origin.getCreatedForUserId())) {
+                live++;
+            }
+        }
+        return live;
+    }
+
+    /**
+     * The agent's {@code dynamicOrigin} for the cap: {@code null} when it has none
+     * or no longer exists (a stale deployment record), and a failure to read it
+     * propagates, so {@link #capRefusal} refuses.
+     */
+    private DynamicOrigin originForCount(String agentId) throws IResourceStore.ResourceStoreException {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            return configuration != null ? configuration.getDynamicOrigin() : null;
+        } catch (IResourceStore.ResourceNotFoundException gone) {
+            return null;
+        }
+    }
+
+    /**
+     * Tears down what the conversation created and did not retain, reading its
+     * stored memory. For the end and delete paths that hold only the id.
+     */
+    public void cleanup(String conversationId) {
+        if (conversationId == null) {
+            return;
+        }
+        String owner = null;
+        Set<String> handled = new HashSet<>();
+        Set<String> retained = Set.of();
+        boolean retentionKnown = false;
+        try {
+            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot != null) {
+                owner = snapshot.getUserId();
+                IConversationMemory memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
+                List<String> created = DynamicAgentToolsProvider.seedCreatedAgentIds(memory);
+                retained = DynamicAgentToolsProvider.seedRetainedAgentIds(memory, created);
+                cleanup(conversationId, memory);
+                handled.addAll(created);
+                retentionKnown = true;
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // gone already: which agents were retained is gone with it
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not read conversation %s to tear down its sub-agents: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+        }
+        // The stored snapshot misses an agent a turn created and never stored — a turn
+        // cancelled or abandoned while the end ran, on any node. The agent's own
+        // dynamicOrigin is durable the moment it exists, so the end also tears down
+        // every deployed agent whose origin names this conversation: whichever of the
+        // end and the turn's finalization runs last still finds it.
+        if (!retentionKnown) {
+            // Retention lives in the conversation's memory only. Without it the origin
+            // scan could permanently delete an agent the model asked to keep, so the
+            // destructive fallback does not run; the agents a turn creates after this
+            // are still caught by tearDownIfEnded.
+            LOGGER.warnf("[DYNAMIC] Conversation %s could not be read; its sub-agents are found by the snapshot only, not by origin",
+                    sanitize(conversationId));
+            return;
+        }
+        for (String agentId : originTagged(conversationId, owner)) {
+            if (!handled.contains(agentId) && !retained.contains(agentId)) {
+                teardown(agentId, conversationId);
+            }
+        }
+    }
+
+    /**
+     * The deployed agents whose {@code dynamicOrigin} names {@code conversationId}
+     * and no discussion — scoped to the conversation's owner when known, through
+     * the same deployment lookup the per-user cap uses. Empty when the deployments
+     * cannot be read (logged; the snapshot path above still ran).
+     */
+    List<String> originTagged(String conversationId, String owner) {
+        List<String> tagged = new ArrayList<>();
+        try {
+            Set<String> agentIds = new LinkedHashSet<>();
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
+                if (info != null && info.getAgentId() != null) {
+                    agentIds.add(info.getAgentId());
+                }
+            }
+            for (String agentId : agentIds) {
+                DynamicOrigin origin = originOf(agentId);
+                // A retained agent stays: retention may exist only in a turn that was never
+                // stored, so the flag on the agent itself is what the origin search reads.
+                if (origin != null && !origin.isRetained() && origin.getCreatedInGroupConversationId() == null
+                        && conversationId.equals(origin.getCreatedInConversationId())
+                        && (owner == null || owner.equals(origin.getCreatedForUserId()))) {
+                    tagged.add(agentId);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not list the deployed sub-agents of conversation %s: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+        }
+        return tagged;
+    }
+
+    /**
+     * Why a sub-agent may not be created in {@code conversationId} now, or
+     * {@code null}: an ended conversation creates none. Checked before setup; an
+     * agent created while the end ran is caught by {@link #tearDownIfEnded}.
+     */
+    public String endedRefusal(String conversationId) {
+        if (isEnded(conversationId)) {
+            return "⚠️ This conversation has ended or no longer exists, so no sub-agent was created.";
+        }
+        return null;
+    }
+
+    /**
+     * After setup: when the conversation ended while the agent was being created,
+     * tears it down at once — the end's cleanup may already have run.
+     *
+     * @return {@code true} when the agent was torn down
+     */
+    public boolean tearDownIfEnded(String conversationId, String agentId) {
+        if (agentId == null || !isEnded(conversationId)) {
+            return false;
+        }
+        DynamicOrigin origin = originOf(agentId);
+        if (origin != null && origin.isRetained()) {
+            // Asked to be kept: it outlives its conversation by design.
+            return false;
+        }
+        teardown(agentId, conversationId);
+        return true;
+    }
+
+    /**
+     * Whether the conversation is over: stored {@code ENDED}, or confirmed gone. A
+     * purge deletes the snapshot after its own cleanup, so an agent whose setup
+     * finished after that scan finds no conversation at all — and must be torn
+     * down, not kept. Gone means confirmed: a state read that finds nothing and a
+     * snapshot read that finds nothing. A store that fails to answer is not "gone"
+     * — nothing is torn down then (logged).
+     */
+    private boolean isEnded(String conversationId) {
+        if (conversationId == null) {
+            return false;
+        }
+        try {
+            ConversationState state = conversationMemoryStore.getConversationState(conversationId);
+            if (state != null) {
+                return state == ConversationState.ENDED;
+            }
+            return conversationMemoryStore.loadConversationMemorySnapshot(conversationId) == null;
+        } catch (IResourceStore.ResourceNotFoundException gone) {
+            return true;
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not read the state of conversation %s; treating it as open: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Tears down what the conversation in {@code memory} created and did not
+     * retain.
+     */
+    public void cleanup(String conversationId, IConversationMemory memory) {
+        if (conversationId == null || memory == null) {
+            return;
+        }
+        List<String> created;
+        Set<String> retained;
+        try {
+            created = DynamicAgentToolsProvider.seedCreatedAgentIds(memory);
+            if (created.isEmpty()) {
+                return;
+            }
+            retained = DynamicAgentToolsProvider.seedRetainedAgentIds(memory, created);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("[DYNAMIC] Could not read the sub-agents conversation %s created: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            return;
+        }
+        for (String agentId : created) {
+            if (agentId == null) {
+                continue;
+            }
+            // The agent's own flag decides (teardown reads it): stored memory can be
+            // older than an unretain_agent in a turn that was never stored. Only an
+            // agent created before the flag existed falls back to memory's list.
+            if (retained.contains(agentId) && legacyRetention(agentId)) {
+                continue;
+            }
+            teardown(agentId, conversationId);
+        }
+    }
+
+    /**
+     * Whether the agent carries no retain flag of its own (created before it
+     * existed).
+     */
+    private boolean legacyRetention(String agentId) {
+        DynamicOrigin origin = originOf(agentId);
+        return origin == null || origin.getRetained() == null;
+    }
+
+    private void teardown(String agentId, String conversationId) {
+        // Held across reading the flag, undeploying and deleting, cluster-wide: a
+        // retain_agent in between (on any node) would otherwise report success for an
+        // agent deleted anyway.
+        try {
+            boolean guarded = SubAgentLocks.withGuard(leaseManager, agentId, held -> {
+                if (!held.coordinated()) {
+                    // Clustered, but the lease manager is degraded (NATS unreachable) and
+                    // handed out a node-local handle: another node's retain cannot be ruled
+                    // out, so the agent is kept (fail safe) for a later cleanup.
+                    LOGGER.warnf("[DYNAMIC] Cluster lease of sub-agent '%s' is unfenced (degraded) — not torn down this time (conversation %s)",
+                            sanitize(agentId), sanitize(conversationId));
+                    return true;
+                }
+                teardownLocked(agentId, conversationId, held);
+                return true;
+            }, () -> false);
+            if (!guarded) {
+                // Never delete unprotected: a retain may be in flight elsewhere. The agent
+                // is left for the next cleanup of this conversation.
+                LOGGER.warnf("[DYNAMIC] Sub-agent '%s' is being changed elsewhere — not torn down this time (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+            }
+        } finally {
+            SubAgentLocks.clearTearingDown(agentId);
+        }
+    }
+
+    private void teardownLocked(String agentId, String conversationId, SubAgentLocks.Guard guard) {
+        Integer versionRead = versionOf(agentId);
+        DynamicOrigin origin = originOf(agentId);
+        if (origin != null && origin.isRetained()) {
+            // The flag on the agent is the authority (retain_agent / unretain_agent
+            // write it at once); it may be newer than any stored memory.
+            LOGGER.debugf("[DYNAMIC] Agent '%s' is retained — kept", sanitize(agentId));
+            return;
+        }
+        if (origin == null || origin.getCreatedInGroupConversationId() != null || !conversationId.equals(origin.getCreatedInConversationId())) {
+            // No verifiable origin (every agent create_sub_agent deploys carries one), a
+            // discussion's agent (the group engine's to clean up) or another
+            // conversation's: not ours to touch.
+            LOGGER.debugf("[DYNAMIC] Agent '%s' is not a standalone sub-agent of conversation %s — left alone", sanitize(agentId),
+                    sanitize(conversationId));
+            return;
+        }
+        SubAgentLocks.markTearingDown(agentId);
+        try {
+            if (!guard.stillHeld()) {
+                LOGGER.warnf("[DYNAMIC] Lost the lease of sub-agent '%s' before undeploying it — kept (conversation %s)", sanitize(agentId),
+                        sanitize(conversationId));
+                return;
+            }
+            agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+            // Last checks before the irreversible step: the lease is still ours, and
+            // the agent is unchanged and still not retained. An agent kept here is
+            // undeployed but intact, and can be deployed again.
+            if (!guard.stillHeld()) {
+                LOGGER.warnf("[DYNAMIC] Lost the lease of sub-agent '%s' before deleting it — undeployed, not deleted (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+                return;
+            }
+            DynamicOrigin latest = originOf(agentId);
+            Integer versionNow = versionOf(agentId);
+            if (latest == null || latest.isRetained() || versionRead == null || !versionRead.equals(versionNow)) {
+                LOGGER.warnf("[DYNAMIC] Sub-agent '%s' was retained or changed while it was undeployed — not deleted (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+                return;
+            }
+            agentStore.deleteAllPermanently(agentId);
+            try {
+                deploymentStore.deleteDeploymentInfos(agentId);
+            } catch (Exception e) {
+                LOGGER.warnf("[DYNAMIC] Could not clear the deployment record(s) of sub-agent '%s': %s", sanitize(agentId), sanitize(e.getMessage()));
+            }
+            LOGGER.infof("[DYNAMIC] Tore down sub-agent '%s' when conversation %s ended", sanitize(agentId), sanitize(conversationId));
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not tear down sub-agent '%s' of conversation %s: %s", sanitize(agentId), sanitize(conversationId),
+                    sanitize(e.getMessage()));
+        }
+    }
+
+    /** The agent's current version, or {@code null} when unreadable. */
+    private Integer versionOf(String agentId) {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            return current != null ? current.getVersion() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * The agent's {@code dynamicOrigin}, or {@code null} when absent or unreadable.
+     */
+    private DynamicOrigin originOf(String agentId) {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            AgentConfiguration configuration = current != null ? agentStore.read(agentId, current.getVersion()) : null;
+            return configuration != null ? configuration.getDynamicOrigin() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("[DYNAMIC] Could not read agent '%s' for its origin: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return null;
+        }
+    }
+}

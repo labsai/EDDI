@@ -1108,7 +1108,7 @@ class CascadingModelExecutor {
         // #8: resolve step type through global variables (parity with the standard
         // path).
         String rawType = step.getType() != null ? step.getType() : task.getType();
-        String modelType = globalVariableResolver.resolveValue(rawType);
+        String modelType = ProviderTypes.resolve(globalVariableResolver, rawType);
         // #8: template step param values (parity with task params), then merge.
         Map<String, String> mergedParams = mergeParams(baseParams, templateParams(step.getParameters(), templateDataObjects, memory, what));
         return new StepModel(modelType, mergedParams);
@@ -1242,7 +1242,7 @@ class CascadingModelExecutor {
         // heuristic and hide the attempt.
         Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects, memory, "Cascade judge");
         try {
-            String type = globalVariableResolver.resolveValue(judgeConfig.getType());
+            String type = ProviderTypes.resolve(globalVariableResolver, judgeConfig.getType());
             return registry.getOrCreate(type, params != null ? params : new HashMap<>());
         } catch (Exception e) {
             LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
