@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Store interface for tenant quota configurations and atomic usage tracking.
@@ -90,6 +91,25 @@ public interface ITenantQuotaStore {
      *            the quota configuration to store
      */
     void setQuota(TenantQuota quota);
+
+    /**
+     * Replaces a tenant's quota only while the stored one still equals
+     * {@code expected} — {@code null} meaning no quota is stored for the tenant.
+     * The write a spend-control change makes
+     * ({@code docs/spend-control-changes.md}): a limit raised over MCP and approved
+     * by an administrator must not overwrite a limit someone lowered in the
+     * meantime. The real stores override this atomically; this default is a
+     * read-compare-write for test doubles.
+     *
+     * @return whether the quota was written
+     */
+    default boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        if (!Objects.equals(getQuota(next.tenantId()), expected)) {
+            return false;
+        }
+        setQuota(next);
+        return true;
+    }
 
     /**
      * List all configured tenant quotas.

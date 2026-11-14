@@ -192,6 +192,29 @@ public class TenantQuotaService {
     }
 
     /**
+     * {@link #setQuota}, but only while the stored quota still equals
+     * {@code expected} ({@code null}: none stored). Drops the cached entry on
+     * success, as {@link #setQuota} does.
+     *
+     * @return whether the quota was written
+     */
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        boolean written = quotaStore.compareAndSetQuota(expected, next);
+        if (written) {
+            invalidateQuotaCache(next.tenantId());
+        }
+        return written;
+    }
+
+    /**
+     * Read a tenant's stored quota configuration straight from the store (no
+     * cache): {@code null} when none is stored.
+     */
+    public TenantQuota readStoredQuota(String tenantId) {
+        return quotaStore.getQuota(tenantId);
+    }
+
+    /**
      * Forget a tenant's cached quota configuration. Call after any write that did
      * not go through {@link #setQuota}, so the change takes effect on this node
      * immediately rather than after {@link #QUOTA_CACHE_TTL}.

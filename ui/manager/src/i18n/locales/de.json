@@ -4720,6 +4720,22 @@
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein {{productName}}-Backend für echte Daten."
   },
+  "spendControl": {
+    "title": "Ausstehende Änderungen",
+    "description": "Über MCP vorgeschlagen und nicht angewendet: Jede würde die Ausgabenkontrolle lockern. Mit der Genehmigung wird sie unter Ihrem Namen angewendet.",
+    "proposedBy": "Vorgeschlagen von {{who}} am {{when}}",
+    "loosening": "Lockert die Ausgabenkontrolle",
+    "allChanges": "Alle Änderungen",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "approveTitle": "Diese Änderung genehmigen?",
+    "rejectTitle": "Diese Änderung ablehnen?",
+    "approveDesc": "Sie wird jetzt mit Ihnen als Verantwortlichem angewendet und lockert die Ausgabenkontrolle: {{loosening}}",
+    "rejectDesc": "Es wird nichts angewendet. Der Vorschlagende kann sie erneut einreichen.",
+    "approved": "Änderung genehmigt und angewendet",
+    "rejected": "Änderung abgelehnt; nichts wurde angewendet",
+    "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
+  },
   "modelPrices": {
     "nav": "Modellpreise",
     "title": "Modellpreise",

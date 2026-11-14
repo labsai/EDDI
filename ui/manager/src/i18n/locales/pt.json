@@ -4770,6 +4770,22 @@
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend {{productName}} para dados reais."
   },
+  "spendControl": {
+    "title": "Alterações pendentes",
+    "description": "Propostas via MCP e não aplicadas: cada uma afrouxaria o controle de gastos. Aprovar aplica a alteração em seu nome.",
+    "proposedBy": "Proposta por {{who}} em {{when}}",
+    "loosening": "Afrouxa o controle de gastos",
+    "allChanges": "Todas as alterações",
+    "approve": "Aprovar",
+    "reject": "Rejeitar",
+    "approveTitle": "Aprovar esta alteração?",
+    "rejectTitle": "Rejeitar esta alteração?",
+    "approveDesc": "Ela é aplicada agora, com você como autor, e afrouxa o controle de gastos: {{loosening}}",
+    "rejectDesc": "Nada é aplicado. Quem propôs pode enviá-la novamente.",
+    "approved": "Alteração aprovada e aplicada",
+    "rejected": "Alteração rejeitada; nada foi aplicado",
+    "approveBlockedDirty": "Guarde primeiro as suas alterações à quota ou recarregue a página para as descartar: guardá-las depois de uma aprovação substituiria a quota aprovada."
+  },
   "modelPrices": {
     "nav": "Preços de modelos",
     "title": "Preços de modelos",

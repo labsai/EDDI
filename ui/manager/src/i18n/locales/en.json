@@ -4761,6 +4761,22 @@
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an {{productName}} backend for real data."
   },
+  "spendControl": {
+    "title": "Pending changes",
+    "description": "Proposed over MCP and not applied: each would loosen spending. Approving applies it under your name.",
+    "proposedBy": "Proposed by {{who}} on {{when}}",
+    "loosening": "Loosens spending",
+    "allChanges": "All changes",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveTitle": "Approve this change?",
+    "rejectTitle": "Reject this change?",
+    "approveDesc": "It is applied now with you as the actor and loosens spending: {{loosening}}",
+    "rejectDesc": "Nothing is applied. The proposer can file it again.",
+    "approved": "Change approved and applied",
+    "rejected": "Change rejected; nothing was applied",
+    "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
+  },
   "modelPrices": {
     "nav": "Model Prices",
     "title": "Model Prices",

@@ -86,6 +86,9 @@ import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
 import ai.labs.eddi.engine.pricing.IModelPriceCatalogStore;
 import ai.labs.eddi.engine.pricing.mongo.MongoModelPriceCatalogStore;
 import ai.labs.eddi.datastore.postgres.PostgresModelPriceCatalogStore;
+import ai.labs.eddi.datastore.postgres.PostgresSpendControlChangeStore;
+import ai.labs.eddi.engine.spendcontrol.ISpendControlChangeStore;
+import ai.labs.eddi.engine.spendcontrol.mongo.MongoSpendControlChangeStore;
 import ai.labs.eddi.engine.groups.budget.ITeamBudgetStore;
 import ai.labs.eddi.engine.groups.budget.MongoTeamBudgetStore;
 import ai.labs.eddi.engine.groups.budget.PostgresTeamBudgetStore;
@@ -395,6 +398,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IModelPriceCatalogStore modelPriceCatalogStore(Instance<MongoModelPriceCatalogStore> mongo,
                                                           Instance<PostgresModelPriceCatalogStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ISpendControlChangeStore spendControlChangeStore(Instance<MongoSpendControlChangeStore> mongo,
+                                                            Instance<PostgresSpendControlChangeStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

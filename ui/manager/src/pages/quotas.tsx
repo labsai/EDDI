@@ -24,11 +24,14 @@ import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
 import { TeamBudgetsTable } from "@/components/quotas/team-budgets-table";
+import { PendingSpendChanges } from "@/components/spend-control/pending-spend-changes";
+import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 
 const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
+  const isAdmin = useIsAdminOrUnknown();
   const { data: quota, isLoading: quotaLoading, isError: quotaError, error: quotaErr, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const {
     data: usage,
@@ -171,6 +174,22 @@ export function QuotasPage() {
           {quotaError && quota && (
             <RefetchErrorNotice onRetry={() => refetchQuota()} />
           )}
+
+          {/* The form stops following the server while it is dirty, and Save sends the
+              whole form: approving now and saving afterwards would overwrite the
+              approved quota with the limits read before it. */}
+          <PendingSpendChanges
+            kind="TENANT_QUOTA"
+            isAdmin={isAdmin}
+            approveBlockedReason={
+              dirty
+                ? t(
+                    "spendControl.approveBlockedDirty",
+                    "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota.",
+                  )
+                : undefined
+            }
+          />
 
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (

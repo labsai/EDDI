@@ -25,6 +25,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -231,6 +232,56 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                         Updates.set("maxMonthlyCostUsd", quota.maxMonthlyCostUsd()),
                         Updates.set("enabled", quota.enabled())),
                 new FindOneAndUpdateOptions().upsert(true));
+    }
+
+    /**
+     * Atomic against any other writer: the update is filtered on every stored field
+     * of the document that was compared, so a write in between matches nothing. A
+     * field the stored document lacks (an older document read with its default) is
+     * matched as absent.
+     */
+    @Override
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        try {
+            Document current = quotas.find(Filters.eq("tenantId", next.tenantId())).first();
+            if (expected == null) {
+                if (current != null) {
+                    return false;
+                }
+                // Keyed on tenantId alone, like every other write here that may insert: a
+                // writer that lost the race matches the winner's document, changes nothing
+                // ($setOnInsert) and reports false. Only an actual insert is a success.
+                return quotas.updateOne(Filters.eq("tenantId", next.tenantId()), Updates.combine(
+                        Updates.setOnInsert("tenantId", next.tenantId()),
+                        Updates.setOnInsert("maxConversationsPerDay", next.maxConversationsPerDay()),
+                        Updates.setOnInsert("maxAgentsPerTenant", next.maxAgentsPerTenant()),
+                        Updates.setOnInsert("maxApiCallsPerMinute", next.maxApiCallsPerMinute()),
+                        Updates.setOnInsert("maxMonthlyCostUsd", next.maxMonthlyCostUsd()),
+                        Updates.setOnInsert("enabled", next.enabled())),
+                        new UpdateOptions().upsert(true)).getUpsertedId() != null;
+            }
+            if (current == null || !expected.equals(toQuota(current))) {
+                return false;
+            }
+            List<Bson> filters = new ArrayList<>();
+            filters.add(Filters.eq("_id", current.get("_id")));
+            for (String field : List.of("maxConversationsPerDay", "maxAgentsPerTenant", "maxApiCallsPerMinute", "maxMonthlyCostUsd", "enabled")) {
+                filters.add(current.containsKey(field) ? Filters.eq(field, current.get(field)) : Filters.exists(field, false));
+            }
+            return quotas.updateOne(Filters.and(filters), Updates.combine(
+                    Updates.set("maxConversationsPerDay", next.maxConversationsPerDay()),
+                    Updates.set("maxAgentsPerTenant", next.maxAgentsPerTenant()),
+                    Updates.set("maxApiCallsPerMinute", next.maxApiCallsPerMinute()),
+                    Updates.set("maxMonthlyCostUsd", next.maxMonthlyCostUsd()),
+                    Updates.set("enabled", next.enabled()))).getMatchedCount() == 1;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return false;
+            }
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        } catch (MongoException e) {
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
     }
 
     @Override

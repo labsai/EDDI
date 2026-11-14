@@ -87,6 +87,7 @@
 - [Audit Ledger](audit-ledger.md)
 - [Tenant Quotas](tenant-quotas.md)
   - [Team Budgets](team-budgets.md)
+  - [Spend-Control Changes](spend-control-changes.md)
   - [Agent Operations Tools](agent-ops-tools.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
