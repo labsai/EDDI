@@ -907,6 +907,12 @@ rule on `outcome="gave_up"` is in the
 eddi_health_recorded_total          # Agent Health turn rows written
 eddi_health_dropped_total           # Turn records lost; tag: reason (queue_full|store_error|shutdown|erased|orphaned)
 eddi_health_queue_depth             # Gauge: turn records waiting for the health worker
+eddi_health_rollup_duration_seconds # Timer: one pass of the health-rollup system job
+eddi_health_rollup_days_total       # Agent days the rollup recomputed
+eddi_health_rollup_rows_total       # Daily rows the rollup wrote
+eddi_health_rollup_failures_total   # Agent days whose rollup failed (retried next pass)
+eddi_health_rollup_pending          # Gauge: agent days waiting for the rollup (read from the shared queue, cached 10 s)
+eddi_health_rollup_lag_seconds      # Gauge: age of the oldest waiting agent day (same)
 ```
 
 No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
@@ -915,7 +921,12 @@ No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for 
 that writes fail, `shutdown` that rows were offered while the node stopped. `erased` and `orphaned` are not faults: rows withheld
 or removed because their user was erased or their conversation deleted — `orphaned` counts the rows the daily orphan sweep removed,
 left either by a failed clean-up on the health worker or by a conversation delete whose own removal of its health rows failed. A dropped row is a gap in the health views, never a slower or
-failed turn. See [Agent Health](agent-health.md).
+failed turn. `eddi_health_rollup_lag_seconds` should stay below a few rollup
+intervals (`eddi.health.rollup-interval`, 5 minutes by default); a lag that keeps
+growing, or a rising `eddi_health_rollup_failures_total`, means the daily rows —
+and with them the health views — are falling behind the turns. Both gauges read
+the shared queue when scraped, so every node reports the same cluster-wide
+backlog. See [Agent Health](agent-health.md#daily-rollup).
 
 ### Agent Identity & Signing Metrics
 

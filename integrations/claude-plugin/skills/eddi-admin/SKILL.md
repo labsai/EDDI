@@ -110,6 +110,25 @@ out, and only an admin sees who rated.
 
 `read_docs("conversation-ratings")` has the scales and filters.
 
+## Agent health
+
+To answer "is this agent healthy?" or "why did it get worse?", read the numbers rather
+than sampling conversations:
+
+- `read_agent_health` — one agent over a period (7d, 30d, 90d): agent-caused failures
+  kept apart from provider/platform failures, Apdex and p95 duration, fallbacks, cost per
+  session, sessions and users, ratings (restricted unless you may read them). Each measure
+  has `value`, `n`, `baseline`, `delta`, `significant` and a `band`; GREY means too little
+  data. Report the measures that are RED or changed significantly, with their `n`.
+  Effectiveness is null until conversation outcomes exist — say so, do not guess.
+- `compare_agent_versions_health` — after a promotion: the new version since its first
+  turn against the old one's last days; `deltas` say `better` and `significant`.
+- `list_agent_health` — every agent you may view, the ones needing attention first, and
+  the platform incidents of the period: if the agent's failures fall on such a day, the provider is the
+  likely cause, not the agent.
+
+`read_docs("agent-health")` has every measure's definition.
+
 **Alerts.** Alert rules (written over REST; the Manager has no Alerts page yet) report low ratings,
 failed turns and turns whose result matched an `OUTPUT_MATCH` condition to an inbox,
 Slack or an https webhook. Events name no user; a rating comment, or an output-match

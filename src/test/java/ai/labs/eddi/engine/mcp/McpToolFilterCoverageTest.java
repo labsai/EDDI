@@ -56,7 +56,8 @@ class McpToolFilterCoverageTest {
             McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class,
             McpGdprTools.class, McpDocTools.class, McpVersionTools.class, McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class);
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpHealthTools.class);
 
     private static Set<String> declaredToolNames() {
         var names = new TreeSet<String>();

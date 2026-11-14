@@ -26,15 +26,20 @@ import org.mockito.InOrder;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -224,6 +229,104 @@ class HealthTurnRecorderTest {
     }
 
     @Test
+    @DisplayName("a resumed turn marks the day its row is stored on (the first-recorded day), not the day of the resume")
+    void marksTheStoredDayDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate firstDay = LocalDate.of(2026, 11, 9);
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory(), null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(firstDay));
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a late row is written with the time of its write in the same write, its undo too; its days are only noted, like any row's")
+    void lateRowCarriesItsWriteTime() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate day = LocalDate.of(2026, 11, 10);
+        Instant captured = CLOCK.instant();
+        Instant written = captured.plus(Duration.ofMinutes(2));
+        AtomicReference<Instant> now = new AtomicReference<>(captured);
+        Clock moving = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        // The worker reaches the store two minutes after the capture.
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
+            @Override
+            void write(HealthTurnFactory.Capture capture) {
+                now.set(written);
+                super.write(capture);
+            }
+        };
+        try {
+            marking.record(memory, null, null, null, false);
+            InOrder order = inOrder(store);
+            order.verify(store, timeout(5_000)).upsert(argThat(turn -> captured.equals(turn.updatedAt())), eq(written));
+            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")), eq(written));
+            verify(dirty, timeout(5_000).times(2)).note("agent-1", Set.of(day));
+            verify(store, never()).upsert(any());
+            verify(dirty, never()).markDeleted(any());
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("a row reaching the store within half the self-heal grace of its capture is written without the stamp")
+    void onTimeRowIsNotStamped() {
+        HealthTurn turn = HealthTurnFactory.capture(memory(), null, null, null, CLOCK.instant(), false).turn();
+        HealthTurnRecorder at = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2)));
+        HealthTurnRecorder after = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)));
+        try {
+            assertNull(at.lateWrittenAt(turn));
+            assertEquals(CLOCK.instant().plus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)), after.lateWrittenAt(turn));
+        } finally {
+            at.shutdown();
+            after.shutdown();
+        }
+    }
+    @Test
+    @DisplayName("an undo marks the days of the discarded executions too; an unreadable day falls back to the capture's")
+    void marksDiscardedDaysDirty() {
+        HealthDirtyDays dirty = mock(HealthDirtyDays.class);
+        LocalDate undoneDay = LocalDate.of(2026, 11, 8);
+        when(store.daysOf(eq("conv-1"), any())).thenThrow(new HealthStoreException("down", null)).thenReturn(Set.of(undoneDay));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, CLOCK);
+        try {
+            marking.record(memory, null, null, null, false);
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(LocalDate.of(2026, 11, 10)));
+            verify(dirty, timeout(5_000)).note("agent-1", Set.of(undoneDay));
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
+        } finally {
+            marking.shutdown();
+        }
+    }
+
+    @Test
     @DisplayName("a turn whose snapshot was not stored is inserted only if absent, never as paused, and discards nothing")
     void uncommittedIsUnsettled() {
         ConversationMemory memory = memory();
@@ -337,7 +440,7 @@ class HealthTurnRecorderTest {
 
             InOrder order = inOrder(store);
             order.verify(store, timeout(5_000)).upsert(any());
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            order.verify(store, timeout(5_000)).deleteConversationReturningDays("conv-1");
         }
 
         @Test
@@ -357,7 +460,7 @@ class HealthTurnRecorderTest {
             order.verify(store).deleteByConversationId("conv-1");
             order.verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
             order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
-            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            order.verify(store, timeout(5_000)).deleteConversationReturningDays("conv-1");
             assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
         }
 
@@ -372,7 +475,7 @@ class HealthTurnRecorderTest {
             guarded.record(new ConversationMemory("conv-2", "agent-1", 2, "user-2"), null, null, null, false);
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 2.0);
 
-            verify(store, after(300).never()).deleteByConversationId(any());
+            verify(store, after(300).never()).deleteConversationReturningDays(any());
             assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
         }
 
@@ -382,7 +485,7 @@ class HealthTurnRecorderTest {
             when(conversations.getStateAndRevision(any())).thenThrow(new IllegalStateException("db down"));
             assertDoesNotThrow(() -> guarded.record(memory(), null, null, null, false));
             assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
-            verify(store, after(300).never()).deleteByConversationId(any());
+            verify(store, after(300).never()).deleteConversationReturningDays(any());
         }
     }
 

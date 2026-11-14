@@ -17,7 +17,9 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentSetup;
 import ai.labs.eddi.engine.api.IRestAlertEvents;
+import ai.labs.eddi.engine.api.IRestAgentHealth;
 import ai.labs.eddi.engine.api.IRestConversationRatingAdmin;
+import ai.labs.eddi.engine.api.IRestHealthPortfolio;
 import ai.labs.eddi.engine.api.IRestDocs;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestLogAdmin;
@@ -85,7 +87,7 @@ class McpRoleTierParityTest {
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
             McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class};
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class, McpHealthTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -129,6 +131,9 @@ class McpRoleTierParityTest {
     /** Team budget reads: REST's admin/editor/viewer tier. */
     private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
+    /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
+    private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health");
+
     /**
      * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
      * configuration.
@@ -154,6 +159,9 @@ class McpRoleTierParityTest {
         }
         if (BUDGET_READ_TOOLS.contains(tool)) {
             return McpRoles.BUDGET_READ;
+        }
+        if (HEALTH_READ_TOOLS.contains(tool)) {
+            return McpRoles.HEALTH_READ;
         }
         return McpRoles.AUTHOR;
     }
@@ -232,7 +240,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(107, measured.size());
+        assertEquals(110, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -324,6 +332,8 @@ class McpRoleTierParityTest {
         mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
         mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
         mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
+        mirrors.put(IRestAgentHealth.class, McpRoles.HEALTH_READ); // read_agent_health, compare_agent_versions_health
+        mirrors.put(IRestHealthPortfolio.class, McpRoles.HEALTH_READ); // list_agent_health
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());

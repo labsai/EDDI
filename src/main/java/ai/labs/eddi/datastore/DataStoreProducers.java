@@ -42,8 +42,17 @@ import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.health.IHealthDailyStore;
+import ai.labs.eddi.engine.health.IHealthDirtyDayStore;
+import ai.labs.eddi.engine.health.IHealthMarkerStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthDailyStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthDirtyDayStore;
+import ai.labs.eddi.engine.health.mongo.MongoHealthMarkerStore;
 import ai.labs.eddi.engine.health.mongo.MongoHealthTurnStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthDailyStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthDirtyDayStore;
+import ai.labs.eddi.engine.health.postgres.PostgresHealthMarkerStore;
 import ai.labs.eddi.engine.health.postgres.PostgresHealthTurnStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
@@ -450,6 +459,24 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IHealthTurnStore healthTurnStore(Instance<MongoHealthTurnStore> mongo, Instance<PostgresHealthTurnStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthDailyStore healthDailyStore(Instance<MongoHealthDailyStore> mongo, Instance<PostgresHealthDailyStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthDirtyDayStore healthDirtyDayStore(Instance<MongoHealthDirtyDayStore> mongo, Instance<PostgresHealthDirtyDayStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IHealthMarkerStore healthMarkerStore(Instance<MongoHealthMarkerStore> mongo, Instance<PostgresHealthMarkerStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

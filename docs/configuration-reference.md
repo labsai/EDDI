@@ -286,15 +286,20 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 
 ## Agent Health
 
-Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`.
+Full narrative: [agent-health.md](agent-health.md#configuration). Independent of `eddi.alerts.*`. Not to be confused with
+`eddi.health.verbose` (further down this page): that one is the `/q/health` **readiness** output, unrelated to Agent Health.
 
 | Property | Default | Description |
 |---|---|---|
 | `eddi.health.enabled` | `true` | Off: no turn row is recorded; the retention sweep still runs |
 | `eddi.health.queue-capacity` | `10000` | Turn rows the health worker may have waiting; past it a row is dropped (`eddi_health_dropped_total`), never waited for |
-| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily |
+| `eddi.health.facts-retention` | `90d` | How long turn rows are kept, in whole UTC days; swept daily. Also the oldest day the rollup can recompute, and the reach of people and session counts |
 | `eddi.health.orphan-sweep-window` | `48h` | How far back the daily orphan sweep looks, by the time each health row was captured (not written): the conversations of those rows are checked against the conversation store, and the rows of those that no longer exist deleted |
 | `eddi.health.orphan-sweep-max` | `50000` | The most conversations one orphan sweep checks; past it a WARN. No cursor is kept, so the excess is not guaranteed a later check and may stay until `eddi.health.facts-retention` |
+| `eddi.health.rollup-interval` | `5m` | How often the `health-rollup` system job turns dirty agent days into daily rows — how far today's numbers may lag. At least 15 s; read when the schedule is created |
+| `eddi.health.daily-retention` | `730d` | How long daily rows and change markers are kept; swept daily |
+| `eddi.health.cache-ttl` | `60s` | How long the health views cache what they read from the stores (per query and agent, never per caller); `0` switches the cache off |
+| `eddi.health.apdex-t` | `4s` | The Apdex threshold T: a turn of at most T satisfies, one of at most 4T is tolerated. Applies to days rolled up after a change |
 
 ---
 
@@ -336,7 +341,7 @@ Full narrative: [agent-testing.md](agent-testing.md).
 | `eddi.security.unauthenticated.allowed-hosts` | *(unset)* | Only while authentication is **off** (`authorization.enabled=false`): the host names, besides `localhost`, `*.localhost`, IP addresses and the container-host names `host.docker.internal`, `gateway.docker.internal` and `host.containers.internal`, that EDDI answers to — comma-separated `host` or `host:port`, case-insensitive, a bare host matching any port. A request addressed to any other `Host` gets **421**, which is what stops a DNS-rebinding page from reaching an unauthenticated EDDI through the browser; `*` turns the check off. The same filter refuses, with **403**, a `POST`/`PUT`/`PATCH`/`DELETE` that a browser marks cross-site (an `Origin` that is neither the request's own nor in `quarkus.http.cors.origins`, or `Sec-Fetch-Site: cross-site`/`same-site` without one). `/q/health` is exempt from both. The compose stacks default it to `eddi`, their service name. See [security.md → Running without authentication](security.md#running-without-authentication) |
 | `eddi.security.hsts.enabled` | `false` | Sends `Strict-Transport-Security: max-age=<eddi.security.hsts.max-age>` on every response, so a browser that has seen the origin once refuses a plain-http connection to it afterwards. Off because EDDI usually serves plain http behind a TLS-terminating proxy; turn it on when the public origin is https only (the Helm chart does when `ingress.tls` is set). Sent whatever the request's own scheme, since behind the proxy every request EDDI sees is http. `includeSubDomains`/`preload` are not offered — set them at the proxy if the whole domain is https-only |
 | `eddi.security.hsts.max-age` | `31536000` | The `max-age`, in seconds, of the header above. `0` tells browsers to forget the policy |
-| `eddi.health.verbose` | `false` | Whether the public `/q/health` readiness output carries the cluster check's details — mode, NATS connection state, `degradedSince`, node id, member count, drain state. Off, the check reports its status only: that is all a kubelet or load balancer reads, and node ids and cluster size are reconnaissance for anyone who can reach the port. `GET /administration/cluster/overview` (authenticated) reports them regardless |
+| `eddi.health.verbose` | `false` | (Readiness, not Agent Health.) Whether the public `/q/health` readiness output carries the cluster check's details — mode, NATS connection state, `degradedSince`, node id, member count, drain state. Off, the check reports its status only: that is all a kubelet or load balancer reads, and node ids and cluster size are reconnaissance for anyone who can reach the port. `GET /administration/cluster/overview` (authenticated) reports them regardless |
 | `eddi.mcp.allow-unauthenticated` | `false` | Exposes the MCP server without auth. Needs its own opt-in on top of `eddi.security.allow-unauthenticated` — inheriting one flag must not be enough to open agent CRUD |
 | `eddi.secretstore.allow-unauthenticated` | `false` | Same, for the secrets vault REST surface |
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |

@@ -22,7 +22,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (108)
+## Available Tools (111)
 
 ### Argument contract
 
@@ -190,6 +190,16 @@ The alert inbox — see [Alerts](alerts.md). Tier `eddi-admin`, `eddi-editor`, e
 | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `list_alert_events`       | Fired alerts, newest first, with what matched and the delivery status per target; filters `agentId`, `ruleId`, `source`, `acknowledged` (false = the open inbox), `state`, `conversationId`, `from`/`to`; `index`, `limit` ≤ 100 |
 | `acknowledge_alert_event` | Acknowledge one event; the acknowledger is the caller's principal. An agent-less digest is an administrator's (`NOT_PERMITTED`) |
+
+### Health Tools (3)
+
+Agent Health over MCP — see [Agent Health](agent-health.md). Read-only. Tier `eddi-admin`, `eddi-editor`, `eddi-viewer`, equal to the REST `/agents/{agentId}/health` and `/health/agents` resources, which the tools call in-process: `VIEW` on the agent for a report or a compare (`FORBIDDEN` otherwise, `not_found` for an unknown agent), only viewable agents in the portfolio, and the quality section comes back `restricted` unless the caller may read ratings (admin or editor with `EDIT` on the agent, as for the rating tools). A bad parameter is `bad_request` with a message naming it. Counts and rates only — no conversation content, no user ids.
+
+| Tool | Description |
+| ---- | ----------- |
+| `read_agent_health` | One agent's report over `period` (7d/30d/90d) or `from`/`to`, optionally one `version` and comma-separated `origins`: reliability (agent-caused vs. platform failures, Apdex, p95, fallbacks), efficiency, adoption, quality, the golden-suite check; each measure with `n`, interval, baseline, delta, `significant` and band |
+| `list_agent_health` | Every agent the caller may view, the ones needing attention first, with sessions and their change, three key measures and the period's platform incidents; `sort`, `limit`, `cursor` |
+| `compare_agent_versions_health` | `fromVersion` against `toVersion`: the newer version since its first turn, the older over its last `days` (default 14) before it; both sides' sections and per-measure deltas with `significant` and `better` |
 
 ### Model Price Tool (1)
 
@@ -870,6 +880,7 @@ These are the **actual Keycloak role strings** the tools check (not aliases). Ev
 | **Author** | `eddi-admin`, `eddi-editor` | `list_agents`, `list_agent_configs`, `get_agent`; deployment (`deploy_agent`, `undeploy_agent`, `upgrade_conversations`, `get_deployment_status`); agent, workflow and resource CRUD (`create_agent`, `update_agent`, `delete_agent`, `list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`); triggers (`*_agent_trigger`); channels (`*_channel_integration`); group configuration (`list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `list_group_templates`, `add_team_task`, `list_team_backlog`); team handoff intake (`list_team_handoffs`, `accept_team_handoff`, `decline_team_handoff`); the price catalog read (`read_model_prices`); agent tests (`run_agent_tests`, `get_agent_test_run`, `list_agent_test_runs`, `cancel_agent_test_run`); conversation ratings (`list_conversation_ratings`, `summarize_conversation_ratings`, `count_ratings_needing_attention`, `review_conversation_rating`); the alert inbox (`list_alert_events`, `acknowledge_alert_event`) | the configuration stores, `/administration/{env}/deploy…`, `/agenttriggerstore`, `/channelstore`, `/groupstore` (the workspace handoffs included), `/agenttests`, `/ratings`, `/alerts`, the `GET`s of `/administration/model-prices` |
 | **Oversight** | `eddi-admin`, `eddi-editor`, `eddi-approver` | `summarize_approvals`, `list_autonomy_recommendations`, `get_autonomy_state`, `count_pending_audit_samples` | `/hitl/analytics`, `/hitl/autonomy`, `/hitl/samples` — the approver reviews how approvals turn out; per-agent scoping (`OversightAccess`) runs after the tier |
 | **Budget read** | `eddi-admin`, `eddi-editor`, `eddi-viewer` | `read_team_budget`, `list_team_budgets` | the `GET`s of `/groupstore/groups/{groupId}/budget` and `/administration/team-budgets` — `VIEW` on the group still applies |
+| **Health read** | `eddi-admin`, `eddi-editor`, `eddi-viewer` | `read_agent_health`, `list_agent_health`, `compare_agent_versions_health` | `/agents/{agentId}/health` (and `/series`, `/compare`), `/health/agents` — `VIEW` on the agent still applies, and the quality section follows the ratings rule |
 | **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`, `get_eddi_version`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); team budget writes (`adjust_team_budget`, `transfer_team_budget`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/administration/gdpr`, `/administration/logs`, `PUT …/budget/current-month`, `POST /administration/team-budgets/transfers`. **Deliberately narrower than REST** for schedules and memory writes. The memory tools act on any user's memory directly, without the per-owner scoping the REST endpoint applies to users. The schedule tools go through the REST schedule resource under the caller's identity, so its owner rules already apply; they stay admin-only (REST also admits `eddi-editor`) until widening them is decided on its own |
 | **HITL** | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver` — then decided per conversation by `HitlAccessGuard`: the owner, `eddi-admin`, `eddi-approver` | `resume_conversation`, `cancel_conversation`, `get_approval_status`, `list_pending_approvals`, and the group counterparts | the REST HITL endpoints (`/{conversationId}/resume`, `/cancel`, `/approval-status`, `/pending-approvals` and the group `/approve`, `/cancel`, `/human-input`, pending listings) — see [HITL](hitl.md#who-may-decide). Until 6.6.0 these tools had no role tier at all, so an `eddi-viewer` could decide its own gated tool calls over MCP while REST refused it (security review 2026-10-15, L5) |
 

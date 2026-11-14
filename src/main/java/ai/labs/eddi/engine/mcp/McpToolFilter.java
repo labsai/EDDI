@@ -106,7 +106,10 @@ public class McpToolFilter implements ToolFilter {
             "review_conversation_rating",
             // Alert inbox (McpAlertTools) — same tier and agent scoping as the REST
             // /alerts/events resource
-            "list_alert_events", "acknowledge_alert_event");
+            "list_alert_events", "acknowledge_alert_event",
+            // Agent Health (McpHealthTools) — read-only, same tier and VIEW scoping as
+            // the REST /agents/{agentId}/health and /health/agents resources
+            "read_agent_health", "list_agent_health", "compare_agent_versions_health");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

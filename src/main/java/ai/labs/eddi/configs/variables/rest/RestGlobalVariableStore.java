@@ -7,12 +7,14 @@ package ai.labs.eddi.configs.variables.rest;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
+import ai.labs.eddi.engine.health.HealthChangeMarkers;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
@@ -63,6 +65,13 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
     private final GlobalVariableResolver resolver;
     private final SecurityIdentity identity;
     private final ResourceAccessGuard accessGuard;
+
+    /**
+     * Agent Health change markers; field-injected and null-checked so the unit
+     * tests that build this class by hand need not provide one.
+     */
+    @Inject
+    Instance<HealthChangeMarkers> healthMarkers;
 
     @Inject
     public RestGlobalVariableStore(IGlobalVariableStore store, GlobalVariableResolver resolver, SecurityIdentity identity,
@@ -135,6 +144,7 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         var toStore = new GlobalVariable(tenantId, key, variable.value(), variable.description(), exportable);
         store.upsert(toStore);
         resolver.invalidateCache();
+        markChange(tenantId);
 
         LOGGER.infof("Global variable upserted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.ok().build();
@@ -148,9 +158,16 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         requireAdminForReservedKey(tenantId, key, "delete");
         store.delete(tenantId, key);
         resolver.invalidateCache();
+        markChange(tenantId);
 
         LOGGER.infof("Global variable deleted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.noContent().build();
+    }
+
+    private void markChange(String tenantId) {
+        if (healthMarkers != null && healthMarkers.isResolvable()) {
+            healthMarkers.get().globalVariableChanged(tenantId);
+        }
     }
 
     /**

@@ -156,6 +156,26 @@ public interface HealthTurnStoreContract {
     }
 
     @Test
+    @DisplayName("a late write is found by the self-heal at the time of its write, not its capture; an on-time rewrite drops the stamp")
+    default void lateWriteStamp() {
+        Instant written = T0.plusSeconds(3_600);
+        store().upsert(row("c1", 0, "a", "agent-late", "u", DAY, T0, 0.1, false), written);
+        store().insertIfAbsent(row("c4", 0, "e", "agent-unsettled", "u", DAY, T0, 0.1, false), written);
+        store().upsert(row("c2", 0, "b", "agent-undo", "u", DAY.minusDays(1), T0.minusSeconds(86_400), 0.1, false));
+        store().markDiscarded(row("c2", 1, "c", "agent-undo", "u", DAY, T0, 0.1, false), List.of("b"), written);
+        store().upsert(row("c3", 0, "d", "agent-on-time", "u", DAY, T0, 0.1, false));
+
+        Set<String> pairs = new HashSet<>();
+        store().forEachAgentDayUpdatedSince(written, written.plusSeconds(1), 10, (agent, day) -> pairs.add(agent + "|" + day));
+        assertEquals(Set.of("agent-late|" + DAY, "agent-unsettled|" + DAY, "agent-undo|" + DAY.minusDays(1)), pairs);
+
+        store().upsert(row("c1", 0, "a", "agent-late", "u", DAY, T0.plusSeconds(10), 0.2, false));
+        pairs.clear();
+        store().forEachAgentDayUpdatedSince(written, written.plusSeconds(1), 10, (agent, day) -> pairs.add(agent + "|" + day));
+        assertEquals(Set.of("agent-unsettled|" + DAY, "agent-undo|" + DAY.minusDays(1)), pairs);
+    }
+
+    @Test
     @DisplayName("streaming by agent and day returns that day's rows only, without markers")
     default void streamsAgentDay() {
         store().upsert(row("c1", 0, "a", "agent-1", "u", DAY, T0, 0.1, false));
