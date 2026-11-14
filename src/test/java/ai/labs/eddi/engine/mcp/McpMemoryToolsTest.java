@@ -173,6 +173,16 @@ class McpMemoryToolsTest {
     }
 
     @Test
+    void upsertUserMemory_storesAnAcceptedStatement() throws Exception {
+        when(userMemoryStore.upsert(any())).thenReturn("id-1");
+
+        tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self", null);
+
+        verify(userMemoryStore).upsert(argThat(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED && !e.conflicted()
+                && e.supersededBy() == null));
+    }
+
+    @Test
     void upsertUserMemory_nullUserId() {
         var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null, null);
         assertTrue(result.contains("userId is required"));
