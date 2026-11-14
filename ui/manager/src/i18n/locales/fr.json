@@ -1000,7 +1000,11 @@
       "errDisabled": "Cette version de l'agent ne demande pas d'évaluation.",
       "errOwner": "Seule la personne qui a eu cette conversation peut l'évaluer.",
       "errGeneric": "La note n'a pas pu être enregistrée."
-    }
+    },
+    "toolArgs": "Arguments",
+    "toolResult": "Résultat",
+    "toolArgsShowFields": "Champs",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -4626,7 +4630,12 @@
     "regularTruncated": "Affichage des {{limit}} premières approbations de conversation — d'autres sont en attente. Traitez-en quelques-unes pour voir les suivantes.",
     "conversationColumn": "Conversation",
     "groupReviewLoadError": "La discussion n'a pas pu être chargée.",
-    "groupReviewNoEntries": "Rien n'a encore été dit."
+    "groupReviewNoEntries": "Rien n'a encore été dit.",
+    "argsViewLabel": "Afficher les arguments comme",
+    "argsViewFields": "Champs",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Brut",
+    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle."
   },
   "hitlReview": {
     "approveEdited": "Approuver avec modifications",

@@ -988,7 +988,11 @@
       "errDisabled": "เอเจนต์เวอร์ชันนี้ไม่ได้ขอคะแนน",
       "errOwner": "เฉพาะผู้ที่สนทนานี้เท่านั้นที่ให้คะแนนได้",
       "errGeneric": "ไม่สามารถบันทึกคะแนนได้"
-    }
+    },
+    "toolArgs": "อาร์กิวเมนต์",
+    "toolResult": "ผลลัพธ์",
+    "toolArgsShowFields": "ฟิลด์",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "กลับไปยังเวิร์กโฟลว์",
@@ -4578,7 +4582,12 @@
     "regularTruncated": "แสดงการอนุมัติบทสนทนา {{limit}} รายการแรก — ยังมีรายการรอดำเนินการอีก ตัดสินใจบางรายการเพื่อดูส่วนที่เหลือ",
     "conversationColumn": "การสนทนา",
     "groupReviewLoadError": "ไม่สามารถโหลดการอภิปรายได้",
-    "groupReviewNoEntries": "ยังไม่มีการพูดอะไร"
+    "groupReviewNoEntries": "ยังไม่มีการพูดอะไร",
+    "argsViewLabel": "แสดงอาร์กิวเมนต์เป็น",
+    "argsViewFields": "ฟิลด์",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "ข้อมูลดิบ",
+    "amendRedactedMarker": "อาร์กิวเมนต์ที่แก้ไขยังมี <REDACTED> อยู่ ให้แทนที่ด้วยค่าจริง หรืออนุมัติโดยไม่แก้ไข: การแก้ไขจะถูกส่งตามที่เขียนทุกประการ"
   },
   "hitlReview": {
     "approveEdited": "อนุมัติพร้อมการแก้ไข",

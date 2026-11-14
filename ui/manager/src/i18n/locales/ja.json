@@ -988,7 +988,11 @@
       "errDisabled": "このエージェントのバージョンは評価を求めていません。",
       "errOwner": "この会話を行った本人だけが評価できます。",
       "errGeneric": "評価を保存できませんでした。"
-    }
+    },
+    "toolArgs": "引数",
+    "toolResult": "結果",
+    "toolArgsShowFields": "フィールド",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -4578,7 +4582,12 @@
     "regularTruncated": "会話の承認を最初の {{limit}} 件のみ表示しています — ほかにも保留中のものがあります。いくつか処理すると残りが表示されます。",
     "conversationColumn": "会話",
     "groupReviewLoadError": "ディスカッションを読み込めませんでした。",
-    "groupReviewNoEntries": "まだ発言はありません。"
+    "groupReviewNoEntries": "まだ発言はありません。",
+    "argsViewLabel": "引数の表示形式",
+    "argsViewFields": "フィールド",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "そのまま",
+    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。"
   },
   "hitlReview": {
     "approveEdited": "編集して承認",

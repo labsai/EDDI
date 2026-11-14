@@ -988,7 +988,11 @@
       "errDisabled": "이 에이전트 버전은 평가를 요청하지 않습니다.",
       "errOwner": "이 대화를 나눈 사람만 평가할 수 있습니다.",
       "errGeneric": "평가를 저장할 수 없습니다."
-    }
+    },
+    "toolArgs": "인수",
+    "toolResult": "결과",
+    "toolArgsShowFields": "필드",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -4578,7 +4582,12 @@
     "regularTruncated": "처음 {{limit}}개의 대화 승인만 표시합니다 — 대기 중인 항목이 더 있습니다. 일부를 처리하면 나머지가 표시됩니다.",
     "conversationColumn": "대화",
     "groupReviewLoadError": "토론을 불러오지 못했습니다.",
-    "groupReviewNoEntries": "아직 발언이 없습니다."
+    "groupReviewNoEntries": "아직 발언이 없습니다.",
+    "argsViewLabel": "인수 표시 방식",
+    "argsViewFields": "필드",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "원본",
+    "amendRedactedMarker": "수정한 인수에 아직 <REDACTED>가 있습니다. 실제 값으로 바꾸거나 수정 없이 승인하세요. 수정 내용은 작성한 그대로 전송됩니다."
   },
   "hitlReview": {
     "approveEdited": "수정 후 승인",

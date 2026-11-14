@@ -1036,7 +1036,11 @@
       "errDisabled": "إصدار الوكيل هذا لا يطلب تقييمات.",
       "errOwner": "لا يمكن تقييم هذه المحادثة إلا من الشخص الذي أجراها.",
       "errGeneric": "تعذّر حفظ التقييم."
-    }
+    },
+    "toolArgs": "الوسائط",
+    "toolResult": "النتيجة",
+    "toolArgsShowFields": "الحقول",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -4770,7 +4774,12 @@
     "regularTruncated": "يتم عرض أول {{limit}} من موافقات المحادثات — توجد موافقات أخرى معلّقة. اتخذ قرارًا بشأن بعضها لرؤية البقية.",
     "conversationColumn": "المحادثة",
     "groupReviewLoadError": "تعذّر تحميل المناقشة.",
-    "groupReviewNoEntries": "لم يُقل أي شيء بعد."
+    "groupReviewNoEntries": "لم يُقل أي شيء بعد.",
+    "argsViewLabel": "عرض الوسائط كـ",
+    "argsViewFields": "الحقول",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "خام",
+    "amendRedactedMarker": "لا تزال الوسائط المعدّلة تحتوي على <REDACTED>. استبدلها بالقيمة الحقيقية، أو وافق دون تعديل: يُرسل التعديل كما هو مكتوب تمامًا."
   },
   "hitlReview": {
     "approveEdited": "الموافقة مع التعديلات",

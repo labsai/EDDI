@@ -1017,7 +1017,11 @@
       "errDisabled": "This agent version does not ask for ratings.",
       "errOwner": "Only the person who had this conversation can rate it.",
       "errGeneric": "The rating could not be saved."
-    }
+    },
+    "toolArgs": "Arguments",
+    "toolResult": "Result",
+    "toolArgsShowFields": "Fields",
+    "toolArgsShowJson": "JSON"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -4619,7 +4623,12 @@
     "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
     "conversationColumn": "Conversation",
     "groupReviewLoadError": "The discussion could not be loaded.",
-    "groupReviewNoEntries": "Nothing has been said yet."
+    "groupReviewNoEntries": "Nothing has been said yet.",
+    "argsViewLabel": "Show arguments as",
+    "argsViewFields": "Fields",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Raw",
+    "amendRedactedMarker": "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written."
   },
   "hitlReview": {
     "approveEdited": "Approve with edits",

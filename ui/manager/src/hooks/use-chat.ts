@@ -53,6 +53,7 @@ import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { chatKeys } from "@/lib/query-keys";
+import { parseToolCallEvent, toolCallActivity } from "@/lib/tool-labels";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -1264,14 +1265,18 @@ function handleSSEEvent(
       // Live "Using {tool}…" signal — the backend emits the NAME right before
       // each tool executes (arguments arrive later, redacted, in the
       // task_complete toolTrace). Feeds the status line only, not the turns.
-      try {
-        const parsed = JSON.parse(event.data);
-        if (typeof parsed.tool === "string" && parsed.tool) {
-          debug.addToolCall(parsed.tool);
-        }
-      } catch {
-        // Malformed payload — the status line just keeps saying "Thinking…".
-      }
+      // Since 6.7 the event may carry the designer's `toolDisplay` label and a few
+      // allow-listed values; the status line shows those, else the humanised name.
+      const call = parseToolCallEvent(event.data);
+      // Malformed payload — the status line just keeps saying "Thinking…".
+      if (call) debug.addToolCall(toolCallActivity(call));
+      return false;
+    }
+    case "tool_result": {
+      // 6.7: `{tool, callId, status, durationMs}` once per call, right after it
+      // ran. Calls run one after another, so a result settles the newest call:
+      // its spinner stops instead of turning only when the model writes again.
+      debug.markToolsSettled();
       return false;
     }
     case "task_start": {

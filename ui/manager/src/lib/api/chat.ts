@@ -97,6 +97,8 @@ export type SSEEventType =
   | "task_complete"
   | "task_failed"
   | "tool_call"
+  /** 6.7: `{tool, callId, status: ok|error|not_executed|rejected, durationMs}`, once per call. */
+  | "tool_result"
   | "cascade_step_start"
   | "cascade_escalation"
   | "guardrail_triggered"

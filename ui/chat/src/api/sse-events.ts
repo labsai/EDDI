@@ -6,6 +6,7 @@
 
 import type { ConversationState, ConversationOutput, InputField } from "@/types";
 import { t } from "@/i18n";
+import { humanizeToolName, type ToolActivity } from "@/tool-labels";
 
 /** The trimmed snapshot the `done` event carries — NOT the full snapshot. */
 export interface DoneSnapshot {
@@ -48,25 +49,52 @@ export function parseErrorMessage(data: string): string {
  */
 const MAX_TOOL_NAME_LENGTH = 48;
 
+/** Longest designer label (with its allow-listed values) the status line shows. */
+const MAX_TOOL_LABEL_LENGTH = 96;
+
+function cap(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
 /**
- * Extract the tool name from a `tool_call` payload — `{"tool":"<name>"}`,
- * emitted right before each tool executes. Arguments are NOT in it (they reach
- * the client only redacted, in `task_complete`'s toolTrace).
+ * What the status line shows for a `tool_call` payload —
+ * `{"tool","callId","displayName"?,"display"?}`, emitted right before each tool
+ * executes. Arguments are NOT in it (they reach the client only redacted, in
+ * `task_complete`'s toolTrace).
+ *
+ * Since EDDI 6.7 a designer can opt a tool into plain-language activity lines
+ * with `toolDisplay` on the LLM task: `displayName` is a static label and
+ * `display` up to three allow-listed, redacted, capped argument values. Then
+ * the result is that phrase ("Creating an action: Renew the contract");
+ * otherwise it is the tool identifier, which the indicator puts into words.
  *
  * Returns null for anything unusable, so a malformed event leaves the indicator
  * on its previous copy instead of rendering "Using undefined…".
  */
-export function parseToolCallName(data: string): string | null {
+export function parseToolCallActivity(data: string): ToolActivity | null {
   if (!data.trim()) return null;
   try {
     const parsed = JSON.parse(data);
-    const tool = parsed && typeof parsed === "object" ? parsed.tool : undefined;
+    if (!parsed || typeof parsed !== "object") return null;
+    const tool = parsed.tool;
     if (typeof tool !== "string") return null;
     const name = tool.trim();
     if (!name) return null;
-    return name.length > MAX_TOOL_NAME_LENGTH
-      ? `${name.slice(0, MAX_TOOL_NAME_LENGTH - 1)}…`
-      : name;
+    const label = typeof parsed.displayName === "string" ? parsed.displayName.trim() : "";
+    const values =
+      parsed.display && typeof parsed.display === "object" && !Array.isArray(parsed.display)
+        ? Object.values(parsed.display as Record<string, unknown>).filter(
+            (v): v is string => typeof v === "string" && v.trim() !== "",
+          )
+        : [];
+    if (label || values.length > 0) {
+      const head = label || humanizeToolName(name);
+      return {
+        text: cap(values.length ? `${head}: ${values.join(", ")}` : head, MAX_TOOL_LABEL_LENGTH),
+        phrase: true,
+      };
+    }
+    return { text: cap(name, MAX_TOOL_NAME_LENGTH), phrase: false };
   } catch {
     return null;
   }

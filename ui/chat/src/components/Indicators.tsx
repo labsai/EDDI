@@ -6,6 +6,7 @@
 
 import { Brain, Wrench } from "lucide-react";
 import { t } from "@/i18n";
+import { humanizeToolName, type ToolActivity } from "@/tool-labels";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
@@ -43,8 +44,9 @@ export function TypingIndicator() {
  * `tool` names the tool the agent is running right now ("Using calculator…",
  * the Manager's wording). It takes precedence over `escalating`: a tool called
  * after an escalation is the stronger model at work, and the reducer drops the
- * tool when an escalation follows it. The name is shown as sent — it is the
- * identifier the agent designer gave the tool, not operator detail.
+ * tool when an escalation follows it. The identifier the agent designer gave
+ * the tool is shown in words (see tool-labels.ts), or the designer's own
+ * `toolDisplay` phrase when the event carries one.
  */
 /**
  * The words a status indicator shows, for the screen-reader announcement.
@@ -55,8 +57,12 @@ export function TypingIndicator() {
  * state here exists only mid-turn — so the widget announces this text from a
  * status region outside the transcript instead.
  */
-export function indicatorStatusText(escalating: boolean, tool: string | null): string {
-  if (tool) return t("indicator.tool", { tool });
+export function indicatorStatusText(escalating: boolean, tool: ToolActivity | null): string {
+  if (tool) {
+    // An identifier is put into words ("Using Get agent descriptors…"); a
+    // designer's toolDisplay phrase ("Creating an action: …") stands alone.
+    return tool.phrase ? `${tool.text}…` : t("indicator.tool", { tool: humanizeToolName(tool.text) });
+  }
   return escalating ? t("indicator.escalating") : t("indicator.thinking");
 }
 
@@ -65,7 +71,7 @@ export function ThinkingIndicator({
   tool = null,
 }: {
   escalating?: boolean;
-  tool?: string | null;
+  tool?: ToolActivity | null;
 }) {
   const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
   // Hidden from assistive technology: the transcript is aria-busy while this is
