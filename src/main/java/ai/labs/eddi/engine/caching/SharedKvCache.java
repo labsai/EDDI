@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.caching;
 
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import ai.labs.eddi.engine.cluster.ClusterValueRefusedException;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -16,8 +17,10 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +47,16 @@ import java.util.concurrent.TimeUnit;
  * {@code eddi.cluster.degraded.nonces=reject}) a write throws
  * {@link ClusterUnavailableException} so the caller can refuse; otherwise the
  * node-local cache answers.
+ * <p>
+ * <b>Recovery</b>: a write that degraded leaves the value on this node only,
+ * and remembers the bucket revision this node last saw for the key (or that it
+ * saw the key absent, or that it does not know). On the next read the value is
+ * published again only by compare-and-set against that revision, so it reaches
+ * the bucket when nobody else wrote since, and is dropped in favour of the
+ * bucket's value when someone did (or deleted the key): a stale local copy
+ * never overwrites, and never shadows, a newer write. A value the bucket
+ * refused as too large is tracked apart and is never retried: it is answered
+ * from the node-local copy only while the bucket holds nothing for the key.
  */
 public class SharedKvCache<K, V> implements ICache<K, V> {
 
@@ -74,6 +87,10 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
      * not found again.
      */
     private static final int MAX_LOCAL_ONLY = 10_000;
+    /** Marker baseline: the revision this node last saw is not known. */
+    private static final long UNKNOWN = -1L;
+    /** Marker baseline: this node last saw the key absent. */
+    private static final long ABSENT = 0L;
 
     private final ICache<K, V> local;
     private final ISharedKv shared;
@@ -85,7 +102,23 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
      * answers from the node-local copy for exactly these keys — never for a key
      * another node removed.
      */
-    private final Set<String> localOnly = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> localOnly = new ConcurrentHashMap<>();
+    /**
+     * Hashes of the keys whose latest value the bucket refused as too large. Never
+     * retried; answers a read only while the bucket holds nothing for the key.
+     */
+    private final Set<String> tooLarge = ConcurrentHashMap.newKeySet();
+    /**
+     * The bucket revision this node last saw per key (0 = seen absent), bounded and
+     * least-recently-used: an evicted key is "unknown", which recovery treats
+     * conservatively.
+     */
+    private final Map<String, Long> seen = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+            return size() > MAX_LOCAL_ONLY;
+        }
+    });
 
     /** What the views read: the node-local copy, never changed through them. */
     private final Map<K, V> readOnlyLocal;
@@ -136,12 +169,50 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         LOGGER.debugf("Shared cache %s unavailable, using the node-local copy: %s", shared.bucket(), e.getMessage());
     }
 
-    /** The shared write failed: the value now lives on this node only. */
-    private void degradedWrite(Object key, ClusterUnavailableException e) {
+    private void saw(String hash, long revision) {
+        seen.put(hash, revision);
+    }
+
+    private long lastSeen(String hash) {
+        Long revision = seen.get(hash);
+        return revision == null ? UNKNOWN : revision;
+    }
+
+    /**
+     * The shared write failed: the value now lives on this node only. A value the
+     * bucket refused as too large is remembered apart and never retried; any other
+     * failure is remembered with the revision this node last saw
+     * ({@code baseline}), which the republish must still find.
+     */
+    private void degradedWrite(Object key, ClusterUnavailableException e, long baseline) {
         degraded(e);
-        if (localOnly.size() < MAX_LOCAL_ONLY) {
-            localOnly.add(key(key));
+        String hash = key(key);
+        if (e instanceof ClusterValueRefusedException) {
+            localOnly.remove(hash);
+            if (tooLarge.size() < MAX_LOCAL_ONLY) {
+                tooLarge.add(hash);
+            }
+            return;
         }
+        tooLarge.remove(hash);
+        if (localOnly.containsKey(hash)) {
+            // Nothing reached the bucket since the first degraded write: its baseline
+            // stands.
+            return;
+        }
+        if (localOnly.size() < MAX_LOCAL_ONLY) {
+            localOnly.put(hash, baseline);
+        }
+    }
+
+    /**
+     * A write reached the bucket at {@code revision}: nothing about the key is
+     * node-local any more.
+     */
+    private void wrote(String hash, long revision) {
+        saw(hash, revision);
+        localOnly.remove(hash);
+        tooLarge.remove(hash);
     }
 
     @Override
@@ -150,25 +221,102 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public V get(Object key) {
+        String hash = key(key);
         try {
-            Optional<ISharedKv.Versioned> v = shared.get(key(key));
-            if (v.isEmpty() && !localOnly.isEmpty() && localOnly.contains(key(key))) {
-                // Written while the bucket was unreachable or refused it (a paginated tool
-                // response larger than the NATS payload limit): this node's copy is the only
-                // one.
+            Optional<ISharedKv.Versioned> v = shared.get(hash);
+            Long baseline = localOnly.get(hash);
+            if (baseline != null) {
+                return reconcile(key, hash, baseline, v);
+            }
+            if (v.isPresent()) {
+                saw(hash, v.get().revision());
+                return decode(v.get().value());
+            }
+            saw(hash, ABSENT);
+            if (!tooLarge.isEmpty() && tooLarge.contains(hash)) {
+                // The bucket refused this value as too large (a paginated tool response above
+                // the NATS payload limit): this node's copy is the only one.
                 V mine = local.get(key);
                 if (mine == null) {
-                    localOnly.remove(key(key));
+                    tooLarge.remove(hash);
                 }
                 return mine;
             }
-            return v.map(versioned -> decode(versioned.value())).orElse(null);
+            return null;
         } catch (ClusterUnavailableException e) {
             degraded(e);
             return local.get(key);
         }
+    }
+
+    /**
+     * Reads a key this node wrote while the bucket would not take it. That value is
+     * newer than the bucket's only if nobody wrote since, so it is published again
+     * by compare-and-set against the revision this node last saw — never by an
+     * unconditional put, which would overwrite a newer write or resurrect a deleted
+     * key:
+     * <ul>
+     * <li>the bucket is still at that revision (or the key still absent, as it was
+     * seen): the local value is published and answers the read;</li>
+     * <li>the revision moved on, or the key was deleted since: another node wrote
+     * after this one, so the marker and the local copy give way to the bucket;</li>
+     * <li>the revision was never known: the bucket's value wins when there is one,
+     * and an absent key is created;</li>
+     * <li>the bucket cannot be written: the marker stays and the local value
+     * answers.</li>
+     * </ul>
+     * Without the republish a status written {@code processing} while NATS was up
+     * and {@code completed} while it was down kept reading back {@code processing}
+     * after recovery, even on the node that wrote both.
+     */
+    private V reconcile(Object key, String hash, long baseline, Optional<ISharedKv.Versioned> v) {
+        V mine = local.get(key);
+        if (mine == null) {
+            localOnly.remove(hash);
+            return v.map(versioned -> adopt(key, hash, versioned)).orElse(null);
+        }
+        try {
+            OptionalLong written;
+            if (v.isPresent()) {
+                if (baseline == UNKNOWN || v.get().revision() != baseline) {
+                    return adopt(key, hash, v.get());
+                }
+                written = shared.update(hash, encode(mine), baseline);
+            } else if (baseline == ABSENT || baseline == UNKNOWN) {
+                written = shared.create(hash, encode(mine));
+            } else {
+                // Seen at a revision, gone now: deleted (or expired) since.
+                localOnly.remove(hash);
+                local.remove(key);
+                saw(hash, ABSENT);
+                return null;
+            }
+            if (written.isPresent()) {
+                wrote(hash, written.getAsLong());
+                return mine;
+            }
+            // Lost the compare-and-set: somebody wrote between the read and now.
+            localOnly.remove(hash);
+            return shared.getConsistent(hash).map(versioned -> adopt(key, hash, versioned)).orElse(null);
+        } catch (ClusterUnavailableException e) {
+            // still unreachable, or too large for the bucket: stays node-local
+            LOGGER.debugf("Shared cache %s still refuses a node-local value: %s", shared.bucket(), e.getMessage());
+            degradedWrite(key, e, baseline);
+            return mine;
+        }
+    }
+
+    /** The bucket's value replaces this node's copy and the marker. */
+    @SuppressWarnings("unchecked")
+    private V adopt(Object key, String hash, ISharedKv.Versioned versioned) {
+        localOnly.remove(hash);
+        saw(hash, versioned.revision());
+        V value = decode(versioned.value());
+        if (value != null) {
+            local.put((K) key, value);
+        }
+        return value;
     }
 
     @Override
@@ -185,11 +333,11 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     @Override
     public V put(K key, V value) {
         local.put(key, value);
+        String hash = key(key);
         try {
-            shared.put(key(key), encode(value));
-            localOnly.remove(key(key));
+            wrote(hash, shared.put(hash, encode(value)));
         } catch (ClusterUnavailableException e) {
-            degradedWrite(key, e);
+            degradedWrite(key, e, lastSeen(hash));
         }
         return null;
     }
@@ -197,11 +345,13 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     @Override
     public V putIfAbsent(K key, V value) {
         try {
-            if (shared.create(key(key), encode(value)).isPresent()) {
+            String hash = key(key);
+            OptionalLong created = shared.create(hash, encode(value));
+            if (created.isPresent()) {
                 local.put(key, value);
                 // The bucket holds this value now: a marker left by an earlier degraded
                 // write must not later answer for it from the node-local copy.
-                localOnly.remove(key(key));
+                wrote(hash, created.getAsLong());
                 return null;
             }
             // The create lost: the key exists in the bucket. Report it as present even
@@ -228,17 +378,20 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     @Override
     public V remove(Object key) {
         V previous = local.remove(key);
-        localOnly.remove(key(key));
+        String hash = key(key);
+        localOnly.remove(hash);
+        tooLarge.remove(hash);
         try {
             // The value read only feeds the return value: a failed read must not skip the
             // delete.
             Optional<ISharedKv.Versioned> stored = Optional.empty();
             try {
-                stored = shared.get(key(key));
+                stored = shared.get(hash);
             } catch (ClusterUnavailableException e) {
                 LOGGER.debugf("Shared cache %s: could not read %s before removing it: %s", shared.bucket(), key, e.getMessage());
             }
-            shared.delete(key(key));
+            shared.delete(hash);
+            saw(hash, ABSENT);
             V removed = stored.map(versioned -> decode(versioned.value())).orElse(null);
             return removed != null ? removed : previous;
         } catch (ClusterUnavailableException e) {
@@ -251,11 +404,11 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     public V put(K key, V value, long lifespan, TimeUnit unit) {
         // The bucket's TTL bounds every entry; the per-entry lifespan applies locally.
         local.put(key, value, lifespan, unit);
+        String hash = key(key);
         try {
-            shared.put(key(key), encode(value));
-            localOnly.remove(key(key));
+            wrote(hash, shared.put(hash, encode(value)));
         } catch (ClusterUnavailableException e) {
-            degradedWrite(key, e);
+            degradedWrite(key, e, lastSeen(hash));
         }
         return null;
     }
@@ -317,8 +470,8 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             // Nothing could be compared against: only a node-local copy can decide.
             degraded(e);
             boolean replaced = local.replace(key, oldValue, newValue);
-            if (replaced && localOnly.size() < MAX_LOCAL_ONLY) {
-                localOnly.add(key(key));
+            if (replaced) {
+                degradedWrite(key, e, lastSeen(key(key)));
             }
             return replaced;
         }
@@ -330,11 +483,12 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             return false;
         }
         try {
-            if (shared.update(key(key), encode(newValue), versioned.get().revision()).isEmpty()) {
+            OptionalLong updated = shared.update(key(key), encode(newValue), versioned.get().revision());
+            if (updated.isEmpty()) {
                 return false;
             }
             local.put(key, newValue);
-            localOnly.remove(key(key));
+            wrote(key(key), updated.getAsLong());
             return true;
         } catch (ClusterUnavailableException e) {
             // The comparison succeeded against the bucket's own value and only the
@@ -344,11 +498,8 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             // local.replace here was wrong: a node without a local copy got false, and
             // a caller retrying from the (now empty) local copy rebuilt the value from
             // nothing.
-            degraded(e);
             local.put(key, newValue);
-            if (localOnly.size() < MAX_LOCAL_ONLY) {
-                localOnly.add(key(key));
-            }
+            degradedWrite(key, e, versioned.get().revision());
             return true;
         }
     }
