@@ -156,6 +156,14 @@ public interface IUserMemoryStore {
      * <li>{@code self/group}: {@code (userId, key, sourceAgentId)}</li>
      * <li>{@code global}: {@code (userId, key)}</li>
      * </ul>
+     * Whatever {@linkplain UserMemoryEntry#assessment() assessment} the entry
+     * carries, it is stored as {@code ACCEPTED} with no {@code supersededBy} and
+     * {@code conflicted=false} ({@link UserMemoryEntry#asStatement()}) — so
+     * rewriting a contested or superseded key resolves it, and an edited entry sent
+     * back by a client cannot keep its old verdict. The same holds for
+     * {@link #insertIfAbsent}, {@link #upsertIfOwnedBy},
+     * {@link #replaceIfUnchanged} and {@link #upsertReserved}; only
+     * {@link #setAssessmentIfUnchanged} records a verdict.
      *
      * <strong>Refuses a {@linkplain #isReservedKey reserved key}</strong> with
      * {@link ReservedMemoryKeyException}, whatever the entry's category. Those keys
@@ -281,8 +289,8 @@ public interface IUserMemoryStore {
 
     /**
      * Overwrites the value, category, visibility, group ids, source conversation
-     * and conflict flag of the entry {@code entryId} with those of {@code entry} —
-     * only if the stored entry's {@code updatedAt} still equals
+     * conflict flag and assessment of the entry {@code entryId} with those of
+     * {@code entry} — only if the stored entry's {@code updatedAt} still equals
      * {@code expectedUpdatedAt}. Its id, user, key, owner, creation time and access
      * count are kept; {@code updatedAt} becomes now. The compare-and-set
      * counterpart of {@link #upsert} onto an existing entry, for the same reason as
@@ -299,6 +307,32 @@ public interface IUserMemoryStore {
         }
         upsert(entry);
         return true;
+    }
+
+    /**
+     * Sets the {@linkplain UserMemoryEntry#assessment() assessment} (and
+     * {@code supersededBy}) of the entry {@code entryId} only if its
+     * {@code updatedAt} still equals {@code expectedUpdatedAt}; {@code conflicted}
+     * follows it ({@code true} exactly for {@code CONTESTED}). Nothing else changes
+     * — <strong>{@code updatedAt} included</strong>: an assessment is Dream's
+     * verdict about the fact, not a new statement of it, so it must not make a
+     * stale entry look fresh to pruning or move it in a {@code most_recent} recall.
+     * A conversation write in the meantime bumps {@code updatedAt}, so the
+     * compare-and-set still loses to it.
+     * <p>
+     * There is no default built on {@link #upsert}: every value write stores
+     * {@code ACCEPTED} ({@link UserMemoryEntry#asStatement()}), so this is the one
+     * write that can record a verdict, and a store must implement it as one
+     * conditional update. Both stores do; this default refuses.
+     *
+     * @return true if the entry was written; false if it changed or is gone
+     * @throws UnsupportedOperationException
+     *             from a store that does not implement it
+     */
+    default boolean setAssessmentIfUnchanged(String entryId, UserMemoryEntry.Assessment assessment, String supersededBy,
+                                             Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        throw new UnsupportedOperationException(getClass().getSimpleName() + " does not record memory assessments");
     }
 
     /**

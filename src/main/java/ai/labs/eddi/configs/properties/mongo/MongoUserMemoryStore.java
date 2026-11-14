@@ -71,6 +71,12 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     private static final String FIELD_GROUP_IDS = "groupIds";
     private static final String FIELD_SOURCE_CONVERSATION_ID = "sourceConversationId";
     private static final String FIELD_CONFLICTED = "conflicted";
+    /**
+     * {@link UserMemoryEntry.Assessment} by name. Absent on documents written
+     * before it existed, which read as {@code ACCEPTED}.
+     */
+    private static final String FIELD_ASSESSMENT = "assessment";
+    private static final String FIELD_SUPERSEDED_BY = "supersededBy";
     private static final String FIELD_ACCESS_COUNT = "accessCount";
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
@@ -181,8 +187,10 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 continue;
 
             Bson filter = and(eq(FIELD_USER_ID, userId), eq(FIELD_KEY, key), eq(FIELD_VISIBILITY, Visibility.global.name()));
+            // A new value is a new statement of the fact: it resolves a contest.
             Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_UPDATED_AT, now.toString()),
-                    Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
+                    Updates.set(FIELD_ASSESSMENT, UserMemoryEntry.Assessment.ACCEPTED.name()), Updates.set(FIELD_SUPERSEDED_BY, null),
+                    Updates.set(FIELD_CONFLICTED, false), Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
                     Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
                     Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
@@ -218,6 +226,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     }
 
     private String write(UserMemoryEntry entry) {
+        entry = entry.asStatement();
         RuntimeUtilities.checkNotNull(entry.userId(), FIELD_USER_ID);
         RuntimeUtilities.checkNotNull(entry.key(), FIELD_KEY);
 
@@ -250,6 +259,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     @Override
     public boolean upsertIfOwnedBy(UserMemoryEntry entry, String agentId) throws IResourceStore.ResourceStoreException {
         IUserMemoryStore.checkOwnedWrite(entry, agentId);
+        entry = entry.asStatement();
         Bson keyFilter = buildUpsertFilter(entry);
         if (!globalKeyUnique && globalKeyHeldByAnother(keyFilter, agentId)) {
             return false;
@@ -319,7 +329,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
                 Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
-                Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_UPDATED_AT, now.toString()),
+                Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_ASSESSMENT, entry.assessment().name()),
+                Updates.set(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.set(FIELD_UPDATED_AT, now.toString()),
                 Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
     }
@@ -352,12 +363,35 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         RuntimeUtilities.checkNotNull(entryId, "entryId");
         RuntimeUtilities.checkNotNull(entry, "entry");
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.value()), Updates.set(FIELD_CATEGORY, entry.category()),
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()), Updates.set(FIELD_CONFLICTED, entry.conflicted()),
+                Updates.set(FIELD_ASSESSMENT, entry.assessment().name()), Updates.set(FIELD_SUPERSEDED_BY, entry.supersededBy()),
                 Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
         return memoriesCollection.updateOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt)), update)
                 .getModifiedCount() == 1;
+    }
+
+    /**
+     * One conditional {@code updateOne} that leaves {@code updatedAt} alone. A
+     * match whose fields already hold the values reports
+     * {@code modifiedCount == 0}, so success is judged by the match.
+     */
+    @Override
+    public boolean setAssessmentIfUnchanged(String entryId, UserMemoryEntry.Assessment assessment, String supersededBy,
+                                            Instant expectedUpdatedAt)
+            throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entryId, "entryId");
+        RuntimeUtilities.checkNotNull(assessment, "assessment");
+        if (!ObjectId.isValid(entryId)) {
+            return false;
+        }
+        Bson update = Updates.combine(Updates.set(FIELD_ASSESSMENT, assessment.name()),
+                Updates.set(FIELD_SUPERSEDED_BY, assessment == UserMemoryEntry.Assessment.SUPERSEDED ? supersededBy : null),
+                Updates.set(FIELD_CONFLICTED, assessment == UserMemoryEntry.Assessment.CONTESTED));
+        return memoriesCollection.updateOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt)), update)
+                .getMatchedCount() == 1;
     }
 
     /** {@code eq(updatedAt, null)} also matches a document without the field. */
@@ -582,13 +616,15 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         // Same refusal as upsert: reserved keys are written only through
         // upsertReserved.
         IUserMemoryStore.rejectReservedKey(entry.key());
+        entry = entry.asStatement();
         String now = Instant.now().toString();
         Bson insertOnly = Updates.combine(Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_VALUE, entry.value()), Updates.setOnInsert(FIELD_CATEGORY, entry.category()),
                 Updates.setOnInsert(FIELD_VISIBILITY, entry.visibility().name()),
                 Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
-                Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
+                Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ASSESSMENT, entry.assessment().name()),
+                Updates.setOnInsert(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
                 Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
         BsonValue upserted;
         try {
@@ -645,6 +681,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 doc.getString(FIELD_KEY), doc.get(FIELD_VALUE), doc.getString(FIELD_CATEGORY), vis, doc.getString(FIELD_SOURCE_AGENT_ID),
                 doc.getList(FIELD_GROUP_IDS, String.class, List.of()), doc.getString(FIELD_SOURCE_CONVERSATION_ID),
                 doc.getBoolean(FIELD_CONFLICTED, false), doc.getInteger(FIELD_ACCESS_COUNT, 0),
-                createdAtStr != null ? Instant.parse(createdAtStr) : null, updatedAtStr != null ? Instant.parse(updatedAtStr) : null);
+                createdAtStr != null ? Instant.parse(createdAtStr) : null, updatedAtStr != null ? Instant.parse(updatedAtStr) : null,
+                UserMemoryEntry.Assessment.parse(doc.getString(FIELD_ASSESSMENT)), doc.getString(FIELD_SUPERSEDED_BY));
     }
 }
