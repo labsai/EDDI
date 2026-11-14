@@ -5,7 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SpendReservations;
@@ -155,7 +155,7 @@ final class MemoryDelegationBudget implements DelegationBudget {
         }
     }
 
-    private static void addToStep(IConversationStep step, double usd) {
+    private static void addToStep(IWritableConversationStep step, double usd) {
         synchronized (step) {
             IData<Object> existing = step.getData(MemoryKeys.AUDIT_DELEGATED_COST);
             double total = usd;
