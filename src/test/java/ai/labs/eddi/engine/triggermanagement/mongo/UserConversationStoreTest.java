@@ -173,6 +173,67 @@ class UserConversationStoreTest {
         assertThrows(MongoWriteException.class, () -> store.createUserConversation(uc));
     }
 
+    // ==================== createOrAdopt ====================
+
+    /** The insert path's serialization, stubbed so insertOne is reached. */
+    private void givenInsertableDocument() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(jsonSerialization.deserialize("{}", Document.class)).thenReturn(new Document());
+    }
+
+    @Test
+    @DisplayName("createOrAdopt — no conflict: the candidate is stored and returned")
+    void createOrAdoptStoresTheCandidate() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
+        givenInsertableDocument();
+        UserConversation candidate = new UserConversation("greeting", "user-1", Deployment.Environment.production, "agent-1", "conv-own");
+
+        assertSame(candidate, store.createOrAdopt(candidate));
+        verify(collection).insertOne(any(Document.class));
+    }
+
+    /**
+     * Two first messages race: both read no mapping, the other insert lands first
+     * and the unique index rejects this one. The loser gets the stored mapping
+     * back, so both talk to one conversation.
+     */
+    @Test
+    @DisplayName("createOrAdopt — duplicate key: the mapping that won is returned")
+    void createOrAdoptAdoptsTheWinnerOnDuplicateKey() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Document.class))).thenReturn(iterable);
+        Document winnerDoc = new Document("intent", "greeting").append("userId", "user-1");
+        // The pre-insert read still sees nothing; the read after the collision sees the
+        // winner.
+        when(iterable.first()).thenReturn(null).thenReturn(winnerDoc);
+        givenInsertableDocument();
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress()))
+                .when(collection).insertOne(any(Document.class));
+        UserConversation winner = new UserConversation("greeting", "user-1", Deployment.Environment.production, "agent-1", "conv-winner");
+        when(documentBuilder.build(winnerDoc, UserConversation.class)).thenReturn(winner);
+
+        UserConversation result = store.createOrAdopt(
+                new UserConversation("greeting", "user-1", Deployment.Environment.production, "agent-1", "conv-own"));
+
+        assertSame(winner, result);
+    }
+
+    @Test
+    @DisplayName("createOrAdopt — the winner is gone again before it can be read: a store error, not null")
+    void createOrAdoptFailsWhenTheWinnerVanished() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(collection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
+        givenInsertableDocument();
+        doThrow(new MongoWriteException(new WriteError(11000, "E11000 duplicate key error", new BsonDocument()), new ServerAddress()))
+                .when(collection).insertOne(any(Document.class));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.createOrAdopt(
+                new UserConversation("greeting", "user-1", Deployment.Environment.production, "agent-1", "conv-own")));
+    }
+
     // ==================== deleteUserConversationIfMatches ====================
 
     @Test

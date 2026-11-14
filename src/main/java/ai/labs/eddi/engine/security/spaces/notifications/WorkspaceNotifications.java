@@ -186,7 +186,7 @@ public class WorkspaceNotifications {
         if (principal != null && !SYSTEM_ADMINS.equals(principal)) {
             recipients.add(principal);
         }
-        if (accessGuard.callerIsAdmin()) {
+        if (accessGuard.isAdmin()) {
             recipients.add(SYSTEM_ADMINS);
         }
         return recipients;

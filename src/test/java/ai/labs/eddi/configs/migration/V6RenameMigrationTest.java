@@ -14,6 +14,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
 import org.bson.BsonDouble;
 import org.bson.BsonInt32;
@@ -859,7 +860,9 @@ class V6RenameMigrationTest {
     @DisplayName("migrateAgentFields")
     class AgentFieldMigrationTests {
 
-        @SuppressWarnings("unchecked")
+        /** The entry that records the whole migration as done. */
+        private static final String COMPLETION = "v6-rename-migration-complete";
+
         @Test
         @DisplayName("should rename 'packages' to 'workflows' in agent documents")
         void renamesPackagesToWorkflows() {
@@ -868,7 +871,45 @@ class V6RenameMigrationTest {
             // Agent document with old field name 'packages'
             var agentDoc = new Document("packages", List.of("workflow-ref"))
                     .append("_id", new ObjectId());
+            MongoCollection<Document> agentCol = agentsCollectionHolding(agentDoc);
+            when(agentCol.replaceOne(any(), any())).thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
+            migration.runIfNeeded();
+
+            // Agent document should have 'workflows' field instead of 'packages'
+            assertTrue(agentDoc.containsKey("workflows"));
+            assertFalse(agentDoc.containsKey("packages"));
+            verify(migrationLogStore).createMigrationLog(argThat(log -> COMPLETION.equals(log.getName())));
+        }
+
+        /**
+         * The agents pass used to call {@code replaceOne} bare and count the document
+         * as migrated whatever came back, unlike the history pass beside it: a replace
+         * that matched nothing recorded the migration complete over an agent still
+         * carrying {@code packages}, and nothing ever retried it.
+         */
+        @Test
+        @DisplayName("an agent rewrite that matched nothing keeps the migration incomplete")
+        void unmatchedAgentRewriteKeepsTheMigrationIncomplete() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            var agentDoc = new Document("packages", List.of("workflow-ref"))
+                    .append("_id", new ObjectId());
+            MongoCollection<Document> agentCol = agentsCollectionHolding(agentDoc);
+            when(agentCol.replaceOne(any(), any())).thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+            migration.runIfNeeded();
+
+            verify(agentCol).replaceOne(any(), eq(agentDoc));
+            verify(migrationLogStore, never()).createMigrationLog(argThat(log -> COMPLETION.equals(log.getName())));
+        }
+
+        /**
+         * An {@code agents} collection holding one document; every other collection is
+         * empty.
+         */
+        @SuppressWarnings("unchecked")
+        private MongoCollection<Document> agentsCollectionHolding(Document agentDoc) {
             MongoCollection<Document> agentCol = mock(MongoCollection.class);
             when(agentCol.estimatedDocumentCount()).thenReturn(1L);
 
@@ -879,24 +920,13 @@ class V6RenameMigrationTest {
             when(agentIterable.iterator()).thenReturn(agentCursor);
             when(agentCol.find()).thenReturn(agentIterable);
 
-            // Empty collection for all other calls
             MongoCollection<Document> emptyCol = mock(MongoCollection.class);
             when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
 
-            when(database.getCollection(anyString())).thenAnswer(invocation -> {
-                String name = invocation.getArgument(0);
-                if ("agents".equals(name)) {
-                    return agentCol;
-                }
-                return emptyCol;
-            });
+            when(database.getCollection(anyString()))
+                    .thenAnswer(invocation -> "agents".equals(invocation.getArgument(0)) ? agentCol : emptyCol);
             when(database.getName()).thenReturn("eddi");
-
-            migration.runIfNeeded();
-
-            // Agent document should have 'workflows' field instead of 'packages'
-            assertTrue(agentDoc.containsKey("workflows"));
-            assertFalse(agentDoc.containsKey("packages"));
+            return agentCol;
         }
     }
 

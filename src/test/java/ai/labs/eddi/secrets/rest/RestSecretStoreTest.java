@@ -14,6 +14,7 @@ import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.arc.ClientProxy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -698,6 +699,39 @@ class RestSecretStoreTest {
         when(secretProvider.isAvailable()).thenReturn(false);
         Response resp = rest.healthCheck();
         assertEquals(503, resp.getStatus());
+    }
+
+    /**
+     * Under ArC the injected {@code @ApplicationScoped} provider is a client proxy,
+     * so {@code getClass().getSimpleName()} on it answered
+     * {@code VaultSecretProvider_ClientProxy} instead of the documented
+     * {@code VaultSecretProvider}. The health body has to name the bean behind the
+     * proxy.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void healthCheck_namesTheProviderBehindTheClientProxy() {
+        VaultSecretProvider real = mock(VaultSecretProvider.class);
+        ISecretProvider proxy = mock(ISecretProvider.class, withSettings().extraInterfaces(ClientProxy.class));
+        when(proxy.isAvailable()).thenReturn(true);
+        when(((ClientProxy) proxy).arc_contextualInstance()).thenReturn(real);
+
+        Response resp = new RestSecretStore(proxy, secretResolver, grantImpactAnalyzer).healthCheck();
+
+        Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+        assertEquals("VaultSecretProvider", body.get("provider"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void healthCheck_namesAnUnproxiedProviderByItsOwnClass() {
+        VaultSecretProvider real = mock(VaultSecretProvider.class);
+        when(real.isAvailable()).thenReturn(true);
+
+        Response resp = new RestSecretStore(real, secretResolver, grantImpactAnalyzer).healthCheck();
+
+        Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+        assertEquals("VaultSecretProvider", body.get("provider"));
     }
 
     // ─── rotateDek ───

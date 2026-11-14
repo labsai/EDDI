@@ -6,12 +6,12 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.integrations.openai.model.ModelObject;
-import io.quarkus.security.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,8 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -166,6 +168,22 @@ class AgentModelResolverTest {
         when(agentFactory.getAllLatestAgents(any())).thenThrow(new RuntimeException("store down"));
 
         assertTrue(resolver().listModels().isEmpty());
+    }
+
+    @Test
+    void failedAgentListing_isNotCached_theNextCallRetries() throws Exception {
+        givenAgent(AGENT_ID_SUPPORT, "Support");
+        when(agentFactory.getAllLatestAgents(any()))
+                .thenThrow(new RuntimeException("store blip"))
+                .thenReturn(agents);
+        var resolver = resolver();
+
+        assertTrue(resolver.listModels().isEmpty());
+
+        assertEquals(2, resolver.listModels().size(),
+                "a one-off store error must not make every model unknown for model-cache-seconds");
+        assertEquals(AGENT_ID_SUPPORT, resolver.resolve("support-a3f9c1").agentId());
+        verify(agentFactory, times(2)).getAllLatestAgents(any());
     }
 
     // ─── resolution ───
@@ -377,8 +395,8 @@ class AgentModelResolverTest {
      * A guard that refuses USE on {@code deniedAgentId} and admits everything else.
      */
     private AgentModelResolver resolverDenying(String deniedAgentId) {
-        var guard = mock(ResourceAccessGuard.class);
-        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(deniedAgentId);
+        var guard = permissiveUseGuard();
+        when(guard.hasAccess(deniedAgentId, AccessLevel.USE)).thenReturn(false);
         var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
         resolver.initCache();
         return resolver;
@@ -399,6 +417,24 @@ class AgentModelResolverTest {
         assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve(AGENT_ID_SUPPORT));
         assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("Private Support"));
         assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("private-support"));
+    }
+
+    @Test
+    void useGate_asksWithoutThrowing() throws Exception {
+        // The throwing check logs a WARN and builds a ForbiddenException per hidden
+        // agent, and GET /v1/models is polled: a deployment with many private agents
+        // filled the log on every listing.
+        givenAgent(AGENT_ID_SUPPORT, "Private Support");
+        givenAgent(AGENT_ID_SALES, "Sales");
+        var guard = permissiveUseGuard();
+        when(guard.hasAccess(AGENT_ID_SUPPORT, AccessLevel.USE)).thenReturn(false);
+        var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
+        resolver.initCache();
+
+        assertEquals(List.of("sales-b4e2d7", "sales-b4e2d7:stateless"),
+                resolver.listModels().stream().map(ModelObject::id).toList());
+        assertThrows(AgentModelResolver.UnknownModelException.class, () -> resolver.resolve("private-support-a3f9c1"));
+        verify(guard, never()).requireAgentUseAccess(any());
     }
 
     @Test
@@ -473,7 +509,6 @@ class AgentModelResolverTest {
         givenAgent(COLLIDING_A, "Support");
         givenAgent(COLLIDING_B, "Support");
         var guard = mock(ResourceAccessGuard.class);
-        doThrow(new ForbiddenException("no")).when(guard).requireAgentUseAccess(any());
         var resolver = new AgentModelResolver(agentFactory, descriptorStore, OpenAiTestFixtures.enabledConfig(), guard);
         resolver.initCache();
 
@@ -482,10 +517,12 @@ class AgentModelResolverTest {
     }
 
     /**
-     * A guard that admits every agent: a bare mock's void requireAgentUseAccess
-     * does nothing. The /v1 USE gate has its own tests.
+     * A guard that admits every agent. A bare mock refuses everything (its
+     * hasAccess answers false); the /v1 USE gate has its own tests.
      */
     private static ResourceAccessGuard permissiveUseGuard() {
-        return mock(ResourceAccessGuard.class);
+        var guard = mock(ResourceAccessGuard.class);
+        when(guard.hasAccess(any(), eq(AccessLevel.USE))).thenReturn(true);
+        return guard;
     }
 }
