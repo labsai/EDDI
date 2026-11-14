@@ -280,6 +280,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
 
 ---
 
