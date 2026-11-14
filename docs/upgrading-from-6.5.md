@@ -223,6 +223,17 @@ every new field is optional and absent on existing documents. What an existing d
 - **The cascade judge sees the request.** With `modelCascade.strategy: judge_model`, the judge now
   receives the last 8,000 characters of the user message along with the answer, so its scores (and
   thus escalation rates) can shift.
+- **Imports and syncs are counted.** A node runs at most four agent imports, import previews and
+  syncs at once (`eddi.backup.max-concurrent-operations`); one more gets `429` with `Retry-After`.
+  One sync reads at most 256 MiB from its source in all (`eddi.backup.sync.max-total-response-bytes`).
+- **The tool-result cache is bounded by size.** It holds at most 64 Mi characters
+  (`eddi.tools.cache.max-total-chars`), and a result over 262,144 characters
+  (`eddi.tools.cache.max-entry-chars`) is not cached, so such a call runs again instead of being
+  answered from the cache.
+- **The retrieved-context envelope carries an id.** Its header and closing line read
+  `[retrieved context <id> — …]` and `[end of retrieved context <id>]`, with a fresh random id per
+  block. Only the model sees it; anything that matched the old fixed closing line in a captured
+  prompt must match the prefix instead.
 
 ### Several controls fail closed
 
@@ -250,7 +261,9 @@ Applies only if you run more than one node.
 - **Signing is opt-in.** Set `eddi.cluster.signing.key` to sign every RPC, reply and event
   (`Eddi-Sig`, HMAC-SHA256); `eddi.cluster.signing.required=true` refuses unsigned messages and
   refuses to start without a key. Without a key only a WARN is logged. During a rolling upgrade
-  keep `required=false` until every node carries the key.
+  keep `required=false` until every node carries the key. With a key, a node never forgets a nonce
+  before its message expires; one that already remembers `eddi.cluster.signing.max-remembered-nonces`
+  (500,000) refuses further signed messages instead (`reason="nonce_capacity"`).
 - **Webhook de-duplication fails closed** (`503`) while NATS is unreachable, under
   `eddi.cluster.degraded.nonces=reject` (the default).
 - **Duplicate node ids are detected.** A twin stops announcing, and the new `cluster-node-identity`

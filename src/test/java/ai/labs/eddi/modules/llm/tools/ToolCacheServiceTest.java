@@ -235,6 +235,29 @@ class ToolCacheServiceTest {
 
             verify(cache).put(eq(SCOPE_A + "|myTool:args"), any(), eq(120L), eq(TimeUnit.SECONDS));
         }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a result longer than eddi.tools.cache.max-entry-chars is not cached; one at the limit is")
+        void put_oversizedResultIsNotCached() {
+            service.maxEntryChars = 100;
+
+            service.put(SCOPE_A, "webscraper", "huge", "x".repeat(101));
+            service.put(SCOPE_A, "webscraper", "fits", "x".repeat(100));
+
+            verify(cache, never()).put(eq(SCOPE_A + "|webscraper:huge"), any(), anyLong(), any());
+            verify(cache).put(eq(SCOPE_A + "|webscraper:fits"), any(), anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("the per-entry limit defaults when it is not positive")
+        void put_nonPositiveLimitDefaults() {
+            service.maxEntryChars = 0;
+
+            service.put(SCOPE_A, "webscraper", "page", "x".repeat(ToolCacheService.DEFAULT_MAX_ENTRY_CHARS + 1));
+
+            verify(cache, never()).put(anyString(), any(), anyLong(), any());
+        }
     }
 
     // ==================== Canonical name vs cache key ====================

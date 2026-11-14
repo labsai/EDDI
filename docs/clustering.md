@@ -289,7 +289,10 @@ SHA-256 of the body. A receiving node:
 - refuses an RPC older (or further in the future) than `eddi.cluster.signing.max-age` (60 s),
   and an event older than the event retention plus that window;
 - refuses a nonce it has already seen within that window, so a captured message cannot be
-  replayed;
+  replayed. Each nonce is remembered exactly until its message expires and never forgotten
+  earlier; a node that already remembers `eddi.cluster.signing.max-remembered-nonces`
+  (500,000) unexpired nonces refuses further messages (`reason="nonce_capacity"`) rather
+  than evict one whose message could still be replayed;
 - drops a reply that is not signed over the nonce of the request it answers.
 
 A refused request gets no reply; the caller sees what an unreachable node looks like.
