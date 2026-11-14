@@ -177,6 +177,41 @@ class SpaceResourcesTest {
             verify(variables, never()).upsert(any());
         }
 
+        /**
+         * Security review 2026-11, B9: a space id is opaque and may contain {@code %}.
+         * Sent raw as {@code ?space=team:a%7Cb}, it is decoded once on the way in and
+         * arrives as {@code team:a|b} — which matches none of the caller's spaces. That
+         * stays a 403; the message used to tell a member they were not one.
+         */
+        @Test
+        @DisplayName("an id that arrives decoded is refused, saying it matches none of the caller's spaces and how to send it")
+        void undecodedIdIsRefusedWithAnExplanation() {
+            when(guard.callerSpaces()).thenReturn(CallerSpaces.of("alice", Set.of("/a|b")));
+            String listed = Subjects.teamSpace("a|b");
+            assertEquals("team:a%7Cb", listed, "the id GET /workspaces lists");
+            assertDoesNotThrow(() -> sut.listVariables(listed));
+
+            var refused = assertThrows(ForbiddenException.class, () -> sut.listVariables("team:a|b"));
+
+            String message = refused.getMessage();
+            assertTrue(message.contains("None of your spaces has the id 'team:a|b'"), message);
+            assertTrue(message.contains("encodeURIComponent"), message);
+            assertTrue(message.contains("GET /workspaces"), message);
+            assertFalse(message.contains("not a member"), message);
+            assertFalse(message.contains("team:a%7Cb"), "the caller's own spaces are not listed: " + message);
+        }
+
+        @Test
+        @DisplayName("the received id is echoed only sanitised and shortened")
+        void echoedIdIsSanitised() {
+            var refused = assertThrows(ForbiddenException.class, () -> sut.listVariables("team:x\r\ninjected" + "y".repeat(500)));
+
+            String message = refused.getMessage();
+            assertFalse(message.contains("\n") || message.contains("\r"), message);
+            assertTrue(message.contains("team:x__injected"), message);
+            assertTrue(message.length() < 600, "a 500-character id is cut: " + message.length());
+        }
+
         @Test
         @DisplayName("a space variable is stored non-exportable, in the space's tenant")
         void variableIsSpaceScoped() {

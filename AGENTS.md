@@ -89,6 +89,17 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
    - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
    - Opening the PR and working its review comments to the end is written down in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant.
+   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until all of these hold:
+     - CodeRabbit has reviewed the PR's **current head**. If commits landed after its last review, request another one: `@coderabbitai review` for new commits, `@coderabbitai full review` after a stretch where pushes went unreviewed.
+     - Every CodeRabbit finding — inline comments, nitpicks and outside-diff-range comments in the review body included — is either fixed or answered on the PR.
+     - Every CodeRabbit thread is resolved.
+
+     A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed**. Wait (`@coderabbitai rate limit` shows when capacity returns) and ask again; never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
+   - **Never merge into a red `main` (except the one PR that fixes or reverts the breakage), and never merge PRs in bulk.** A PR's green CI only proves it works against the `main` it was tested on. "Require branches to be up to date" is off, so two PRs that are each green can break `main` together: on 2026-11-12, #1352 renamed `ResourceAccessGuard.callerIsAdmin()` to `isAdmin()`, #1345 added a test calling `callerIsAdmin()`, both were merged minutes apart, and `main` stopped compiling its tests. Therefore:
+     - Before every merge, check the `CI/CD` run for `main`'s **current commit**: compare `gh run list -b main -w CI/CD -L 1 --json headSha,status,conclusion` with `gh api repos/labsai/EDDI/commits/main --jq .sha`. The run's `headSha` must equal the current `main` SHA; a green run for an older commit says nothing about the newest one. If no run for that commit exists yet, or it is queued or in progress, wait for it to finish ("not red yet" is not green). It must be **finished and green**. If it is red, fix `main` first: no other PR merges until it is green again.
+     - When `main` has a merge queue, merge only through it (`gh pr merge <n> --squash --auto` adds the PR to the queue). Never use `--admin` to bypass it.
+     - Without a queue, merge one PR at a time. Before the next merge, merge `origin/main` into that PR's branch and wait for its CI to pass again whenever `main` changed in a file the PR touches or depends on, including a renamed or removed symbol. If you must land several, first build `main` plus all of them together and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
+     - After merging, watch `main`'s `CI/CD` run for that commit. If it goes red, revert or fix it before anything else merges.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -413,8 +424,8 @@ public void execute(IConversationMemory memory, Object component) {
 ```java
 @Inject PrePostUtils prePostUtils;
 
-// Before main logic — returns the template data rebuilt with the new properties; keep it
-templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
+// Before main logic — updates templateDataObjects in place (refreshed {properties}, vaulted secrets scrubbed); the return value is that same map
+prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 // After main logic
 prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, httpCode, validationError);
 ```

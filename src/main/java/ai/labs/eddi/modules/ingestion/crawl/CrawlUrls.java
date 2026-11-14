@@ -152,6 +152,30 @@ public final class CrawlUrls {
         }
     }
 
+    /**
+     * The URL to request: without its fragment, and with the characters a URI may
+     * not carry raw percent-encoded, exactly as {@link #canonicalize(String)}
+     * encodes them. An already valid URL comes back unchanged. Empty when the URL
+     * cannot be parsed even so.
+     *
+     * <p>
+     * Only the document id used to be encoded. The fetch went out with the raw
+     * {@code abs:href}, so {@code href="my doc.html"} was queued under a valid id
+     * and then failed in the fetcher's {@code URI.create} on every run — recorded
+     * as an inconclusive error, which also kept deletion reconciliation from ever
+     * running for that source.
+     */
+    public static String fetchable(String url) {
+        if (url == null || url.isBlank()) {
+            return "";
+        }
+        try {
+            return parseTolerantly(stripFragment(url.trim())).toString();
+        } catch (URISyntaxException e) {
+            return "";
+        }
+    }
+
     /** Everything before the {@code #}; fragments are client-side only. */
     public static String stripFragment(String url) {
         if (url == null) {

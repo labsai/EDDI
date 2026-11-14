@@ -9,7 +9,12 @@ interface AccessibleDialogProps {
   onClose: () => void;
   /** Dialog title (also used for aria-labelledby) */
   title: string;
-  /** Dialog content */
+  /**
+   * Dialog content. Rendered edge to edge — the dialog adds no padding of its
+   * own, so a full-bleed body (a diff editor, a toolbar strip) can reach the
+   * border. Ordinary content brings its own: wrap it in `p-5`, matching the
+   * header, or it sits flush against the dialog's border.
+   */
   children: ReactNode;
   /** Optional data-testid */
   testId?: string;

@@ -601,13 +601,32 @@ class SchedulePollerServiceTest {
         p.init();
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of());
 
-        Instant before = Instant.now();
         p.pollAndAwait();
 
-        var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).findDueSchedules(any(), leaseExpiry.capture(), anyInt());
-        assertTrue(leaseExpiry.getValue().isBefore(before.minus(Duration.ofMinutes(5))),
+        var lease = ArgumentCaptor.forClass(Duration.class);
+        verify(scheduleStore).findDueSchedules(any(), lease.capture(), anyInt());
+        assertEquals(p.getEffectiveLeaseTimeout(), lease.getValue());
+        assertTrue(lease.getValue().compareTo(Duration.ofMinutes(5)) > 0,
                 "a running fire's claim must not be stealable within the fire timeout");
+    }
+
+    /**
+     * The batch is read once and claimed row by row, so the poller's claim must be
+     * the one that re-checks due-ness: a row another instance fired and re-armed in
+     * between would otherwise fire twice. The any-time claim is for manual fires
+     * only.
+     */
+    @Test
+    void poll_claimsWithTheDueCheckedClaimAndTheEffectiveLease() throws Exception {
+        var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
+
+        poller.pollAndAwait();
+
+        verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), eq(poller.getEffectiveLeaseTimeout()));
+        verify(scheduleStore, never()).tryClaimAnyTime(any(), any(), any(), any());
     }
 
     @Test
@@ -1021,23 +1040,24 @@ class SchedulePollerServiceTest {
     // --- Manual fires (REST) ---
 
     /**
-     * A manual fire must claim on the poller's own terms. Passing {@code now} as
-     * the lease expiry would match the CAS clause that steals a CRASHED instance's
-     * claim ({@code claimedAt <= leaseExpiry}) and so would seize the claim of a
-     * fire that is still running — the opposite of what claiming is for.
+     * A manual fire must claim on the poller's own terms. A zero lease would match
+     * the CAS clause that steals a CRASHED instance's claim and so would seize the
+     * claim of a fire that is still running — the opposite of what claiming is for.
+     * <p>
+     * It must also claim WITHOUT the poller's due check: "Fire now" exists to fire
+     * before the next fire time, and the poller's claim refuses a schedule that is
+     * not due.
      */
     @Test
-    void claimForManualFire_usesTheConfiguredLeaseAsTheStealThreshold() throws Exception {
+    void claimForManualFire_usesTheConfiguredLeaseAndNoDueCheck() throws Exception {
         var schedule = makeCronSchedule("manual-1", "0 9 * * *", "hi");
-        when(scheduleStore.tryClaim(eq("manual-1"), any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaimAnyTime(eq("manual-1"), any(), any(), any())).thenReturn(true);
 
         assertTrue(poller.claimForManualFire(schedule));
 
         var now = ArgumentCaptor.forClass(Instant.class);
-        var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
-        verify(scheduleStore).tryClaim(eq("manual-1"), eq("test-instance"), now.capture(), leaseExpiry.capture());
-        assertEquals(now.getValue().minus(poller.getEffectiveLeaseTimeout()), leaseExpiry.getValue(),
-                "a manual fire must not be able to steal a live claim");
+        verify(scheduleStore).tryClaimAnyTime(eq("manual-1"), eq("test-instance"), now.capture(), eq(poller.getEffectiveLeaseTimeout()));
+        verify(scheduleStore, never()).tryClaim(any(), any(), any(), any());
         assertEquals("manual-1_" + now.getValue(), schedule.getFireId(), "the in-memory copy must mirror the persisted fireId");
     }
 
@@ -1053,7 +1073,7 @@ class SchedulePollerServiceTest {
     @Test
     void claimForManualFire_refusesWithoutClaimingClusterContention() throws Exception {
         var schedule = makeCronSchedule("manual-2", "0 9 * * *", "hi");
-        when(scheduleStore.tryClaim(eq("manual-2"), any(), any(), any())).thenReturn(false);
+        when(scheduleStore.tryClaimAnyTime(eq("manual-2"), any(), any(), any())).thenReturn(false);
 
         assertFalse(poller.claimForManualFire(schedule));
 
@@ -1074,7 +1094,7 @@ class SchedulePollerServiceTest {
     @Test
     void claimForManualFire_propagatesAStoreFailureInsteadOfReportingAConflict() throws Exception {
         var schedule = makeCronSchedule("manual-8", "0 9 * * *", "hi");
-        when(scheduleStore.tryClaim(eq("manual-8"), any(), any(), any()))
+        when(scheduleStore.tryClaimAnyTime(eq("manual-8"), any(), any(), any()))
                 .thenThrow(new IResourceStore.ResourceStoreException("db down"));
 
         assertThrows(IResourceStore.ResourceStoreException.class, () -> poller.claimForManualFire(schedule));

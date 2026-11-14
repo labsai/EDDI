@@ -126,6 +126,24 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("a link with a raw space is fetched encoded, and its page ingested")
+        void fetchesUnencodedLinkEncoded() {
+            // jsoup resolves the href without encoding the space. Only the document id
+            // was encoded, so the fetch went out raw, the real fetcher's URI.create
+            // refused it, and the page was an inconclusive error on every run.
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"my doc.html#intro\">doc</a></body></html>")
+                    .page(SITE + "/my%20doc.html", "<html><body>The document</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(request(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/my%20doc.html"), site.requestedUrls().toString());
+            assertTrue(sink.documentIds().contains(SITE + "/my%20doc.html"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
         @DisplayName("ignores a link marked rel=nofollow")
         void honoursNofollow() {
             FakeSite site = new FakeSite()
@@ -978,6 +996,23 @@ class WebCrawlerTest {
 
             assertTrue(sink.documentIds().contains(SITE + "/orphan"),
                     "a page in the sitemap must be found even when nothing links to it");
+        }
+
+        @Test
+        @DisplayName("a sitemap URL with a raw space is fetched encoded")
+        void fetchesUnencodedSitemapUrlEncoded() {
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", SITE + "/my doc.html")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/my%20doc.html", "<html><body>listed with a space</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertEquals(1, site.requestCount(SITE + "/my%20doc.html"), site.requestedUrls().toString());
+            assertTrue(sink.documentIds().contains(SITE + "/my%20doc.html"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
         }
 
         @Test
