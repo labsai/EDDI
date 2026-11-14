@@ -1220,7 +1220,8 @@ torn down — undeployed and permanently deleted — when the conversation that
 created them **ends** (an explicit end, `CONVERSATION_END`) or is **deleted**,
 unless the model retained them with `retain_agent`. Only an agent whose
 `dynamicOrigin` names that conversation and no discussion, and is not marked
-retained there (`retain: true` at creation), is touched — and the
+retained there (`retain: true` at creation, or `retain_agent` since; `unretain_agent`
+clears it), is touched — and the
 end finds such agents by that origin too, so one a turn created but never stored
 is not missed. An ended conversation creates no further sub-agents. A user may
 have at most `eddi.dynamic-agents.standalone.max-live-per-user` (default 20)

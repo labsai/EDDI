@@ -1425,6 +1425,31 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("retain_agent and unretain_agent write the flag on the agent itself — the authority cleanup reads")
+        void retainAndUnretainWriteTheAgentsFlag() throws Exception {
+            tool.retainAgent("created-1");
+            var written = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(agentStore).update(eq("created-1"), eq(1), written.capture(), eq(true));
+            assertTrue(written.getValue().getDynamicOrigin().isRetained());
+
+            tool.unretainAgent("created-1");
+            assertFalse(written.getValue().getDynamicOrigin().isRetained(), "un-retained on the agent too");
+            assertFalse(retainedAgentIds.contains("created-1"));
+        }
+
+        @Test
+        @DisplayName("a retain flag that cannot be stored is reported, and nothing claims the agent retained")
+        void retainAgent_flagWriteFailure() throws Exception {
+            when(agentStore.update(eq("created-1"), eq(1), any(AgentConfiguration.class), eq(true)))
+                    .thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            String result = tool.retainAgent("created-1");
+
+            assertTrue(result.contains("could not be stored"), result);
+            assertFalse(retainedAgentIds.contains("created-1"));
+        }
+
+        @Test
         void retainAgent_notCreatedByUs() {
             String result = tool.retainAgent("external-agent");
 

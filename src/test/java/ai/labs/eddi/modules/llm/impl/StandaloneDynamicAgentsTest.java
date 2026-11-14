@@ -316,4 +316,29 @@ class StandaloneDynamicAgentsTest {
         verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
         verify(agentStore, never()).deleteAllPermanently(anyString());
     }
+
+    @Test
+    @DisplayName("retained during the turn that never got stored: the end's snapshot path reads the agent's flag and keeps it")
+    void retainedFlagIsTheAuthorityForTheSnapshotPath() throws Exception {
+        var origin = new DynamicOrigin("parent", CONVERSATION, null, "user-1");
+        origin.setRetained(true);
+        agent("kept", origin);
+        // The stored memory predates retain_agent: it lists the agent, but not as
+        // retained.
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("kept"), Set.of()));
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
+
+    @Test
+    @DisplayName("an agent whose flag cannot be read is kept, not deleted")
+    void unreadableFlagKeepsTheAgent() throws Exception {
+        when(agentStore.getCurrentResourceId("unreadable")).thenThrow(new IllegalStateException("store down"));
+
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("unreadable"), Set.of()));
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
 }

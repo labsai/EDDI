@@ -74,6 +74,24 @@ public interface DelegationBudget {
      * turn cannot each be handed the same remaining money.
      */
     interface Hold {
+        /** Holds nothing and allows without a ceiling — where nothing is admitted. */
+        Hold NONE = new Hold() {
+            @Override
+            public OptionalDouble allowance() {
+                return OptionalDouble.empty();
+            }
+
+            @Override
+            public void release() {
+                // nothing held
+            }
+
+            @Override
+            public void keep(double usd) {
+                // nothing held
+            }
+        };
+
         /** What the delegation may spend; empty when no ceiling applies. */
         OptionalDouble allowance();
 

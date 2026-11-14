@@ -364,6 +364,12 @@ public class StandaloneDynamicAgents {
 
     private void teardown(String agentId, String conversationId) {
         DynamicOrigin origin = originOf(agentId);
+        if (origin != null && origin.isRetained()) {
+            // The flag on the agent is the authority (retain_agent / unretain_agent
+            // write it at once); it may be newer than any stored memory.
+            LOGGER.debugf("[DYNAMIC] Agent '%s' is retained — kept", sanitize(agentId));
+            return;
+        }
         if (origin == null || origin.getCreatedInGroupConversationId() != null || !conversationId.equals(origin.getCreatedInConversationId())) {
             // No verifiable origin (every agent create_sub_agent deploys carries one), a
             // discussion's agent (the group engine's to clean up) or another

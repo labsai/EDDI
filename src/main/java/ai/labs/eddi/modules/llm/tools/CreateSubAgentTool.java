@@ -500,9 +500,10 @@ public class CreateSubAgentTool {
             String response = null;
             // Admitted only when there is a message to send: it holds the allowance for
             // the initial turn, so a parallel delegation of this turn cannot reuse it.
-            DelegationBudget.Hold hold = initialMessage != null && !initialMessage.isBlank() ? budget.admit() : null;
-            OptionalDouble remaining = hold != null ? hold.allowance() : OptionalDouble.empty();
-            if (hold != null && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+            // Never null: without a message there is nothing to hold (Hold.NONE).
+            DelegationBudget.Hold hold = initialMessage != null && !initialMessage.isBlank() ? budget.admit() : DelegationBudget.Hold.NONE;
+            OptionalDouble remaining = hold.allowance();
+            if (initialMessage != null && !initialMessage.isBlank() && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
                 hold.release();
                 // The sub-agent exists; its first turn would spend past the creating
                 // conversation's ceiling, so it is not sent.
