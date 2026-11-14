@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -177,9 +178,13 @@ public class HealthOutcomeEvaluator {
     /**
      * Conversations whose rating mark the full queue refused, coalesced and bounded
      * ({@link #MAX_DEFERRED_RATINGS}); only beyond that is a mark lost — counted
-     * and logged.
+     * and logged. Each deferral stamps the entry with a new generation, and the
+     * drain removes an entry only while it still holds the generation the drain
+     * read before marking: a rating deferred again while the mark was being stored
+     * (after a pass had already judged and cleared it) keeps its entry.
      */
-    private final Set<String> deferredRatings = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> deferredRatings = new ConcurrentHashMap<>();
+    private final AtomicLong deferredRatingGeneration = new AtomicLong();
     private final AtomicLong ratingsLostSinceWarn = new AtomicLong();
     private final AtomicReference<Instant> lastRatingWarn = new AtomicReference<>();
     private ExecutorService ownedExecutor;
@@ -189,6 +194,11 @@ public class HealthOutcomeEvaluator {
      * turn captured days ago is retried as long as a fresh one. Bounded and per
      * node — on another node the limit starts again, which only retries longer.
      */
+    /**
+     * The failure the direct retries took last, where the next pass's retries start
+     * after.
+     */
+    private volatile String lastRetried;
     private final Cache<String, FeedFailure> feedFailures = Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(MAX_RETRY.multipliedBy(2))
             .build();
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
@@ -316,10 +326,21 @@ public class HealthOutcomeEvaluator {
         List<Map.Entry<String, FeedFailure>> retries = new ArrayList<>(feedFailures.asMap().entrySet());
         retries.removeIf(e -> e.getValue().givenUp());
         retries.sort(Map.Entry.comparingByValue(Comparator.comparing(FeedFailure::capturedAt)));
+        // Rotated: this pass starts after the failure the last pass retried last, so
+        // one whose retry uses up the share every time cannot keep the later ones from
+        // their turn until they reach the limit and are given up.
+        String rotation = lastRetried;
+        for (int i = 0; rotation != null && i < retries.size(); i++) {
+            if (retries.get(i).getKey().equals(rotation)) {
+                Collections.rotate(retries, -(i + 1));
+                break;
+            }
+        }
         for (Map.Entry<String, FeedFailure> retry : retries) {
             if (!clock.instant().isBefore(replayDeadline) || done[0] >= replayLimit) {
                 break;
             }
+            lastRetried = retry.getKey();
             if (seen.add(retry.getKey())) {
                 failedAt = evaluateInFeed(new ConversationActivity(retry.getKey(), retry.getValue().capturedAt()), done, failedAt);
             }
@@ -716,7 +737,10 @@ public class HealthOutcomeEvaluator {
      * are read.
      */
     private void deferRating(String conversationId) {
-        if (deferredRatings.contains(conversationId) || deferredRatings.size() < MAX_DEFERRED_RATINGS && deferredRatings.add(conversationId)) {
+        long generation = deferredRatingGeneration.incrementAndGet();
+        if (deferredRatings.computeIfPresent(conversationId, (id, previous) -> generation) != null
+                || deferredRatings.size() < MAX_DEFERRED_RATINGS
+                        && deferredRatings.merge(conversationId, generation, (previous, next) -> next) != null) {
             metrics.ratingMarkOverflow(HealthMetrics.RESULT_DEFERRED);
             return;
         }
@@ -746,13 +770,16 @@ public class HealthOutcomeEvaluator {
      * As {@link #drainDeferredRatings()}, stopping at {@code deadline} if given.
      */
     void drainDeferredRatings(Instant deadline) {
-        for (String conversationId : List.copyOf(deferredRatings)) {
+        for (Map.Entry<String, Long> deferred : List.copyOf(deferredRatings.entrySet())) {
             if (deadline != null && !clock.instant().isBefore(deadline)) {
                 return;
             }
+            String conversationId = deferred.getKey();
             try {
                 outcomeStore.markDue(conversationId, null, clock.instant());
-                deferredRatings.remove(conversationId);
+                // Only the generation this mark covers: a later deferral stays for the next
+                // drain.
+                deferredRatings.remove(conversationId, deferred.getValue());
             } catch (RuntimeException e) {
                 LOGGER.debugf("Could not store the deferred Agent Health rating marks; they are retried: %s", sanitize(e.getMessage()));
                 return;

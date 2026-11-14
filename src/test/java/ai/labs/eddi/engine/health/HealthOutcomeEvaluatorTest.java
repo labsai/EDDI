@@ -495,6 +495,42 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("the direct retries rotate: an earlier failure whose retry uses up the share every pass does not keep a later one "
+                + "from its turn")
+        void retriesRotateAcrossPasses() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant a = NOW.minus(Duration.ofMinutes(40));
+            List<ConversationActivity> feed = new ArrayList<>(List.of(new ConversationActivity("a", a),
+                    new ConversationActivity("b", a.plus(Duration.ofMinutes(5)))));
+            cursor = HealthFeedCursor.at(a.minusSeconds(60));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of("a", "b"));
+
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(1, evaluated.stream().filter("b"::equals).count());
+
+            // From now on a's retry takes longer than the replay's share of the pass, so
+            // once a is retried nothing after it is; and b is behind the watermark, so
+            // neither the replay (restarted at a) nor the forward feed reaches it.
+            when(outcomes.findByConversation(anyString())).thenAnswer(inv -> {
+                String id = inv.getArgument(0);
+                evaluated.add(id);
+                if ("a".equals(id)) {
+                    clock.now = clock.now.plusSeconds(31);
+                }
+                throw new HealthStoreException("down", null);
+            });
+            for (int pass = 2; pass <= 5; pass++) {
+                clock.now = clock.now.plus(Duration.ofMinutes(1));
+                evaluator.run(clock.now.plusSeconds(60));
+            }
+            assertTrue(evaluated.stream().filter("b"::equals).count() >= 3, "b took its turn: " + evaluated);
+            assertTrue(evaluated.stream().filter("a"::equals).count() >= 3, "a kept its turn: " + evaluated);
+        }
+
+        @Test
         @DisplayName("a conversation given up at the retry limit starts a new retry window with a later capture that fails")
         void laterCaptureAfterGivingUpIsRetried() {
             MovableClock clock = new MovableClock();
@@ -831,6 +867,31 @@ class HealthOutcomeEvaluatorTest {
             // Stored: neither the next drain nor the next pass marks it again.
             evaluator.drainDeferredRatings();
             evaluator.run(NOW.plusSeconds(60));
+            verify(outcomes, times(2)).markDue(eq("queued"), isNull(), eq(NOW));
+        }
+
+        @Test
+        @DisplayName("a rating deferred again while the drain stores the previous mark keeps its entry for the next drain")
+        void drainKeepsARatingDeferredDuringTheMark() {
+            evaluator.ratingExecutor(task -> {
+                throw new RejectedExecutionException("full");
+            });
+            evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("queued", 4));
+            // While the first mark is being stored, a pass judges the session and clears
+            // it, and a new rating arrives with the queue still full: it is deferred again.
+            when(outcomes.markDue(eq("queued"), isNull(), any())).thenAnswer(invocation -> {
+                evaluator.onRatingWithdrawn(new ConversationRatingWithdrawn("queued", 5));
+                return 1L;
+            }).thenReturn(1L);
+
+            evaluator.drainDeferredRatings();
+            verify(outcomes, times(1)).markDue(eq("queued"), isNull(), eq(NOW));
+
+            // The newer deferral was not removed with the mark that preceded it.
+            evaluator.drainDeferredRatings();
+            verify(outcomes, times(2)).markDue(eq("queued"), isNull(), eq(NOW));
+
+            evaluator.drainDeferredRatings();
             verify(outcomes, times(2)).markDue(eq("queued"), isNull(), eq(NOW));
         }
 
