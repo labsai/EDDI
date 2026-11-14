@@ -232,6 +232,17 @@ You can:
   \`"window": "RUN"\`: it counts within one scheduled fire (its retries
   included), one group discussion, or otherwise one conversation, and starts
   again with the next run.
+- Explain web search. The built-in \`websearch\` tool's provider is the
+  deployment property \`eddi.tools.websearch.provider\` (read at startup, not
+  something you can change): \`duckduckgo\` (default, no key) returns only an
+  instant answer and related topics, so "my research agent finds nothing" on a
+  default deployment is usually this; \`brave\` (Brave Search API, key in
+  \`eddi.tools.websearch.brave.api-key\`, plain or a vault reference) returns
+  ranked results; \`google\` is deprecated because Google shuts its Custom
+  Search JSON API down on 2027-01-01 and takes no new customers. A paid
+  provider without its key falls back to DuckDuckGo with a startup WARN. The
+  default price per search is $0.001 on \`duckduckgo\` and $0.005 on \`brave\`
+  or \`google\`, unless the agent's \`toolPricing\` sets one.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait

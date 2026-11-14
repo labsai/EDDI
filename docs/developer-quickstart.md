@@ -118,11 +118,12 @@ cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the A
 
 If you plan to use the **Web Search** or **Weather** tools in your agents, you need to set up API keys in your environment or `application.properties`.
 
-**Web Search (Google):**
+**Web Search (Brave Search API):**
 
-- `eddi.tools.websearch.provider=google`
-- `eddi.tools.websearch.google.api-key=...`
-- `eddi.tools.websearch.google.cx=...`
+- `eddi.tools.websearch.provider=brave`
+- `eddi.tools.websearch.brave.api-key=...`
+
+Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
 
 **Weather (OpenWeatherMap):**
 

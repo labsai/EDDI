@@ -105,7 +105,8 @@ public class OutboundHttp {
      * redirect hops.
      */
     public static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
-            "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication");
+            "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication",
+            "x-subscription-token");
 
     /**
      * Per-hop response timeout applied when the request sets none. It bounds only

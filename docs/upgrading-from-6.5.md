@@ -352,6 +352,21 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 
 ## Changes after 6.7.0
 
+### The default `websearch` price now follows the search provider
+
+Cost tracking used to charge every `websearch` call $0.001 whatever the provider. The default now
+depends on `eddi.tools.websearch.provider`: `brave` and `google` are priced at $0.005 per call (both
+list $5 per 1,000 requests), `duckduckgo` stays at $0.001. Deployments on `google` therefore see the
+price of a search rise from $0.001 to $0.005, five times. Agents, conversations and tenants that
+carry a dollar cost ceiling (`maxBudgetPerConversation`, group and team budgets, the tenant's monthly
+cost budget) and use web search reach it up to five times sooner for the same number of Google
+searches. Agents that set `toolPricing.websearch` themselves are unaffected.
+
+To keep the old price, set `eddi.tools.websearch.price-per-call=0.001` (or
+`EDDI_TOOLS_WEBSEARCH_PRICE_PER_CALL=0.001`); it replaces the provider default for whichever provider
+is configured, and also lets a plan that differs from list price be recorded as it is. See
+[Web Search Tool](langchain.md#web-search-tool).
+
 ### An httpcall whose literal target is refused now fails at deploy
 
 With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an

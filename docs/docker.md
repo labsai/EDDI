@@ -188,10 +188,11 @@ Administrators can also turn it off on the Manager's **Updates** page; that is s
 ### AI Tools
 
 ```bash
--e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=your_key \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=your_cx
+-e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+-e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=your_key
 ```
+
+(`google` still works with `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY` and `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX` until Google shuts the Custom Search JSON API down on 2027-01-01; see [langchain.md → Web Search Tool](langchain.md#web-search-tool).)
 
 ```bash
 -e EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=your_key
@@ -206,7 +207,7 @@ docker run --name eddi \
   -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
-  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_KEY \
+  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+  -e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=YOUR_KEY \
   -d labsai/eddi:latest
 ```
