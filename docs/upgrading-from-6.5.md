@@ -352,6 +352,18 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 
 ## Changes after 6.7.0
 
+### The tool-history response lost its totals and per-call timing
+
+`GET /llm/tools/history/{conversationId}` now answers `{"toolCalls": [...], "hasErrors": bool}`, each call
+`{toolName, callId, arguments, result, success, error}`. The fields `totalCost`, `totalExecutionTimeMs`,
+`cacheHits`, `cacheMisses` and `toolMetrics` are gone from the body, and so are `executionTimeMs`, `cost`,
+`fromCache` and `timestamp` on each call: the stored trace never recorded them, so they were always zero or
+empty. A client that reads one of them now gets `undefined` or `null`; remove it. A conversation's tool spend
+is served by `GET /llm/tools/costs/conversation/{conversationId}`. `success` and `hasErrors` are no longer
+always `true` and `false`: a failed or refused call now shows with `success: false` and the reason in `error`,
+and a refused call that never ran appears as a call of its own. The Manager and the Platform Operator do not
+call this endpoint.
+
 ### An httpcall whose literal target is refused now fails at deploy
 
 With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an

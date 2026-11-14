@@ -54,8 +54,7 @@ export interface AuditToolCall {
  * Events without a type are treated as calls (a hand-written or older entry);
  * other markers are skipped — they are not invocations. A `tool_error` attaches
  * its reason as `error` to the call it refused. A
- * `tool_result` attaches to the most recent unanswered call of the same tool,
- * the same pairing `RestToolHistory` uses.
+ * `tool_result` attaches to the most recent unanswered call of the same tool.
  */
 export function auditToolCalls(entry: Pick<AuditEntry, "toolCalls"> | null | undefined): AuditToolCall[] {
   const raw = entry?.toolCalls;
