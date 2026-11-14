@@ -67,6 +67,24 @@ public final class SpendReservations {
         return Optional.of(new Reservation(amount));
     }
 
+    /**
+     * Reserves all the headroom left — {@code ceilingUsd} less {@code spentUsd}
+     * less what is already held — in one step, so nothing reserved in between can
+     * push the total above the ceiling.
+     *
+     * @return the reservation, holding the headroom it took; empty when there is
+     *         none
+     */
+    public synchronized Optional<Reservation> reserveHeadroom(double spentUsd, double ceilingUsd) {
+        double headroom = ceilingUsd - spentUsd - heldUsd;
+        if (!Double.isFinite(headroom) || !(headroom > 0.0)) {
+            return Optional.empty();
+        }
+        heldUsd += headroom;
+        open++;
+        return Optional.of(new Reservation(headroom));
+    }
+
     /** What the calls in flight are holding right now. */
     public synchronized double heldUsd() {
         return heldUsd;

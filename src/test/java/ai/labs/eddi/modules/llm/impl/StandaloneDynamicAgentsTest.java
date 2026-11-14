@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.SetupResult;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
+import ai.labs.eddi.modules.llm.tools.SubAgentLocks;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -38,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -340,5 +343,45 @@ class StandaloneDynamicAgentsTest {
 
         verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
         verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
+
+    @Test
+    @DisplayName("unretain_agent in the active turn wins over the stale stored list: the agent is removed at the end")
+    void liveUnretainWinsOverStaleMemory() throws Exception {
+        var origin = new DynamicOrigin("parent", CONVERSATION, null, "user-1");
+        origin.setRetained(false);
+        agent("released", origin);
+
+        // The stored memory still lists it as retained.
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("released"), Set.of("released")));
+
+        verify(agentFactory).undeployAgent(Environment.production, "released", null);
+        verify(agentStore).deleteAllPermanently("released");
+    }
+
+    @Test
+    @DisplayName("an agent created before the flag existed (absent, not false) keeps memory's retention")
+    void legacyAgentFallsBackToMemory() throws Exception {
+        agent("legacy", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("legacy"), Set.of("legacy")));
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("teardown marks the agent as being torn down while it undeploys and deletes, and clears the mark after")
+    void teardownMarksTheAgent() throws Exception {
+        agent("sub-1", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+        var markedDuringUndeploy = new AtomicBoolean();
+        doAnswer(invocation -> {
+            markedDuringUndeploy.set(SubAgentLocks.isTearingDown("sub-1"));
+            return null;
+        }).when(agentFactory).undeployAgent(Environment.production, "sub-1", null);
+
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1"), Set.of()));
+
+        assertTrue(markedDuringUndeploy.get(), "a retain arriving meanwhile is refused");
+        assertFalse(SubAgentLocks.isTearingDown("sub-1"), "cleared once teardown is over");
     }
 }

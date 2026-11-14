@@ -1438,6 +1438,24 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("retain while teardown holds the agent: refused as being torn down, nothing claims it retained")
+        void retainAgent_whileTearingDown() throws Exception {
+            var lock = SubAgentLocks.lockFor("created-1");
+            lock.lock();
+            SubAgentLocks.markTearingDown("created-1");
+            try {
+                String result = tool.retainAgent("created-1");
+
+                assertTrue(result.contains("being torn down"), result);
+                assertFalse(retainedAgentIds.contains("created-1"));
+                verify(agentStore, never()).update(anyString(), anyInt(), any(AgentConfiguration.class), anyBoolean());
+            } finally {
+                SubAgentLocks.clearTearingDown("created-1");
+                lock.unlock();
+            }
+        }
+
+        @Test
         @DisplayName("a retain flag that cannot be stored is reported, and nothing claims the agent retained")
         void retainAgent_flagWriteFailure() throws Exception {
             when(agentStore.update(eq("created-1"), eq(1), any(AgentConfiguration.class), eq(true)))

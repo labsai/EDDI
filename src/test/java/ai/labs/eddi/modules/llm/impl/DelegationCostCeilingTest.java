@@ -331,4 +331,40 @@ class DelegationCostCeilingTest {
         first.release();
         assertEquals(0.5, budget.admit().allowance().getAsDouble(), 1e-9, "released once settled");
     }
+
+    @Test
+    @DisplayName("admission reserves the headroom left at that moment, in one step: a reservation landing first is not handed out again")
+    void admissionReservesTheCurrentHeadroom() {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        // Another call of this turn reserved 0.3 between any earlier read and this
+        // admission.
+        memory.getSpendReservations().tryReserve(0.5, 1.0, 0.3);
+
+        var hold = new MemoryDelegationBudget(memory).admit();
+
+        assertEquals(0.2, hold.allowance().getAsDouble(), 1e-9);
+        assertEquals(0.5, memory.getSpendReservations().heldUsd(), 1e-9, "never above the ceiling");
+        assertTrue(memory.getSpendReservations().reserveHeadroom(0.5, 1.0).isEmpty(), "nothing left");
+    }
+
+    @Test
+    @DisplayName("an interrupted wait is handled like a timeout: recorded spend charged, the rest held, the interrupt restored")
+    void interruptedWaitKeepsTheHold() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        doAnswer(invocation -> {
+            // The tool's own timeout cancels the worker while it waits.
+            Thread.currentThread().interrupt();
+            return null;
+        }).when(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        when(conversationService.getConversationMemorySnapshot("conv-b")).thenReturn(spentSoFar(0.0), spentSoFar(0.1));
+
+        String result = tool().converseWithAgent("agent-b", "hello", null);
+
+        assertTrue(Thread.interrupted(), "the interrupt flag is restored");
+        assertTrue(result.contains("Stopped waiting"), result);
+        assertEquals(0.1, ((Number) memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST).getResult()).doubleValue(), 1e-9);
+        assertEquals(0.0, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9, "the rest stays held");
+    }
 }

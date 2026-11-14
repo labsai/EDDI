@@ -71,7 +71,9 @@ final class MemoryDelegationBudget implements DelegationBudget {
             return DelegationBudget.super.admit();
         }
         OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
-        var held = reservations.tryReserve(LlmSpendGate.conversationCost(memory), ceiling.getAsDouble(), remaining.getAsDouble());
+        // Read and reserve the headroom in one step: a value read earlier could be
+        // stale once another reservation landed in between.
+        var held = reservations.reserveHeadroom(LlmSpendGate.conversationCost(memory), ceiling.getAsDouble());
         if (held.isEmpty()) {
             // Another delegation of this turn took it first.
             OptionalDouble none = OptionalDouble.of(0.0);
@@ -93,10 +95,11 @@ final class MemoryDelegationBudget implements DelegationBudget {
             };
         }
         SpendReservations.Reservation reservation = held.get();
+        OptionalDouble allowance = OptionalDouble.of(reservation.amountUsd());
         return new Hold() {
             @Override
             public OptionalDouble allowance() {
-                return remaining;
+                return allowance;
             }
 
             @Override

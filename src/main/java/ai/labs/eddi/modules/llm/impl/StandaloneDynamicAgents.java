@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.modules.llm.tools.SubAgentLocks;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -355,14 +357,42 @@ public class StandaloneDynamicAgents {
             return;
         }
         for (String agentId : created) {
-            if (agentId == null || retained.contains(agentId)) {
+            if (agentId == null) {
+                continue;
+            }
+            // The agent's own flag decides (teardown reads it): stored memory can be
+            // older than an unretain_agent in a turn that was never stored. Only an
+            // agent created before the flag existed falls back to memory's list.
+            if (retained.contains(agentId) && legacyRetention(agentId)) {
                 continue;
             }
             teardown(agentId, conversationId);
         }
     }
 
+    /**
+     * Whether the agent carries no retain flag of its own (created before it
+     * existed).
+     */
+    private boolean legacyRetention(String agentId) {
+        DynamicOrigin origin = originOf(agentId);
+        return origin == null || origin.getRetained() == null;
+    }
+
     private void teardown(String agentId, String conversationId) {
+        // Held across reading the flag, undeploying and deleting: a retain_agent in
+        // between would otherwise report success for an agent deleted anyway.
+        ReentrantLock lock = SubAgentLocks.lockFor(agentId);
+        lock.lock();
+        try {
+            teardownLocked(agentId, conversationId);
+        } finally {
+            SubAgentLocks.clearTearingDown(agentId);
+            lock.unlock();
+        }
+    }
+
+    private void teardownLocked(String agentId, String conversationId) {
         DynamicOrigin origin = originOf(agentId);
         if (origin != null && origin.isRetained()) {
             // The flag on the agent is the authority (retain_agent / unretain_agent
@@ -378,6 +408,7 @@ public class StandaloneDynamicAgents {
                     sanitize(conversationId));
             return;
         }
+        SubAgentLocks.markTearingDown(agentId);
         try {
             agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
             agentStore.deleteAllPermanently(agentId);

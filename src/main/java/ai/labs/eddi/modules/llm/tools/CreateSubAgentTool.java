@@ -604,7 +604,10 @@ public class CreateSubAgentTool {
                         // a timed-out message may still be spending.
                         // The original allowance: the observed spend already includes the start turn.
                         DelegationBudget.settleUnfinished(budget, hold, conversationService, conversationId, 0.0, remaining,
-                                e instanceof TimeoutException);
+                                e instanceof TimeoutException || e instanceof InterruptedException);
+                    }
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
                     }
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
                             agentId, e.getMessage());

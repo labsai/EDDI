@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -190,6 +191,25 @@ public class TeardownAgentTool {
      * @return a refusal for the model, or {@code null} when written
      */
     private String writeRetainedFlag(String agentId, boolean retained) {
+        String tearingDown = "⚠️ Cannot %s agent '%s' — the agent is being torn down.".formatted(retained ? "retain" : "un-retain", agentId);
+        if (SubAgentLocks.isTearingDown(agentId)) {
+            return tearingDown;
+        }
+        ReentrantLock lock = SubAgentLocks.lockFor(agentId);
+        lock.lock();
+        try {
+            // Re-checked under the lock: a teardown that took the lock first may have
+            // decided to delete it meanwhile (and, once done, the agent is gone).
+            if (SubAgentLocks.isTearingDown(agentId)) {
+                return tearingDown;
+            }
+            return writeRetainedFlagLocked(agentId, retained);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private String writeRetainedFlagLocked(String agentId, boolean retained) {
         String refusal = refuseUnlessCreatedHere(agentId);
         if (refusal != null) {
             return refusal;
@@ -197,7 +217,9 @@ public class TeardownAgentTool {
         try {
             IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
             AgentConfiguration configuration = agentStore.read(agentId, current.getVersion());
-            if (configuration.getDynamicOrigin().isRetained() == retained) {
+            // Written whenever it is not already exactly this value — an absent (legacy)
+            // flag is written too, so the agent's own flag decides from now on.
+            if (Boolean.valueOf(retained).equals(configuration.getDynamicOrigin().getRetained())) {
                 return null;
             }
             configuration.getDynamicOrigin().setRetained(retained);

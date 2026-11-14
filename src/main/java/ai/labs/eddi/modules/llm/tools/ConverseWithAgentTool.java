@@ -458,6 +458,14 @@ public class ConverseWithAgentTool {
             // Already-paused at submit — no snapshot available here, so we cannot
             // determine the pause type; report the base (RULE-shaped) message.
             return pausedForApprovalMessage(conversationId, null);
+        } catch (InterruptedException e) {
+            // The tool's own timeout cancelled this wait: the delegated turn may still
+            // be running, exactly as on a timeout below.
+            Thread.currentThread().interrupt();
+            LOGGER.warnf("[CONVERSE] Interrupted waiting for agent '%s' response", agentId);
+            DelegationBudget.settleUnfinished(budget, hold, conversationService, delegatedConversation, costBefore, delegatedAllowance, true);
+            settled = true;
+            return "⚠️ Stopped waiting for agent '%s' to respond.".formatted(agentId);
         } catch (TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
             // The delegated turn may still be running: charge what it has recorded so
