@@ -495,6 +495,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // A follow-up runs a member agent at the group's cost, like a continuation:
             // owning the transcript is not the same as still being allowed to run it.
             requireGroupUseAccess(groupId);
+            if (gc.getDepth() > 0) {
+                return nestedChildRefused();
+            }
             GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -747,6 +750,15 @@ public class RestGroupConversation implements IRestGroupConversation {
                 .build();
     }
 
+    /**
+     * 409 for a follow-up or continuation of a nested discussion — see
+     * {@code GroupConversationService.rejectIfNestedChild}.
+     */
+    private static Response nestedChildRefused() {
+        return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                .entity(GroupConversationService.NESTED_CHILD_REFUSAL).build();
+    }
+
     @Override
     @RunOnVirtualThread
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
@@ -764,6 +776,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // A continuation re-runs every member, exactly like a new discussion: owning
             // the transcript is not the same as still being allowed to run the group.
             requireGroupUseAccess(groupId);
+            if (gc.getDepth() > 0) {
+                return nestedChildRefused();
+            }
             GroupConversation result = groupConversationService.continueDiscussion(gcId, request.question(), null);
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -824,6 +839,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             // Strict: a continuation is a write (see followUpWithMember).
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             requireGroupUseAccess(groupId);
+            if (gc.getDepth() > 0) {
+                sendErrorEvent(eventSink, sse, GroupConversationService.NESTED_CHILD_REFUSAL);
+                closeQuietly(eventSink);
+                return;
+            }
 
             // Reuse the shared streaming listener so a continuation that pauses or is
             // cancelled for HITL streams the awaiting_approval / cancelled /

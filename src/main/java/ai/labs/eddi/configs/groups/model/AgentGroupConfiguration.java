@@ -708,9 +708,18 @@ public class AgentGroupConfiguration {
      *            discussion cap because the failure modes differ — a runaway turn
      *            files twenty tasks in one breath, where a discussion-long drift
      *            files one per turn for forty turns
+     * @param onUnparseableVerdict
+     *            what a TASK_FORCE VERIFY pass does with the tasks its verdict did
+     *            not settle: {@code PASS} (default, the behaviour before this
+     *            option) auto-verifies them when the verifier's reply is not a
+     *            readable verdict; {@code FAIL} fails them instead, and also reads
+     *            a verdict entry without a {@code passed} field as not passed. FAIL
+     *            is the recommended setting wherever the verifier is the check that
+     *            matters: under PASS, a verifier talked out of the JSON format (by
+     *            a member result it is reviewing, for instance) approves everything
      */
     public record GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn,
-            AssignmentMode assignmentMode) {
+            AssignmentMode assignmentMode, UnparseableVerdictPolicy onUnparseableVerdict) {
 
         public static final int DEFAULT_MAX_PER_DISCUSSION = 20;
         public static final int DEFAULT_MAX_PER_TURN = 3;
@@ -731,6 +740,15 @@ public class AgentGroupConfiguration {
             if (assignmentMode == null) {
                 assignmentMode = AssignmentMode.ROLE;
             }
+            if (onUnparseableVerdict == null) {
+                onUnparseableVerdict = UnparseableVerdictPolicy.PASS;
+            }
+        }
+
+        /** Backward-compatible constructor without {@code onUnparseableVerdict}. */
+        public GroupTaskConfig(boolean allowAgentTaskCreation, int maxAgentAddedTasksPerDiscussion, int maxPerTurn,
+                AssignmentMode assignmentMode) {
+            this(allowAgentTaskCreation, maxAgentAddedTasksPerDiscussion, maxPerTurn, assignmentMode, UnparseableVerdictPolicy.PASS);
         }
 
         /** Backward-compatible constructor without {@code assignmentMode} (I18). */
@@ -742,6 +760,17 @@ public class AgentGroupConfiguration {
         public GroupTaskConfig() {
             this(false, DEFAULT_MAX_PER_DISCUSSION, DEFAULT_MAX_PER_TURN);
         }
+    }
+
+    /**
+     * What a VERIFY pass does with tasks an unreadable verdict left unsettled — see
+     * {@link GroupTaskConfig#onUnparseableVerdict()}.
+     */
+    public enum UnparseableVerdictPolicy {
+        /** Auto-verify them (the behaviour before this option). */
+        PASS,
+        /** Fail them; a verdict entry without {@code passed} is not a pass. */
+        FAIL
     }
 
     /**

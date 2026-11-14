@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.UnparseableVerdictPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -822,7 +823,7 @@ public class TaskForceEngine {
 
         GroupMember verifier = speakers.getFirst();
         List<TaskItem> verified = completedTasks;
-        runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+        runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter, unparseablePolicy(config));
 
         // E2 maxReworks: a task that failed this pass goes back to its member with the
         // verifier's feedback and is checked again, up to maxReworks times per task.
@@ -873,7 +874,7 @@ public class TaskForceEngine {
                     || (maxTurns > 0 && turnCounter.get() >= maxTurns)) {
                 return;
             }
-            runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+            runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter, unparseablePolicy(config));
         }
     }
 
@@ -938,7 +939,7 @@ public class TaskForceEngine {
      */
     private void runVerificationPass(GroupConversation gc, GroupMember verifier, List<TaskItem> completedTasks, DiscussionPhase phase,
                                      String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
-                                     AtomicInteger turnCounter)
+                                     AtomicInteger turnCounter, UnparseableVerdictPolicy onUnparseable)
             throws GroupDiscussionException {
         turnCounter.incrementAndGet();
 
@@ -957,7 +958,7 @@ public class TaskForceEngine {
             td.put("subject", t.subject());
             td.put("description", t.description());
             td.put("assignedDisplayName", t.assignedDisplayName());
-            td.put("result", t.result() != null ? t.result() : "(no result)");
+            td.put("result", t.result() != null ? PeerContentGuard.fenced(t.result()) : "(no result)");
             return td;
         }).collect(Collectors.toList());
         data.put("completedTasks", taskData);
@@ -969,15 +970,22 @@ public class TaskForceEngine {
             verifyInput = "Review the task results and provide pass/fail for each task.";
         }
 
-        TranscriptEntry verifyEntry = memberTurnExecutor.executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
+        TranscriptEntry verifyEntry = memberTurnExecutor.executeAgentTurn(verifier, gc, PeerContentGuard.withQuotedNotice(verifyInput), protocol,
+                phaseIdx, phase, null, listener);
 
         // Parse verification results — same three-tier fallback
-        parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener);
+        parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener, onUnparseable);
 
         // Replace raw JSON with a human-readable summary for the transcript.
         // The JSON was needed for parseAndApplyVerification above; users should
         // see formatted pass/fail results, not raw JSON.
-        String formattedContent = formatVerificationForDisplay(verifyEntry.content());
+        // Rendered with the policy that was applied, so it never says "Passed" for a
+        // task the list just failed.
+        boolean failClosed = onUnparseable == UnparseableVerdictPolicy.FAIL;
+        String formattedContent = formatVerificationForDisplay(verifyEntry.content(), failClosed);
+        if (failClosed) {
+            formattedContent = withPolicyOutcomes(formattedContent, gc, completedTasks);
+        }
         TranscriptEntry displayEntry = new TranscriptEntry(
                 verifyEntry.speakerAgentId(), verifyEntry.speakerDisplayName(),
                 formattedContent, verifyEntry.phaseIndex(), verifyEntry.phaseName(),
@@ -1010,7 +1018,7 @@ public class TaskForceEngine {
                     .map(dep -> {
                         Map<String, Object> dr = new LinkedHashMap<>();
                         dr.put("subject", dep.subject());
-                        dr.put("result", dep.result());
+                        dr.put("result", PeerContentGuard.fenced(dep.result()));
                         return dr;
                     }).collect(Collectors.toList());
             if (!depResults.isEmpty()) {
@@ -1030,7 +1038,7 @@ public class TaskForceEngine {
         if (task.verificationNote() != null && !task.verificationNote().isBlank()) {
             input += "\n\nReviewer feedback on the previous attempt (address this): " + task.verificationNote();
         }
-        return input;
+        return data.containsKey("dependencyResults") ? PeerContentGuard.withQuotedNotice(input) : input;
     }
 
     /**
@@ -1039,15 +1047,39 @@ public class TaskForceEngine {
      */
     public void parseAndApplyVerification(GroupConversation gc, List<TaskItem> completedTasks,
                                           String verifyContent, GroupDiscussionEventListener listener) {
+        parseAndApplyVerification(gc, completedTasks, verifyContent, listener, UnparseableVerdictPolicy.PASS);
+    }
+
+    /**
+     * As
+     * {@link #parseAndApplyVerification(GroupConversation, List, String, GroupDiscussionEventListener)},
+     * with what an unreadable verdict does configurable
+     * ({@code taskListConfig.onUnparseableVerdict}): {@code PASS} auto-verifies,
+     * {@code FAIL} fails every task the verdict did not settle.
+     */
+    public void parseAndApplyVerification(GroupConversation gc, List<TaskItem> completedTasks,
+                                          String verifyContent, GroupDiscussionEventListener listener,
+                                          UnparseableVerdictPolicy onUnparseable) {
+        boolean failClosed = onUnparseable == UnparseableVerdictPolicy.FAIL;
         // H4 fix: dedicated verification parser that reads 'passed' boolean from JSON
         try {
             if (verifyContent != null && verifyContent.contains("[")) {
-                if (tryParseVerificationJson(gc, completedTasks, verifyContent, listener)) {
+                if (tryParseVerificationJson(gc, completedTasks, verifyContent, listener, failClosed)) {
+                    // A verdict that names only some tasks leaves the rest COMPLETED,
+                    // never checked. Under FAIL they fail too, so they are reworked
+                    // (maxReworks) instead of passing through unchecked.
+                    if (failClosed) {
+                        failUnsettled(gc, completedTasks, listener, NOTE_NOT_NAMED);
+                    }
                     return;
                 }
             }
         } catch (Exception e) {
-            LOGGER.debugf("Failed to parse verification output, marking all as passed: %s", e.getMessage());
+            LOGGER.debugf("Failed to parse verification output: %s", e.getMessage());
+        }
+        if (failClosed) {
+            failUnsettled(gc, completedTasks, listener, NOTE_UNPARSEABLE);
+            return;
         }
 
         // Fallback: mark all still-completed tasks as verified (safe default).
@@ -1087,9 +1119,89 @@ public class TaskForceEngine {
      *
      * @return true if parsing succeeded and at least one task was verified
      */
-    @SuppressWarnings("unchecked")
     public boolean tryParseVerificationJson(GroupConversation gc, List<TaskItem> completedTasks,
                                             String content, GroupDiscussionEventListener listener) {
+        return tryParseVerificationJson(gc, completedTasks, content, listener, false);
+    }
+
+    /**
+     * The verification note of a task failed because the verdict was unreadable.
+     */
+    static final String NOTE_UNPARSEABLE = "Not verified: the verifier's verdict could not be parsed";
+    /**
+     * The verification note of a task failed because the verdict did not name it.
+     */
+    static final String NOTE_NOT_NAMED = "Not verified: the verifier's verdict did not name this task";
+
+    /**
+     * Fails every task of the pass that is still {@code COMPLETED} under
+     * {@code onUnparseableVerdict=FAIL}: the verdict was unreadable
+     * ({@link #NOTE_UNPARSEABLE}) or did not name the task
+     * ({@link #NOTE_NOT_NAMED}). Live status, for the reasons the auto-verify loop
+     * documents.
+     */
+    private void failUnsettled(GroupConversation gc, List<TaskItem> completedTasks, GroupDiscussionEventListener listener,
+                               String note) {
+        boolean unparseable = NOTE_UNPARSEABLE.equals(note);
+        if (unparseable) {
+            Metrics.counter(METER_VERIFY_UNPARSEABLE).increment();
+        }
+        int failed = 0;
+        for (TaskItem task : completedTasks) {
+            TaskItem live = gc.getTaskList().findById(task.id());
+            if (live == null || live.status() != TaskStatus.COMPLETED) {
+                continue;
+            }
+            gc.getTaskList().verifyTask(live.id(), false, note);
+            failed++;
+            if (listener != null) {
+                listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                        live.id(), live.subject(), false, unparseable ? "Verdict unparseable" : "Not in the verdict"));
+            }
+        }
+        if (unparseable || failed > 0) {
+            LOGGER.warnf("VERIFY verdict for group %s %s — failed %d task(s) (onUnparseableVerdict=FAIL)",
+                    LogSanitizer.sanitize(gc.getGroupId()), unparseable ? "could not be parsed" : "left tasks unnamed", failed);
+        }
+    }
+
+    /**
+     * {@code formatted} plus a line for every task of the pass that
+     * {@code onUnparseableVerdict=FAIL} failed, so the transcript says what the
+     * task list says — the verifier's own text may claim the opposite.
+     */
+    static String withPolicyOutcomes(String formatted, GroupConversation gc, List<TaskItem> completedTasks) {
+        var sb = new StringBuilder();
+        for (TaskItem task : completedTasks) {
+            TaskItem live = gc.getTaskList() != null ? gc.getTaskList().findById(task.id()) : null;
+            if (live != null && live.status() == TaskStatus.FAILED
+                    && (NOTE_UNPARSEABLE.equals(live.verificationNote()) || NOTE_NOT_NAMED.equals(live.verificationNote()))) {
+                sb.append("❌ **").append(live.subject()).append("**: Failed\n").append(live.verificationNote()).append("\n\n");
+            }
+        }
+        if (sb.isEmpty()) {
+            return formatted;
+        }
+        return (formatted != null && !formatted.isBlank() ? formatted.stripTrailing() + "\n\n" : "")
+                + "## Applied by onUnparseableVerdict=FAIL\n\n" + sb.toString().stripTrailing();
+    }
+
+    /** The configured VERIFY outcome for an unreadable verdict; PASS when unset. */
+    static UnparseableVerdictPolicy unparseablePolicy(AgentGroupConfiguration config) {
+        return config != null && config.getTaskListConfig() != null
+                ? config.getTaskListConfig().onUnparseableVerdict()
+                : UnparseableVerdictPolicy.PASS;
+    }
+
+    /**
+     * As
+     * {@link #tryParseVerificationJson(GroupConversation, List, String, GroupDiscussionEventListener)};
+     * with {@code missingPassedFails} a verdict entry without a {@code passed}
+     * field counts as not passed.
+     */
+    @SuppressWarnings("unchecked")
+    public boolean tryParseVerificationJson(GroupConversation gc, List<TaskItem> completedTasks,
+                                            String content, GroupDiscussionEventListener listener, boolean missingPassedFails) {
         try {
             // The first balanced JSON array the reply contains (it may be wrapped in
             // a markdown fence or prose). Not first '[' to last ']': a bracketed
@@ -1109,7 +1221,7 @@ public class TaskForceEngine {
                     // match that can never succeed, silently dropping the verification.
                     String subject = stringOrNull(map.get("subject"));
                     // Read 'passed' boolean directly from JSON
-                    boolean passed = true; // default to passed
+                    boolean passed = !missingPassedFails; // absent: passed unless onUnparseableVerdict=FAIL
                     if (map.containsKey("passed")) {
                         Object passedVal = map.get("passed");
                         passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
@@ -1208,8 +1320,17 @@ public class TaskForceEngine {
      * summary suitable for display in the UI. Falls back to the raw content if
      * formatting fails.
      */
-    @SuppressWarnings("unchecked")
     public String formatVerificationForDisplay(String rawContent) {
+        return formatVerificationForDisplay(rawContent, false);
+    }
+
+    /**
+     * As {@link #formatVerificationForDisplay(String)}; with
+     * {@code missingPassedFails} an entry without {@code passed} renders as failed,
+     * the reading {@code onUnparseableVerdict=FAIL} applied to the task.
+     */
+    @SuppressWarnings("unchecked")
+    public String formatVerificationForDisplay(String rawContent, boolean missingPassedFails) {
         if (rawContent == null || !rawContent.contains("[")) {
             return rawContent;
         }
@@ -1228,7 +1349,7 @@ public class TaskForceEngine {
                     // renders to the user as the literal word "null" instead of
                     // falling back to "Unknown Task".
                     String subject = Objects.requireNonNullElse(stringOrNull(map.get("subject")), "Unknown Task");
-                    boolean passed = true;
+                    boolean passed = !missingPassedFails;
                     if (map.containsKey("passed")) {
                         Object passedVal = map.get("passed");
                         passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));

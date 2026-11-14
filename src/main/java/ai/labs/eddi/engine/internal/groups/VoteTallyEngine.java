@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.Dissent;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.engine.agenttests.BoundedRegex;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,10 +63,25 @@ public final class VoteTallyEngine {
      * front ({@code - Option A: …}, {@code 1. Option A: …}), a period or closing
      * parenthesis as the separator, any letter case. The strict form found "0
      * options" in most real syntheses, so the vote could not run.
+     * <p>
+     * Matched against <b>one line at a time</b>, and linear in that line: the
+     * synthesis is model (or human) text of up to 100,000 characters, read on every
+     * voter prompt. The former whole-text form ended in
+     * {@code (.+?)\s*[*_]{0,2}\s*$} under MULTILINE, whose two whitespace runs
+     * split a long run of spaces every possible way — a few thousand spaces stalled
+     * a thread for minutes. The trailing emphasis is now stripped in Java
+     * ({@link #optionText}).
      */
     private static final Pattern OPTION_LINE = Pattern.compile(
-            "^\\s*(?:[-*+•]\\s+|\\d+[.)]\\s+)?[*_]{0,2}Option\\s+([A-Za-z0-9]+)[*_]{0,2}\\s*[:.)\\-–—]\\s*[*_]{0,2}\\s*(.+?)\\s*[*_]{0,2}\\s*$",
-            Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+            "^[ \\t\\x0B\\f]*(?:[-*+•][ \\t\\x0B\\f]+|\\d+[.)][ \\t\\x0B\\f]+)?[*_]{0,2}Option[ \\t\\x0B\\f]+([A-Za-z0-9]+)[*_]{0,2}"
+                    + "[ \\t\\x0B\\f]*[:.)\\-–—][ \\t\\x0B\\f]*[*_]{0,2}[ \\t\\x0B\\f]*(.*)$",
+            Pattern.CASE_INSENSITIVE);
+    /** A line longer than this is prose, not an option line, and is not matched. */
+    static final int MAX_OPTION_LINE_LENGTH = 1_000;
+    /** At most this many options are read from one synthesis. */
+    static final int MAX_SYNTHESIS_OPTIONS = 32;
+    /** Wall-clock budget of one option-line match — a second line of defence. */
+    private static final long OPTION_LINE_TIMEOUT_MS = 50;
     /**
      * A ballot voting by label ("Option A", also emphasised) instead of the
      * option's text.
@@ -116,15 +133,100 @@ public final class VoteTallyEngine {
         for (int i = transcript.size() - 1; i >= 0; i--) {
             TranscriptEntry entry = transcript.get(i);
             if (entry != null && entry.type() == TranscriptEntryType.SYNTHESIS && entry.content() != null) {
-                List<String> options = new ArrayList<>();
-                Matcher matcher = OPTION_LINE.matcher(entry.content());
-                while (matcher.find()) {
-                    options.add(matcher.group(2).trim());
-                }
-                return options;
+                return synthesisOptions(entry.content());
             }
         }
         return List.of();
+    }
+
+    /**
+     * The {@code Option X: …} lines of one synthesis, line by line. A label whose
+     * text is empty ({@code **Option A:**} on a line of its own) takes the next
+     * non-blank line as its text, as the whole-text pattern did — unless that line
+     * is itself an option, which is never another option's text.
+     * <p>
+     * <b>Labels must run in sequence</b> — A, B, C… or 1, 2, 3…, the k-th option
+     * labelled k — or the synthesis yields no options and the vote cannot run.
+     * Ballots may vote by label, and {@link #canonicalOption} resolves a label by
+     * position: an option that went missing (its line over the length cap, its text
+     * empty) or a label out of order would make "Option B" mean another option's
+     * text. An over-long option line therefore rejects the synthesis too, rather
+     * than being skipped.
+     */
+    static List<String> synthesisOptions(String content) {
+        List<String> options = new ArrayList<>();
+        List<String> lines = content.lines().toList();
+        for (int i = 0; i < lines.size() && options.size() < MAX_SYNTHESIS_OPTIONS; i++) {
+            String line = lines.get(i);
+            if (line.isBlank()) {
+                continue;
+            }
+            MatchResult match = optionLine(line);
+            if (match == null) {
+                continue;
+            }
+            if (line.length() > MAX_OPTION_LINE_LENGTH || labelPosition(match.group(1)) != options.size()) {
+                LOGGER.debugf("Synthesis options rejected: option line %d is over-long or out of label sequence", i + 1);
+                return List.of();
+            }
+            String text = optionText(match.group(2));
+            if (text.isEmpty()) {
+                int next = i + 1;
+                while (next < lines.size() && lines.get(next).isBlank()) {
+                    next++;
+                }
+                if (next >= lines.size() || lines.get(next).length() > MAX_OPTION_LINE_LENGTH || optionLine(lines.get(next)) != null) {
+                    continue; // no text for this label; a following option line is left for the loop
+                }
+                String continuation = lines.get(next).strip();
+                for (int markers = 0; markers < 2 && !continuation.isEmpty()
+                        && (continuation.charAt(0) == '*' || continuation.charAt(0) == '_'); markers++) {
+                    continuation = continuation.substring(1);
+                }
+                text = optionText(continuation);
+                i = next;
+            }
+            if (!text.isEmpty()) {
+                options.add(text);
+            }
+        }
+        return options;
+    }
+
+    /**
+     * The option-line match of {@code line}, or {@code null}. An over-long line is
+     * matched on its first {@link #MAX_OPTION_LINE_LENGTH} characters, enough to
+     * tell whether it is an option label; its text is never used.
+     */
+    private static MatchResult optionLine(String line) {
+        String probe = line.length() > MAX_OPTION_LINE_LENGTH ? line.substring(0, MAX_OPTION_LINE_LENGTH) : line;
+        return BoundedRegex.firstMatch(OPTION_LINE, probe, OPTION_LINE_TIMEOUT_MS).orElse(null);
+    }
+
+    /**
+     * The zero-based position an option label names: a single letter (A = 0) or a
+     * number (1 = 0); {@code -1} for anything else.
+     */
+    private static int labelPosition(String label) {
+        String index = label.toUpperCase(Locale.ROOT);
+        return index.length() == 1 && Character.isLetter(index.charAt(0))
+                ? index.charAt(0) - 'A'
+                : parseIndex(index);
+    }
+
+    /**
+     * An option's text without the trailing whitespace, up to two emphasis markers
+     * and whitespace that close it ({@code Defer the decision **}).
+     */
+    private static String optionText(String tail) {
+        int end = tail.length();
+        while (end > 0 && Character.isWhitespace(tail.charAt(end - 1))) {
+            end--;
+        }
+        for (int markers = 0; markers < 2 && end > 0 && (tail.charAt(end - 1) == '*' || tail.charAt(end - 1) == '_'); markers++) {
+            end--;
+        }
+        return tail.substring(0, end).trim();
     }
 
     /** The JSON contract line rendered into the ballot prompt. */
@@ -433,10 +535,7 @@ public final class VoteTallyEngine {
         }
         Matcher label = OPTION_LABEL.matcher(trimmed);
         if (label.matches()) {
-            String index = label.group(1).toUpperCase(Locale.ROOT);
-            int position = index.length() == 1 && Character.isLetter(index.charAt(0))
-                    ? index.charAt(0) - 'A'
-                    : parseIndex(index);
+            int position = labelPosition(label.group(1));
             if (position >= 0 && position < options.size()) {
                 return options.get(position);
             }

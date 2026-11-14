@@ -658,6 +658,34 @@ class MemberTurnExecutorTest {
         assertEquals(0.42, gc.getTotalCost());
     }
 
+    @Test
+    void executeGroupMemberTurn_closesTheChildDiscussionAfterReadingItsAnswer() throws Exception {
+        var groupConversationService = Mockito.mock(GroupConversationService.class);
+        var subConversation = new GroupConversation();
+        subConversation.setId("sub-gc-1");
+        subConversation.setSynthesizedAnswer("Nested answer");
+        when(groupConversationService.discuss(eq("sub-group-1"), any(), any(), anyInt(), any(), any(), any(), eq("gc-1")))
+                .thenReturn(subConversation);
+        // A child that cannot be closed must not fail the parent's turn.
+        when(groupConversationService.closeGroupConversation("sub-gc-1")).thenThrow(new RuntimeException("store down"));
+
+        var executor = new MemberTurnExecutor(Mockito.mock(IConversationService.class), Mockito.mock(IAgentFactory.class),
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                groupConversationService, new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        var groupMember = new GroupMember("sub-group-1", "Sub Group", 1, null, MemberType.GROUP);
+
+        var entry = executor.executeAgentTurn(groupMember, gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals("Nested answer", entry.content());
+        // Nothing else ever closed a nested child: its dynamic agents stayed deployed,
+        // and it stayed open to a continuation outside the team budget.
+        verify(groupConversationService).closeGroupConversation("sub-gc-1");
+    }
+
     /**
      * I6 defense in depth: the phase loops intercept HUMAN speakers BEFORE this
      * method and pause the discussion — any caller reaching it with a human

@@ -52,6 +52,7 @@ import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
 import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
+import ai.labs.eddi.engine.internal.groups.CreatedAgentRecruitGuard;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
@@ -419,7 +420,7 @@ public class GroupConversationService implements IGroupConversationService, User
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
-                this::discussionOwnerMayUse);
+                this::discussionOwnerMayUse, agentId -> CreatedAgentRecruitGuard.isDynamicAgent(agentStore, agentId));
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 discussionControls, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
@@ -2036,6 +2037,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        rejectIfNestedChild(groupConversationId, targetAgentId == null || targetAgentId.isBlank() ? null : question);
         admitTeamBudgetForExisting(groupConversationId);
         return lifecycleOps().followUpWithMember(groupConversationId, targetAgentId, question);
     }
@@ -2045,6 +2047,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        rejectIfNestedChild(groupConversationId, question);
         admitTeamBudgetForExisting(groupConversationId);
         return withArtifacts(lifecycleOps().continueDiscussion(groupConversationId, question, listener));
     }
@@ -2069,6 +2072,42 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private void failConversation(GroupConversation gc) {
         lifecycleOps().failConversation(gc);
+    }
+
+    /** The refusal for a follow-up or continuation of a nested discussion. */
+    public static final String NESTED_CHILD_REFUSAL = "This is a nested discussion run as a GROUP member's turn of a parent discussion; "
+            + "it cannot be continued or followed up on its own. Continue the parent discussion instead.";
+
+    /**
+     * A nested discussion (depth > 0) is one GROUP member's turn of its parent, not
+     * a conversation of its own: it is held to the parent's budget only while the
+     * parent runs it (team admission and charging apply at depth 0), so driving it
+     * directly would spend past an exhausted team budget. Nothing in the engine
+     * continues a child — nested pauses are cancelled, not resumed — so only the
+     * external entry points reach this — the MCP tools rely on it, with no depth
+     * check of their own.
+     * <p>
+     * A discussion that does not exist is left to the operation to report. A store
+     * that cannot be read fails closed: the error propagates, because the operation
+     * reads the discussion again and, if that read succeeded, would run the child
+     * with no depth check at all. A blank question or follow-up target (passed here
+     * as a {@code null} question) is also left to the operation, which refuses it
+     * before it touches the store; this check must not touch it either.
+     */
+    private void rejectIfNestedChild(String groupConversationId, String question)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException {
+        if (groupConversationId == null || question == null || question.isBlank()) {
+            return;
+        }
+        GroupConversation existing;
+        try {
+            existing = conversationStore.read(groupConversationId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return;
+        }
+        if (existing != null && existing.getDepth() > 0) {
+            throw new GroupDiscussionException(NESTED_CHILD_REFUSAL);
+        }
     }
 
     /**

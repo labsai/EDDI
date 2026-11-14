@@ -852,6 +852,7 @@ public class MemberTurnExecutor {
                                                   DiscussionPhase phase, TranscriptEntryType entryType, String targetAgentId,
                                                   GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
+        GroupConversation subConversation = null;
         try {
             // member.agentId() is actually a groupId for GROUP members
             String subGroupId = member.agentId();
@@ -885,7 +886,7 @@ public class MemberTurnExecutor {
                     : Math.max(0.0, bindingCeiling - gc.getTotalCost());
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
+            subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
                     gc.getAttachments(), remainingBudget, gc.getId());
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
@@ -941,6 +942,30 @@ public class MemberTurnExecutor {
                     Instant.now(), "Sub-group depth exceeded: " + e.getMessage(), targetAgentId);
         } catch (Exception e) {
             return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Sub-group discussion failed", targetAgentId);
+        } finally {
+            closeNestedDiscussion(subConversation);
+        }
+    }
+
+    /**
+     * Closes a nested discussion once its answer has been read. Each GROUP-member
+     * turn starts a fresh child and the parent keeps no record of it, so nothing
+     * else would ever close it: a COMPLETED child defers its ephemeral-agent
+     * cleanup to a close, so the agents its members created stayed deployed, and
+     * the child stayed open to a continuation that spends outside the team budget
+     * (team admission and charging apply at depth 0 only). Best-effort: a child
+     * that cannot be closed (still pausing, already closed) is logged, never fails
+     * the parent's turn.
+     */
+    private void closeNestedDiscussion(GroupConversation subConversation) {
+        if (subConversation == null || subConversation.getId() == null) {
+            return;
+        }
+        try {
+            groupConversationService.closeGroupConversation(subConversation.getId());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not close nested group conversation %s: %s", LogSanitizer.sanitize(subConversation.getId()),
+                    e.getMessage());
         }
     }
 

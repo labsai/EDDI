@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -183,6 +184,98 @@ class VoteTallyEngineTest {
                 TiePolicy.NO_DECISION);
 
         assertTrue(VoteTallyEngine.resolveOptions(config, List.of()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a label on its own line takes the next non-blank line as its text")
+    void resolveOptions_labelOnItsOwnLine() {
+        assertEquals(List.of("Adopt PostgreSQL", "Stay on MongoDB"),
+                VoteTallyEngine.synthesisOptions("**Option A:**\n\n  Adopt PostgreSQL\nOption B: Stay on MongoDB"));
+    }
+
+    @Test
+    @DisplayName("a skipped over-long option line cannot shift the labels of the options after it")
+    void resolveOptions_skippedLineDoesNotShiftLabels() {
+        // Option A is over the line cap. Read positionally, B's text became the first
+        // option, so a ballot for "Option B" resolved to C's text, "Unsafe".
+        String synthesis = "Option A: " + "x".repeat(VoteTallyEngine.MAX_OPTION_LINE_LENGTH) + "\nOption B: Safe\nOption C: Unsafe";
+
+        List<String> options = VoteTallyEngine.synthesisOptions(synthesis);
+
+        assertEquals(List.of(), options, "labels out of sequence: the vote must not run rather than mislabel");
+        assertNull(VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option B\"}"), options, VoteMethod.MAJORITY));
+    }
+
+    @Test
+    @DisplayName("labels with a gap, a duplicate or the wrong start are rejected; blank lines between options are fine")
+    void resolveOptions_labelsMustBeConsecutive() {
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Safe\nOption C: Unsafe"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Safe\nOption A: Unsafe"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option B: Safe\nOption C: Unsafe"));
+        assertEquals(List.of("Safe", "Unsafe"), VoteTallyEngine.synthesisOptions("Option A: Safe\n\n\n   \nOption B: Unsafe"));
+        assertEquals(List.of("Safe", "Unsafe"), VoteTallyEngine.synthesisOptions("Option 1: Safe\nOption 2: Unsafe"));
+    }
+
+    @Test
+    @DisplayName("an empty label does not swallow the next option line as its text")
+    void resolveOptions_emptyLabelDoesNotConsumeTheNextOption() {
+        // "Option B: Stay" used to become A's text, and B's line was consumed.
+        List<String> options = VoteTallyEngine.synthesisOptions("Option A:\nOption B: Stay");
+
+        assertFalse(options.contains("Option B: Stay"), "an option label is never another option's text: " + options);
+        assertEquals(List.of(), options, "A has no text, so B is out of sequence and the vote cannot run");
+        assertEquals(List.of("Adopt", "Stay"), VoteTallyEngine.synthesisOptions("Option A:\nAdopt\nOption B: Stay"),
+                "a plain continuation line is still A's text");
+    }
+
+    @Test
+    @DisplayName("the option cap truncates the tail only: labels before it keep their text, labels after it resolve to nothing")
+    void resolveOptions_capDoesNotShiftLabels() {
+        var synthesis = new StringBuilder();
+        for (int i = 1; i <= 40; i++) {
+            synthesis.append("Option ").append(i).append(": choice ").append(i).append('\n');
+        }
+
+        List<String> options = VoteTallyEngine.synthesisOptions(synthesis.toString());
+
+        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, options.size());
+        var last = VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option 32\"}"), options, VoteMethod.MAJORITY);
+        assertNotNull(last);
+        assertEquals(List.of("choice 32"), last.votes());
+        assertNull(VoteTallyEngine.parseBallot(ballot("a1", "{\"vote\": \"Option 33\"}"), options, VoteMethod.MAJORITY));
+    }
+
+    @Test
+    @DisplayName("adversarial whitespace in a synthesis is parsed in linear time, not by catastrophic backtracking")
+    void resolveOptions_adversarialWhitespace_completesQuickly() {
+        String pad800 = " ".repeat(800);
+        String pad4000 = " ".repeat(4000);
+        var numbered = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            numbered.append("Option ").append(i).append(": x").append(pad800).append("y\n");
+        }
+        String manyLines = numbered.toString();
+        String blankRun = "\n".repeat(20_000) + "Option A: x" + pad4000 + "y";
+        var config = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.LAST_SYNTHESIS, List.of(), 0.5, Map.of(), false,
+                TiePolicy.NO_DECISION);
+
+        // A bound generous enough for any loaded CI runner: the former pattern took
+        // ~2 s for ONE 800-space line (so ~200 s for the 100 below) and did not finish
+        // the 4,000-space line in 500 s. Any finite bound proves the fix.
+        List<List<String>> results = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> List.of(
+                VoteTallyEngine.synthesisOptions("Option A: x" + pad800 + "y"),
+                VoteTallyEngine.synthesisOptions("Option A: x" + pad4000 + "y"),
+                VoteTallyEngine.resolveOptions(config, List.of(new TranscriptEntry("mod", "Mod", manyLines, 0,
+                        "S", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null))),
+                VoteTallyEngine.synthesisOptions(blankRun),
+                VoteTallyEngine.synthesisOptions("Option A:" + " ".repeat(99_000))));
+
+        assertEquals(List.of("x" + pad800 + "y"), results.get(0), "a line within the length cap still parses");
+        assertEquals(List.of(), results.get(1), "a line over the length cap is prose, not an option");
+        assertEquals(VoteTallyEngine.MAX_SYNTHESIS_OPTIONS, results.get(2).size(), "options are capped per synthesis");
+        assertTrue(results.get(2).stream().allMatch(("x" + pad800 + "y")::equals), "each capped option is the line's text");
+        assertEquals(List.of(), results.get(3), "the only option line is over the length cap");
+        assertEquals(List.of(), results.get(4), "a label followed only by an over-long run of spaces has no text");
     }
 
     // =================================================================

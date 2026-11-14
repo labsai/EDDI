@@ -903,8 +903,9 @@ const BODY_TEAM_BUDGETS = `Team budgets (a monthly dollar cap per standing team)
 - The window is the UTC calendar month. The cap is the base plus this month's
   adjustment; next month starts at the base again.
 - The ROOT discussion's group pays: ad-hoc discussions, cadence runs, follow-ups
-  and continuations included; a nested child charges its parent. Only priced
-  spend counts (an unpriced model is $0 here too). Metering never fails a
+  and continuations included; a nested child charges its parent, is closed once
+  its answer is read, and cannot be continued or followed up itself (409). Only
+  priced spend counts (an unpriced model is $0 here too). Metering never fails a
   discussion.
 - At the cap: a new discussion, follow-up or continuation is refused (409 "Team
   '…' has spent $x of its $y budget for YYYY-MM; it resets …"); a cadence fire
@@ -1563,8 +1564,10 @@ your tool schemas do not cover it, not as a routine first step:
 - TASK_FORCE groups: maxReworks (0-5, default 0) sends a task that fails VERIFY
   back to its member with the verifier's feedback, up to that many times per
   task, within protocol.maxTurns and the cost ceiling; it is not applied when the
-  EXECUTE phase gates tasks for approval. An unparseable verdict still
-  auto-verifies, counted as eddi_group_verify_unparseable_total. A repeating
+  EXECUTE phase gates tasks for approval. An unparseable (or ambiguous) verdict
+  auto-verifies by default, counted as eddi_group_verify_unparseable_total;
+  taskListConfig.onUnparseableVerdict "FAIL" (recommended) fails those tasks
+  instead and reads a verdict entry without "passed" as not passed. A repeating
   phase's convergence.mode "VERDICT" ends it once the moderator's review of the
   latest repeat passes (default "SIMILARITY", the agreement score).
 - convergence.judge "SERVICE" with a convergence.service block (llmProvider,

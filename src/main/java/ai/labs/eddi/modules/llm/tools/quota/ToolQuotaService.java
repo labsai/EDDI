@@ -173,9 +173,16 @@ public class ToolQuotaService {
      * itself. Read from the current step only, like the per-fire cost allowance:
      * the run belongs to the turn that set it.
      * <p>
-     * A caller who can put its own context on a turn can choose these ids, so a run
-     * cap bounds an autonomous run (a schedule, a group cadence) and is not an
-     * abuse limit for end users; use a fixed window for that.
+     * Both ids are engine-reserved context keys ({@code ClientContextGuard}): the
+     * REST, streaming and MCP entry points drop them from client context, so only
+     * the schedule executor and the group runtime set them. A client that could
+     * send a fresh {@code scheduleFireId} each turn would otherwise have reset
+     * every RUN quota at will. Without either, the run is the conversation — so a
+     * run cap still bounds an autonomous run (a schedule, a group cadence) rather
+     * than an end user's conversation over time; use a fixed window for that. An
+     * operator who permits a reserved key for clients
+     * ({@code eddi.conversation.client-context.permitted-reserved-keys}) hands this
+     * choice back to them.
      */
     static String runIdFor(IConversationMemory memory) {
         String fire = stepContext(memory, ScheduleConfiguration.CONTEXT_FIRE_ID);
