@@ -11,11 +11,12 @@ import {
   type ConnectionErrors,
 } from "@/lib/connection-validation";
 import { bindingLabel } from "@/lib/connection-labels";
-import type {
-  Binding,
-  ConnectionConfiguration,
-  StaticAuth,
-  OAuthConfig,
+import {
+  THUMBPRINT_HEADERS,
+  type Binding,
+  type ConnectionConfiguration,
+  type StaticAuth,
+  type OAuthConfig,
 } from "@/lib/api/connections";
 
 /** The header an integrating system sends a caller-supplied credential in. */
@@ -181,6 +182,12 @@ export function ConnectionCredentialFields({
     );
   }
 
+  // Both signed-JWT shapes prove the client with a vaulted private key in place
+  // of a client secret: the JWT bearer grant always, and the other OAuth types
+  // when their client authentication is private_key_jwt.
+  const jwtBearer = draft.authType === "OAUTH2_JWT_BEARER";
+  const signsWithKey = jwtBearer || draft.oauth?.clientAuthMethod === "private_key_jwt";
+
   return (
     <div className="space-y-4">
       {draft.authType === "OAUTH2_AUTHORIZATION_CODE" && (
@@ -246,7 +253,9 @@ export function ConnectionCredentialFields({
       <div className={dense ? "grid gap-4 sm:grid-cols-2" : "space-y-4"}>
         <div className="space-y-1.5">
           <label className={labelClass} htmlFor={fieldId("client-id")}>
-            {t("connections.clientId", "Client ID")}
+            {jwtBearer
+              ? t("connections.serviceAccountEmail", "Service account (issuer)")
+              : t("connections.clientId", "Client ID")}
           </label>
           <Input
             id={fieldId("client-id")}
@@ -260,32 +269,124 @@ export function ConnectionCredentialFields({
             aria-invalid={errors["oauth.clientId"] !== undefined || undefined}
             aria-describedby={fieldId("client-id-error")}
           />
+          {jwtBearer && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "connections.serviceAccountEmailHint",
+                "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+              )}
+            </p>
+          )}
           <ValidationMessage
             code={errors["oauth.clientId"]}
             id={fieldId("client-id-error")}
             testId={`${idPrefix}-client-id-error`}
           />
         </div>
-        <div className="space-y-1.5">
-          <label className={labelClass} htmlFor={fieldId("client-secret")}>
-            {t("connections.clientSecret", "Client secret")}
-          </label>
-          <SecretKeyPicker
-            id={fieldId("client-secret")}
-            value={draft.oauth?.clientSecret ?? ""}
-            onChange={(clientSecret) => onPatchOAuth({ clientSecret })}
-            referenceOnly
-            readOnly={readOnly}
-            aria-describedby={fieldId("client-secret-error")}
-            testId={`${idPrefix}-client-secret`}
-          />
-          <ValidationMessage
-            code={errors["oauth.clientSecret"]}
-            id={fieldId("client-secret-error")}
-            testId={`${idPrefix}-client-secret-error`}
-          />
-        </div>
+        {signsWithKey ? (
+          <div className="space-y-1.5">
+            <label className={labelClass} htmlFor={fieldId("private-key")}>
+              {t("connections.privateKey", "Private key")}
+            </label>
+            <SecretKeyPicker
+              id={fieldId("private-key")}
+              value={draft.oauth?.privateKey ?? ""}
+              onChange={(privateKey) => onPatchOAuth({ privateKey })}
+              referenceOnly
+              readOnly={readOnly}
+              aria-invalid={errors["oauth.privateKey"] !== undefined || undefined}
+              aria-describedby={`${fieldId("private-key-hint")} ${fieldId("private-key-error")}`}
+              testId={`${idPrefix}-private-key`}
+            />
+            <p id={fieldId("private-key-hint")} className="text-xs text-muted-foreground">
+              {t(
+                "connections.privateKeyHint",
+                "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+              )}
+            </p>
+            <ValidationMessage
+              code={errors["oauth.privateKey"]}
+              id={fieldId("private-key-error")}
+              testId={`${idPrefix}-private-key-error`}
+            />
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <label className={labelClass} htmlFor={fieldId("client-secret")}>
+              {t("connections.clientSecret", "Client secret")}
+            </label>
+            <SecretKeyPicker
+              id={fieldId("client-secret")}
+              value={draft.oauth?.clientSecret ?? ""}
+              onChange={(clientSecret) => onPatchOAuth({ clientSecret })}
+              referenceOnly
+              readOnly={readOnly}
+              aria-describedby={fieldId("client-secret-error")}
+              testId={`${idPrefix}-client-secret`}
+            />
+            <ValidationMessage
+              code={errors["oauth.clientSecret"]}
+              id={fieldId("client-secret-error")}
+              testId={`${idPrefix}-client-secret-error`}
+            />
+          </div>
+        )}
       </div>
+
+      {draft.oauth?.clientAuthMethod === "private_key_jwt" &&
+        draft.authType !== "OAUTH2_JWT_BEARER" && (
+          <div className={dense ? "grid gap-4 sm:grid-cols-2" : "space-y-4"}>
+            <div className="space-y-1.5">
+              <label className={labelClass} htmlFor={fieldId("certificate-thumbprint")}>
+                {t("connections.certificateThumbprint", "Certificate thumbprint")}
+              </label>
+              <Input
+                id={fieldId("certificate-thumbprint")}
+                data-testid={`${idPrefix}-certificate-thumbprint`}
+                className="font-mono text-xs"
+                dir="ltr"
+                value={draft.oauth?.certificateThumbprint ?? ""}
+                onChange={(e) => onPatchOAuth({ certificateThumbprint: e.target.value })}
+                autoComplete="off"
+                readOnly={readOnly}
+                aria-invalid={errors["oauth.certificateThumbprint"] !== undefined || undefined}
+                aria-describedby={`${fieldId("certificate-thumbprint-hint")} ${fieldId("certificate-thumbprint-error")}`}
+              />
+              <p id={fieldId("certificate-thumbprint-hint")} className="text-xs text-muted-foreground">
+                {t(
+                  "connections.certificateThumbprintHint",
+                  "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+                )}
+              </p>
+              <ValidationMessage
+                code={errors["oauth.certificateThumbprint"]}
+                id={fieldId("certificate-thumbprint-error")}
+                testId={`${idPrefix}-certificate-thumbprint-error`}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass} htmlFor={fieldId("thumbprint-header")}>
+                {t("connections.certificateThumbprintHeader", "Thumbprint header")}
+              </label>
+              <select
+                id={fieldId("thumbprint-header")}
+                data-testid={`${idPrefix}-thumbprint-header`}
+                className="flex h-9 w-full rounded-lg border border-border bg-background px-3 font-mono text-xs"
+                value={draft.oauth?.certificateThumbprintHeader ?? "x5t#S256"}
+                onChange={(e) => onPatchOAuth({ certificateThumbprintHeader: e.target.value })}
+                disabled={readOnly}
+              >
+                {THUMBPRINT_HEADERS.map((header) => (
+                  <option key={header} value={header}>
+                    {header === "x5t#S256"
+                      ? t("connections.thumbprintS256", "x5t#S256 — SHA-256 (Entra default)")
+                      : t("connections.thumbprintSha1", "x5t — SHA-1")}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

@@ -6177,13 +6177,15 @@
       "static": "Chave de API",
       "basic": "Usuário e senha",
       "clientCredentials": "Conta de serviço OAuth",
-      "authorizationCode": "Login de usuário OAuth"
+      "authorizationCode": "Login de usuário OAuth",
+      "jwtBearer": "Conta de serviço com chave de assinatura"
     },
     "choice": {
       "staticBody": "Um cabeçalho fixo, igual para todos — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. O {{productName}} faz a codificação, então a senha continua sendo uma entrada separada do cofre, que você pode trocar sozinha.",
       "clientCredentialsBody": "O agente se identifica como ele mesmo. Um token de acesso compartilhado por todos, renovado automaticamente.",
-      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre."
+      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre.",
+      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos."
     },
     "binding": {
       "perUser": "Por pessoa",
@@ -6217,7 +6219,7 @@
     "clientId": "ID do cliente",
     "clientSecret": "Segredo do cliente",
     "clientAuthMethod": "Autenticação do cliente",
-    "clientAuthMethodHint": "Como o segredo do cliente chega ao endpoint do token. Errar aqui parece exatamente um segredo errado, por isso é um ajuste e não um chute.",
+    "clientAuthMethodHint": "Como o cliente se identifica no endpoint de token: com o segredo do cliente via Basic ou no corpo, ou com private_key_jwt — uma asserção assinada com uma chave privada guardada no cofre, para um aplicativo registrado com certificado. Escolher errado parece exatamente um segredo incorreto, por isso é uma configuração e não uma alternativa automática.",
     "discoveryUrl": "URL de descoberta (opcional)",
     "pkceAlwaysOn": "O PKCE (S256) é sempre aplicado a um login de usuário e não pode ser desligado — o destino do redirecionamento é um caminho público.",
     "scopes": "Escopos",
@@ -6303,7 +6305,9 @@
       "paramReserved": "Um destes parâmetros é definido pelo próprio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Substituí-lo quebraria o fluxo.",
       "paramValueReference": "Os valores dos parâmetros são enviados exatamente como escritos — uma referência ${…} aqui não é resolvida e colocaria um ponteiro do cofre num URL. Use apenas valores de protocolo simples.",
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
-      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui."
+      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
+      "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url.",
+      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -6326,7 +6330,30 @@
     "confirmAuthChangeDesc": "As contas ligadas através desta ligação deixarão de se resolver — uma concessão pertence ao fluxo que a produziu. O {{productName}} recusa a alteração enquanto alguma conta continuar ligada e diz quantas; desligue-as primeiro, ou crie uma nova ligação e deixe as pessoas ligarem essa.",
     "confirmAuthChangeAccept": "Alterar",
     "deleted": "Conexão \"{{name}}\" excluída",
-    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?"
+    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?",
+    "privateKey": "Chave privada",
+    "privateKeyHint": "Uma entrada do cofre com uma chave RSA PKCS#8 PEM não criptografada (BEGIN PRIVATE KEY), ou o arquivo de chave JSON completo de uma conta de serviço do Google. A chave nunca sai do {{productName}}; só uma asserção assinada de curta duração é enviada.",
+    "certificateThumbprint": "Impressão digital do certificado",
+    "certificateThumbprintHint": "Do certificado enviado ao provedor de identidade — em hexadecimal como o portal mostra, ou em base64url. Pública, não é um segredo.",
+    "certificateThumbprintHeader": "Cabeçalho da impressão digital",
+    "thumbprintS256": "x5t#S256 — SHA-256 (padrão do Entra)",
+    "thumbprintSha1": "x5t — impressão SHA-1",
+    "serviceAccountEmail": "Conta de serviço (emissor)",
+    "serviceAccountEmailHint": "ex.: agent@project.iam.gserviceaccount.com. Opcional quando a chave privada é um arquivo de chave JSON, que indica a própria conta.",
+    "audience": "Público da asserção (opcional)",
+    "audienceHint": "A claim aud da asserção assinada. Deixe em branco para usar a URL do token, que é o que o Google espera.",
+    "preset": "Começar de um modelo",
+    "presetNone": "Nenhum — preencher todos os campos",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Aplicação do Microsoft Entra com certificado",
+        "description": "Um registo de aplicação do Entra que se autentica com um certificado em vez de um segredo de cliente (private_key_jwt). Substitua <tenant-id> no URL do token, preencha o ID da aplicação (cliente) e a impressão digital do certificado e guarde a chave privada do certificado no cofre como PEM PKCS#8 não encriptado. Adicione https://login.microsoftonline.com à lista de permissões de endpoints de credenciais."
+      },
+      "google-service-account": {
+        "label": "Conta de serviço do Google (chave JSON)",
+        "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",

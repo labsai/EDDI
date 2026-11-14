@@ -31,7 +31,7 @@ const hintClass = "text-[10px] text-muted-foreground";
 const labelClass = "text-xs font-medium";
 
 /** The connection auth types an IMAP login can use. */
-const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS"]);
+const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_JWT_BEARER"]);
 
 /**
  * Platform settings of an `email` channel integration: EDDI polls the mailbox

@@ -333,7 +333,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
 
         try {
-            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientSecret(connection), code, oauthState.getCodeVerifier(),
+            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientCredential(connection), code, oauthState.getCodeVerifier(),
                     oauthState.getRedirectUri());
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
@@ -640,10 +640,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return name;
     }
 
-    private String resolveClientSecret(ConnectionConfiguration connection) {
-        // Checked against the token endpoint, where the client secret is sent.
-        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+    private String resolveClientCredential(ConnectionConfiguration connection) {
+        // Checked against the token endpoint, where the client secret — or an
+        // assertion signed by the private key — is sent.
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().clientCredentialReference(connection.getAuthType()),
+                connection.getOauth().getTokenUrl(), connection.getName(),
+                connection.getOauth().clientCredentialDescription(connection.getAuthType()));
     }
 
     /**

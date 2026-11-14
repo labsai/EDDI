@@ -6117,13 +6117,15 @@
       "static": "API key",
       "basic": "Username & password",
       "clientCredentials": "OAuth service account",
-      "authorizationCode": "OAuth user login"
+      "authorizationCode": "OAuth user login",
+      "jwtBearer": "Signed-key service account"
     },
     "choice": {
       "staticBody": "One fixed header, the same for everyone — X-Api-Key, or Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} does the encoding, so the password stays a separate vault entry you can rotate on its own.",
       "clientCredentialsBody": "The agent signs in as itself. One access token shared by everyone, refreshed automatically.",
-      "authorizationCodeBody": "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault."
+      "authorizationCodeBody": "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault.",
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
     },
     "binding": {
       "perUser": "Per user",
@@ -6157,7 +6159,7 @@
     "clientId": "Client ID",
     "clientSecret": "Client secret",
     "clientAuthMethod": "Client authentication",
-    "clientAuthMethodHint": "How the client secret reaches the token endpoint. Guessing it wrong looks exactly like a wrong secret, so it is a setting rather than a fallback.",
+    "clientAuthMethodHint": "How the client proves itself at the token endpoint: the client secret by Basic or in the body, or private_key_jwt — an assertion signed with a vaulted private key, for an app registered with a certificate. Guessing it wrong looks exactly like a wrong secret, so it is a setting rather than a fallback.",
     "discoveryUrl": "Discovery URL (optional)",
     "pkceAlwaysOn": "PKCE (S256) is always applied to a user login and cannot be switched off — the redirect target is a public path.",
     "scopes": "Scopes",
@@ -6243,7 +6245,9 @@
       "paramReserved": "One of these parameters is set by {{productName}} itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
       "paramValueReference": "Parameter values are sent exactly as written — a ${…} reference here is not resolved, and would put a vault pointer in a URL. Use plain protocol values only.",
       "paramValueTooLong": "A parameter value is at most 512 characters.",
-      "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here."
+      "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here.",
+      "thumbprintFormat": "Not a thumbprint of the right length: x5t#S256 needs the SHA-256 thumbprint, x5t the SHA-1 one — as hex or base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra identifies the key only by its certificate thumbprint. Paste the thumbprint of the certificate you uploaded to the app registration."
     },
     "backToList": "Back to Connections",
     "headerSecret": "Stored secret",
@@ -6266,7 +6270,30 @@
     "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. {{productName}} refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
     "confirmAuthChangeAccept": "Change it",
     "deleted": "Connection \"{{name}}\" deleted",
-    "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
+    "confirmDeleteNamed": "Delete connection \"{{name}}\"?",
+    "privateKey": "Private key",
+    "privateKeyHint": "A vault entry holding an unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY) RSA key, or a whole Google service-account JSON key file. The key never leaves {{productName}}; only a short-lived signed assertion is sent.",
+    "certificateThumbprint": "Certificate thumbprint",
+    "certificateThumbprintHint": "Of the certificate uploaded to the identity provider — hex as the portal shows it, or base64url. Public, not a secret.",
+    "certificateThumbprintHeader": "Thumbprint header",
+    "thumbprintS256": "x5t#S256 — SHA-256 (Entra default)",
+    "thumbprintSha1": "x5t — SHA-1",
+    "serviceAccountEmail": "Service account (issuer)",
+    "serviceAccountEmailHint": "e.g. agent@project.iam.gserviceaccount.com. Optional when the private key is a JSON key file, which names its own account.",
+    "audience": "Assertion audience (optional)",
+    "audienceHint": "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+    "preset": "Start from a template",
+    "presetNone": "None — fill in every field",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Microsoft Entra app with a certificate",
+        "description": "An Entra app registration that authenticates with a certificate instead of a client secret (private_key_jwt). Replace <tenant-id> in the token URL, fill in the application (client) ID and the certificate's thumbprint, and store the certificate's private key as an unencrypted PKCS#8 PEM in the vault. Add https://login.microsoftonline.com to the credential endpoint allowlist."
+      },
+      "google-service-account": {
+        "label": "Google service account (JSON key)",
+        "description": "Google APIs as a service account, signed with its private key (RFC 7523 JWT bearer). Store the downloaded JSON key file as ONE vault entry and reference it as the private key; the issuer and key id are read from it. Add https://oauth2.googleapis.com to the credential endpoint allowlist. Without domain-wide delegation the account sees only what is shared with it."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Input Parser",
