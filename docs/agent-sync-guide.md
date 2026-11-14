@@ -203,7 +203,7 @@ fault and the operator can act on both:
 
 | Status | Meaning |
 |--------|---------|
-| `400 Bad Request` | The source URL is malformed, or this deployment's policy refuses it — the body names the setting that would allow it, see [Reaching the source instance](#reaching-the-source-instance). Also answered when `selectedResources` is present but names nothing |
+| `400 Bad Request` | The source URL is malformed, or this deployment's policy refuses it — the body names the setting that would allow it, see [Reaching the source instance](#reaching-the-source-instance). Also answered when `selectedResources` is present but names nothing, and when the source agent's settings, which the sync would adopt, are ones a save of the agent would refuse (an invalid `healthConfig`, HITL config, `ratingConfig`, continuation bound, Dream setting, or a signing flag without a key). That refusal names the field and comes before anything is written; until it did, the agent write refused last, after the workflows and extensions had landed, and the caller saw a `500` |
 | `403 Forbidden` | The caller may not change the target agent. An upgrade (sync, or `strategy=upgrade` from a ZIP) needs **EDIT** on `targetAgentId` and is refused before anything is written; a preview needs VIEW. Until this was checked up front, a caller without EDIT had snippets, extensions and workflows written before the final agent write refused, and saw a `500` |
 | `404 Not Found` | The named `targetAgentId` does not exist here |
 | `409 Conflict` | No `targetAgentId` was named and more than one local agent was promoted from this source agent. The body lists them; name one, or pass `createNew=true` |
@@ -229,7 +229,8 @@ The body of a single sync is an `UpgradeResult`:
 `/backup/import/sync/batch` answers a JSON array of `BatchSyncResult`
 (`sourceAgentId`, `targetAgentId`, `result`, `error`) — one entry per request, in request
 order, whether it succeeded or not. It answers `500` only when *every* agent failed, and
-`207` when some did. A batch **preview** row that failed carries `sourceAgentName: null`
+`207` when some did. An agent refused with a `400` (its settings, say) is a failed row whose
+`error` names the field; nothing was written for it. A batch **preview** row that failed carries `sourceAgentName: null`
 and an `error` field rather than encoding the failure into the agent's name.
 
 ### 5. Execute Batch Sync

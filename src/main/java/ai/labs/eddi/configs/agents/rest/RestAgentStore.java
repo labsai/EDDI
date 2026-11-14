@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentCascadeRequest;
@@ -841,6 +842,32 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
+     * Every check {@link #updateAgent} — here and in {@code AgentStore.update} —
+     * applies to an agent's own settings, as opposed to its workflow list: the
+     * security flags, {@code ratingConfig}, {@code healthConfig}, the HITL config,
+     * the Dream settings and the continuation bounds.
+     * <p>
+     * An upgrade or a sync ({@code UpgradeExecutor}) writes snippets, extensions
+     * and workflows before the agent, so it runs these on the settings it is about
+     * to adopt before its first write. Otherwise a refusal came only at the agent
+     * update, wrapped into a 500, with everything before it left in place.
+     *
+     * @throws BadRequestException
+     *             naming the offending field
+     */
+    public static void validateSettings(AgentConfiguration config) {
+        validateSecurityFlags(config);
+        RatingConfigValidator.validate(config);
+        HealthConfigValidator.validate(config);
+        try {
+            AgentStore.validateSettings(config);
+        } catch (IllegalArgumentException e) {
+            // A 400 like the one IllegalArgumentExceptionMapper gives the update.
+            throw new BadRequestException(e.getMessage(), ErrorResponses.badRequest(e.getMessage()));
+        }
+    }
+
+    /**
      * Validate that cryptographic security flags are backed by a signing keypair.
      * <p>
      * Both {@code signInterAgentMessages} and {@code requirePeerVerification}
@@ -850,7 +877,7 @@ public class RestAgentStore implements IRestAgentStore {
      * @throws BadRequestException
      *             if crypto is enabled without a keypair
      */
-    private void validateSecurityFlags(AgentConfiguration config) {
+    private static void validateSecurityFlags(AgentConfiguration config) {
         if (config.getSecurity() == null) {
             return;
         }
