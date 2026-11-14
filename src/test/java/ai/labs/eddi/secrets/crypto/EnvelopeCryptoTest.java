@@ -3,22 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.secrets.crypto;
-import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for AES-256-GCM envelope encryption utilities.
+ * Unit tests for AES-256-GCM envelope encryption utilities. The encryption
+ * tests use a random DEK; only the derivation tests pay for PBKDF2's
+ * iterations.
  */
-@SuppressWarnings("deprecation") // Intentionally testing deprecated single-arg deriveKeyFromString for backward
-                                 // compat
 class EnvelopeCryptoTest {
+
+    private static final byte[] SALT = "fixture-salt-16b".getBytes(StandardCharsets.UTF_8);
 
     @Test
     void encryptAndDecrypt_roundtrip() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("test-master-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         String plaintext = "sk-abc123secretValue";
 
         var result = EnvelopeCrypto.encrypt(plaintext, key);
@@ -31,7 +35,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void encryptAndDecrypt_emptyString() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("test-key");
+        byte[] key = EnvelopeCrypto.generateDek();
 
         var result = EnvelopeCrypto.encrypt("", key);
         String decrypted = EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key);
@@ -40,7 +44,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void encrypt_producesUniqueIVs() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("test-key");
+        byte[] key = EnvelopeCrypto.generateDek();
 
         var result1 = EnvelopeCrypto.encrypt("same-plaintext", key);
         var result2 = EnvelopeCrypto.encrypt("same-plaintext", key);
@@ -53,8 +57,8 @@ class EnvelopeCryptoTest {
 
     @Test
     void decrypt_wrongKey_throws() {
-        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("key-one");
-        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("key-two");
+        byte[] key1 = EnvelopeCrypto.generateDek();
+        byte[] key2 = EnvelopeCrypto.generateDek();
 
         var result = EnvelopeCrypto.encrypt("secret", key1);
 
@@ -63,8 +67,8 @@ class EnvelopeCryptoTest {
 
     @Test
     void deriveKeyFromString_producesConsistentResults() {
-        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("my-passphrase");
-        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("my-passphrase");
+        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("my-passphrase", SALT);
+        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("my-passphrase", SALT);
 
         assertArrayEquals(key1, key2);
         assertEquals(32, key1.length, "Key must be 32 bytes for AES-256");
@@ -72,10 +76,32 @@ class EnvelopeCryptoTest {
 
     @Test
     void deriveKeyFromString_differentInputsDifferentKeys() {
-        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("passphrase-a");
-        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("passphrase-b");
+        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("passphrase-a", SALT);
+        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("passphrase-b", SALT);
 
         assertFalse(Arrays.equals(key1, key2));
+    }
+
+    @Test
+    void deriveKeyFromString_differentSaltsDifferentKeys() {
+        byte[] otherSalt = "other-salt-16byt".getBytes(StandardCharsets.UTF_8);
+
+        byte[] key1 = EnvelopeCrypto.deriveKeyFromString("my-passphrase", SALT);
+        byte[] key2 = EnvelopeCrypto.deriveKeyFromString("my-passphrase", otherSalt);
+
+        assertFalse(Arrays.equals(key1, key2), "the per-deployment salt must change the KEK");
+    }
+
+    @Test
+    void deriveKeyFromString_saltShorterThanEightBytes_throws() {
+        byte[] sevenBytes = new byte[7];
+
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.deriveKeyFromString("my-passphrase", sevenBytes));
+    }
+
+    @Test
+    void deriveKeyFromString_nullSalt_throws() {
+        assertThrows(EnvelopeCrypto.CryptoException.class, () -> EnvelopeCrypto.deriveKeyFromString("my-passphrase", null));
     }
 
     @Test
@@ -91,7 +117,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void encryptDecrypt_unicodeContent() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("unicode-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         String plaintext = "こんにちは世界 🔑 Ключ";
 
         var result = EnvelopeCrypto.encrypt(plaintext, key);
@@ -104,7 +130,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void aad_roundtrip() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         byte[] aad = "default|apiKey|default#g1".getBytes();
         String plaintext = "sk-secret-value";
 
@@ -114,7 +140,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void aad_wrongAadFailsToDecrypt() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         var result = EnvelopeCrypto.encrypt("sk-secret-value", key, "default|apiKey|default#g1".getBytes());
 
         // A ciphertext bound to one row cannot be authenticated under another row's AAD
@@ -127,7 +153,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void aad_legacyNoAadValueCannotBeReadWithAad() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         // A legacy row (encrypted without AAD) authenticates only without AAD — which
         // is
         // why the provider tries the AAD form first and falls back to no-AAD.
@@ -139,7 +165,7 @@ class EnvelopeCryptoTest {
 
     @Test
     void aad_nullAadEqualsNoAadOverload() {
-        byte[] key = EnvelopeCrypto.deriveKeyFromString("aad-key");
+        byte[] key = EnvelopeCrypto.generateDek();
         var result = EnvelopeCrypto.encrypt("v", key, null);
         // null AAD is the legacy form: readable by both the no-AAD and null-AAD paths.
         assertEquals("v", EnvelopeCrypto.decrypt(result.ciphertext(), result.iv(), key));
