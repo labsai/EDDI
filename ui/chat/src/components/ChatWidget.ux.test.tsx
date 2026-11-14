@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
 import { setAuthToken } from "@/api/http";
@@ -27,14 +27,11 @@ beforeEach(() => {
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-          <Route path="/chat/managed/:intent/:userId" element={<ChatWidget />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider>
+      <ChatLocationProvider initialPath={path}>
+        <ChatWidget />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 

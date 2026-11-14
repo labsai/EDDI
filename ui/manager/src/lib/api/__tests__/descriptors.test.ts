@@ -14,6 +14,20 @@ describe("descriptors API", () => {
       ).resolves.toBeUndefined();
     });
 
+    // The server refuses (400) a document setting any field besides name and
+    // description, so the body must carry those two and nothing else.
+    it("sends a SET whose document holds only the fields given", async () => {
+      let body: unknown;
+      server.use(
+        http.patch("*/descriptorstore/descriptors/:id", async ({ request }) => {
+          body = await request.json();
+          return new HttpResponse(null, { status: 204 });
+        })
+      );
+      await updateDescriptor("res1", 1, { description: "only this" });
+      expect(body).toEqual({ operation: "SET", document: { description: "only this" } });
+    });
+
     it("handles API error", async () => {
       server.use(
         http.patch("*/descriptorstore/descriptors/:id", () =>

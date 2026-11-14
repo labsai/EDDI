@@ -36,7 +36,7 @@ describe("StudioEditorPanel", () => {
     workflowVersion: 2,
   };
 
-  it("shows 'no config' message when URI is missing", () => {
+  it("explains a store-backed step that references no resource", () => {
     renderWithProviders(
       <StudioEditorPanel
         {...defaultProps}
@@ -47,14 +47,15 @@ describe("StudioEditorPanel", () => {
         }}
       />
     );
-    expect(
-      screen.getByText(
-        "This pipeline stage has no configuration URI"
-      )
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "noConfig");
+    expect(screen.queryByTestId("studio-step-info-json")).not.toBeInTheDocument();
+    expect(screen.getByTestId("studio-step-info-open-workflow")).toHaveAttribute(
+      "href",
+      "/manage/workflowview/wf1?version=2",
+    );
   });
 
-  it("shows 'unsupported type' for unknown extension types with URI", () => {
+  it("shows an unknown step type's stored configuration read-only", () => {
     renderWithProviders(
       <StudioEditorPanel
         {...defaultProps}
@@ -65,12 +66,66 @@ describe("StudioEditorPanel", () => {
         }}
       />
     );
-    expect(
-      screen.getByText(
-        "Editor not available for this extension type"
-      )
-    ).toBeInTheDocument();
-    expect(screen.getByText("eddi://ai.labs.unknown_type")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "unknown");
+    expect(screen.getByTestId("studio-step-info-type")).toHaveTextContent("eddi://ai.labs.unknown_type");
+    expect(screen.getByTestId("studio-step-info-json")).toHaveTextContent("unknownstore/items/id1");
+  });
+
+  // The user-reported bug: `ai.labs.httpcalls` is the API-call task's canonical
+  // id (ApiCallsTask.ID), yet the Studio's own type table only knew the alias,
+  // so every httpcalls step said "Editor not available".
+  it.each([
+    ["eddi://ai.labs.httpcalls", "eddi://ai.labs.apicalls/apicallstore/apicalls/6aed18496ddb7a7697be8?version=1"],
+    ["eddi://ai.labs.apicalls", "eddi://ai.labs.apicalls/apicallstore/apicalls/6aed18496ddb7a7697be8?version=1"],
+    ["eddi://ai.labs.httpcalls", "eddi://ai.labs.httpcalls/apicallstore/apicalls/6aed18496ddb7a7697be8?version=1"],
+  ])("opens the API-calls editor for a %s step (%s)", async (type, uri) => {
+    renderWithProviders(
+      <StudioEditorPanel {...defaultProps} workflowStep={{ type, extensions: {}, config: { uri } }} />
+    );
+    expect(await screen.findByTestId("apicalls-editor")).toBeInTheDocument();
+    expect(screen.queryByTestId("studio-step-info")).not.toBeInTheDocument();
+  });
+
+  it("opens the LLM editor for a step still typed ai.labs.langchain", async () => {
+    renderWithProviders(
+      <StudioEditorPanel
+        {...defaultProps}
+        workflowStep={{
+          type: "eddi://ai.labs.langchain",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.langchain/llmstore/llms/llm1?version=1" },
+        }}
+      />
+    );
+    expect(await screen.findByTestId("llm-task-editor")).toBeInTheDocument();
+  });
+
+  it("describes a templating step instead of warning about it", () => {
+    renderWithProviders(
+      <StudioEditorPanel
+        {...defaultProps}
+        workflowStep={{ type: "eddi://ai.labs.templating", extensions: {}, config: {} }}
+      />
+    );
+    expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "templating");
+    expect(screen.queryByTestId("studio-step-info-json")).not.toBeInTheDocument();
+  });
+
+  it("shows a parser's embedded configuration read-only", () => {
+    renderWithProviders(
+      <StudioEditorPanel
+        {...defaultProps}
+        workflowStep={{
+          type: "eddi://ai.labs.parser",
+          extensions: { dictionaries: [{ type: "eddi://ai.labs.parser.dictionaries.integer" }] },
+          config: { appendExpressions: true },
+        }}
+      />
+    );
+    expect(screen.getByTestId("studio-step-info")).toHaveAttribute("data-kind", "inline");
+    const json = screen.getByTestId("studio-step-info-json");
+    expect(json).toHaveTextContent("appendExpressions");
+    expect(json).toHaveTextContent("ai.labs.parser.dictionaries.integer");
   });
 
   it("shows loading skeleton when fetching resource", () => {
@@ -171,6 +226,6 @@ describe("StudioEditorPanel", () => {
         }}
       />
     );
-    expect(screen.getByText("ai.labs.parser")).toBeInTheDocument();
+    expect(screen.getByTestId("studio-step-info-type")).toHaveTextContent("ai.labs.parser");
   });
 });

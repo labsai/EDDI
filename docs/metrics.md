@@ -858,7 +858,7 @@ eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
-eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
+eddi_guardrail_toolresult_count_total       # Tool results screened by the tool-result guardrail, whole and before truncation (a `summarize` summary is screened and counted again); tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output/tool-call guardrail fired; tags: phase (input|output|tool_call), type, action (block|redact|reprompt|warn)
 eddi_guardrail_toolcall_decisions_total     # One tool call screened by toolCallGuardrails; tags: stage (live|resume), outcome (allowed|rewritten|blocked|reprompted|undecided)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout|spend_refused)
