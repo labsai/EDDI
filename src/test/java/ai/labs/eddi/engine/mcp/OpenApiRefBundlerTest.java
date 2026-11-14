@@ -388,6 +388,27 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("an x- extension of the Paths or Responses Object is data; an x- NAME in components.schemas is still resolved")
+    void extensionsInMapsWithExtensionsAreData() throws Exception {
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", "{\"Pet\":{\"type\":\"string\"}}"));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},
+                 "paths":{"x-note":{"$ref":"https://example.com/value.json"},
+                   "/pets":{"get":{"responses":{"x-meta":{"$ref":"https://example.com/meta.json"},
+                     "200":{"description":"ok"}}}}},
+                 "components":{"schemas":{"x-foo":{"$ref":"https://example.com/defs.json#/Pet"}}}}
+                """;
+
+        JsonNode bundled = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher));
+
+        assertEquals("https://example.com/value.json", bundled.at("/paths/x-note/$ref").asText(), "a Paths Object extension is kept");
+        assertEquals("https://example.com/meta.json", bundled.at("/paths/~1pets/get/responses/x-meta/$ref").asText());
+        assertEquals("string", bundled.at("/components/schemas/x-foo/type").asText(), "a schema NAMED x-foo is a schema");
+        verify(fetcher, times(1)).fetchSpec(anyString());
+        verify(fetcher).fetchSpec("https://example.com/defs.json");
+    }
+
+    @Test
     @DisplayName("a discriminator mapping in a referenced document is moved into the root and rewritten to the moved schema")
     void remoteDiscriminatorMappingRelocated() throws Exception {
         String defs = """

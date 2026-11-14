@@ -205,7 +205,7 @@ final class OpenApiRefBundler {
      */
     private static boolean needsBundling(JsonNode root) {
         boolean[] found = {false};
-        forEachKeywordObject(root, false, node -> {
+        forEachKeywordObject(root, Context.KEYWORDS, node -> {
             JsonNode ref = node.get("$ref");
             JsonNode id = node.get("$id");
             if (ref != null && ref.isTextual() && !ref.asText().trim().startsWith("#") || id != null && id.isTextual()) {
@@ -233,36 +233,88 @@ final class OpenApiRefBundler {
             "schemas", "parameters", "responses", "examples", "headers", "requestBodies", "securitySchemes", "links", "callbacks",
             "pathItems", "paths", "webhooks", "content", "encoding", "variables");
 
-    static boolean isLiteralField(String name, JsonNode value, boolean inNameMap) {
-        if (inNameMap) {
-            // A key of a name map is a name - a schema may be called "x-tenant" - and its
-            // value is checked like any other object.
-            return false;
-        }
-        return name.startsWith("x-") || LITERAL_FIELDS.contains(name) || "examples".equals(name) && value.isArray();
+    /** What the keys of an object are. */
+    enum Context {
+        /** OpenAPI or JSON Schema keywords, and x- extensions. */
+        KEYWORDS,
+        /** The Components Object: keywords, whose maps hold no extensions. */
+        COMPONENTS,
+        /**
+         * Names only ({@code components.schemas}, {@code properties}): a schema may be
+         * called {@code x-tenant}.
+         */
+        NAMES,
+        /** Names plus x- extensions: the Paths, Responses and Callback Objects. */
+        NAMES_WITH_EXTENSIONS,
+        /** A map of names to Callback Objects. */
+        CALLBACKS
     }
 
-    private static boolean isNameMap(String name, JsonNode value, boolean inNameMap) {
-        return !inNameMap && value.isObject() && NAME_MAPS.contains(name);
+    static boolean isLiteralField(String name, JsonNode value, Context context) {
+        return switch (context) {
+            // A key of a pure name map is a name - a schema may be called "x-tenant" - and
+            // its value is checked like any other object.
+            case NAMES, CALLBACKS -> false;
+            // The Paths, Responses and Callback Objects allow extensions beside their
+            // names.
+            case NAMES_WITH_EXTENSIONS -> name.startsWith("x-");
+            case KEYWORDS, COMPONENTS -> name.startsWith("x-") || LITERAL_FIELDS.contains(name)
+                    || "examples".equals(name) && value.isArray();
+        };
+    }
+
+    /**
+     * The context of the value of field {@code name} of an object in
+     * {@code context}.
+     */
+    static Context childContext(String name, JsonNode value, Context context) {
+        if (!value.isObject()) {
+            return Context.KEYWORDS;
+        }
+        return switch (context) {
+            case NAMES, NAMES_WITH_EXTENSIONS -> Context.KEYWORDS;
+            case CALLBACKS -> Context.NAMES_WITH_EXTENSIONS;
+            case KEYWORDS, COMPONENTS -> {
+                if ("components".equals(name) && context == Context.KEYWORDS) {
+                    yield Context.COMPONENTS;
+                }
+                if ("paths".equals(name)) {
+                    yield Context.NAMES_WITH_EXTENSIONS;
+                }
+                if ("responses".equals(name)) {
+                    // An operation's Responses Object allows extensions; the components map does
+                    // not.
+                    yield context == Context.COMPONENTS ? Context.NAMES : Context.NAMES_WITH_EXTENSIONS;
+                }
+                if ("callbacks".equals(name)) {
+                    yield Context.CALLBACKS;
+                }
+                yield NAME_MAPS.contains(name) ? Context.NAMES : Context.KEYWORDS;
+            }
+        };
+    }
+
+    private static boolean isKeywordObject(Context context) {
+        return context == Context.KEYWORDS || context == Context.COMPONENTS;
     }
 
     /**
      * Visits every object of {@code node} that holds OpenAPI keywords — not a name
      * map, not inside literal data — in one pass.
      */
-    private static void forEachKeywordObject(JsonNode node, boolean nameMap, Consumer<JsonNode> visit) {
+    private static void forEachKeywordObject(JsonNode node, Context context, Consumer<JsonNode> visit) {
         if (node.isObject()) {
-            if (!nameMap) {
+            if (isKeywordObject(context)) {
                 visit.accept(node);
             }
             for (Map.Entry<String, JsonNode> field : node.properties()) {
-                if (!isLiteralField(field.getKey(), field.getValue(), nameMap)) {
-                    forEachKeywordObject(field.getValue(), isNameMap(field.getKey(), field.getValue(), nameMap), visit);
+                if (!isLiteralField(field.getKey(), field.getValue(), context)) {
+                    forEachKeywordObject(field.getValue(), childContext(field.getKey(), field.getValue(), context), visit);
                 }
             }
         } else if (node.isArray()) {
             for (JsonNode element : node) {
-                forEachKeywordObject(element, false, visit);
+                forEachKeywordObject(element, Context.KEYWORDS, visit);
             }
         }
     }
@@ -287,7 +339,7 @@ final class OpenApiRefBundler {
      * since it names a schema and not a node that could take its place.
      */
     private static void requireInternalRefsOnly(JsonNode root) {
-        forEachKeywordObject(root, false, node -> {
+        forEachKeywordObject(root, Context.KEYWORDS, node -> {
             JsonNode ref = node.get("$ref");
             if (ref != null && ref.isValueNode() && !ref.asText().trim().startsWith("#")) {
                 throw new IllegalArgumentException("OpenAPI spec still holds an external $ref after inlining; refused");
@@ -315,20 +367,23 @@ final class OpenApiRefBundler {
     }
 
     private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain) {
-        return expand(node, doc, chain, false);
+        return expand(node, doc, chain, Context.KEYWORDS);
     }
 
-    private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain, boolean nameMap) {
+    private JsonNode expand(JsonNode node, Doc doc, Deque<String> chain, Context context) {
         if (++expandedNodes > MAX_EXPANDED_NODES) {
             throw new IllegalArgumentException(
                     "OpenAPI spec expands to more than " + MAX_EXPANDED_NODES + " nodes once its $refs are inlined; refused");
         }
-        if (node.isObject() && nameMap) {
+        if (node.isObject() && !isKeywordObject(context)) {
             // A map of names: every value is an OpenAPI object of its own, and no key is
-            // a keyword ($ref, $id, example, ... are names here).
+            // a keyword ($ref, $id, example, ... are names here) - except an x- extension
+            // where the object allows one (Paths, Responses, Callback), which is data.
             ObjectNode out = NODES.objectNode();
             for (Map.Entry<String, JsonNode> field : node.properties()) {
-                out.set(field.getKey(), expand(field.getValue(), doc, chain, false));
+                String name = field.getKey();
+                JsonNode value = field.getValue();
+                out.set(name, isLiteralField(name, value, context) ? value : expand(value, doc, chain, childContext(name, value, context)));
             }
             return out;
         }
@@ -363,7 +418,7 @@ final class OpenApiRefBundler {
                         continue;
                     }
                     // Literal data is copied as it is: a $ref in an example is not a reference.
-                    out.set(name, isLiteralField(name, value, false) ? value : expand(value, doc, chain, isNameMap(name, value, false)));
+                    out.set(name, isLiteralField(name, value, context) ? value : expand(value, doc, chain, childContext(name, value, context)));
                 }
                 if (!doc.root()) {
                     relocateDiscriminatorMapping(out, doc, chain);
@@ -378,7 +433,7 @@ final class OpenApiRefBundler {
         if (node.isArray()) {
             ArrayNode out = NODES.arrayNode(node.size());
             for (JsonNode element : node) {
-                out.add(expand(element, doc, chain, false));
+                out.add(expand(element, doc, chain, Context.KEYWORDS));
             }
             return out;
         }
@@ -458,9 +513,9 @@ final class OpenApiRefBundler {
             if ("$ref".equals(name) || "$id".equals(name) && field.getValue().isTextual()) {
                 continue;
             }
-            JsonNode sibling = isLiteralField(name, field.getValue(), false)
+            JsonNode sibling = isLiteralField(name, field.getValue(), Context.KEYWORDS)
                     ? field.getValue()
-                    : expand(field.getValue(), doc, chain, isNameMap(name, field.getValue(), false));
+                    : expand(field.getValue(), doc, chain, childContext(name, field.getValue(), Context.KEYWORDS));
             JsonNode existing = into.get(name);
             into.set(name, existing == null ? sibling : stricter(name, existing, sibling));
         }

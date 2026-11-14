@@ -76,6 +76,8 @@ Seven confirmed findings from a security review of the outbound paths.
 - **OpenAPI literal data**: a `$ref` inside `example`, `default`, `const`, `enum`, an Example `value`, a JSON Schema
   `examples` array or an `x-` extension is copied as a value and never fetched; keys of name maps (`properties`,
   `schemas`, `responses`, ...) are names, so a property called `example` is still a schema.
+  The Paths, Responses (of an operation) and Callback Objects hold names plus `x-` extensions: there an `x-`
+  key is data, while in a pure name map (`components.schemas`, `properties`) it is a name and still resolved.
 - **Discriminator mappings in referenced documents** are rewritten: each mapped schema is moved into the root's
   `components.schemas` (renamed on a clash) and the mapping value points at it.
 - **Enum intersection** is indexed (linear), keeping the holder's order.
