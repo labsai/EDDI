@@ -134,7 +134,10 @@ public final class CrawlUrls {
             // literal ".." against "%2e", so /docs/%2e/../private read as /docs/private
             // while a server decoding %2e serves /private.
             String served = parsed.getRawPath() == null || parsed.getRawPath().isEmpty() ? null : canonicalRawPath(parsed.getRawPath());
-            String rawPath = served != null ? served : uri.getRawPath() == null ? "" : uri.getRawPath();
+            // An ambiguous path (an encoded / or \) keeps its raw form: normalize() would
+            // resolve a literal ".." against the encoded segment and hand the scope check
+            // a path the server never serves, while the raw form stays out of scope.
+            String rawPath = served != null ? served : parsed.getRawPath() == null ? "" : parsed.getRawPath();
             String path = foldIndexFile(rawPath);
             // The root is stripped too, so "https://host/" and "https://host" are one
             // document rather than two copies of a site's front page.
@@ -256,8 +259,10 @@ public final class CrawlUrls {
      * literal {@code ..}, while {@code URI.getPath()} decodes {@code %2e%2e} into
      * one — so {@code /docs/%2e%2e/users/evil} passed a {@code /docs/} prefix,
      * missed an exclude of {@code /users/**} and a {@code Disallow: /users/}, and
-     * was served as {@code /users/evil}. A segment that is a dot segment before a
-     * {@code ;} parameter ({@code ..;}) counts too, as Tomcat reads it.
+     * was served as {@code /users/evil}. In the parameter-free reading a segment
+     * that is a dot segment before a {@code ;} parameter ({@code ..;}) counts too,
+     * as Tomcat reads it; the parameter-preserving reading resolves complete dot
+     * segments only, as nginx does.
      *
      * @return the canonical raw path, {@code /} for an empty one, or null when it
      *         holds an encoded {@code /} or {@code \}
@@ -286,17 +291,22 @@ public final class CrawlUrls {
             int parameters = segment.indexOf(';');
             String name = parameters >= 0 ? segment.substring(0, parameters) : segment;
             boolean last = i == segments.length - 1;
-            if (segment.isEmpty() && !last) {
+            // The parameter-free reading drops parameters first, so a segment that is only
+            // a parameter (";x=1") is empty and merged too, before ".." is resolved.
+            String compared = stripParameters ? name : segment;
+            if (compared.isEmpty() && !last) {
                 // Adjacent slashes are one, as nginx and Apache merge them by default:
                 // kept, an empty segment absorbed the next "..", so /docs//%2e%2e/private
                 // read as /docs/private while the server served /private.
                 continue;
             }
-            if (".".equals(name)) {
+            // The parameter-preserving reading resolves only complete dot segments: a
+            // server keeping parameters (nginx) serves "..;" as an ordinary segment.
+            if (".".equals(compared)) {
                 if (last) {
                     kept.addLast("");
                 }
-            } else if ("..".equals(name)) {
+            } else if ("..".equals(compared)) {
                 kept.pollLast();
                 if (last) {
                     kept.addLast("");

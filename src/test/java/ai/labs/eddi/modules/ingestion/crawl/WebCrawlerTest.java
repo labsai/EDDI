@@ -380,6 +380,11 @@ class WebCrawlerTest {
             assertFalse(command.redirectAllowed().test(mixed), "a mixed dot-segment redirect leaves /docs/");
             assertFalse(command.redirectAllowed().test(parameterized), "a parameterized redirect into an exclude");
             assertTrue(command.redirectAllowed().test(SITE + "/docs/b"), "an ordinary in-scope redirect");
+            // nginx keeps "..;" as a segment (/private/..;/docs/a is under /private/);
+            // Tomcat
+            // drops ";x=1" and merges the empty segment (/docs/;x=1/../private is /private)
+            assertFalse(command.redirectAllowed().test(SITE + "/private/..;/docs/a"), "a parameterized dot segment");
+            assertFalse(command.redirectAllowed().test(SITE + "/docs/;x=1/../private"), "an empty parameter-only segment");
         }
 
         @Test
@@ -1021,6 +1026,25 @@ class WebCrawlerTest {
 
             assertTrue(sink.documentIds().contains(SITE + "/orphan"),
                     "a page in the sitemap must be found even when nothing links to it");
+        }
+
+        @Test
+        @DisplayName("an ambiguous sitemap URL (encoded slash before ..) is not fetched under a normalized identity")
+        void ambiguousSitemapUrlIsNotFetched() {
+            // URI.normalize() turns /docs/a%2f../../safe into /docs/safe, while a server
+            // decoding the slash resolves it to /safe: the URL stays out of scope.
+            String ambiguous = SITE + "/docs/a%2f../../safe";
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", ambiguous, SITE + "/orphan")
+                    .page(SITE + "/", "<html><body>no links here</body></html>")
+                    .page(SITE + "/orphan", "<html><body>listed</body></html>")
+                    .page(ambiguous, "<html><body>EVIL</body></html>");
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertTrue(site.wasRequested(SITE + "/orphan"));
+            assertFalse(site.wasRequested(ambiguous), "an ambiguous path is never in scope");
         }
 
         @Test

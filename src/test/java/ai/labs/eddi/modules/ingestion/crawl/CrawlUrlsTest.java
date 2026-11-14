@@ -199,7 +199,18 @@ class CrawlUrlsTest {
         void encodedDotSegmentsResolved() {
             assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/%2e%2e/users/evil"));
             assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/%2E./users/evil"));
-            assertEquals("/users/evil", CrawlUrls.path("https://example.com/docs/..;/users/evil"));
+            // "..;" is a dot segment to Tomcat (parameters dropped), an ordinary segment to
+            // nginx
+            assertEquals("/users/evil", CrawlUrls.pathWithoutParameters("https://example.com/docs/..;/users/evil"));
+            assertEquals("/docs/..;/users/evil", CrawlUrls.path("https://example.com/docs/..;/users/evil"));
+            assertEquals("/private/..;/docs/a", CrawlUrls.path("https://example.com/private/..;/docs/a"));
+            assertEquals("/docs/a", CrawlUrls.pathWithoutParameters("https://example.com/private/..;/docs/a"));
+            // a segment that is only a parameter is empty once the parameter is dropped
+            assertEquals("/private", CrawlUrls.pathWithoutParameters("https://example.com/docs/;x=1/../private"));
+            // an ambiguous path keeps its raw form through canonicalization and stays out
+            // of scope
+            String ambiguous = CrawlUrls.canonicalize("https://example.com/docs/a%2f../../safe");
+            assertNull(CrawlUrls.path(ambiguous), ambiguous);
             assertEquals("/docs/a", CrawlUrls.path("https://example.com/docs/%2e/a"));
             // an empty segment does not absorb the "..": the server merges the slashes
             assertEquals("/private/x", CrawlUrls.path("https://example.com/docs//%2e%2e/private/x"));

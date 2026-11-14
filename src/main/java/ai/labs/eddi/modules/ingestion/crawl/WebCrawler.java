@@ -440,7 +440,9 @@ public class WebCrawler {
             if (canonical.isEmpty() || visited.contains(canonical) || queued.contains(canonical)) {
                 continue;
             }
-            if (!isInScope(canonical, seedHost, request, excludes)) {
+            // The URL that will be fetched is held to the scope as well as its identity:
+            // canonicalizing can remove a reading of the path that the server would use.
+            if (!isInScope(canonical, seedHost, request, excludes) || !isInScope(fetchUrl, seedHost, request, excludes)) {
                 continue;
             }
             // Both strings are retained, and a short relative link inherits the whole of
@@ -574,7 +576,7 @@ public class WebCrawler {
                 String canonical = CrawlUrls.canonicalize(url);
                 // A sitemap is written by the site, not by the operator, and may list
                 // anything at all — so it earns no exemption from the scope.
-                if (!canonical.isEmpty() && frontier.queued.add(canonical)
+                if (!canonical.isEmpty() && isInScope(fetchUrl, seedHost, request, excludes) && frontier.queued.add(canonical)
                         && isInScope(canonical, seedHost, request, excludes)) {
                     frontier.queue.add(new Candidate(fetchUrl, canonical, 0, false));
                     pagesFromSitemaps++;
