@@ -90,6 +90,8 @@ The first green run surfaced three defects in what activation provisions. The ti
   `?limit=`. The approval preview, the request fingerprint and the execution all go through `buildRequest`, so
   request pinning sees the same request that is sent. Side effect: an endpoint that needs a query value its spec does
   not mark required (`duplicateRag`'s `version`) now answers the model with its own 400 instead of being forced.
+  A path parameter stays required even when an optional query parameter of the same name shares its tool variable
+  (review finding; regression test `pathParamSharingNameWithOptionalQueryStaysRequired`).
 - **A repeated operationId dropped a tool.** `GET /groupstore/groups/{groupId}/lessons` and `…/outcomes` were both
   `list`. Tools register by name, so assembly logged `Tool name collision: http tool 'list'` and the operator never
   received one of two endpoints it had been granted. The two now have their own operationIds (`listGroupLessons`,

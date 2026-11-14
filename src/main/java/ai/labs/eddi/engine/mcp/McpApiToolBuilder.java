@@ -642,6 +642,9 @@ public final class McpApiToolBuilder {
         // Tool parameters the model may leave out: query parameters the spec does not
         // mark required. Path parameters are always required, by OpenAPI's own rule.
         var optionalVariables = new LinkedHashSet<String>();
+        // Path variables, which stay required even when an optional query parameter
+        // of the same name shares their tool variable (variableNamesFor keys by name).
+        var pathVariables = new LinkedHashSet<String>();
         var optionalQueryKeys = new ArrayList<String>();
         // The JSON Schema of the same parameters, for ApiCall.argumentSchema: typed
         // tool parameters, and a check of every call before the approval gate.
@@ -674,11 +677,13 @@ public final class McpApiToolBuilder {
                     optionalQueryKeys.add(paramName);
                 }
             } else if ("path".equals(param.getIn())) {
+                pathVariables.add(variableName);
                 paramDescriptions.put(variableName, paramDesc);
                 argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
             }
             // header/cookie params are skipped for now
         }
+        optionalVariables.removeAll(pathVariables);
         request.setQueryParams(queryParams);
         if (!optionalQueryKeys.isEmpty()) {
             request.setOptionalQueryParams(optionalQueryKeys);

@@ -119,6 +119,23 @@ class McpApiToolBuilderArgumentSchemaTest {
         assertEquals(List.of("dryRun"), call.getRequest().getOptionalQueryParams());
     }
 
+    private static final String SHARED_NAME_SPEC = """
+            {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
+             "paths":{"/items/{id}":{"get":{"operationId":"getItem","tags":["t"],
+               "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}},
+                             {"name":"id","in":"query","schema":{"type":"string"}}],
+               "responses":{"200":{"description":"ok"}}}}}}
+            """;
+
+    @Test
+    @DisplayName("a path parameter stays required when an optional query parameter shares its name")
+    void pathParamSharingNameWithOptionalQueryStaysRequired() {
+        ApiCall call = McpApiToolBuilder.parseAndBuild(SHARED_NAME_SPEC, null, null, null).configsByGroup().values().stream()
+                .flatMap(c -> c.getHttpCalls().stream()).findFirst().orElseThrow();
+        JsonNode schema = MAPPER.valueToTree(call.getArgumentSchema());
+        assertEquals("[\"id\"]", schema.get("required").toString());
+    }
+
     private static final String REPEATED_IDS_SPEC = """
             {"openapi":"3.0.3","info":{"title":"t","version":"1"},"servers":[{"url":"https://t.example.com"}],
              "paths":{
