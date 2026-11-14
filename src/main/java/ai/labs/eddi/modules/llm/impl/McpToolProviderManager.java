@@ -19,6 +19,9 @@ import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import com.github.benmanes.caffeine.cache.AsyncCache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,6 +60,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Matcher;
@@ -109,18 +114,36 @@ public class McpToolProviderManager {
     private final long toolCacheTtlMillis;
 
     /**
-     * Cache of active MCP clients, keyed by server URL. Connections are reused
-     * across conversation turns to avoid reconnect overhead.
+     * Cache of active MCP clients, keyed by {@link #cacheKey}. Connections are
+     * reused across conversation turns to avoid reconnect overhead.
+     * <p>
+     * Bounded — {@code eddi.mcp.client-cache.max-size} entries, each dropped after
+     * {@code eddi.mcp.client-cache.expire-after-access-ms} without use. It was a
+     * plain map: every distinct server/credential/timeout combination ever used
+     * kept an open client for the life of the process. An evicted client is closed
+     * by the removal listener, which Caffeine runs on its executor, never on the
+     * thread that caused the eviction.
+     * <p>
+     * The value is a future so the client is built <em>outside</em> any map lock:
+     * {@code computeIfAbsent} used to open the connection (the {@code initialize}
+     * handshake) while holding the map bin, so a slow or hanging server stalled
+     * lookups for unrelated servers in the same bin. Concurrent callers for one key
+     * share the first caller's build; callers for other keys never wait on it.
      */
-    private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
+    private final AsyncCache<String, McpClient> clientCache;
 
     /**
-     * Cache of discovered tool specs/executors per server URL. Finding F12: without
-     * this, every conversation turn issued a live {@code tools/list} RPC to every
-     * configured MCP server (only the connection was cached). Mirrors the 5-minute
-     * Agent Card cache in {@link A2AToolProviderManager}.
+     * Cache of discovered tool specs/executors, keyed like {@link #clientCache}.
+     * Finding F12: without this, every conversation turn issued a live
+     * {@code tools/list} RPC to every configured MCP server (only the connection
+     * was cached). Mirrors the 5-minute Agent Card cache in
+     * {@link A2AToolProviderManager}.
+     * <p>
+     * A map view of a bounded Caffeine cache: freshness is still decided by
+     * {@link CachedTools#timestamp()}, and the entry also expires once it is past
+     * the TTL, so a stale one does not sit in memory until it is next asked for.
      */
-    private final Map<String, CachedTools> toolCache = new ConcurrentHashMap<>();
+    private final Map<String, CachedTools> toolCache;
 
     /** Cached discovery result for one server, with the time it was captured. */
     record CachedTools(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors, long timestamp) {
@@ -148,13 +171,33 @@ public class McpToolProviderManager {
      */
     static final long DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER = 524_288L;
 
+    /**
+     * Default cap on cached MCP clients (and on the tool lists and circuit-breaker
+     * entries keyed the same way). One entry is one distinct server, credential and
+     * timeout combination, so a deployment rarely needs more than a few dozen.
+     */
+    static final int DEFAULT_CLIENT_CACHE_MAX_SIZE = 256;
+
+    /**
+     * Default idle time after which a cached MCP client is closed: 30 minutes, well
+     * above the 5-minute tool-cache TTL, so a client in regular use is never
+     * dropped between two discoveries.
+     */
+    static final long DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS = 1_800_000L;
+
     // ----- Circuit breaker state -----
     /** Maximum failures within the window before the circuit opens. */
     private static final int CIRCUIT_FAILURE_THRESHOLD = 3;
     /** Time window for counting failures (seconds). */
     private static final long CIRCUIT_WINDOW_SECONDS = 60;
-    /** Recent failure timestamps per server URL. */
-    private final Map<String, List<Instant>> failureTimestamps = new ConcurrentHashMap<>();
+    /**
+     * Recent failure timestamps per cache key. A map view of a bounded cache whose
+     * entries expire one window after their last failure — by then none of the
+     * timestamps can count towards opening the circuit, so dropping the entry
+     * changes no answer. It is deliberately not tied to client eviction: closing an
+     * idle client says nothing about whether its server is healthy.
+     */
+    private final Map<String, List<Instant>> failureTimestamps;
 
     /**
      * Field-injected so a directly constructed instance (tests, non-CDI callers)
@@ -193,6 +236,8 @@ public class McpToolProviderManager {
             @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes", defaultValue = "32768") int maxSchemaBytes,
             @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes-per-server", defaultValue = "524288") long maxSchemaBytesPerServer,
             @ConfigProperty(name = "eddi.mcp.tool-cache.ttl-ms", defaultValue = "300000") long toolCacheTtlMillis,
+            @ConfigProperty(name = "eddi.mcp.client-cache.max-size", defaultValue = "256") int clientCacheMaxSize,
+            @ConfigProperty(name = "eddi.mcp.client-cache.expire-after-access-ms", defaultValue = "1800000") long clientCacheExpireAfterAccessMillis,
             ConnectionResolver connectionResolver) {
         this.connectionResolver = connectionResolver;
         this.globalVariableResolver = globalVariableResolver;
@@ -204,6 +249,86 @@ public class McpToolProviderManager {
         this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
         this.maxSchemaBytesPerServer = maxSchemaBytesPerServer > 0 ? maxSchemaBytesPerServer : DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER;
         this.toolCacheTtlMillis = toolCacheTtlMillis >= 0 ? toolCacheTtlMillis : DEFAULT_TOOL_CACHE_TTL_MILLIS;
+
+        // A non-positive bound would disable caching outright (every call a fresh
+        // handshake) — fall back to the shipped default rather than honour it.
+        long maxSize = clientCacheMaxSize > 0 ? clientCacheMaxSize : DEFAULT_CLIENT_CACHE_MAX_SIZE;
+        Duration idle = Duration.ofMillis(clientCacheExpireAfterAccessMillis > 0
+                ? clientCacheExpireAfterAccessMillis
+                : DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS);
+        this.toolCache = Caffeine.newBuilder().maximumSize(maxSize).expireAfterWrite(Duration.ofMillis(this.toolCacheTtlMillis))
+                .<String, CachedTools>build().asMap();
+        this.failureTimestamps = Caffeine.newBuilder().maximumSize(maxSize).expireAfterWrite(Duration.ofSeconds(CIRCUIT_WINDOW_SECONDS))
+                .<String, List<Instant>>build().asMap();
+        this.clientCache = Caffeine.newBuilder().maximumSize(maxSize).expireAfterAccess(idle)
+                .removalListener((String key, McpClient client, RemovalCause cause) -> onClientRemoved(key, client, cause))
+                .buildAsync();
+    }
+
+    /**
+     * Back-compat constructor without the client-cache bounds, which take their
+     * shipped defaults.
+     */
+    public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext, boolean ssrfProtectionEnabled,
+            int maxDescriptionChars, int maxSchemaBytes, long maxSchemaBytesPerServer, long toolCacheTtlMillis,
+            ConnectionResolver connectionResolver) {
+        this(globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, ssrfProtectionEnabled, maxDescriptionChars,
+                maxSchemaBytes, maxSchemaBytesPerServer, toolCacheTtlMillis, DEFAULT_CLIENT_CACHE_MAX_SIZE,
+                DEFAULT_CLIENT_CACHE_EXPIRE_AFTER_ACCESS_MILLIS, connectionResolver);
+    }
+
+    /**
+     * Closes a client the cache evicted (over capacity, or idle too long).
+     * <p>
+     * Caffeine runs removal listeners on its executor, so a close that blocks on a
+     * dead server never stalls the request that triggered the eviction. Explicit
+     * removals ({@link #closeClient}, {@link #closeAllClients}) are skipped here:
+     * those close the client themselves, synchronously, so shutdown does not exit
+     * with closes still queued. The evicted key's tool list goes with the client,
+     * because its executors are bound to the client that has just been closed.
+     */
+    private void onClientRemoved(String key, McpClient client, RemovalCause cause) {
+        if (!cause.wasEvicted() || client == null) {
+            return;
+        }
+        if (key != null) {
+            toolCache.remove(key);
+        }
+        LOGGER.debugf("Closing MCP client evicted from the cache (%s)", cause);
+        closeQuietly(key, client);
+    }
+
+    private static void closeQuietly(String key, McpClient client) {
+        try {
+            client.close();
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(serverOf(key)));
+        }
+    }
+
+    /** The URL part of a cache key, for log lines — never the credential digest. */
+    private static String serverOf(String key) {
+        if (key == null) {
+            return null;
+        }
+        int bar = key.indexOf('|');
+        return bar < 0 ? key : key.substring(0, bar);
+    }
+
+    /**
+     * Closes a cached client once it exists: now if it has been built, otherwise
+     * when its build finishes — a client still being built when its entry is
+     * dropped would otherwise be handed to its caller and never closed.
+     */
+    private static void closeWhenBuilt(String key, CompletableFuture<McpClient> future) {
+        if (future.isDone()) {
+            if (!future.isCompletedExceptionally()) {
+                closeQuietly(key, future.join());
+            }
+            return;
+        }
+        future.thenAcceptAsync(client -> closeQuietly(key, client));
     }
 
     /**
@@ -215,8 +340,8 @@ public class McpToolProviderManager {
      * the <em>unresolved</em> apiKey — the {@code ${vault:…}} reference string —
      * and the credential is resolved once, when the transport is built. So a
      * rotated secret produced no new cache key, and the cached client went on
-     * presenting the old credential until it happened to be evicted. In practice
-     * that is until restart: the client cache has no TTL.
+     * presenting the old credential until it happened to be evicted — and a client
+     * in regular use is never evicted by idleness.
      * <p>
      * Eviction is total rather than surgical. The cache key is a digest, so it
      * cannot say which vault reference a given entry used, and the alternative —
@@ -227,7 +352,7 @@ public class McpToolProviderManager {
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(reference -> {
-            int clients = clientCache.size();
+            int clients = clientCache.asMap().size();
             if (clients == 0 && toolCache.isEmpty()) {
                 return;
             }
@@ -241,17 +366,19 @@ public class McpToolProviderManager {
      * <p>
      * Shared by shutdown and secret invalidation, because dropping a client without
      * closing it leaks its connection, and dropping it without dropping the tool
-     * cache leaves executors bound to a closed client.
+     * cache leaves executors bound to a closed client. Each entry is removed and
+     * then closed, key by key, so a client cached concurrently is either closed
+     * here or left alone — never dropped without a close. Built clients are closed
+     * on this thread, so shutdown does not return with closes still pending.
      */
     private void closeAllClients() {
-        for (var entry : clientCache.entrySet()) {
-            try {
-                entry.getValue().close();
-            } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
+        var clients = clientCache.asMap();
+        for (String key : List.copyOf(clients.keySet())) {
+            CompletableFuture<McpClient> future = clients.remove(key);
+            if (future != null) {
+                closeWhenBuilt(key, future);
             }
         }
-        clientCache.clear();
         toolCache.clear();
     }
 
@@ -442,6 +569,10 @@ public class McpToolProviderManager {
             // a live tools/list RPC per server per turn was pure overhead.
             CachedTools cached = toolCache.get(cacheKey(serverConfig));
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
+                // The cached executors use the cached client without going through
+                // getOrCreateClient, so touch its entry: otherwise a client in
+                // constant use would look idle to expire-after-access.
+                clientCache.getIfPresent(circuitKey);
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
                 mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
@@ -938,25 +1069,77 @@ public class McpToolProviderManager {
      * closed.
      */
     McpClient getOrCreateClient(McpServerConfig config) {
-        return clientCache.computeIfAbsent(cacheKey(config), key -> {
-            String url = config.getUrl();
-            LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
-                    sanitize(config.getTransport()));
+        String key = cacheKey(config);
+        CompletableFuture<McpClient> existing = clientCache.getIfPresent(key);
+        if (existing == null) {
+            // Claim the key with an empty future, then build with no lock held: the
+            // build opens a connection, and computeIfAbsent would have held the map
+            // bin — and every other key hashed to it — for as long as that took.
+            CompletableFuture<McpClient> claim = new CompletableFuture<>();
+            existing = clientCache.asMap().putIfAbsent(key, claim);
+            if (existing == null) {
+                return buildInto(key, claim, config);
+            }
+        }
+        // Someone else is building (or has built) this key: share their client.
+        return awaitClient(existing);
+    }
 
-            Duration timeout = Duration.ofMillis(effectiveTimeoutMs(config));
+    /**
+     * Builds the client for a claimed key on the calling thread and publishes it. A
+     * failed build releases the claim, so the next caller tries again rather than
+     * being handed the same failure for as long as the entry would live.
+     */
+    private McpClient buildInto(String key, CompletableFuture<McpClient> claim, McpServerConfig config) {
+        McpClient client;
+        try {
+            client = buildClient(config);
+        } catch (RuntimeException | Error e) {
+            clientCache.asMap().remove(key, claim);
+            claim.completeExceptionally(e);
+            throw e;
+        }
+        claim.complete(client);
+        return client;
+    }
 
-            McpTransport transport = createTransport(config, timeout);
+    /** Waits for another caller's build, rethrowing its failure unwrapped. */
+    private static McpClient awaitClient(CompletableFuture<McpClient> future) {
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof RuntimeException cause) {
+                throw cause;
+            }
+            if (e.getCause() instanceof Error cause) {
+                throw cause;
+            }
+            throw e;
+        }
+    }
 
-            // The trace context goes into params._meta (SEP-414) through the meta
-            // supplier, which DefaultMcpClient invokes on the calling thread —
-            // where the execute_tool span is current — just before handing the
-            // message to the transport. The transport then mirrors it into the
-            // HTTP headers from the message itself (see createTransport). The
-            // supplier reads the context per request, never at build time: this
-            // client is cached and shared across conversations.
-            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
-                    .metaSupplier(traceMetaSupplier()).build();
-        });
+    /**
+     * Builds and connects one MCP client. Package-private and overridable purely as
+     * a seam, so a test can count builds or make one slow without a live server.
+     */
+    McpClient buildClient(McpServerConfig config) {
+        String url = config.getUrl();
+        LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
+                sanitize(config.getTransport()));
+
+        Duration timeout = Duration.ofMillis(effectiveTimeoutMs(config));
+
+        McpTransport transport = createTransport(config, timeout);
+
+        // The trace context goes into params._meta (SEP-414) through the meta
+        // supplier, which DefaultMcpClient invokes on the calling thread —
+        // where the execute_tool span is current — just before handing the
+        // message to the transport. The transport then mirrors it into the
+        // HTTP headers from the message itself (see createTransport). The
+        // supplier reads the context per request, never at build time: this
+        // client is cached and shared across conversations.
+        return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
+                .metaSupplier(traceMetaSupplier()).build();
     }
 
     /**
@@ -1479,20 +1662,17 @@ public class McpToolProviderManager {
         // same way and must be dropped with it — a bare toolCache.remove(url) would
         // leave executors bound to a closed client behind.
         toolCache.keySet().removeIf(key -> key.startsWith(prefix));
-        for (var key : List.copyOf(clientCache.keySet())) {
+        var clients = clientCache.asMap();
+        for (var key : List.copyOf(clients.keySet())) {
             if (!key.startsWith(prefix)) {
                 continue;
             }
-            McpClient client = clientCache.remove(key);
+            CompletableFuture<McpClient> client = clients.remove(key);
             if (client == null) {
                 continue;
             }
-            try {
-                client.close();
-                LOGGER.infof("Closed MCP client for '%s'", sanitize(url));
-            } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(url));
-            }
+            closeWhenBuilt(key, client);
+            LOGGER.infof("Closed MCP client for '%s'", sanitize(url));
         }
     }
 
@@ -1501,7 +1681,7 @@ public class McpToolProviderManager {
      */
     @PreDestroy
     void shutdown() {
-        LOGGER.infof("Shutting down %d MCP client connection(s)", clientCache.size());
+        LOGGER.infof("Shutting down %d MCP client connection(s)", clientCache.asMap().size());
         closeAllClients();
     }
 
@@ -1509,7 +1689,16 @@ public class McpToolProviderManager {
      * Get the number of active cached connections (for monitoring/testing).
      */
     int getActiveConnectionCount() {
-        return clientCache.size();
+        return clientCache.asMap().size();
+    }
+
+    /**
+     * Runs the caches' pending maintenance — size eviction and expiry — now rather
+     * than on a later access. For tests; production relies on Caffeine's own
+     * amortised maintenance.
+     */
+    void runCacheMaintenance() {
+        clientCache.synchronous().cleanUp();
     }
 
     /**
@@ -1632,11 +1821,19 @@ public class McpToolProviderManager {
      * older than the window to prevent unbounded growth.
      */
     private void recordFailure(String url) {
-        List<Instant> failures = failureTimestamps.computeIfAbsent(url, k -> new CopyOnWriteArrayList<>());
-        failures.add(Instant.now());
-        // Evict old entries outside the window
-        Instant cutoff = Instant.now().minusSeconds(CIRCUIT_WINDOW_SECONDS);
-        failures.removeIf(t -> t.isBefore(cutoff));
+        // Replaced rather than mutated in place, so every failure is a write and the
+        // entry's expire-after-write clock restarts from the latest failure.
+        failureTimestamps.compute(url, (k, previous) -> {
+            Instant now = Instant.now();
+            Instant cutoff = now.minusSeconds(CIRCUIT_WINDOW_SECONDS);
+            List<Instant> failures = new CopyOnWriteArrayList<>();
+            if (previous != null) {
+                // Evict old entries outside the window
+                previous.stream().filter(t -> !t.isBefore(cutoff)).forEach(failures::add);
+            }
+            failures.add(now);
+            return failures;
+        });
     }
 
     /**

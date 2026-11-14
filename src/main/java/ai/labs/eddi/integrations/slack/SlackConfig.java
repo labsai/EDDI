@@ -39,10 +39,18 @@ public class SlackConfig {
     /** Default base delay, in milliseconds, for the API retry backoff. */
     public static final long DEFAULT_API_RETRY_BASE_MS = 500L;
 
+    /** Default number of inbound Slack events processed at once. */
+    public static final int DEFAULT_MAX_CONCURRENT_EVENTS = 32;
+
+    /** Default number of accepted inbound events that may wait for a slot. */
+    public static final int DEFAULT_MAX_QUEUED_EVENTS = 256;
+
     private final int requestTimeoutSeconds;
     private final int groupCompletionTimeoutSeconds;
     private final int apiMaxRetries;
     private final long apiRetryBaseMs;
+    private final int maxConcurrentEvents;
+    private final int maxQueuedEvents;
 
     @Inject
     public SlackConfig(
@@ -51,7 +59,11 @@ public class SlackConfig {
             @ConfigProperty(name = "eddi.slack.group-completion-timeout-seconds",
                             defaultValue = "" + DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS) int groupCompletionTimeoutSeconds,
             @ConfigProperty(name = "eddi.slack.api-max-retries", defaultValue = "" + DEFAULT_API_MAX_RETRIES) int apiMaxRetries,
-            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs) {
+            @ConfigProperty(name = "eddi.slack.api-retry-base-ms", defaultValue = "" + DEFAULT_API_RETRY_BASE_MS) long apiRetryBaseMs,
+            @ConfigProperty(name = "eddi.slack.max-concurrent-events",
+                            defaultValue = "" + DEFAULT_MAX_CONCURRENT_EVENTS) int maxConcurrentEvents,
+            @ConfigProperty(name = "eddi.slack.max-queued-events",
+                            defaultValue = "" + DEFAULT_MAX_QUEUED_EVENTS) int maxQueuedEvents) {
 
         // A non-positive timeout would make every Slack turn fail instantly, and a
         // negative retry budget would skip the first attempt entirely. Fall back to the
@@ -62,6 +74,31 @@ public class SlackConfig {
                 : DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS;
         this.apiMaxRetries = apiMaxRetries >= 1 ? apiMaxRetries : DEFAULT_API_MAX_RETRIES;
         this.apiRetryBaseMs = apiRetryBaseMs >= 0 ? apiRetryBaseMs : DEFAULT_API_RETRY_BASE_MS;
+        // Zero concurrency would refuse every event; a negative queue is meaningless.
+        this.maxConcurrentEvents = maxConcurrentEvents > 0 ? maxConcurrentEvents : DEFAULT_MAX_CONCURRENT_EVENTS;
+        this.maxQueuedEvents = maxQueuedEvents >= 0 ? maxQueuedEvents : DEFAULT_MAX_QUEUED_EVENTS;
+    }
+
+    /**
+     * Constructor with the inbound-event bounds at their shipped defaults, for
+     * callers written before those bounds existed.
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, DEFAULT_MAX_CONCURRENT_EVENTS,
+                DEFAULT_MAX_QUEUED_EVENTS);
+    }
+
+    /** Inbound events processed at once; further accepted events wait. */
+    public int getMaxConcurrentEvents() {
+        return maxConcurrentEvents;
+    }
+
+    /**
+     * Accepted events that may wait for a processing slot. Beyond running plus
+     * waiting, an event is refused with a retryable status so Slack redelivers it.
+     */
+    public int getMaxQueuedEvents() {
+        return maxQueuedEvents;
     }
 
     /** Seconds a single agent turn may take before Slack is told it timed out. */

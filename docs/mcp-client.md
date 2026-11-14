@@ -229,6 +229,14 @@ cloud instance-metadata endpoints are refused either way. See
 Related properties: `eddi.mcp.tool-cache.ttl-ms` (default `300000`) and the
 tool-description and schema size limits listed in the configuration reference.
 
+Connections to MCP servers are cached and reused across turns — one client per
+distinct server URL, credential and timeout. The cache is bounded:
+`eddi.mcp.client-cache.max-size` (default `256`) clients at most, each closed after
+`eddi.mcp.client-cache.expire-after-access-ms` (default `1800000`, 30 minutes)
+without use. An evicted client's connection is closed in the background and the
+next call to that server reconnects, so eviction costs one handshake, not a failed
+turn.
+
 ---
 
 ## What is governed

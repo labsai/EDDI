@@ -571,6 +571,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.mcp.tool-cache.ttl-ms` | `300000` (5 min) | How long a remote server's tool list is cached. Lower it while developing against a changing MCP server |
+| `eddi.mcp.client-cache.max-size` | `256` | Most MCP clients kept open at once — one per distinct server URL, credential and timeout. Past it the cache evicts a client and closes its connection; the next call to that server reconnects. Also bounds the tool-list and circuit-breaker entries keyed the same way. Zero/negative falls back to `256` |
+| `eddi.mcp.client-cache.expire-after-access-ms` | `1800000` (30 min) | How long an MCP client may go unused before it is closed and dropped. A tool-cache hit counts as use. Zero/negative falls back to `1800000` |
 | `eddi.mcp.tool-description.max-chars` | `1024` | Truncation cap on imported tool descriptions, bounding prompt cost. Also the cap on every description, title and enum value inside a tool's parameter schema |
 | `eddi.mcp.tool-schema.max-bytes` | `32768` | Cap on one remote tool's serialised parameter schema. Over it, the schema's descriptions are stripped first; a schema still over it is dropped with its tool (`eddi_mcp_tool_schema_governed_total{outcome=dropped}`) |
 | `eddi.mcp.tool-schema.max-bytes-per-server` | `524288` (512 KB) | Cap on the schema bytes one MCP server may put into the prompt across all its tools per discovery; tools past it are dropped (`outcome=dropped_server_cap`) |
@@ -601,6 +603,8 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.group-completion-timeout-seconds` | `300` | How long a whole group discussion may take before follow-up routing gives up |
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
+| `eddi.slack.max-concurrent-events` | `32` | How many inbound Slack events are processed at once, across all workspaces. Further accepted events wait for a slot. Zero/negative falls back to `32` |
+| `eddi.slack.max-queued-events` | `256` | How many accepted events may wait for a processing slot. Past running plus waiting, the Events API webhook answers `503` with `Retry-After: 1` instead of `200`, so Slack redelivers the event (it retries up to three times, backing off over minutes) rather than EDDI dropping it. Negative falls back to `256` |
 | `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 | `eddi.webhook.max-body-bytes` | `262144` | Largest body, in bytes, the signed inbound webhook endpoint (`POST /integrations/webhook/{integrationId}`) reads before answering 413. The cap is applied to the raw bytes before the signature is checked, so it also bounds what an unauthenticated caller can make EDDI buffer |
 
