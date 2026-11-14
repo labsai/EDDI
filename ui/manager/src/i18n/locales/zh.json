@@ -6274,7 +6274,6 @@
     "rules": "规则",
     "property": "属性设置器",
     "apicalls": "API 调用",
-    "httpcallsLegacy": "API 调用（旧版）",
     "llm": "大语言模型",
     "output": "输出",
     "templating": "模板",

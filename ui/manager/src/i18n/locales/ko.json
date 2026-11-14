@@ -6274,7 +6274,6 @@
     "rules": "규칙",
     "property": "속성 설정기",
     "apicalls": "API 호출",
-    "httpcallsLegacy": "API 호출(레거시)",
     "llm": "LLM",
     "output": "출력",
     "templating": "템플릿",

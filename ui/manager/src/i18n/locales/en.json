@@ -6274,7 +6274,6 @@
     "rules": "Rules",
     "property": "Property Setter",
     "apicalls": "API Calls",
-    "httpcallsLegacy": "API Calls (legacy)",
     "llm": "LLM",
     "output": "Output",
     "templating": "Templating",

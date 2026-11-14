@@ -352,6 +352,19 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 
 ## Changes after 6.7.0
 
+### API-call steps named `ai.labs.apicalls` are now offered to the LLM as tools
+
+`eddi://ai.labs.apicalls` is an alias of `eddi://ai.labs.httpcalls`: both names run the same API-call
+task in the pipeline. Tool discovery used to match the step type literally, so a workflow whose API-call
+step was typed `eddi://ai.labs.apicalls` ran that step but never offered its calls to the model as tools.
+Discovery now treats both names alike. An existing agent in agent mode whose workflow uses the
+`ai.labs.apicalls` name, with `enableHttpCallTools` left at its default of `true`, therefore exposes those
+calls to the model as tools from the first turn after the upgrade, and the model may start calling them.
+To keep the old behaviour, set `enableHttpCallTools: false` in the agent's `langchain.json`, or remove the
+calls you do not want the model to use from the step's httpcalls configuration. The same alias rule applies to
+`eddi://ai.labs.langchain` (an alias of `eddi://ai.labs.llm`) wherever the turn budget is checked. See
+[Custom HTTP Tools](langchain.md#custom-http-tools).
+
 ### An httpcall whose literal target is refused now fails at deploy
 
 With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an

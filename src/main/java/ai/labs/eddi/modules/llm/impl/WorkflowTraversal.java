@@ -75,8 +75,26 @@ public final class WorkflowTraversal {
      */
     private static final Cache<String, List<?>> CACHE = Caffeine.newBuilder().maximumSize(CACHE_MAX_ENTRIES).build();
 
+    /**
+     * Step types the pipeline accepts under a second name, mapped to the canonical
+     * one. The bootstrap modules register each alias as the same lifecycle task
+     * ({@code ApiCallsModule}: {@code ai.labs.apicalls} →
+     * {@code ai.labs.httpcalls}; {@code LlmModule}: {@code ai.labs.langchain} →
+     * {@code ai.labs.llm}), so a step typed with either name RUNS. Discovery must
+     * find it under either name too: matching the literal string meant an
+     * {@code eddi://ai.labs.apicalls} step executed in the pipeline but its calls
+     * were never offered to the LLM as tools, with nothing in the logs to say so.
+     */
+    static final Map<String, String> STEP_TYPE_ALIASES = Map.of("eddi://ai.labs.apicalls", "eddi://ai.labs.httpcalls",
+            "eddi://ai.labs.langchain", "eddi://ai.labs.llm");
+
     private WorkflowTraversal() {
         // static utility class
+    }
+
+    /** The canonical name of a step type: the alias target, or the type itself. */
+    static String canonicalStepType(String stepType) {
+        return stepType == null ? null : STEP_TYPE_ALIASES.getOrDefault(stepType, stepType);
     }
 
     /**
@@ -154,6 +172,9 @@ public final class WorkflowTraversal {
                                                    IResourceClientLibrary resourceClientLibrary, long nowMillis) {
 
         List<StepConfig<T>> results = new ArrayList<>();
+        // Both sides are compared by canonical name, and the cache is keyed by it, so
+        // asking for an alias and asking for its target are one traversal.
+        String wantedType = canonicalStepType(stepTypeUri);
 
         String agentId = memory.getAgentId();
         Integer agentVersion = memory.getAgentVersion();
@@ -167,7 +188,7 @@ public final class WorkflowTraversal {
         // The config type belongs in the key: without it, two callers asking for the
         // same step type but a different target class would share an entry and the
         // second one would get a ClassCastException out of an unrelated cache hit.
-        String cacheKey = agentId + '|' + agentVersion + '|' + stepTypeUri + '|' + configClass.getName();
+        String cacheKey = agentId + '|' + agentVersion + '|' + wantedType + '|' + configClass.getName();
         List<?> cached = CACHE.getIfPresent(cacheKey);
         if (cached != null) {
             @SuppressWarnings("unchecked") // configClass is part of the key, so the element type matches
@@ -233,7 +254,7 @@ public final class WorkflowTraversal {
             try {
                 WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
                 for (var step : workflowConfig.getWorkflowSteps()) {
-                    if (step.getType() != null && stepTypeUri.equals(step.getType().toString())) {
+                    if (step.getType() != null && wantedType.equals(canonicalStepType(step.getType().toString()))) {
                         String uri = (String) step.getConfig().get("uri");
                         if (uri == null)
                             continue;
