@@ -67,7 +67,7 @@ prompt to the real endpoint. This entry adds the test that would have caught it,
 
 The first green run surfaced three defects in what activation provisions. The tier now asserts each of them.
 
-- **The operator prompt failed its template render on every turn (revision 60 → 61).** The backend renders
+- **The operator prompt failed its template render on every turn (revision 60 → 61, landing as 63).** The backend renders
   `systemMessage` with Qute, and the forEach entry in the prompt's apicalls section was written
   `forEach {pathToTargetArray (…, required), iterationObjectName …}`. Qute read that as an expression and could not
   parse it. Every operator turn logged `ERROR … Template processing failed for LLM parameter 'systemMessage'` and
@@ -114,5 +114,11 @@ text. Restoring the `{outcome: …}` line fails that check with 5 unrendered pro
 
 - Making `Operator Activation E2E` (or `E2E Gate`) a required status check is a repository-settings decision; only
   `Build & Test` and `CodeQL Analysis` are required today.
-- The revision bump (61) collides with any other open PR that bumps the operator revision; whichever merges
-  second re-bumps.
+- The revision bump collided as expected: `main` reached 62 meanwhile, so the merge of `main` into this branch
+  (2026-11-14) re-bumped to **63** with the fingerprint of the merged prompt, which still parses and renders in both
+  scopes.
+- **Follow-up, not in this PR:** the prompt still holds literal braces that Qute evaluates as variables and the
+  runtime renders as empty — `{input}`, `{output}`, `{id}`, `{risk}`, `{cause}`, `{context}`, metric label sets such
+  as `{reason="caller_timed_out"}` and `{provider,outcome}` (16 in the read_write scope). They do not fail the render,
+  so the model simply never sees that text. Escaping the prompt's literal braces at build time, with a test that
+  renders it under the runtime engine's rules, is the fix.
