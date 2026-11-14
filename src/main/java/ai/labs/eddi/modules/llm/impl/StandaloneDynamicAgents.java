@@ -220,7 +220,7 @@ public class StandaloneDynamicAgents {
      */
     public String endedRefusal(String conversationId) {
         if (isEnded(conversationId)) {
-            return "⚠️ This conversation has ended, so no sub-agent was created.";
+            return "⚠️ This conversation has ended or no longer exists, so no sub-agent was created.";
         }
         return null;
     }
@@ -239,10 +239,29 @@ public class StandaloneDynamicAgents {
         return true;
     }
 
+    /**
+     * Whether the conversation is over: stored {@code ENDED}, or confirmed gone. A
+     * purge deletes the snapshot after its own cleanup, so an agent whose setup
+     * finished after that scan finds no conversation at all — and must be torn
+     * down, not kept. Gone means confirmed: a state read that finds nothing and a
+     * snapshot read that finds nothing. A store that fails to answer is not "gone"
+     * — nothing is torn down then (logged).
+     */
     private boolean isEnded(String conversationId) {
+        if (conversationId == null) {
+            return false;
+        }
         try {
-            return conversationId != null && conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED;
-        } catch (RuntimeException e) {
+            ConversationState state = conversationMemoryStore.getConversationState(conversationId);
+            if (state != null) {
+                return state == ConversationState.ENDED;
+            }
+            return conversationMemoryStore.loadConversationMemorySnapshot(conversationId) == null;
+        } catch (IResourceStore.ResourceNotFoundException gone) {
+            return true;
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not read the state of conversation %s; treating it as open: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
             return false;
         }
     }

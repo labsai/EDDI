@@ -240,4 +240,37 @@ class StandaloneDynamicAgentsTest {
         assertTrue(result.contains("torn down"), result);
         assertTrue(created.isEmpty(), "a torn-down agent is not tracked");
     }
+
+    @Test
+    @DisplayName("creation gate passed, then a purge deletes the conversation, then setup completes: the new agent is torn down")
+    void purgedWhileSettingUp() throws Exception {
+        agent("late", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+        var standalone = service(20);
+        // The gate: the conversation still exists.
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(ConversationState.READY);
+        assertNull(standalone.endedRefusal(CONVERSATION));
+        // The purge deletes it while setup runs: both reads now find nothing.
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(null);
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        assertTrue(standalone.tearDownIfEnded(CONVERSATION, "late"));
+        verify(agentFactory).undeployAgent(Environment.production, "late", null);
+        verify(agentStore).deleteAllPermanently("late");
+        assertNotNull(standalone.endedRefusal(CONVERSATION), "a gone conversation creates no further agents");
+    }
+
+    @Test
+    @DisplayName("a store that fails to answer is not a gone conversation: nothing is torn down")
+    void storeFailureTearsNothingDown() throws Exception {
+        agent("late", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(null);
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        assertFalse(service(20).tearDownIfEnded(CONVERSATION, "late"));
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+
+        when(memoryStore.getConversationState(CONVERSATION)).thenThrow(new IllegalStateException("down"));
+        assertFalse(service(20).tearDownIfEnded(CONVERSATION, "late"));
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+    }
 }
