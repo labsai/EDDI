@@ -298,4 +298,22 @@ class StandaloneDynamicAgentsTest {
         standalone.releaseCreation("user-1");
         assertNull(standalone.reserveCreation("user-1"), "released once setup finished");
     }
+
+    @Test
+    @DisplayName("an agent created with retain=true survives the end's origin search, even if the creating turn was never stored")
+    void retainedOriginSurvivesEndCleanup() throws Exception {
+        var stored = new ConversationMemory(CONVERSATION, "parent", 1, "user-1");
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION)).thenReturn(ConversationMemoryUtilities.convertConversationMemory(stored));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(deployed("kept")));
+        var origin = new DynamicOrigin("parent", CONVERSATION, null, "user-1");
+        origin.setRetained(true);
+        agent("kept", origin);
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(ConversationState.ENDED);
+
+        service(20).cleanup(CONVERSATION);
+        assertFalse(service(20).tearDownIfEnded(CONVERSATION, "kept"));
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
 }

@@ -69,6 +69,53 @@ public interface DelegationBudget {
     }
 
     /**
+     * One admitted delegation: the allowance handed down, held against the caller's
+     * ceiling from admission until it is settled, so parallel delegations of one
+     * turn cannot each be handed the same remaining money.
+     */
+    interface Hold {
+        /** What the delegation may spend; empty when no ceiling applies. */
+        OptionalDouble allowance();
+
+        /**
+         * The delegated turn is over (finished or failed): stop holding. Idempotent.
+         */
+        void release();
+
+        /**
+         * The caller stopped waiting while the delegated turn may still run: hold
+         * {@code usd} for the rest of this turn instead of the whole allowance.
+         */
+        void keep(double usd);
+    }
+
+    /**
+     * Admits a delegation: reads the remaining allowance and holds it in one step.
+     * Default: no hold — the allowance is {@link #remainingUsd()}, and
+     * {@link Hold#keep} falls back to {@link #reserve}.
+     */
+    default Hold admit() {
+        OptionalDouble remaining = remainingUsd();
+        DelegationBudget self = this;
+        return new Hold() {
+            @Override
+            public OptionalDouble allowance() {
+                return remaining;
+            }
+
+            @Override
+            public void release() {
+                // nothing held
+            }
+
+            @Override
+            public void keep(double usd) {
+                self.reserve(usd);
+            }
+        };
+    }
+
+    /**
      * Settles a delegated turn whose outcome the caller did not get (a timeout, a
      * failure after the start): charges what the callee's conversation has recorded
      * since {@code costBefore} — read now — and, when {@code stillRunning},
@@ -76,14 +123,35 @@ public interface DelegationBudget {
      */
     static void settleUnfinished(DelegationBudget budget, IConversationService conversationService, String conversationId,
                                  double costBefore, OptionalDouble allowance, boolean stillRunning) {
-        if (budget == null || conversationId == null) {
+        settleUnfinished(budget, null, conversationService, conversationId, costBefore, allowance, stillRunning);
+    }
+
+    /**
+     * As above, settling {@code hold} too: released, or — when {@code stillRunning}
+     * — kept at the rest of {@code allowance}, the ORIGINAL allowance handed down
+     * (what was observed since {@code costBefore} already includes a start turn's
+     * spend; subtracting it from a reduced allowance would count it twice).
+     */
+    static void settleUnfinished(DelegationBudget budget, Hold hold, IConversationService conversationService, String conversationId,
+                                 double costBefore, OptionalDouble allowance, boolean stillRunning) {
+        if (budget == null) {
             return;
         }
-        double now = costOf(conversationService, conversationId, costBefore);
-        double observed = Double.isFinite(now - costBefore) && now - costBefore > 0.0 ? now - costBefore : 0.0;
-        budget.charge(observed);
-        if (stillRunning && allowance != null && allowance.isPresent()) {
-            budget.reserve(Math.max(0.0, allowance.getAsDouble() - observed));
+        double observed = 0.0;
+        if (conversationId != null) {
+            double now = costOf(conversationService, conversationId, costBefore);
+            observed = Double.isFinite(now - costBefore) && now - costBefore > 0.0 ? now - costBefore : 0.0;
+            budget.charge(observed);
+        }
+        double rest = allowance != null && allowance.isPresent() ? Math.max(0.0, allowance.getAsDouble() - observed) : 0.0;
+        if (hold != null) {
+            if (stillRunning && conversationId != null && rest > 0.0) {
+                hold.keep(rest);
+            } else {
+                hold.release();
+            }
+        } else if (stillRunning && conversationId != null && rest > 0.0) {
+            budget.reserve(rest);
         }
     }
 

@@ -261,7 +261,9 @@ public class StandaloneDynamicAgents {
             }
             for (String agentId : agentIds) {
                 DynamicOrigin origin = originOf(agentId);
-                if (origin != null && origin.getCreatedInGroupConversationId() == null
+                // A retained agent stays: retention may exist only in a turn that was never
+                // stored, so the flag on the agent itself is what the origin search reads.
+                if (origin != null && !origin.isRetained() && origin.getCreatedInGroupConversationId() == null
                         && conversationId.equals(origin.getCreatedInConversationId())
                         && (owner == null || owner.equals(origin.getCreatedForUserId()))) {
                     tagged.add(agentId);
@@ -294,6 +296,11 @@ public class StandaloneDynamicAgents {
      */
     public boolean tearDownIfEnded(String conversationId, String agentId) {
         if (agentId == null || !isEnded(conversationId)) {
+            return false;
+        }
+        DynamicOrigin origin = originOf(agentId);
+        if (origin != null && origin.isRetained()) {
+            // Asked to be kept: it outlives its conversation by design.
             return false;
         }
         teardown(agentId, conversationId);

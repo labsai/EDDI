@@ -1211,9 +1211,7 @@ ceilings:
 
 A new callee conversation's start turn and its message turn share one allowance:
 what the start turn spent is subtracted before the message turn is sent. A message
-that is skipped on a continued conversation is not charged. A delegation that
-times out is not charged back (its spend is unknown when the caller gives up), but
-it ran under the ceiling passed down.
+that is skipped on a continued conversation is not charged. A delegation that times out is charged what the callee had recorded when the caller gave up, and the rest of the allowance it handed down is held for the remainder of that caller turn, so the same money is not handed out twice in the turn. That hold is not persisted: spend the callee makes after the caller's turn has ended is not charged back to the caller's conversation (it is still metered to the tenant, and the callee stays held to the allowance passed down).
 
 #### Sub-agents outside a group discussion
 
@@ -1221,7 +1219,8 @@ it ran under the ceiling passed down.
 torn down — undeployed and permanently deleted — when the conversation that
 created them **ends** (an explicit end, `CONVERSATION_END`) or is **deleted**,
 unless the model retained them with `retain_agent`. Only an agent whose
-`dynamicOrigin` names that conversation and no discussion is touched — and the
+`dynamicOrigin` names that conversation and no discussion, and is not marked
+retained there (`retain: true` at creation), is touched — and the
 end finds such agents by that origin too, so one a turn created but never stored
 is not missed. An ended conversation creates no further sub-agents. A user may
 have at most `eddi.dynamic-agents.standalone.max-live-per-user` (default 20)

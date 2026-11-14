@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -267,5 +268,67 @@ class DelegationCostCeilingTest {
         // 0.5 allowance: 0.1 charged, 0.4 held — nothing left to hand out again this
         // turn.
         assertEquals(0.0, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9);
+    }
+
+    private static ConversationMemorySnapshot spentSoFar(double usd) {
+        var callee = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        callee.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, usd));
+        return ConversationMemoryUtilities.convertConversationMemory(callee);
+    }
+
+    @Test
+    @DisplayName("timeout after a paid start: 0.50 handed down, 0.20 start, 0.05 message — 0.25 charged and 0.25 held, nothing reusable")
+    void timeoutAfterPaidStartHoldsTheOriginalRemainder() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        var config = new DynamicAgentConfig();
+        config.setEnabled(true);
+        config.setAllowDelegation(true);
+        config.setDelegationTimeoutSeconds(1);
+        doAnswer(invocation -> null).when(conversationService)
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        // Read after the start (0.20 spent), then when the caller gives up (0.25
+        // spent).
+        when(conversationService.getConversationMemorySnapshot("conv-b")).thenReturn(spentSoFar(0.2), spentSoFar(0.25));
+        var tool = new ConverseWithAgentTool(conversationService, "user-1", config, 0, null, null, new MemoryDelegationBudget(memory));
+
+        tool.converseWithAgent("agent-b", "hello", null);
+
+        assertEquals(0.25, ((Number) memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST).getResult()).doubleValue(), 1e-9);
+        // Held: 0.50 - 0.25 = 0.25. With the reduced message allowance it held 0.05,
+        // leaving 0.20 to hand out again.
+        assertEquals(0.0, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("say() failing after a paid start still charges the start, and releases the hold")
+    void failedSayChargesTheStart() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        doThrow(new IllegalStateException("say failed")).when(conversationService)
+                .say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        when(conversationService.getConversationMemorySnapshot("conv-b")).thenReturn(spentSoFar(0.2));
+
+        String result = tool().converseWithAgent("agent-b", "hello", null);
+
+        assertTrue(result.contains("Error"), result);
+        assertEquals(0.2, ((Number) memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST).getResult()).doubleValue(), 1e-9);
+        assertEquals(0.3, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9, "nothing still held");
+    }
+
+    @Test
+    @DisplayName("the allowance is held at admission: a parallel delegation of the same turn is not handed it again")
+    void admissionHoldsTheAllowance() {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        var budget = new MemoryDelegationBudget(memory);
+
+        var first = budget.admit();
+        var second = budget.admit();
+
+        assertEquals(0.5, first.allowance().getAsDouble(), 1e-9);
+        assertEquals(0.0, second.allowance().getAsDouble(), 1e-9, "the first delegation holds the whole remainder");
+        first.release();
+        assertEquals(0.5, budget.admit().allowance().getAsDouble(), 1e-9, "released once settled");
     }
 }

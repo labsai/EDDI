@@ -228,7 +228,12 @@ public class ConverseWithAgentTool {
         // Outside the try: a timeout settles what the delegated turn spent so far.
         double costBefore = 0.0;
         OptionalDouble messageAllowance = OptionalDouble.empty();
+        // The whole allowance handed down, before a start turn's spend is subtracted.
+        OptionalDouble delegatedAllowance = OptionalDouble.empty();
         String delegatedConversation = null;
+        // Held from admission until settled; settled on every exit (see finally).
+        DelegationBudget.Hold hold = null;
+        boolean settled = false;
         try {
             // --- Validate parameters ---
             if (agentId == null || agentId.isBlank()) {
@@ -277,7 +282,8 @@ public class ConverseWithAgentTool {
             // left under its ceiling is handed down as the callee's ceiling for the turn,
             // and a caller with nothing left does not delegate at all. Before the
             // per-task counter, so a refusal burns no slot.
-            OptionalDouble remaining = budget.remainingUsd();
+            hold = budget.admit();
+            OptionalDouble remaining = hold.allowance();
             if (remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: the conversation's cost ceiling is reached", sanitize(agentId));
                 return "⚠️ This conversation's cost ceiling is reached, so no other agent can be consulted. Answer directly.";
@@ -330,6 +336,7 @@ public class ConverseWithAgentTool {
             // --- Start new conversation if no conversationId provided ---
             boolean startedHere = false;
             messageAllowance = remaining;
+            delegatedAllowance = remaining;
             if (conversationId == null || conversationId.isBlank()) {
                 try {
                     ConversationResult convResult = conversationService.startConversation(
@@ -351,6 +358,8 @@ public class ConverseWithAgentTool {
                     messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
                     if (!(messageAllowance.getAsDouble() > 0.0)) {
                         budget.charge(startCost);
+                        hold.release();
+                        settled = true;
                         return "⚠️ This conversation's cost ceiling was reached while agent '%s' started, so the message was not sent."
                                 .formatted(agentId);
                     }
@@ -404,6 +413,8 @@ public class ConverseWithAgentTool {
             if (!skipped.get() || startedHere) {
                 budget.charge(DelegationBudget.spentSince(costBefore, snapshot));
             }
+            hold.release();
+            settled = true;
 
             // Finding 25: the delegated conversation paused for human approval on
             // this turn. Return a structured, actionable result so the delegating
@@ -452,7 +463,11 @@ public class ConverseWithAgentTool {
             // The delegated turn may still be running: charge what it has recorded so
             // far, and hold the rest of its allowance for this turn, so repeated
             // timeouts cannot hand the same money out again.
-            DelegationBudget.settleUnfinished(budget, conversationService, delegatedConversation, costBefore, messageAllowance, true);
+            // The ORIGINAL allowance: settleUnfinished subtracts everything observed since
+            // costBefore, the start turn's spend included — the reduced message allowance
+            // would subtract it twice and hold too little.
+            DelegationBudget.settleUnfinished(budget, hold, conversationService, delegatedConversation, costBefore, delegatedAllowance, true);
+            settled = true;
             // The number has to come from the same config the wait used, or the
             // message tells the model a limit that was never applied — which is how
             // a stale "(60s limit)" survived the timeout becoming configurable.
@@ -461,6 +476,14 @@ public class ConverseWithAgentTool {
         } catch (Exception e) {
             LOGGER.errorf("[CONVERSE] Error conversing with agent '%s': %s", agentId, e.getMessage());
             return "❌ Error conversing with agent '%s': %s".formatted(agentId, e.getMessage());
+        } finally {
+            if (!settled && hold != null) {
+                // Every other exit — a refusal, a failed start, say() throwing after the
+                // start spent, an approval pause: charge what the delegated conversation
+                // recorded (nothing when there is none) and stop holding.
+                DelegationBudget.settleUnfinished(budget, hold, conversationService, delegatedConversation, costBefore, delegatedAllowance,
+                        false);
+            }
         }
     }
 

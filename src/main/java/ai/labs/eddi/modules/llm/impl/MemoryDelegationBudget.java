@@ -57,6 +57,60 @@ final class MemoryDelegationBudget implements DelegationBudget {
      * check of this turn counts, and never released: the turn's memory carries it
      * until the turn ends. Not persisted — a later turn sees only what was charged.
      */
+    /**
+     * Reads what is left and holds all of it in one step
+     * ({@link SpendReservations#tryReserve} refuses once the spend plus what is
+     * held reaches the ceiling): a parallel delegation of the same turn then finds
+     * the allowance taken and is refused rather than handed it a second time.
+     */
+    @Override
+    public Hold admit() {
+        OptionalDouble remaining = remainingUsd();
+        SpendReservations reservations = memory != null ? memory.getSpendReservations() : null;
+        if (remaining.isEmpty() || reservations == null || !(remaining.getAsDouble() > 0.0)) {
+            return DelegationBudget.super.admit();
+        }
+        OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
+        var held = reservations.tryReserve(LlmSpendGate.conversationCost(memory), ceiling.getAsDouble(), remaining.getAsDouble());
+        if (held.isEmpty()) {
+            // Another delegation of this turn took it first.
+            OptionalDouble none = OptionalDouble.of(0.0);
+            return new Hold() {
+                @Override
+                public OptionalDouble allowance() {
+                    return none;
+                }
+
+                @Override
+                public void release() {
+                    // nothing held
+                }
+
+                @Override
+                public void keep(double usd) {
+                    // nothing held
+                }
+            };
+        }
+        SpendReservations.Reservation reservation = held.get();
+        return new Hold() {
+            @Override
+            public OptionalDouble allowance() {
+                return remaining;
+            }
+
+            @Override
+            public void release() {
+                reservation.close();
+            }
+
+            @Override
+            public void keep(double usd) {
+                reservation.settle(usd);
+            }
+        };
+    }
+
     @Override
     public void reserve(double usd) {
         if (memory == null || !Double.isFinite(usd) || !(usd > 0.0)) {

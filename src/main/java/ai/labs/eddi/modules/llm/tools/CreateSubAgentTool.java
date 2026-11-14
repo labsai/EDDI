@@ -463,7 +463,7 @@ public class CreateSubAgentTool {
             SetupResult result;
             try {
                 result = agentSetupService.setupAgent(request,
-                        new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId));
+                        origin(Boolean.TRUE.equals(retain)));
             } catch (AgentSetupException e) {
                 // Inheritance was asked for but supplied no key: say why, instead of
                 // leaving the model with a bare "API key is required" it cannot act on.
@@ -498,8 +498,12 @@ public class CreateSubAgentTool {
             // --- Optional: send initial message ---
             String conversationId = null;
             String response = null;
-            OptionalDouble remaining = budget.remainingUsd();
-            if (initialMessage != null && !initialMessage.isBlank() && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+            // Admitted only when there is a message to send: it holds the allowance for
+            // the initial turn, so a parallel delegation of this turn cannot reuse it.
+            DelegationBudget.Hold hold = initialMessage != null && !initialMessage.isBlank() ? budget.admit() : null;
+            OptionalDouble remaining = hold != null ? hold.allowance() : OptionalDouble.empty();
+            if (hold != null && remaining.isPresent() && !(remaining.getAsDouble() > 0.0)) {
+                hold.release();
                 // The sub-agent exists; its first turn would spend past the creating
                 // conversation's ceiling, so it is not sent.
                 response = "[Initial message not sent: this conversation's cost ceiling is reached]";
@@ -522,6 +526,7 @@ public class CreateSubAgentTool {
                         messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
                         if (!(messageAllowance.getAsDouble() > 0.0)) {
                             budget.charge(startCost);
+                            hold.release();
                             charged = true;
                             throw new IllegalStateException("this conversation's cost ceiling was reached while the sub-agent started");
                         }
@@ -561,6 +566,7 @@ public class CreateSubAgentTool {
                     // Charge-back: the new conversation's whole spend so far is this
                     // tool's doing.
                     budget.charge(DelegationBudget.spentSince(0.0, snapshot));
+                    hold.release();
                     charged = true;
                     // Finding 25: a sub-agent that pauses for approval on its first
                     // message must report the pending approval, not "[no response]".
@@ -586,7 +592,7 @@ public class CreateSubAgentTool {
                     }
                 } catch (IConversationService.ConversationAwaitingApprovalException e) {
                     if (!charged) {
-                        DelegationBudget.settleUnfinished(budget, conversationService, conversationId, 0.0, messageAllowance, false);
+                        DelegationBudget.settleUnfinished(budget, hold, conversationService, conversationId, 0.0, remaining, false);
                     }
                     response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
                             + " is awaiting human approval; a reviewer must decide via POST /agents/"
@@ -595,7 +601,8 @@ public class CreateSubAgentTool {
                     if (!charged) {
                         // The start turn may have run (and spent) before the message failed;
                         // a timed-out message may still be spending.
-                        DelegationBudget.settleUnfinished(budget, conversationService, conversationId, 0.0, messageAllowance,
+                        // The original allowance: the observed spend already includes the start turn.
+                        DelegationBudget.settleUnfinished(budget, hold, conversationService, conversationId, 0.0, remaining,
                                 e instanceof TimeoutException);
                     }
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
@@ -634,6 +641,17 @@ public class CreateSubAgentTool {
             LOGGER.errorf("[SUB-AGENT] Unexpected error creating sub-agent: %s", e.getMessage());
             return "❌ Unexpected error: " + e.getMessage();
         }
+    }
+
+    /**
+     * The provenance stamped on the created agent, with the retain flag: an end
+     * that finds the agent by its origin keeps a retained one even when the turn
+     * that created it was never stored.
+     */
+    private DynamicOrigin origin(boolean retained) {
+        var origin = new DynamicOrigin(parentAgentId, callerConversationId, groupConversationId, userId);
+        origin.setRetained(retained);
+        return origin;
     }
 
     /**

@@ -620,6 +620,55 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("settling a timed-out delegation: $10 allowance, $2 start, $3 recorded — $3 charged, $7 held")
+        void settleUnfinishedHoldsOriginalAllowanceMinusCharged() throws Exception {
+            var budget = new RecordingBudget(10.0);
+            double[] kept = {-1};
+            var hold = new DelegationBudget.Hold() {
+                @Override
+                public OptionalDouble allowance() {
+                    return OptionalDouble.of(10.0);
+                }
+
+                @Override
+                public void release() {
+                    kept[0] = 0.0;
+                }
+
+                @Override
+                public void keep(double usd) {
+                    kept[0] = usd;
+                }
+            };
+            var started = new ConversationMemory("abcdef0123456789abcdef01", "sub-agent-1", 1, "user-1");
+            started.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 3.0));
+            when(conversationService.getConversationMemorySnapshot("conv-123"))
+                    .thenReturn(ConversationMemoryUtilities.convertConversationMemory(started));
+
+            // The start ($2) is part of the $3 recorded: the ORIGINAL $10 is settled, not
+            // the $8 message allowance.
+            DelegationBudget.settleUnfinished(budget, hold, conversationService, "conv-123", 0.0, OptionalDouble.of(10.0), true);
+
+            assertEquals(3.0, budget.charged, 1e-9);
+            assertEquals(7.0, kept[0], 1e-9);
+        }
+
+        @Test
+        @DisplayName("retain=true is stamped on the created agent's own origin")
+        void createSubAgent_retainStampedOnOrigin() throws Exception {
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-1").build());
+
+            tool.createSubAgent("Keeper", "prompt", null, null, null, true);
+
+            var origin = ArgumentCaptor.forClass(DynamicOrigin.class);
+            verify(agentSetupService).setupAgent(any(SetupAgentRequest.class), origin.capture());
+            assertTrue(origin.getValue().isRetained());
+        }
+
+        @Test
         @DisplayName("a start turn that spent before the initial message failed is still charged")
         void createSubAgent_failedMessageChargesTheStart() throws Exception {
             var budget = new RecordingBudget(0.5);

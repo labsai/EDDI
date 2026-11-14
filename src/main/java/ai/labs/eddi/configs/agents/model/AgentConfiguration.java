@@ -371,6 +371,23 @@ public class AgentConfiguration {
         }
 
         /**
+         * Whether {@code create_sub_agent} was asked to retain the agent when it
+         * created it. Stored with the agent, so an end that cleans up by origin keeps
+         * it even when the turn that created it was never stored (where the
+         * conversation's own retain flags live). {@code false} for agents created
+         * before this field existed.
+         */
+        private boolean retained;
+
+        public boolean isRetained() {
+            return retained;
+        }
+
+        public void setRetained(boolean retained) {
+            this.retained = retained;
+        }
+
+        /**
          * Whether this origin names {@code conversationId} as the creating
          * conversation, or {@code groupConversationId} as the discussion it ran in. A
          * {@code null} argument never matches.
