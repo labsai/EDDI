@@ -471,9 +471,11 @@ final class OpenApiRefBundler {
         JsonNode node = pointAt(referenced.tree(), fragment, target);
         chain.push(key);
         // The referenced document is its own base scope: an $id around the reference
-        // does not reach into it.
+        // does not reach into it. An $id ABOVE the fragment in that document does: it
+        // is the base the fragment's relative references resolve against, so the
+        // fragment starts inside a foreign base when any ancestor sets one.
         int outerForeignBaseDepth = foreignBaseDepth;
-        foreignBaseDepth = 0;
+        foreignBaseDepth = ancestorChangesBase(referenced, fragment) ? 1 : 0;
         JsonNode expanded;
         try {
             expanded = expand(node, referenced, chain);
@@ -503,7 +505,8 @@ final class OpenApiRefBundler {
      * into an untyped schema, so the two are merged into one schema here instead: a
      * field only one side has is kept; a numeric bound both have keeps the stricter
      * value (the smaller maximum, the larger minimum); {@code required} keeps the
-     * union; {@code enum} keeps the values both allow; any other field both have
+     * union; {@code properties} keeps the union, merging a property both define the
+     * same way; {@code enum} keeps the values both allow; any other field both have
      * takes the holder's value (the author's local refinement — a description, a
      * pattern).
      */
@@ -522,7 +525,61 @@ final class OpenApiRefBundler {
         return into;
     }
 
+    /**
+     * Whether an object on the JSON-pointer path from {@code doc}'s root to
+     * {@code fragment} — the root included, the fragment's own node excluded (its
+     * {@code $id} is seen when it is expanded) — carries an {@code $id} that
+     * changes the base URI.
+     */
+    private static boolean ancestorChangesBase(Doc doc, String fragment) {
+        if (fragment.isEmpty()) {
+            return false;
+        }
+        JsonPointer pointer;
+        try {
+            pointer = JsonPointer.compile(fragment);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        JsonNode current = doc.tree();
+        while (current != null && !pointer.matches()) {
+            JsonNode id = current.isObject() ? current.get("$id") : null;
+            if (id != null && id.isTextual() && changesBase(id.asText().trim(), doc)) {
+                return true;
+            }
+            current = current.isArray() ? current.get(pointer.getMatchingIndex()) : current.get(pointer.getMatchingProperty());
+            pointer = pointer.tail();
+        }
+        return false;
+    }
+
+    /**
+     * {@code holder}'s fields merged into a copy of {@code target}, field by field,
+     * with {@link #stricter} for a field both have.
+     */
+    private static ObjectNode mergeSchemas(ObjectNode target, JsonNode holder) {
+        ObjectNode merged = target.deepCopy();
+        for (Map.Entry<String, JsonNode> field : holder.properties()) {
+            JsonNode existing = merged.get(field.getKey());
+            merged.set(field.getKey(), existing == null ? field.getValue() : stricter(field.getKey(), existing, field.getValue()));
+        }
+        return merged;
+    }
+
     private static JsonNode stricter(String name, JsonNode target, JsonNode holder) {
+        if ("properties".equals(name) && target.isObject() && holder.isObject()) {
+            // Both sides' properties apply: union them, merging a property both define
+            // the same way. Taking the holder's map dropped the target's properties, and
+            // the argument converter then dropped them from "required" too.
+            ObjectNode properties = ((ObjectNode) target).deepCopy();
+            for (Map.Entry<String, JsonNode> property : holder.properties()) {
+                JsonNode existing = properties.get(property.getKey());
+                properties.set(property.getKey(), existing instanceof ObjectNode existingSchema && property.getValue().isObject()
+                        ? mergeSchemas(existingSchema, property.getValue())
+                        : property.getValue());
+            }
+            return properties;
+        }
         if (target.isNumber() && holder.isNumber()) {
             int order = new BigDecimal(target.asText()).compareTo(new BigDecimal(holder.asText()));
             if (UPPER_BOUNDS.contains(name)) {

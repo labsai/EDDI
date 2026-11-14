@@ -81,6 +81,9 @@ Seven confirmed findings from a security review of the outbound paths.
 - **Discriminator mappings in referenced documents** are rewritten: each mapped schema is moved into the root's
   `components.schemas` (renamed on a clash) and the mapping value points at it.
 - **Enum intersection** is indexed (linear), keeping the holder's order.
+- **An `$id` above a referenced fragment** sets the fragment's base too: a relative `$ref` under it is refused, as
+  under the fragment's own `$id`. **`properties` beside a `$ref`** are united with the target's (a property both
+  define is merged the same way), so the target's properties, and its `required` entries for them, survive.
 - **Markdown destinations** with an embedded line ending or control character are dropped.
 ### Design decisions
 

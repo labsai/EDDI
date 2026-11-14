@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -329,6 +330,42 @@ class OpenApiRefBundlerTest {
                 "https://docs.example/v1/openapi.json", fetcher).contains("#/components/schemas/X"));
         assertTrue(OpenApiRefBundler.bundle(template.formatted("#anchor", "#/components/schemas/X"), null, fetcher)
                 .contains("#/components/schemas/X"));
+    }
+
+    @Test
+    @DisplayName("an $id ABOVE the referenced fragment changes its base too: its relative $ref is refused, not fetched beside the document")
+    void idAboveTheFragmentIsHonoured() {
+        String defs = "{\"$id\":\"https://schemas.example/v2/\",\"properties\":{\"p\":{\"$ref\":\"Pet.json\"}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://docs.example/v1/defs.json", defs,
+                "https://docs.example/v1/Pet.json", "{\"type\":\"string\"}"));
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> OpenApiRefBundler.bundle(specReferencing("https://docs.example/v1/defs.json#/properties/p"), null, fetcher));
+
+        assertTrue(e.getMessage().contains("$id changes the base"), e.getMessage());
+        verify(fetcher, never()).fetchSpec("https://docs.example/v1/Pet.json");
+    }
+
+    @Test
+    @DisplayName("properties beside a $ref and on its target are united, so the argument schema keeps the target's required property")
+    void siblingPropertiesAreUnitedThroughTheArgumentConverter() {
+        String defs = "{\"Thing\":{\"type\":\"object\",\"required\":[\"a\"],"
+                + "\"properties\":{\"a\":{\"type\":\"string\",\"maxLength\":50},\"shared\":{\"type\":\"string\",\"maxLength\":40}}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Thing",
+                   "properties":{"b":{"type":"integer"},"shared":{"type":"string","maxLength":10}}}}}}
+                """;
+
+        OpenAPI openAPI = McpApiToolBuilder.parseSpec(spec, fetcher);
+        Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+
+        Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+        assertTrue(properties.containsKey("a") && properties.containsKey("b"), converted.toString());
+        assertEquals(10, ((Number) ((Map<?, ?>) properties.get("shared")).get("maxLength")).intValue(),
+                "a property both define keeps the stricter bound");
+        assertTrue(((List<?>) converted.get("required")).contains("a"), converted.toString());
     }
 
     @Test
