@@ -47,6 +47,9 @@ Seven confirmed findings from a security review of the outbound paths.
 - **Decision paths are judged raw as well as decoded**: a matrix value with an encoded slash (`approve;x=%2Fzzz`)
   made the decoded path end in `zzz` while the router served `approve`. The filter now also reads the raw path,
   strips matrix parameters per raw segment before decoding, and refuses when either reading is a decision path.
+  The raw path comes from the request URI, not `UriInfo.getPath(false)`: RESTEasy Reactive throws from that on
+  every call, which answered 400 to every request (`/manage` and all store writes included) until the filter read
+  the path only for marked writes, and from the request URI.
 - **Every MCP request to this deployment is marked**, whatever its credential (static key, connection, none), not
   only one carrying `${caller:token}`.
 - **OpenAPI bundling**: the output is capped at 32 M characters while it is written (a shared large value

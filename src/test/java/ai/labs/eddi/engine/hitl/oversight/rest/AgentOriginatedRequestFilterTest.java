@@ -14,11 +14,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -71,11 +74,60 @@ class AgentOriginatedRequestFilterTest {
         when(request.getMethod()).thenReturn("POST");
         when(request.getUriInfo()).thenReturn(uriInfo);
         when(uriInfo.getPath()).thenReturn("groups/g1/conversations/gc1/approve;x=/zzz");
-        when(uriInfo.getPath(false)).thenReturn("groups/g1/conversations/gc1/approve;x=%2Fzzz");
+        // As RESTEasy Reactive answers: the encoded path is not available through
+        // getPath(false), only through the request URI.
+        when(uriInfo.getPath(false)).thenThrow(new IllegalArgumentException("We do not support non-decoded parameters"));
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:7070/groups/g1/conversations/gc1/approve;x=%2Fzzz"));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://localhost:7070/"));
         when(request.getHeaderString(AgentCallMarker.HEADER)).thenReturn("true");
 
         new AgentOriginatedRequestFilter().filter(request);
 
+        verify(request).abortWith(any());
+    }
+
+    /**
+     * Regression: RESTEasy Reactive's {@code UriInfo.getPath(false)} throws, and
+     * the filter called it on every request, so every request it saw answered 400 —
+     * {@code GET /manage}, {@code /manage/__auth_config__.js}, every store write.
+     */
+    @ParameterizedTest
+    @CsvSource({"GET,manage", "GET,manage/__auth_config__.js", "POST,workflowstore/workflows", "GET,agentstore/agents/descriptors",
+            "POST,agents/c2/resume"})
+    @DisplayName("an unmarked request or a read passes without the path being read the unsupported way")
+    void unmarkedRequestsNeverTouchTheUnsupportedPathReading(String method, String path) {
+        ContainerRequestContext request = mock(ContainerRequestContext.class);
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(request.getMethod()).thenReturn(method);
+        when(request.getUriInfo()).thenReturn(uriInfo);
+        when(uriInfo.getPath()).thenReturn(path);
+        when(uriInfo.getPath(false)).thenThrow(new IllegalArgumentException("We do not support non-decoded parameters"));
+
+        assertDoesNotThrow(() -> new AgentOriginatedRequestFilter().filter(request));
+
+        verify(request, never()).abortWith(any());
+        verify(uriInfo, never()).getPath(false);
+    }
+
+    @Test
+    @DisplayName("a marked write reads the raw path from the request URI, below a root path too, and never throws")
+    void markedWriteReadsRawPathFromRequestUri() {
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(uriInfo.getPath(false)).thenThrow(new IllegalArgumentException("We do not support non-decoded parameters"));
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://h/eddi/agents/c2/resume;x=%2Fzzz?q=1"));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://h/eddi/"));
+        assertEquals("/agents/c2/resume;x=%2Fzzz", AgentOriginatedRequestFilter.rawPath(uriInfo));
+
+        UriInfo broken = mock(UriInfo.class);
+        when(broken.getRequestUri()).thenThrow(new IllegalStateException("no request"));
+        assertNull(AgentOriginatedRequestFilter.rawPath(broken));
+
+        ContainerRequestContext request = mock(ContainerRequestContext.class);
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getUriInfo()).thenReturn(broken);
+        when(broken.getPath()).thenReturn("agents/c2/resume");
+        when(request.getHeaderString(AgentCallMarker.HEADER)).thenReturn("true");
+        assertDoesNotThrow(() -> new AgentOriginatedRequestFilter().filter(request));
         verify(request).abortWith(any());
     }
 

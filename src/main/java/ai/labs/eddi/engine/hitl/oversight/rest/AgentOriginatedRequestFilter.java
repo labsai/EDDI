@@ -10,8 +10,10 @@ import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.Provider;
 
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -47,13 +49,48 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
     private static final Pattern GUARDED = Pattern.compile("^/?hitl/(?:samples|autonomy|analytics/rebuild)(?:/.*)?$");
     @Override
     public void filter(ContainerRequestContext request) {
+        String marker = request.getHeaderString(AgentCallMarker.HEADER);
+        String method = request.getMethod();
+        if (!AgentOriginatedRequests.isMarked(marker) || method == null || READ_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
+            // Nothing to judge: every unmarked request and every read leaves untouched,
+            // before any path is read.
+            return;
+        }
         String path = request.getUriInfo().getPath();
-        String rawPath = request.getUriInfo().getPath(false);
-        if (refused(request.getMethod(), path, rawPath, request.getHeaderString(AgentCallMarker.HEADER))) {
+        String rawPath = rawPath(request.getUriInfo());
+        if (refused(method, path, rawPath, marker)) {
             String message = isDecision(path, rawPath)
                     ? AgentOriginatedRequests.DECISION_REFUSAL
                     : "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions";
             request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED, message));
+        }
+    }
+
+    /**
+     * The request path relative to the application, still percent-encoded.
+     * <p>
+     * Not {@code UriInfo.getPath(false)}: RESTEasy Reactive throws
+     * {@code IllegalArgumentException("We do not support non-decoded parameters")}
+     * from it on every call, which the exception mapper turned into a 400 for every
+     * request this filter saw — {@code /manage} and every store write included. The
+     * raw path of the request URI, less the base URI's, is the same string. Null
+     * when it cannot be read; the decoded reading is then judged alone.
+     */
+    static String rawPath(UriInfo uriInfo) {
+        try {
+            URI requestUri = uriInfo.getRequestUri();
+            String raw = requestUri == null ? null : requestUri.getRawPath();
+            if (raw == null) {
+                return null;
+            }
+            URI baseUri = uriInfo.getBaseUri();
+            String base = baseUri == null ? null : baseUri.getRawPath();
+            if (base != null && !base.isEmpty() && !"/".equals(base) && raw.startsWith(base)) {
+                raw = raw.substring(base.endsWith("/") ? base.length() - 1 : base.length());
+            }
+            return raw;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
