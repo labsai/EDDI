@@ -335,12 +335,20 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // deployed across conversations, so the per-user cap applies there; a
             // discussion's agents are bounded and cleaned up by the group engine.
             StandaloneDynamicAgents standalone = standaloneAgents;
-            Supplier<String> creationGate = groupConversationId == null && standalone != null
-                    ? () -> standalone.capRefusal(userId)
+            boolean standaloneConversation = groupConversationId == null && standalone != null;
+            // An ended conversation creates no sub-agent; one it created while the end
+            // ran is torn down at once.
+            Supplier<String> creationGate = standaloneConversation
+                    ? () -> {
+                        String ended = standalone.endedRefusal(callerConversationId);
+                        return ended != null ? ended : standalone.capRefusal(userId);
+                    }
                     : null;
+            Predicate<String> afterCreate = standaloneConversation ? agentId -> standalone.tearDownIfEnded(callerConversationId, agentId) : null;
             tools.add(new CreateSubAgentTool(agentSetupService,
                     conversationService, parentAgentId, userId, dynamicConfig,
-                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId, delegationBudget, creationGate));
+                    sharedCreatedIds, sharedRetainedIds, callerConversationId, groupConversationId, delegationBudget, creationGate,
+                    afterCreate));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s' (%d already created)",
                     sanitize(parentAgentId), sharedCreatedIds.size());
             anyDynamicToolAdded = true;

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,6 +22,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -149,17 +152,98 @@ public class StandaloneDynamicAgents {
         if (conversationId == null) {
             return;
         }
+        String owner = null;
+        Set<String> handled = new HashSet<>();
+        Set<String> retained = Set.of();
         try {
             ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-            if (snapshot == null) {
-                return;
+            if (snapshot != null) {
+                owner = snapshot.getUserId();
+                IConversationMemory memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
+                List<String> created = DynamicAgentToolsProvider.seedCreatedAgentIds(memory);
+                retained = DynamicAgentToolsProvider.seedRetainedAgentIds(memory, created);
+                cleanup(conversationId, memory);
+                handled.addAll(created);
             }
-            cleanup(conversationId, ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot));
         } catch (IResourceStore.ResourceNotFoundException e) {
-            // gone already: nothing recorded to clean up
+            // gone already: only the agents' own origins can name them now
         } catch (Exception e) {
             LOGGER.warnf("[DYNAMIC] Could not read conversation %s to tear down its sub-agents: %s", sanitize(conversationId),
                     sanitize(e.getMessage()));
+        }
+        // The stored snapshot misses an agent a turn created and never stored — a turn
+        // cancelled or abandoned while the end ran, on any node. The agent's own
+        // dynamicOrigin is durable the moment it exists, so the end also tears down
+        // every deployed agent whose origin names this conversation: whichever of the
+        // end and the turn's finalization runs last still finds it.
+        for (String agentId : originTagged(conversationId, owner)) {
+            if (!handled.contains(agentId) && !retained.contains(agentId)) {
+                teardown(agentId, conversationId);
+            }
+        }
+    }
+
+    /**
+     * The deployed agents whose {@code dynamicOrigin} names {@code conversationId}
+     * and no discussion — scoped to the conversation's owner when known, through
+     * the same deployment lookup the per-user cap uses. Empty when the deployments
+     * cannot be read (logged; the snapshot path above still ran).
+     */
+    List<String> originTagged(String conversationId, String owner) {
+        List<String> tagged = new ArrayList<>();
+        try {
+            Set<String> agentIds = new LinkedHashSet<>();
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
+                if (info != null && info.getAgentId() != null) {
+                    agentIds.add(info.getAgentId());
+                }
+            }
+            for (String agentId : agentIds) {
+                DynamicOrigin origin = originOf(agentId);
+                if (origin != null && origin.getCreatedInGroupConversationId() == null
+                        && conversationId.equals(origin.getCreatedInConversationId())
+                        && (owner == null || owner.equals(origin.getCreatedForUserId()))) {
+                    tagged.add(agentId);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("[DYNAMIC] Could not list the deployed sub-agents of conversation %s: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+        }
+        return tagged;
+    }
+
+    /**
+     * Why a sub-agent may not be created in {@code conversationId} now, or
+     * {@code null}: an ended conversation creates none. Checked before setup; an
+     * agent created while the end ran is caught by {@link #tearDownIfEnded}.
+     */
+    public String endedRefusal(String conversationId) {
+        if (isEnded(conversationId)) {
+            return "⚠️ This conversation has ended, so no sub-agent was created.";
+        }
+        return null;
+    }
+
+    /**
+     * After setup: when the conversation ended while the agent was being created,
+     * tears it down at once — the end's cleanup may already have run.
+     *
+     * @return {@code true} when the agent was torn down
+     */
+    public boolean tearDownIfEnded(String conversationId, String agentId) {
+        if (agentId == null || !isEnded(conversationId)) {
+            return false;
+        }
+        teardown(agentId, conversationId);
+        return true;
+    }
+
+    private boolean isEnded(String conversationId) {
+        try {
+            return conversationId != null && conversationMemoryStore.getConversationState(conversationId) == ConversationState.ENDED;
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 

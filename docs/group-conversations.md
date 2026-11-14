@@ -1221,7 +1221,9 @@ it ran under the ceiling passed down.
 torn down — undeployed and permanently deleted — when the conversation that
 created them **ends** (an explicit end, `CONVERSATION_END`) or is **deleted**,
 unless the model retained them with `retain_agent`. Only an agent whose
-`dynamicOrigin` names that conversation and no discussion is touched. A user may
+`dynamicOrigin` names that conversation and no discussion is touched — and the
+end finds such agents by that origin too, so one a turn created but never stored
+is not missed. An ended conversation creates no further sub-agents. A user may
 have at most `eddi.dynamic-agents.standalone.max-live-per-user` (default 20)
 such agents deployed at once, across all their conversations; at the cap the
 tool refuses with a message naming `teardown_agent`.

@@ -13,12 +13,15 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.setup.SetupResult;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -181,5 +185,59 @@ class StandaloneDynamicAgentsTest {
         when(agentStore.read("a1", 1)).thenThrow(new IResourceStore.ResourceStoreException("down"));
 
         assertNotNull(service(20).capRefusal("user-1"));
+    }
+
+    @Test
+    @DisplayName("the end's cleanup also finds a deployed agent whose origin names the conversation but the snapshot does not list")
+    void endCleanupFindsOriginTaggedAgentMissingFromSnapshot() throws Exception {
+        var stored = new ConversationMemory(CONVERSATION, "parent", 1, "user-1");
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION)).thenReturn(ConversationMemoryUtilities.convertConversationMemory(stored));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                .thenReturn(List.of(deployed("unstored"), deployed("groups"), deployed("someone-else")));
+        agent("unstored", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+        agent("groups", new DynamicOrigin("parent", CONVERSATION, "gc-1", "user-1"));
+        agent("someone-else", new DynamicOrigin("parent", "fedcba9876543210fedcba98", null, "user-1"));
+
+        service(20).cleanup(CONVERSATION);
+
+        verify(agentFactory).undeployAgent(Environment.production, "unstored", null);
+        verify(agentStore).deleteAllPermanently("unstored");
+        verify(agentFactory, never()).undeployAgent(any(), eq("groups"), any());
+        verify(agentFactory, never()).undeployAgent(any(), eq("someone-else"), any());
+    }
+
+    @Test
+    @DisplayName("an ended conversation creates no sub-agent, and one created while it ended is torn down; a cancelled one keeps creating")
+    void creationAfterEnd() throws Exception {
+        agent("late", new DynamicOrigin("parent", CONVERSATION, null, "user-1"));
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(ConversationState.ENDED);
+
+        assertNotNull(service(20).endedRefusal(CONVERSATION));
+        assertTrue(service(20).tearDownIfEnded(CONVERSATION, "late"));
+        verify(agentFactory).undeployAgent(Environment.production, "late", null);
+        verify(agentStore).deleteAllPermanently("late");
+
+        // A plain cancel leaves the conversation open: creation goes ahead.
+        when(memoryStore.getConversationState(CONVERSATION)).thenReturn(ConversationState.EXECUTION_INTERRUPTED);
+        assertNull(service(20).endedRefusal(CONVERSATION));
+        assertFalse(service(20).tearDownIfEnded(CONVERSATION, "late"));
+    }
+
+    @Test
+    @DisplayName("create_sub_agent tears down an agent the conversation ended under, and reports it")
+    void toolTearsDownAfterCreateWhenEnded() throws Exception {
+        var setup = mock(AgentSetupService.class);
+        when(setup.setupAgent(any(), any())).thenReturn(SetupResult.builder().action("setup_complete").agentId("late").build());
+        var config = new DynamicAgentConfig();
+        config.setEnabled(true);
+        config.setAllowCreation(true);
+        var created = new ArrayList<String>();
+        var tool = new CreateSubAgentTool(setup, mock(IConversationService.class), "parent", "user-1", config, created, null, CONVERSATION,
+                null, null, null, agentId -> true);
+
+        String result = tool.createSubAgent("Helper", "You help", null, null, null, null);
+
+        assertTrue(result.contains("torn down"), result);
+        assertTrue(created.isEmpty(), "a torn-down agent is not tracked");
     }
 }

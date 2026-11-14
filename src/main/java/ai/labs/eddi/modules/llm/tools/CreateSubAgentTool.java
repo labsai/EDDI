@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
@@ -75,6 +76,10 @@ public class CreateSubAgentTool {
     private final DelegationBudget budget;
     /** Asked before setup; a non-null answer refuses. May be null. */
     private final Supplier<String> creationGate;
+    /**
+     * Asked after setup; {@code true} means the agent was torn down. May be null.
+     */
+    private final Predicate<String> afterCreate;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             IConversationService conversationService,
@@ -145,6 +150,30 @@ public class CreateSubAgentTool {
             String groupConversationId,
             DelegationBudget budget,
             Supplier<String> creationGate) {
+        this(agentSetupService, conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds,
+                callerConversationId, groupConversationId, budget, creationGate, null);
+    }
+
+    /**
+     * @param afterCreate
+     *            asked with the new agent's id once it is set up: {@code true} when
+     *            it was torn down at once because the conversation ended meanwhile
+     *            ({@code StandaloneDynamicAgents#tearDownIfEnded}). {@code null}
+     *            asks nothing.
+     */
+    public CreateSubAgentTool(AgentSetupService agentSetupService,
+            IConversationService conversationService,
+            String parentAgentId,
+            String userId,
+            DynamicAgentConfig config,
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds,
+            String callerConversationId,
+            String groupConversationId,
+            DelegationBudget budget,
+            Supplier<String> creationGate,
+            Predicate<String> afterCreate) {
+        this.afterCreate = afterCreate;
         this.creationGate = creationGate;
         this.budget = budget != null ? budget : DelegationBudget.UNLIMITED;
         this.callerConversationId = callerConversationId;
@@ -419,6 +448,11 @@ public class CreateSubAgentTool {
                 throw e;
             }
             String agentId = result.agentId();
+            if (afterCreate != null && afterCreate.test(agentId)) {
+                // The conversation ended while the agent was being set up, possibly after
+                // the end's own cleanup ran: torn down at once rather than left deployed.
+                return "⚠️ This conversation ended while the sub-agent was being created; it was torn down.";
+            }
             createdAgentIds.add(agentId);
             if (Boolean.TRUE.equals(retain)) {
                 retainedAgentIds.add(agentId);
