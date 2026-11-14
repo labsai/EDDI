@@ -1234,8 +1234,17 @@ conversation turns) while it reads the retain flag, undeploys and deletes, and
 `retain_agent` / `unretain_agent` take the same lease to write the flag. A retain
 that cannot get it within a short wait is refused with "the agent is being torn
 down or changed elsewhere, try again"; a teardown that cannot get it leaves that
-agent for the next cleanup instead of deleting it unprotected. With clustering
-off, a per-node lock does the same job. The per-user cap, by contrast, stays
+agent for the next cleanup instead of deleting it unprotected. Teardown fails safe
+in three more cases, keeping the agent: the cluster lease is degraded (NATS
+unreachable, so the lease manager hands out an unfenced, node-local handle; retain
+and unretain still proceed then), the lease is lost before the undeploy or before
+the delete, or the agent was retained or changed while it was undeployed (the flag
+and version are read again right before the delete; an agent kept at that point is
+undeployed but intact). One window remains: the agent store offers no
+version-checked permanent delete, so a delete that takes longer than the lease's
+safety margin (two heartbeats between its local validity and its server-side
+expiry) could overlap a retain on another node. With clustering off, a per-node
+lock does the same job. The per-user cap, by contrast, stays
 best-effort across nodes (see `eddi.dynamic-agents.standalone.max-live-per-user`
 in the [configuration reference](configuration-reference.md)).
 

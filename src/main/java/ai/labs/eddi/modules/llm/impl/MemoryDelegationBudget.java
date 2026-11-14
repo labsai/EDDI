@@ -46,18 +46,28 @@ final class MemoryDelegationBudget implements DelegationBudget {
         if (memory == null) {
             return OptionalDouble.empty();
         }
+        SpendReservations reservations = memory.getSpendReservations();
+        if (reservations == null) {
+            return remaining(null);
+        }
+        // Ceiling, spend and holds from one view: under the monitor every charge-back
+        // and reservation takes.
+        return reservations.computeExclusively(() -> remaining(reservations));
+    }
+
+    private OptionalDouble remaining(SpendReservations reservations) {
         OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
         if (!LlmSpendGate.ceilingApplies(ceiling)) {
             return OptionalDouble.empty();
         }
-        SpendReservations reservations = memory.getSpendReservations();
         double spent = LlmSpendGate.conversationCost(memory) + (reservations != null ? reservations.heldUsd() : 0.0);
         return OptionalDouble.of(Math.max(0.0, ceiling.getAsDouble() - spent));
     }
 
     /**
      * Reads what is left and holds all of it in one step, under the conversation's
-     * {@link SpendReservations} monitor: the recorded spend is read there
+     * {@link SpendReservations} monitor: the effective ceiling (whose baseline is
+     * itself a spend read) and the recorded spend are both read there
      * ({@link SpendReservations#reserveHeadroom(DoubleSupplier, double)}), and
      * {@link #charge} and every release take the same monitor, so neither a
      * parallel delegation nor a charge-back can land between the read and the hold.
@@ -70,14 +80,22 @@ final class MemoryDelegationBudget implements DelegationBudget {
         if (memory == null) {
             return Hold.NONE;
         }
+        SpendReservations reservations = memory.getSpendReservations();
+        if (reservations == null) {
+            // Nothing to hold a reservation in: refused under a ceiling, unbounded
+            // without one.
+            return LlmSpendGate.ceilingApplies(LlmSpendGate.effectiveCeiling(memory)) ? REFUSED : Hold.NONE;
+        }
+        return reservations.computeExclusively(() -> admitLocked(reservations));
+    }
+
+    private Hold admitLocked(SpendReservations reservations) {
         OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
         if (!LlmSpendGate.ceilingApplies(ceiling)) {
             return Hold.NONE;
         }
-        SpendReservations reservations = memory.getSpendReservations();
-        Optional<SpendReservations.Reservation> held = reservations == null
-                ? Optional.empty()
-                : reservations.reserveHeadroom(() -> LlmSpendGate.conversationCost(memory), ceiling.getAsDouble());
+        Optional<SpendReservations.Reservation> held = reservations.reserveHeadroom(() -> LlmSpendGate.conversationCost(memory),
+                ceiling.getAsDouble());
         if (held.isEmpty()) {
             return REFUSED;
         }

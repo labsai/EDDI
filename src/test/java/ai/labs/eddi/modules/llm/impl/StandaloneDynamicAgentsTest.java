@@ -97,6 +97,13 @@ class StandaloneDynamicAgentsTest {
         return origin;
     }
 
+    /** A degraded-mode handle: unfenced (Mockito would answer 0 for the Long). */
+    private static LeaseHandle unfencedHandle() {
+        LeaseHandle handle = mock(LeaseHandle.class);
+        when(handle.fence()).thenReturn(null);
+        return handle;
+    }
+
     private static IConversationLeaseManager sharedLeases(Set<String> held) {
         IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
         when(leases.acquireKey(anyString(), any(Duration.class))).thenAnswer(invocation -> {
@@ -457,6 +464,76 @@ class StandaloneDynamicAgentsTest {
         verify(agentStore, never()).update(eq("sub-1"), any(), any(), anyBoolean());
         verify(agentStore).deleteAllPermanently("sub-1");
         assertTrue(held.isEmpty(), "teardown released the lease");
+    }
+
+    @Test
+    @DisplayName("a lease lost after undeploy (past its validity) stops the delete: the agent is kept, undeployed")
+    void leaseLostBeforeDeleteKeepsTheAgent() throws Exception {
+        Set<String> held = ConcurrentHashMap.newKeySet();
+        var lost = new AtomicBoolean();
+        IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
+        when(leases.isClustered()).thenReturn(true);
+        LeaseHandle handle = mock(LeaseHandle.class);
+        when(handle.key()).thenReturn(SubAgentLocks.LEASE_PREFIX + "sub-1");
+        when(handle.fence()).thenReturn(7L);
+        when(handle.isLost()).thenAnswer(invocation -> lost.get());
+        when(leases.acquireKey(anyString(), any(Duration.class))).thenAnswer(invocation -> {
+            held.add(invocation.getArgument(0));
+            return CompletableFuture.completedFuture(handle);
+        });
+        agent("sub-1", released());
+        doAnswer(invocation -> {
+            lost.set(true);
+            return null;
+        }).when(agentFactory).undeployAgent(Environment.production, "sub-1", null);
+
+        new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, 20, leases)
+                .cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1"), Set.of()));
+
+        verify(agentFactory).undeployAgent(Environment.production, "sub-1", null);
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+        verify(leases).release(handle);
+    }
+
+    @Test
+    @DisplayName("an agent retained or changed while it was undeployed is not deleted")
+    void retainedDuringUndeployIsNotDeleted() throws Exception {
+        agent("sub-1", released());
+        doAnswer(invocation -> {
+            var configuration = new AgentConfiguration();
+            var origin = new DynamicOrigin("parent", CONVERSATION, null, "user-1");
+            origin.setRetained(true);
+            configuration.setDynamicOrigin(origin);
+            when(agentStore.read("sub-1", 1)).thenReturn(configuration);
+            return null;
+        }).when(agentFactory).undeployAgent(Environment.production, "sub-1", null);
+
+        service(20).cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1"), Set.of()));
+
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+    }
+
+    @Test
+    @DisplayName("clustered but degraded (an unfenced handle): teardown keeps the agent, retain may still write its flag")
+    void degradedHandleSkipsTeardownButAllowsRetain() throws Exception {
+        IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
+        when(leases.isClustered()).thenReturn(true);
+        when(leases.acquireKey(anyString(), any(Duration.class)))
+                .thenAnswer(invocation -> CompletableFuture.completedFuture(unfencedHandle()));
+        agent("sub-1", released());
+
+        new StandaloneDynamicAgents(agentStore, agentFactory, deploymentStore, memoryStore, 20, leases)
+                .cleanup(CONVERSATION, memoryThatCreated(List.of("sub-1"), Set.of()));
+
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), any());
+        verify(agentStore, never()).deleteAllPermanently(anyString());
+
+        var retainTool = new TeardownAgentTool(agentFactory, agentStore, deploymentStore, new CopyOnWriteArrayList<>(List.of("sub-1")),
+                ConcurrentHashMap.newKeySet(), ConcurrentHashMap.newKeySet(), CONVERSATION, null, leases);
+        String reply = retainTool.retainAgent("sub-1");
+
+        assertFalse(reply.contains("changed elsewhere"), reply);
+        verify(agentStore).update(eq("sub-1"), any(), any(), anyBoolean());
     }
 
     @Test

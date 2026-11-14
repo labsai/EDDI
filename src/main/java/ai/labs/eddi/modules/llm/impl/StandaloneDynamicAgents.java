@@ -416,13 +416,22 @@ public class StandaloneDynamicAgents {
             return;
         }
         try (SubAgentLocks.Guard held = guard.get()) {
-            teardownLocked(agentId, conversationId);
+            if (!held.coordinated()) {
+                // Clustered, but the lease manager is degraded (NATS unreachable) and
+                // handed out a node-local handle: another node's retain cannot be ruled
+                // out, so the agent is kept (fail safe) for a later cleanup.
+                LOGGER.warnf("[DYNAMIC] Cluster lease of sub-agent '%s' is unfenced (degraded) — not torn down this time (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+                return;
+            }
+            teardownLocked(agentId, conversationId, held);
         } finally {
             SubAgentLocks.clearTearingDown(agentId);
         }
     }
 
-    private void teardownLocked(String agentId, String conversationId) {
+    private void teardownLocked(String agentId, String conversationId, SubAgentLocks.Guard guard) {
+        Integer versionRead = versionOf(agentId);
         DynamicOrigin origin = originOf(agentId);
         if (origin != null && origin.isRetained()) {
             // The flag on the agent is the authority (retain_agent / unretain_agent
@@ -440,7 +449,27 @@ public class StandaloneDynamicAgents {
         }
         SubAgentLocks.markTearingDown(agentId);
         try {
+            if (!guard.stillHeld()) {
+                LOGGER.warnf("[DYNAMIC] Lost the lease of sub-agent '%s' before undeploying it — kept (conversation %s)", sanitize(agentId),
+                        sanitize(conversationId));
+                return;
+            }
             agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+            // Last checks before the irreversible step: the lease is still ours, and
+            // the agent is unchanged and still not retained. An agent kept here is
+            // undeployed but intact, and can be deployed again.
+            if (!guard.stillHeld()) {
+                LOGGER.warnf("[DYNAMIC] Lost the lease of sub-agent '%s' before deleting it — undeployed, not deleted (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+                return;
+            }
+            DynamicOrigin latest = originOf(agentId);
+            Integer versionNow = versionOf(agentId);
+            if (latest == null || latest.isRetained() || versionRead == null || !versionRead.equals(versionNow)) {
+                LOGGER.warnf("[DYNAMIC] Sub-agent '%s' was retained or changed while it was undeployed — not deleted (conversation %s)",
+                        sanitize(agentId), sanitize(conversationId));
+                return;
+            }
             agentStore.deleteAllPermanently(agentId);
             try {
                 deploymentStore.deleteDeploymentInfos(agentId);
@@ -451,6 +480,16 @@ public class StandaloneDynamicAgents {
         } catch (Exception e) {
             LOGGER.warnf("[DYNAMIC] Could not tear down sub-agent '%s' of conversation %s: %s", sanitize(agentId), sanitize(conversationId),
                     sanitize(e.getMessage()));
+        }
+    }
+
+    /** The agent's current version, or {@code null} when unreadable. */
+    private Integer versionOf(String agentId) {
+        try {
+            IResourceStore.IResourceId current = agentStore.getCurrentResourceId(agentId);
+            return current != null ? current.getVersion() : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 

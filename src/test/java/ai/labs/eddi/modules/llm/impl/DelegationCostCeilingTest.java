@@ -412,6 +412,71 @@ class DelegationCostCeilingTest {
         assertEquals(0.5, reservations.heldUsd(), 1e-9, "never above the ceiling");
     }
 
+    /** A callee conversation: earlier turns spent 2.00, this turn carries 0.25. */
+    private static ConversationMemory delegatedCallee() {
+        var callee = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        callee.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 2.0));
+        callee.startNextStep();
+        callee.getCurrentStep().storeData(new Data<>("context:" + ClientContextGuard.KEY_DELEGATION_MAX_COST,
+                new Context(Context.ContextType.string, "0.25")));
+        return callee;
+    }
+
+    @Test
+    @DisplayName("the effective ceiling is computed inside the reservations lock: a charge-back arriving during its read waits")
+    void ceilingIsReadUnderTheLock() throws Exception {
+        var callee = delegatedCallee();
+        SpendReservations reservations = callee.getSpendReservations();
+        SpendReadProbe probe = new SpendReadProbe(callee, reservations, true);
+        probe.whileReadingSpend = () -> new MemoryDelegationBudget(callee).charge(5.0);
+
+        var hold = new MemoryDelegationBudget(probe.memory).admit();
+        probe.join();
+
+        assertTrue(probe.readUnderLock.get(), "the ceiling's baseline is read under the reservations monitor");
+        assertTrue(probe.blockedDuringRead.get(), "the charge waited for the admission");
+        assertEquals(0.25, hold.allowance().getAsDouble(), 1e-9, "ceiling 2.25 less 2.00 spent, as at the read");
+        assertEquals(7.0, LlmSpendGate.conversationCost(callee), 1e-9, "the charge landed after");
+    }
+
+    @Test
+    @DisplayName("a charge landing on the current step between the ceiling's cost reads cannot turn the ceiling negative (unbounded)")
+    void chargeBetweenCostReadsKeepsTheCeiling() {
+        var callee = spy(delegatedCallee());
+        var charged = new AtomicBoolean();
+        doAnswer(invocation -> {
+            // The charge-back lands while the baseline is being read.
+            if (charged.compareAndSet(false, true)) {
+                callee.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_DELEGATED_COST, 5.0));
+            }
+            return invocation.callRealMethod();
+        }).when(callee).getPreviousSteps();
+
+        OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(callee);
+
+        assertTrue(LlmSpendGate.ceilingApplies(ceiling), "a ceiling, never 'no ceiling'");
+        assertEquals(2.25, ceiling.getAsDouble(), 1e-9, "the spend before this turn plus the allowance");
+        assertNotNull(new LlmSpendGate(null, null).check(callee), "and 7.00 spent is refused against it");
+    }
+
+    @Test
+    @DisplayName("a computed ceiling that is not a usable number means nothing is left: delegation and model calls are refused")
+    void unusableComputedCeilingRefuses() {
+        var callee = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");
+        // Spend before this turn plus the allowance overflows to infinity.
+        callee.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, Double.MAX_VALUE));
+        callee.startNextStep();
+        callee.getCurrentStep().storeData(new Data<>("context:" + ClientContextGuard.KEY_DELEGATION_MAX_COST,
+                new Context(Context.ContextType.string, String.valueOf(Double.MAX_VALUE))));
+
+        OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(callee);
+
+        assertEquals(0.0, ceiling.getAsDouble(), 0.0, "floored to 0, not dropped");
+        assertTrue(LlmSpendGate.ceilingApplies(ceiling));
+        assertEquals(0.0, new MemoryDelegationBudget(callee).admit().allowance().getAsDouble(), 0.0, "refused, not unbounded");
+        assertNotNull(new LlmSpendGate(null, null).check(callee));
+    }
+
     /**
      * A spy on the conversation memory that, the first time the spend is read while
      * the reservations monitor is held, starts {@link #whileReadingSpend} on
@@ -425,8 +490,17 @@ class DelegationCostCeilingTest {
         private Thread other;
 
         SpendReadProbe(ConversationMemory real, SpendReservations reservations) {
+            this(real, reservations, false);
+        }
+
+        /**
+         * @param ceilingRead
+         *            hook the effective ceiling's baseline read
+         *            ({@code getPreviousSteps}) instead of the spend read
+         */
+        SpendReadProbe(ConversationMemory real, SpendReservations reservations, boolean ceilingRead) {
             memory = spy(real);
-            doAnswer(invocation -> {
+            var hook = doAnswer(invocation -> {
                 if (Thread.holdsLock(reservations) && other == null) {
                     readUnderLock.set(true);
                     other = new Thread(whileReadingSpend);
@@ -434,7 +508,12 @@ class DelegationCostCeilingTest {
                     blockedDuringRead.set(awaitBlocked(other));
                 }
                 return invocation.callRealMethod();
-            }).when(memory).getAllSteps();
+            });
+            if (ceilingRead) {
+                hook.when(memory).getPreviousSteps();
+            } else {
+                hook.when(memory).getAllSteps();
+            }
         }
 
         void join() throws InterruptedException {

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import java.util.Optional;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 /**
  * The paid calls of one conversation that are in flight: what each is expected
@@ -103,6 +104,15 @@ public final class SpendReservations {
      */
     public synchronized void exclusively(Runnable action) {
         action.run();
+    }
+
+    /**
+     * As {@link #exclusively(Runnable)}, returning what {@code action} computes:
+     * for a decision (the ceiling, the headroom, the hold) that must be taken from
+     * one consistent view of the spend.
+     */
+    public synchronized <T> T computeExclusively(Supplier<T> action) {
+        return action.get();
     }
 
     /** What the calls in flight are holding right now. */

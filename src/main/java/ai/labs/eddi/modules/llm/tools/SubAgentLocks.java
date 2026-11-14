@@ -72,6 +72,25 @@ public final class SubAgentLocks {
             this.lease = lease;
         }
 
+        /**
+         * Whether this guard still excludes every other node: true for a node-local
+         * guard, and for a cluster lease until it is lost (past its validity, or taken
+         * over). Checked right before each irreversible step.
+         */
+        public boolean stillHeld() {
+            return lease == null || !lease.isLost();
+        }
+
+        /**
+         * Whether this guard coordinates with the other nodes at all. False only when
+         * clustering is on and the lease manager handed out an unfenced handle (its
+         * degraded mode with NATS unreachable): node-local ordering only. Without
+         * clustering, the in-node lock is all there is to coordinate, so true.
+         */
+        public boolean coordinated() {
+            return leaseManager == null || !leaseManager.isClustered() || (lease != null && lease.fence() != null);
+        }
+
         @Override
         public void close() {
             if (closed) {

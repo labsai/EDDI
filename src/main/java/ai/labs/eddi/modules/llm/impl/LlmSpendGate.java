@@ -411,11 +411,51 @@ public class LlmSpendGate {
         if (!(allowance > 0)) {
             return agentCeiling;
         }
-        double fireCeiling = conversationCost(memory) - currentStepCost(memory) + allowance;
+        // A computed ceiling: the spend before this turn plus the allowance. Never
+        // negative — and if it were (not finite), it would mean nothing is left, not
+        // that no ceiling applies: ceilingApplies() reads a negative value as "no
+        // ceiling", which only a genuinely absent configuration may mean.
+        double fireCeiling = spendBeforeThisTurn(memory) + allowance;
+        if (!Double.isFinite(fireCeiling) || fireCeiling < 0.0) {
+            fireCeiling = 0.0;
+        }
         if (ceilingApplies(agentCeiling) && agentCeiling.getAsDouble() <= fireCeiling) {
             return agentCeiling;
         }
         return OptionalDouble.of(fireCeiling);
+    }
+
+    /**
+     * What the conversation had spent before this turn: {@link #conversationCost}
+     * less the current step's {@code audit:cost} and {@code audit:delegated_cost},
+     * summed from the previous steps directly. Taking one total minus another read
+     * a moment later could go negative when a charge-back landed on the current
+     * step between the two reads; summing only steps nothing writes to any more
+     * cannot.
+     */
+    static double spendBeforeThisTurn(IConversationMemory memory) {
+        var previous = memory.getPreviousSteps();
+        if (previous == null) {
+            // A memory without a step stack (test doubles): the difference, floored.
+            return Math.max(0.0, conversationCost(memory) - currentStepCost(memory));
+        }
+        double total = 0.0;
+        for (String key : SPEND_KEYS) {
+            for (IData<Object> cost : previous.<Object>getExactDataPerStep(key)) {
+                total += positive(cost);
+            }
+        }
+        var current = memory.getCurrentStep();
+        if (current != null) {
+            total += positive(current.getData(MemoryKeys.AUDIT_DISCARDED_COST));
+        }
+        var undone = memory.getRedoCache();
+        if (undone != null) {
+            for (IConversationStep step : undone) {
+                total += ConversationMemory.recordedSpend(step);
+            }
+        }
+        return total;
     }
 
     /**
