@@ -96,8 +96,8 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn("").when(parser).normalize(anyString(), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(anyString(), isNull(), anyList());
+            doReturn("").when(parser).normalize(anyString(), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(anyString(), eq("en"), anyList());
 
             task.execute(ctx.memory(), parser);
 
@@ -113,8 +113,8 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn(null).when(parser).normalize(anyString(), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(isNull(), isNull(), anyList());
+            doReturn(null).when(parser).normalize(anyString(), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(isNull(), eq("en"), anyList());
 
             task.execute(ctx.memory(), parser);
 
@@ -134,7 +134,7 @@ class InputParserTaskBranchTest {
         IInputParser parser = mock(IInputParser.class);
         var config = new IInputParser.Config(appendExpressions, true, true);
         doReturn(config).when(parser).getConfig();
-        doReturn("hello").when(parser).normalize(eq("hello"), isNull());
+        doReturn("hello").when(parser).normalize(eq("hello"), eq("en"));
 
         RawSolution solution = mock(RawSolution.class);
         var foundWord = mock(IDictionary.IFoundWord.class);
@@ -145,7 +145,7 @@ class InputParserTaskBranchTest {
         doReturn(true).when(foundWord).isWord();
         doReturn(List.of(foundWord)).when(solution).getDictionaryEntries();
 
-        doReturn(List.of(solution)).when(parser).parse(eq("hello"), isNull(), anyList());
+        doReturn(List.of(solution)).when(parser).parse(eq("hello"), eq("en"), anyList());
         return parser;
     }
 
@@ -212,8 +212,8 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn("test").when(parser).normalize(eq("test"), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(eq("test"), isNull(), anyList());
+            doReturn("test").when(parser).normalize(eq("test"), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(eq("test"), eq("en"), anyList());
 
             // Default: conversationOutputs has exactly 1 entry (current)
             assertEquals(1, ctx.conversationOutputs().size());
@@ -221,7 +221,7 @@ class InputParserTaskBranchTest {
             task.execute(ctx.memory(), parser);
 
             // parse called with empty temp dictionaries (size < 2 check)
-            verify(parser).parse(eq("test"), isNull(), eq(Collections.emptyList()));
+            verify(parser).parse(eq("test"), eq("en"), eq(Collections.emptyList()));
         }
 
         @Test
@@ -231,15 +231,15 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn("test").when(parser).normalize(eq("test"), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(eq("test"), isNull(), anyList());
+            doReturn("test").when(parser).normalize(eq("test"), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(eq("test"), eq("en"), anyList());
 
             // Add a previous output without quickReplies
             ctx.conversationOutputs().addFirst(new ConversationOutput());
 
             task.execute(ctx.memory(), parser);
 
-            verify(parser).parse(eq("test"), isNull(), anyList());
+            verify(parser).parse(eq("test"), eq("en"), anyList());
         }
     }
 
@@ -257,8 +257,8 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn("option1").when(parser).normalize(eq("option1"), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(eq("option1"), isNull(), anyList());
+            doReturn("option1").when(parser).normalize(eq("option1"), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(eq("option1"), eq("en"), anyList());
 
             // Previous output with quickReply without expressions
             ConversationOutput prevOutput = new ConversationOutput();
@@ -270,7 +270,7 @@ class InputParserTaskBranchTest {
             ctx.conversationOutputs().addFirst(prevOutput);
 
             task.execute(ctx.memory(), parser);
-            verify(parser).parse(eq("option1"), isNull(), anyList());
+            verify(parser).parse(eq("option1"), eq("en"), anyList());
         }
 
         @Test
@@ -280,8 +280,8 @@ class InputParserTaskBranchTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             doReturn(config).when(parser).getConfig();
-            doReturn("option1").when(parser).normalize(eq("option1"), isNull());
-            doReturn(Collections.emptyList()).when(parser).parse(eq("option1"), isNull(), anyList());
+            doReturn("option1").when(parser).normalize(eq("option1"), eq("en"));
+            doReturn(Collections.emptyList()).when(parser).parse(eq("option1"), eq("en"), anyList());
 
             ConversationOutput prevOutput = new ConversationOutput();
             Map<String, Object> qr = new HashMap<>();
@@ -292,7 +292,7 @@ class InputParserTaskBranchTest {
             ctx.conversationOutputs().addFirst(prevOutput);
 
             task.execute(ctx.memory(), parser);
-            verify(parser).parse(eq("option1"), isNull(), anyList());
+            verify(parser).parse(eq("option1"), eq("en"), anyList());
         }
     }
 
@@ -426,8 +426,8 @@ class InputParserTaskBranchTest {
         IInputParser parser = mock(IInputParser.class);
         var config = new IInputParser.Config(true, true, true);
         doReturn(config).when(parser).getConfig();
-        doReturn("test").when(parser).normalize(eq("test"), isNull());
-        doReturn(Collections.emptyList()).when(parser).parse(eq("test"), isNull(), anyList());
+        doReturn("test").when(parser).normalize(eq("test"), eq("en"));
+        doReturn(Collections.emptyList()).when(parser).parse(eq("test"), eq("en"), anyList());
 
         task.execute(ctx.memory(), parser);
 

@@ -142,6 +142,13 @@ class NlpDictionariesTest {
         }
 
         @Test
+        @DisplayName("lookupTerm — a top-level domain longer than four letters is still an email")
+        void lookupEmailWithLongTopLevelDomain() {
+            assertEquals(1, dict.lookupTerm("info@eddi.technology").size());
+            assertEquals(1, dict.lookupTerm("shop@example.online").size());
+        }
+
+        @Test
         @DisplayName("lookupTerm — non-email returns empty")
         void lookupNonEmail() {
             var result = dict.lookupTerm("not-an-email");

@@ -155,7 +155,11 @@ public class RestSemanticParser implements IRestSemanticParser {
                     throw failure;
                 }
                 IInputParser inputParser = cachedParser.parser();
-                List<RawSolution> rawSolutions = inputParser.parse(sentence);
+                // Normalize first, as the pipeline does: this endpoint exists to show what
+                // a parser makes of an input, and without the parser's normalizers it
+                // answered for an input the pipeline never parses.
+                String normalized = inputParser.normalize(sentence == null ? "" : sentence, null);
+                List<RawSolution> rawSolutions = inputParser.parseAllReadings(normalized, null);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
                 asyncResponse.resume(solutionExpressions.stream().map(solution -> new ResponseSolution(solution.getExpressions())).toList());
             } catch (IllegalArgumentException e) {

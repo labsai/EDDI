@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -74,6 +76,7 @@ class VaultGrantCheckerTest {
     private ILlmStore llmStore;
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
+    private IParserStore parserStore;
     private IAgentStore agentStore;
     private IConnectionStore connectionStore;
     private GlobalVariableResolver globalVariableResolver;
@@ -88,6 +91,7 @@ class VaultGrantCheckerTest {
 
         apiCallsStore = mock(IApiCallsStore.class);
         mcpCallsStore = mock(IMcpCallsStore.class);
+        parserStore = mock(IParserStore.class);
 
         agentStore = mock(IAgentStore.class);
         connectionStore = mock(IConnectionStore.class);
@@ -96,7 +100,7 @@ class VaultGrantCheckerTest {
         // resolver too.
         when(globalVariableResolver.resolveValue(anyString(), anyString())).thenAnswer(i -> i.getArgument(0));
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
-                mock(IRagStore.class), connectionStore, globalVariableResolver);
+                mock(IRagStore.class), parserStore, connectionStore, globalVariableResolver);
     }
 
     /**
@@ -379,6 +383,27 @@ class VaultGrantCheckerTest {
                     "the general scan had the same blind spot as the connection hop");
         }
 
+        /**
+         * The in-place expansion had no exception handling, so a variable-store failure
+         * escaped to the catch-all of findUngrantedReferences(agentId, version), which
+         * answers "no violations": the agent deployed with nothing checked.
+         */
+        @Test
+        @DisplayName("a variable store that fails is a violation, not a pass")
+        void variableStoreFailureFailsClosed() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.llm", LLM_ID);
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "${vars:anthropic-key}")));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+            when(globalVariableResolver.resolveValue(anyString(), anyString())).thenThrow(new IllegalStateException("variable store down"));
+            when(agentStore.read(eq("agent-1"), anyInt())).thenReturn(agent);
+
+            assertFalse(checker.findUngrantedReferences("agent-1", 1).isEmpty(),
+                    "an unreadable variable may hold any vault reference, so the check must not pass");
+        }
+
         @Test
         @DisplayName("a variable that expands to plain text contributes nothing")
         void plainVariableIsIgnored() throws Exception {
@@ -610,6 +635,51 @@ class VaultGrantCheckerTest {
             when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        /**
+         * A parser's semanticFallback names an embedding model, whose API key is a
+         * vault reference resolved by EmbeddingModelFactory. Parser documents were not
+         * read at all, so such a key was used without the agent being granted it.
+         */
+        @Test
+        @DisplayName("a parser document's vault reference is found")
+        void parserDocumentsAreScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.parser", LLM_ID);
+
+            var parser = new ParserConfiguration();
+            parser.setConfig(Map.of("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", VAULT_REF))));
+            when(parserStore.read(eq(LLM_ID), anyInt())).thenReturn(parser);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        /**
+         * Only the document a step's config.uri names was scanned; a parser is usually
+         * configured inline in the workflow step itself.
+         */
+        @Test
+        @DisplayName("a vault reference in a step's inline configuration is found, and its tenant reported")
+        void inlineStepConfigurationIsScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.parser"));
+            var stepConfig = new LinkedHashMap<String, Object>();
+            stepConfig.put("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", VAULT_REF)));
+            step.setConfig(stepConfig);
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenReturn(workflow);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+
+            var spaced = "${vault:t.acme.1a2b3c4d/openai-key}";
+            stepConfig.put("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", spaced)));
+            when(agentStore.read(eq("agent-1"), anyInt())).thenReturn(agent);
+            assertTrue(checker.referencedTenants("agent-1", 1).contains("t.acme.1a2b3c4d"), String.valueOf(checker.referencedTenants("agent-1", 1)));
         }
 
         @Test
