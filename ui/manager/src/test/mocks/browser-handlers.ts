@@ -1,6 +1,7 @@
 import { http, passthrough } from "msw";
 import type { RequestHandler } from "msw";
-import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers, connectionHandlers, agentTestHandlers, brandingHandlers } from "./handlers";
+import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers, connectionHandlers, agentTestHandlers, brandingHandlers, healthHandlers } from "./handlers";
+import { healthPendingHandlers } from "./health-handlers";
 import { brandingDeliveryResolver } from "./branding-handlers";
 
 /** The brand files, which mock mode answers itself (see devAssetPassthrough). */
@@ -62,6 +63,8 @@ export const devAssetPassthrough: RequestHandler[] = DEV_ASSET_PATHS.map((path) 
  */
 export const browserHandlers: RequestHandler[] = [
   ...devAssetPassthrough,
+  ...healthHandlers,
+  ...healthPendingHandlers,
   ...handlers,
   ...coordinatorHandlers,
   ...orphanHandlers,
