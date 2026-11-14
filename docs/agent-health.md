@@ -207,17 +207,25 @@ They are recomputed, never incremented:
    marked. A one-second window that still holds more than 10,000 pairs is not
    cut: all of its pairs are streamed and marked in chunks of 10,000, with a
    WARN, so the watermark never passes a pair it did not mark — even when many
-   rows share one timestamp). A row that reaches the store more than 30 seconds after its capture
-   time, which this scan may already be past, marks its days in the store
-   **before** it is written, instead of on the five-second flush, so a node
-   stopping between the write and the mark cannot lose it (a mark whose row then
-   fails to write only costs a recompute), and again, at once, after the write:
-   a rollup that ran in between recomputed the day without the row, and the
-   second mark is another durable attempt if the first could not reach the
-   store. The mark is lost only if the node stops at a bad moment, in one of two
-   ways: a rollup clears the pre-mark just before the write and the node stops
-   just after it, before the second mark; or all four writes (two before, two
-   after) fail and the mark is still waiting in memory, as a deletion mark does. Then it drains the
+   rows share one timestamp). A row that reaches the store more than 30 seconds
+   after its capture time — which this scan may already be past, since it goes
+   by capture time — is **written late**: the same write stores the time of the
+   write with the row (`writtenAt` on MongoDB, `written_at_ms` on PostgreSQL),
+   and the self-heal matches that time too; an undo in such a write is timed by
+   the write as well. So a late row is found again like any other, by a time
+   the watermark cannot have passed, and needs no dirty mark to survive: its
+   days are noted for the five-second flush like an on-time row's, and a rollup
+   that ran during the write, a node stopping right after it, or a dirty queue
+   that refuses every mark only delay the recompute until the next pass after
+   the write's time is a minute old. Only late rows carry the stamp — a later
+   on-time write of the row removes it — so its index (sparse on MongoDB,
+   partial on PostgreSQL) holds the rare late rows only, and an on-time write
+   costs nothing extra. **What this rests on:** a row is found only if its
+   write commits within the one-minute grace of the time the self-heal goes by
+   — the capture for an on-time row, the start of the write for a late one —
+   less the clock skew between nodes. A write that takes longer than that, on
+   a node that then stops before its flush, can still be missed, for late and
+   on-time rows alike. Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked

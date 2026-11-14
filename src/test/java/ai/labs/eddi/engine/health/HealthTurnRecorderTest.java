@@ -39,6 +39,7 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,7 +47,6 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -244,12 +244,12 @@ class HealthTurnRecorderTest {
     }
 
     @Test
-    @DisplayName("a late row's days are marked in the store before the row is written, so a stop in between cannot lose the mark")
-    void lateWriteMarksBeforeTheWrite() {
+    @DisplayName("a late row is written with the time of its write in the same write, its undo too; its days are only noted, like any row's")
+    void lateRowCarriesItsWriteTime() {
         HealthDirtyDays dirty = mock(HealthDirtyDays.class);
         LocalDate day = LocalDate.of(2026, 11, 10);
-        LocalDate firstDay = LocalDate.of(2026, 11, 9);
         Instant captured = CLOCK.instant();
+        Instant written = captured.plus(Duration.ofMinutes(2));
         AtomicReference<Instant> now = new AtomicReference<>(captured);
         Clock moving = new Clock() {
             @Override
@@ -267,81 +267,46 @@ class HealthTurnRecorderTest {
                 return now.get();
             }
         };
-        // The worker reaches the store two minutes after the capture; an earlier
-        // execution of the turn is stored on the day before.
-        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(firstDay));
+        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
+        ConversationMemory memory = memory();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+        // The worker reaches the store two minutes after the capture.
         HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
             @Override
             void write(HealthTurnFactory.Capture capture) {
-                now.set(captured.plus(Duration.ofMinutes(2)));
+                now.set(written);
                 super.write(capture);
             }
         };
         try {
-            marking.record(memory(), null, null, null, false);
-            verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(day, firstDay));
-            InOrder order = inOrder(dirty, store);
-            order.verify(dirty).markLateWrite(eq("agent-1"), any());
-            order.verify(store).upsert(any());
-            // Again after the write: a rollup in between may have cleared the pre-mark.
-            order.verify(dirty, timeout(5_000)).markLateWrite("agent-1", Set.of(firstDay));
+            marking.record(memory, null, null, null, false);
+            InOrder order = inOrder(store);
+            order.verify(store, timeout(5_000)).upsert(argThat(turn -> captured.equals(turn.updatedAt())), eq(written));
+            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")), eq(written));
+            verify(dirty, timeout(5_000).times(2)).note("agent-1", Set.of(day));
+            verify(store, never()).upsert(any());
+            verify(dirty, never()).markDeleted(any());
         } finally {
             marking.shutdown();
         }
     }
 
     @Test
-    @DisplayName("a late row's day reaches the dirty store after the write, even when a rollup cleared the pre-mark or the pre-mark failed")
-    @SuppressWarnings("unchecked")
-    void lateWriteMarkSurvivesARollupAndAFailedPreMark() {
-        LocalDate day = LocalDate.of(2026, 11, 10);
-        Instant captured = CLOCK.instant();
-        Clock late = Clock.fixed(captured.plus(Duration.ofMinutes(2)), ZoneOffset.UTC);
-        IHealthDirtyDayStore dirtyStore = mock(IHealthDirtyDayStore.class);
-        // Both attempts of the pre-mark fail (it falls back to memory); the store is
-        // back for the write.
-        doThrow(new HealthStoreException("down", null)).doThrow(new HealthStoreException("down", null)).doNothing().when(dirtyStore)
-                .mark(any(), any());
-        Instance<IHealthDirtyDayStore> dirtyInstance = mock(Instance.class);
-        when(dirtyInstance.get()).thenReturn(dirtyStore);
-        HealthDirtyDays dirty = new HealthDirtyDays(dirtyInstance, HealthSettings.defaults(), late);
-        when(store.daysOf(eq("conv-1"), any())).thenReturn(Set.of(day));
-        AtomicReference<Instant> now = new AtomicReference<>(captured);
-        Clock moving = new Clock() {
-            @Override
-            public ZoneId getZone() {
-                return ZoneOffset.UTC;
-            }
-
-            @Override
-            public Clock withZone(ZoneId zone) {
-                return this;
-            }
-
-            @Override
-            public Instant instant() {
-                return now.get();
-            }
-        };
-        HealthTurnRecorder marking = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry), dirty, moving) {
-            @Override
-            void write(HealthTurnFactory.Capture capture) {
-                now.set(late.instant());
-                super.write(capture);
-            }
-        };
+    @DisplayName("a row reaching the store within half the self-heal grace of its capture is written without the stamp")
+    void onTimeRowIsNotStamped() {
+        HealthTurn turn = HealthTurnFactory.capture(memory(), null, null, null, CLOCK.instant(), false).turn();
+        HealthTurnRecorder at = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2)));
+        HealthTurnRecorder after = new HealthTurnRecorder(instance(store), HealthSettings.defaults(), new HealthMetrics(registry),
+                Clock.offset(CLOCK, HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)));
         try {
-            marking.record(memory(), null, null, null, false);
-            InOrder order = inOrder(store, dirtyStore);
-            order.verify(store, timeout(5_000)).upsert(any());
-            // Durable after the row exists: neither a rollup that cleared the pre-mark
-            // nor a stop that loses the in-memory fallback leaves the day unmarked.
-            order.verify(dirtyStore, timeout(5_000)).mark(eq("agent-1"), argThat(days -> days.contains(day)));
+            assertNull(at.lateWrittenAt(turn));
+            assertEquals(CLOCK.instant().plus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2).plusMillis(1)), after.lateWrittenAt(turn));
         } finally {
-            marking.shutdown();
+            at.shutdown();
+            after.shutdown();
         }
     }
-
     @Test
     @DisplayName("an undo marks the days of the discarded executions too; an unreadable day falls back to the capture's")
     void marksDiscardedDaysDirty() {

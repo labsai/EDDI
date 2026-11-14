@@ -54,7 +54,8 @@ class PostgresHealthTurnStoreTest {
     void upsertShape() {
         String sql = PostgresHealthTurnStore.UPSERT;
         assertEquals(30, PostgresHealthTurnStore.WRITTEN.size());
-        assertEquals(PostgresHealthTurnStore.WRITTEN.size(), placeholders(sql));
+        // Every column once, then the late-write stamp.
+        assertEquals(PostgresHealthTurnStore.WRITTEN.size() + 1, placeholders(sql));
         assertTrue(sql.contains("ON CONFLICT (conversation_id, execution_id) DO UPDATE SET"));
         assertTrue(sql.contains("discarded = health_turns.discarded OR EXCLUDED.discarded"));
         assertTrue(sql.contains("day = COALESCE(health_turns.day, EXCLUDED.day)"));
@@ -121,7 +122,7 @@ class PostgresHealthTurnStoreTest {
                 + "THEN COALESCE(health_turns.discarded_at_ms, EXCLUDED.discarded_at_ms) ELSE EXCLUDED.discarded_at_ms END"));
         assertFalse(PostgresHealthTurnStore.MARK_DISCARDED.contains("updated_at_ms"));
         assertTrue(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE
-                .contains("((updated_at_ms >= ? AND updated_at_ms < ?) OR (discarded_at_ms >= ? AND discarded_at_ms < ?))"));
+                .contains("((updated_at_ms >= ? AND updated_at_ms < ?) OR (discarded_at_ms >= ? AND discarded_at_ms < ?) OR "));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES).contains("idx_health_turns_discarded_rows"));
         assertTrue(PostgresHealthTurnStore.DELETE_OLDER.contains("day < ? OR (day IS NULL AND discarded_at_ms < ?)"));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES).contains("(agent_id, day)"));
@@ -179,5 +180,70 @@ class PostgresHealthTurnStoreTest {
         verify(connection).setAutoCommit(false);
         verify(connection).commit();
         verify(connection).setAutoCommit(true);
+    }
+
+    @Test
+    @DisplayName("a late write stamps written_at_ms in the same statement, an on-time one clears it, and the self-heal matches it")
+    void lateWriteStamp() {
+        assertTrue(PostgresHealthTurnStore.UPSERT.contains(", written_at_ms) VALUES ("));
+        assertTrue(PostgresHealthTurnStore.UPSERT.contains("written_at_ms = EXCLUDED.written_at_ms"), "every applied write replaces the stamp");
+        assertTrue(PostgresHealthTurnStore.INSERT_IF_ABSENT.contains(", written_at_ms) VALUES ("));
+        assertEquals(PostgresHealthTurnStore.WRITTEN.size() + 1, placeholders(PostgresHealthTurnStore.INSERT_IF_ABSENT));
+        assertTrue(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE.contains("OR (written_at_ms >= ? AND written_at_ms < ?))"));
+        assertEquals(7, placeholders(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE));
+        assertTrue(PostgresHealthTurnStore.CREATE_TABLE.contains("written_at_ms BIGINT"));
+        assertEquals(List.of("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"),
+                List.of(PostgresHealthTurnStore.ADD_COLUMNS));
+        assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES)
+                .contains("idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"), "late rows only");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the stamp is bound after the row's columns, the discard time is the late write's, the self-heal binds both windows")
+    void lateWriteBinding() throws Exception {
+        Instance<DataSource> instance = mock(Instance.class);
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement ddl = mock(Statement.class);
+        PreparedStatement upsert = mock(PreparedStatement.class);
+        PreparedStatement insert = mock(PreparedStatement.class);
+        PreparedStatement discard = mock(PreparedStatement.class);
+        PreparedStatement selfHeal = mock(PreparedStatement.class);
+        ResultSet rows = mock(ResultSet.class);
+        when(instance.get()).thenReturn(dataSource);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(ddl);
+        when(connection.createArrayOf(eq("text"), any())).thenReturn(mock(Array.class));
+        when(connection.prepareStatement(PostgresHealthTurnStore.UPSERT)).thenReturn(upsert);
+        when(connection.prepareStatement(PostgresHealthTurnStore.INSERT_IF_ABSENT)).thenReturn(insert);
+        when(connection.prepareStatement(PostgresHealthTurnStore.MARK_DISCARDED)).thenReturn(discard);
+        when(connection.prepareStatement(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE)).thenReturn(selfHeal);
+        when(selfHeal.executeQuery()).thenReturn(rows);
+        PostgresHealthTurnStore store = new PostgresHealthTurnStore(instance);
+        Instant written = Instant.parse("2026-11-10T11:05:00Z");
+
+        store.upsert(turn(), written);
+        verify(upsert).setLong(31, written.toEpochMilli());
+        store.upsert(turn());
+        verify(upsert).setNull(31, Types.BIGINT);
+        store.insertIfAbsent(turn(), written);
+        verify(insert).setLong(31, written.toEpochMilli());
+        verify(ddl).execute("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT");
+
+        store.markDiscarded(turn(), List.of("old"), written);
+        verify(discard).setLong(5, written.toEpochMilli());
+        store.markDiscarded(turn(), List.of("old"));
+        verify(discard).setLong(5, turn().updatedAt().toEpochMilli());
+
+        Instant since = Instant.parse("2026-11-10T11:00:00Z");
+        Instant until = Instant.parse("2026-11-10T11:10:00Z");
+        store.forEachAgentDayUpdatedSince(since, until, 10, (a, d) -> {
+        });
+        for (int i : new int[]{1, 3, 5}) {
+            verify(selfHeal).setLong(i, since.toEpochMilli());
+            verify(selfHeal).setLong(i + 1, until.toEpochMilli());
+        }
+        verify(selfHeal).setInt(7, 10);
     }
 }

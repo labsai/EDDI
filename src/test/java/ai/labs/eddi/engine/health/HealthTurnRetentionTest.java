@@ -493,7 +493,7 @@ class HealthTurnRetentionTest {
         }
 
         @Override
-        public void upsert(HealthTurn turn) {
+        public void upsert(HealthTurn turn, Instant lateWrittenAt) {
             if (hold) {
                 writing.countDown();
                 try {
@@ -508,12 +508,12 @@ class HealthTurnRetentionTest {
         }
 
         @Override
-        public synchronized void insertIfAbsent(HealthTurn turn) {
+        public synchronized void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt) {
             rows.putIfAbsent(turn.conversationId() + "|" + turn.executionId(), turn);
         }
 
         @Override
-        public long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+        public long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt) {
             return 0L;
         }
 
