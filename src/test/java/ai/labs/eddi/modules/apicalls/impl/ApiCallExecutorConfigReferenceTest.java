@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
@@ -49,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -443,6 +445,35 @@ class ApiCallExecutorConfigReferenceTest {
         assertTrue(failure.getMessage().contains("EDDI_VAULT_MASTER_KEY"), failure.getMessage());
         verify(request, never()).setHttpHeader("X-Api-Key", "${vault:api-key}");
         verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("a reference that names no secret is a configuration refusal naming the call and the tenant looked up")
+    void missingVaultSecretIsAConfigurationRefusal() throws Exception {
+        when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.NOT_FOUND);
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
+
+        var refusal = assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, AgentConfigurationRefusal.find(failure));
+        assertTrue(refusal.getMessage().startsWith("API call 'downstream': header 'X-Api-Key' references ${vault:api-key} "
+                + "(no tenant given, so tenant 'default')"), refusal.getMessage());
+        assertTrue(refusal.getMessage().contains("no secret named 'api-key' exists in tenant 'default'"), refusal.getMessage());
+        verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("a vault that could not be read is not a configuration refusal")
+    void vaultOutageIsNotAConfigurationRefusal() throws Exception {
+        when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.PROVIDER_FAILED);
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
+
+        assertNull(AgentConfigurationRefusal.find(failure));
+        assertTrue(failure.getMessage().contains("the vault could not read it"), failure.getMessage());
     }
 
     @Test

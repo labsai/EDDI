@@ -117,4 +117,17 @@ class SecretReferenceTest {
         var ref = SecretReference.parse("${eddivault:openaiKey}");
         assertEquals("${vault:openaiKey}", ref.toReferenceString());
     }
+
+    @Test
+    void describe_namesTheTenantTheReferenceIsLookedUpIn() {
+        assertEquals("${vault:api-key} (no tenant given, so tenant 'default')", SecretReference.describe("${vault:api-key}"));
+        assertEquals("${vault:eddi/api-key} (tenant 'eddi')", SecretReference.describe("${vault:eddi/api-key}"));
+        assertEquals("${eddivault:api-key} (no tenant given, so tenant 'default')", SecretReference.describe("${eddivault:api-key}"));
+    }
+
+    @Test
+    void describe_leavesTextWithoutAReferenceAlone() {
+        assertEquals("plain text", SecretReference.describe("plain text"));
+        assertNull(SecretReference.describe(null));
+    }
 }

@@ -127,6 +127,25 @@ public record SecretReference(String tenantId, String keyName) {
     }
 
     /**
+     * The first reference in {@code reference}, as written, followed by the tenant
+     * it is actually looked up in — {@code ${vault:name} (no tenant given, so
+     * tenant 'default')} or {@code ${vault:acme/name} (tenant 'acme')}. For an
+     * error message: a short-form reference to a secret stored under another tenant
+     * otherwise reads as "the secret is missing" with nothing saying where EDDI
+     * looked. Names only; never a value. Returns {@code reference} unchanged when
+     * it holds no vault reference.
+     */
+    public static String describe(String reference) {
+        ReferenceScanner.Match match = reference == null ? null : SCANNER.findFirst(reference);
+        if (match == null) {
+            return reference;
+        }
+        return match.tenant() == null
+                ? match.text() + " (no tenant given, so tenant '" + DEFAULT_TENANT + "')"
+                : match.text() + " (tenant '" + match.tenant() + "')";
+    }
+
+    /**
      * Construct the vault reference string. Uses the shortest valid form:
      * <ul>
      * <li>Default tenant → {@code ${vault:keyName}}</li>
