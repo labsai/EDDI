@@ -107,6 +107,7 @@ public interface AlertStoreContract {
 
         assertEquals(3, ruleStore().count(AGENT, false)); // mine, both, off
         assertEquals(2, ruleStore().count(AGENT, true)); // mine, off
+        assertEquals(1, ruleStore().countAllAgents()); // all
         List<String> listed = ruleStore().list(AGENT, true, 0, 10).stream().map(AlertRule::name).toList();
         assertEquals(Set.of("mine", "off"), new HashSet<>(listed));
         assertEquals(5, ruleStore().count(null, false));
