@@ -534,14 +534,16 @@ class OpenApiRefBundlerTest {
         assertFalse(bundled.at("/components/schemas/S/additionalProperties").asBoolean(true), bundled.toString());
         assertTrue(bundled.at("/components/schemas/T/additionalProperties").isObject(), "a schema beats true");
 
-        // ... and through the converter (3.0: swagger-parser reads a 3.1 boolean as a
-        // schema)
-        OpenAPI openAPI = McpApiToolBuilder.parseSpec(spec.replace("3.1.0", "3.0.0"), fetcher);
+        // ... and through the converter, under 3.1 (where "false" arrives as a boolean
+        // schema) and 3.0 (where it arrives as a Boolean) alike
+        for (String version : new String[]{"3.1.0", "3.0.0"}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec(spec.replace("3.1.0", version), fetcher);
 
-        Map<String, Object> closed = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
-        assertEquals(Boolean.FALSE, closed.get("additionalProperties"), closed.toString());
-        Object typed = openAPI.getComponents().getSchemas().get("T").getAdditionalProperties();
-        assertTrue(typed instanceof Schema<?>, "a schema beats true: " + typed);
+            Map<String, Object> closed = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+            assertEquals(Boolean.FALSE, closed.get("additionalProperties"), version + ": " + closed);
+            Map<String, Object> open = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("T"), openAPI);
+            assertEquals(Boolean.TRUE, open.get("additionalProperties"), version + ": a schema keeps today's true: " + open);
+        }
     }
 
     @Test

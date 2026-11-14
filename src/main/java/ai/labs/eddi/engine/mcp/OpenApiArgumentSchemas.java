@@ -172,8 +172,11 @@ final class OpenApiArgumentSchemas {
         Object additional = schema.getAdditionalProperties();
         if (additional instanceof Boolean allowed) {
             out.put("additionalProperties", allowed);
-        } else if (additional instanceof Schema<?>) {
-            out.put("additionalProperties", true);
+        } else if (additional instanceof Schema<?> additionalSchema) {
+            // OpenAPI 3.1 parses "additionalProperties: false" into a boolean schema, not a
+            // Boolean: read as an ordinary schema it became "true", and the argument
+            // contract accepted the undeclared properties the spec forbids.
+            out.put("additionalProperties", !Boolean.FALSE.equals(additionalSchema.getBooleanSchemaValue()));
         }
     }
 

@@ -92,7 +92,8 @@ Seven confirmed findings from a security review of the outbound paths.
   mappings sharing one name are allocated in linear time. Merging `properties` beside a `$ref` builds new containers that share
   the unchanged subtrees instead of deep-copying them, so a large literal referenced many times is not duplicated on
   the heap before the output cap runs. `additionalProperties` beside a `$ref` is merged as a constraint: `false` on
-  either side wins, a schema beats `true`, two schemas are merged.
+  either side wins, a schema beats `true`, two schemas are merged. The argument converter reads an OpenAPI 3.1 boolean
+  schema: `additionalProperties: false` arrives as one, and was reported as `true`.
 - **Crawl scope**: an ambiguous path (an encoded `/` or `\`) keeps its raw form through canonicalization instead of
   a normalized one that a scope check would approve; the URL that will be fetched is scope-checked too, for links and
   sitemap entries. The parameter-preserving path reading resolves only complete dot segments (`..;` is a segment to
