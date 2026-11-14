@@ -32,6 +32,8 @@ class GuardTextTest {
     private static final String BACKSLASH = "" + (char) 92;
     /** {@code 4} as a JSON unicode escape; the receiver reads it as {@code 4}. */
     private static final String ESCAPED_FOUR = BACKSLASH + "u0034";
+    /** A quote written as backslash-quote. */
+    private static final String ESCAPED_QUOTE = BACKSLASH + "\"";
 
     @Nested
     @DisplayName("decoding")
@@ -107,7 +109,16 @@ class GuardTextTest {
                 "{'id':'0123" + ESCAPED_FOUR + "56789abcdef01234567'}",
                 // a lenient document that starts with a comment rather than a bracket
                 "/* note */ {\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}",
-                "# note\n{\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}"})
+                "# note\n{\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}",
+                // not JSON, but langchain4j's fallback parse reads it: every quote written as
+                // backslash-quote, no outer quotes
+                "{" + ESCAPED_QUOTE + "agentId" + ESCAPED_QUOTE + ":" + ESCAPED_QUOTE + "x" + ESCAPED_QUOTE + "," + ESCAPED_QUOTE
+                        + "message" + ESCAPED_QUOTE + ":" + ESCAPED_QUOTE + "hi" + ESCAPED_QUOTE + "," + ESCAPED_QUOTE + "id"
+                        + ESCAPED_QUOTE + ":" + ESCAPED_QUOTE + "0123" + ESCAPED_FOUR + "56789abcdef01234567" + ESCAPED_QUOTE + "}",
+                // not JSON either: one pair of outer quotes around bare inner quotes
+                "\"{\"agentId\":\"x\",\"message\":\"hi\",\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\"}\"",
+                // a trailing comma langchain4j's fallback drops
+                "{\"id\":\"0123" + ESCAPED_FOUR + "56789abcdef01234567\",}"})
         @DisplayName("an escaped or encoded id is seen by both guards")
         void bothSeeTheId(String rawArguments) {
             assertEquals(SelfUngatingGuard.OWN_AGENT_REASON, SelfUngatingGuard.refusalFromArguments(rawArguments, ID), "SelfUngatingGuard");
