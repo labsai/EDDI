@@ -388,7 +388,7 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             try {
                 stored = shared.get(hash);
             } catch (ClusterUnavailableException e) {
-                LOGGER.debugf("Shared cache %s: could not read %s before removing it: %s", shared.bucket(), key, e.getMessage());
+                LOGGER.debugf("Shared cache %s: could not read %s before removing it: %s", shared.bucket(), hash, e.getMessage());
             }
             shared.delete(hash);
             saw(hash, ABSENT);

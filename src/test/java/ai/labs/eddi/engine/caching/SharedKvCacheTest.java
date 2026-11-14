@@ -183,6 +183,7 @@ class SharedKvCacheTest {
         verify(kv).delete(any());
         reset(kv);
         assertTrue(kv.get(KvKeys.hashed("task-1")).isEmpty(), "the shared record is gone");
+        assertNull(node.get("task-1"), "and no node reads it any more");
     }
 
     @Test
