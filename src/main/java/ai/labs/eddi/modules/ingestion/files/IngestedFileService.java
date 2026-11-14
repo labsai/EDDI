@@ -360,8 +360,8 @@ public class IngestedFileService {
                     : DeleteOutcome.DELETED_BUT_CHUNKS_REMAIN;
         } finally {
             // Always, including after a failure: a claim that is never released
-            // blocks the source until it is reaped, which is a quarter of an hour of
-            // 409s for every run and every delete.
+            // blocks the source until it is reaped, which takes the source's run time
+            // budget plus fifteen minutes of 409s for every run and every delete.
             pipeline.releaseClaim(ragConfigId, source, claim.get());
         }
     }

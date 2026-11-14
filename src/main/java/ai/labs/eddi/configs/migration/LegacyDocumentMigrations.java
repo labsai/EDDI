@@ -32,9 +32,9 @@ import static java.lang.Boolean.parseBoolean;
  * They live here rather than on {@link MigrationManager} because they have two
  * callers with different lifetimes. {@code MigrationManager} runs them once, as
  * a MongoDB collection sweep at first startup — that part genuinely is
- * Mongo-specific. {@code RestImportService} runs the same three transforms on
- * every uploaded agent ZIP, and a 5.x ZIP is just as legacy-shaped whether the
- * deployment stores it in MongoDB or in PostgreSQL.
+ * Mongo-specific. {@code RestImportService} runs the same transforms (the LLM
+ * one only for a 5.x ZIP) on every uploaded agent ZIP, and a 5.x ZIP is just as
+ * legacy-shaped whether the deployment stores it in MongoDB or in PostgreSQL.
  * <p>
  * Keeping them on the backend-selected {@code IMigrationManager} bean meant
  * {@code PostgresMigrationManager} answered {@code document -> null} for all

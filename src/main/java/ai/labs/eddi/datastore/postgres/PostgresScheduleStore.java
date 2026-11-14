@@ -44,7 +44,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * the original, wedged fire can still commit, so fire targets must be
  * idempotent.
  * <p>
- * Activated via {@code @DefaultBean}.
+ * Selected at runtime by {@code DataStoreProducers} when
+ * {@code eddi.datastore.type=postgres}; the bean itself is
+ * {@code @DefaultBean}.
  *
  * @author ginccc
  * @since 6.0.0
@@ -135,7 +137,9 @@ public class PostgresScheduleStore implements IScheduleStore {
      * same upgrade pattern as {@link #ADD_METADATA_COLUMN} and
      * {@link #ADD_USER_ID_COLUMN}, so existing installs pick them up on the next
      * start. Values for rows written before the upgrade stay null — there is
-     * nothing to backfill from.
+     * nothing to backfill from. The array also carries the later
+     * {@code disabled_reason}, {@code creator_teams} and {@code creator_admin}
+     * columns.
      */
     private static final String[] ADD_PAYLOAD_COLUMNS = {
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS agent_version INTEGER",

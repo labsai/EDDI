@@ -64,9 +64,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * {@code webhook} is the signed inbound webhook channel ({@code POST
      * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
      * {@link WebhookChannelSettings#validate}. {@code email} is the mailbox channel
-     * (trigger mode: a polled IMAP mailbox starts turns, nothing is sent back),
-     * validated by {@link EmailChannelSettings#validate} and, against the
-     * deployment, by {@link EmailChannelSupport}.
+     * (a polled mailbox starts turns; in conversation mode the agent also replies
+     * over SMTP), validated by {@link EmailChannelSettings#validate} and, against
+     * the deployment, by {@link EmailChannelSupport}.
      */
     private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE,
             EmailChannelSettings.CHANNEL_TYPE);
@@ -458,16 +458,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     // ─── Validation ────────────────────────────────────────────────────────────
 
-    // Visible for testing
     /**
      * {@code platformConfig} keys that hold credentials.
      * <p>
-     * A channel's bot token or signing secret is stored, and returned by
-     * {@code GET /channelstore/channels/&#123;id&#125;}, exactly as it was written
-     * — so a plaintext value is readable by anyone who can read the configuration,
-     * and lands in ZIP exports and backups too. {@code ChannelTargetRouter}
-     * resolves {@code ${vault:...}} references at send time, so the vault is
-     * available here; nothing was telling operators to use it.
+     * A channel's bot token or signing secret is stored exactly as it was written,
+     * and an administrator reading
+     * {@code GET /channelstore/channels/&#123;id&#125;} gets it back as stored
+     * (everyone else reads a redacted copy, see {@link #readChannel}) — so a
+     * plaintext value is readable by administrators, and lands in ZIP exports and
+     * backups too. {@code ChannelTargetRouter} resolves {@code ${vault:...}}
+     * references at send time, so the vault is available here; nothing was telling
+     * operators to use it.
      */
     private static final Set<String> SECRET_PLATFORM_CONFIG_KEYS = Set.of(
             "bottoken", "signingsecret", "clientsecret", "apikey", "apisecret", "token",
@@ -493,8 +494,8 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 continue;
             }
             if (SECRET_PLATFORM_CONFIG_KEYS.contains(key.toLowerCase(Locale.ROOT)) && !text.contains("${vault:")) {
-                LOG.warnf("Channel integration '%s' stores platformConfig.%s in plaintext — it is returned verbatim by "
-                        + "GET /channelstore/channels/{id} and included in backups. Store it in the secrets vault and "
+                LOG.warnf("Channel integration '%s' stores platformConfig.%s in plaintext — it is returned verbatim to "
+                        + "administrators by GET /channelstore/channels/{id} and included in backups. Store it in the secrets vault and "
                         + "reference it as ${vault:<key>} instead; the router resolves that at send time.",
                         sanitize(config.getName()), sanitize(key));
             }

@@ -21,7 +21,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * Removes credential material from a resolved request — headers, query
+ * Removes credential material from a resolved request — URI, headers, query
  * parameters and body alike.
  * <p>
  * One definition, two consumers: the debug record written to conversation

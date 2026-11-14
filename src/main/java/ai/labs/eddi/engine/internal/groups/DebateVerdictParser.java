@@ -24,7 +24,8 @@ import java.util.Map;
  * A DEBATE ends in a SYNTHESIS phase that judges a winner, but the judgment was
  * only ever prose — so a caller wanting to know who won had to parse English,
  * and nothing downstream (a router, a report, a test) could branch on the
- * result. This reads {@link DiscussionStylePresets#TEMPLATE_DEBATE_JUDGMENT}'s
+ * result. This reads
+ * {@link ai.labs.eddi.configs.groups.model.DiscussionStylePresets#TEMPLATE_DEBATE_JUDGMENT}'s
  * JSON into the structured record instead.
  * <p>
  * <b>Every failure is prose-only, never a failed discussion.</b> Unparseable

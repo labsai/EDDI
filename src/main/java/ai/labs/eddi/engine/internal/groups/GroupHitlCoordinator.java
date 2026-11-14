@@ -67,12 +67,13 @@ import java.util.concurrent.ExecutorService;
  * CAS pattern, and race-window comment carries over unchanged.
  * <p>
  * Holds a back-reference to the concrete {@link GroupConversationService} for
- * three calls that stay on the facade: {@code executeDiscussion} (the phase
- * loop {@code resumeDiscussion} re-enters), {@code resolvePhases}, and
- * {@code cleanupEphemeralAgents}. Same safety argument as
- * {@link MemberTurnExecutor}'s self-reference — this class's constructor only
- * stores it, never invokes a method on it before the facade's own constructor
- * (and therefore full field initialization) completes.
+ * the calls that stay on the facade: {@code executeDiscussion} (the phase loop
+ * {@code resumeDiscussion} re-enters), {@code effectivePhases},
+ * {@code resolveParticipants} / {@code rosterWithRecruits},
+ * {@code approvalContextRenderer} and {@code cleanupEphemeralAgents}. Same
+ * safety argument as {@link MemberTurnExecutor}'s self-reference — this class's
+ * constructor only stores it, never invokes a method on it before the facade's
+ * own constructor (and therefore full field initialization) completes.
  * <p>
  * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its

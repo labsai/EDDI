@@ -603,10 +603,10 @@ public class GroupLifecycleOps {
     }
 
     /**
-     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
-     * failure — a broken artifact store must not make discussions undeletable; the
-     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
-     * guarantee, this is the tidy path.
+     * Removes the blobs the discussion's shared attachments live in. Unlike the
+     * artifact cascade below, a failure is rethrown as a
+     * {@code ResourceStoreException} so the delete keeps the document and can be
+     * retried.
      */
     private void deleteAttachmentsForGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
         if (attachmentStore == null) {
@@ -624,6 +624,12 @@ public class GroupLifecycleOps {
         }
     }
 
+    /**
+     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
+     * failure — a broken artifact store must not make discussions undeletable; the
+     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
+     * guarantee, this is the tidy path.
+     */
     private void deleteArtifactsForGroupConversation(String groupConversationId) {
         if (sharedArtifactStore == null) {
             return;

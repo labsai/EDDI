@@ -25,12 +25,13 @@ import java.util.List;
  * <p>
  * {@link AuthStartupGuard} already refuses an unauthenticated production boot,
  * but its escape hatch ({@code eddi.security.allow-unauthenticated=true}) is
- * set by every shipped compose file and k8s manifest, so in practice it never
- * fires. That is tolerable for the conversation API and intolerable for these
- * two: the MCP endpoint exposes agent CRUD, conversation history, user memories
- * and audit trails as tools, and {@code /secretstore} writes the vault, rotates
- * the DEK and offers a reset. Both are declaratively protected
- * ({@code @RolesAllowed}) and both of those checks are no-ops when
+ * set by the quick-start compose files and the k8s manifests (all but
+ * {@code docker-compose.auth.yml}), so in practice it rarely fires. That is
+ * tolerable for the conversation API and intolerable for these two: the MCP
+ * endpoint exposes agent CRUD, conversation history, user memories and audit
+ * trails as tools, and {@code /secretstore} writes the vault, rotates the DEK
+ * and offers a reset. Both are declaratively protected ({@code @RolesAllowed})
+ * and both of those checks are no-ops when
  * {@link DisabledAuthController#isAuthorizationEnabled()} returns false.
  * <p>
  * So each gets its own, deliberately narrower opt-out. An operator who wants an

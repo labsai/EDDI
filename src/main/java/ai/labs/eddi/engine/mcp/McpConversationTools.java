@@ -457,7 +457,7 @@ public class McpConversationTools {
             + "Useful for finding conversation IDs without knowing them beforehand.")
     public String listConversations(@ToolArg(description = "Agent ID (required)") String agentId,
                                     @ToolArg(description = "Filter by Agent version (default: all versions)", required = false) Integer agentVersion,
-                                    @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'ERROR' (default: all)",
+                                    @ToolArg(description = "Filter by state: 'READY', 'IN_PROGRESS', 'ENDED', 'EXECUTION_INTERRUPTED', 'ERROR', 'AWAITING_HUMAN' (default: all)",
                                              required = false) String conversationState,
                                     @ToolArg(description = "Maximum number of results (default: 20, max: 100)", required = false,
                                              defaultValue = "20") Integer limit) {
@@ -474,7 +474,8 @@ public class McpConversationTools {
                 try {
                     state = ConversationState.valueOf(conversationState.trim().toUpperCase());
                 } catch (IllegalArgumentException e) {
-                    return errorJson("Invalid conversationState: " + conversationState + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
+                    return errorJson("Invalid conversationState: " + conversationState
+                            + ". Valid values: READY, IN_PROGRESS, ENDED, EXECUTION_INTERRUPTED, ERROR, AWAITING_HUMAN");
                 }
             }
 
@@ -506,8 +507,8 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
-            + "Returns the AgentConfiguration JSON with all package references.")
+    @Tool(name = "get_agent", description = "Get an agent's full configuration including its workflows, name, and description. "
+            + "Returns the AgentConfiguration JSON with all workflow references.")
     public String getAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                            @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
@@ -553,7 +554,8 @@ public class McpConversationTools {
     @Tool(name = "read_agent_logs", description = "Read recent server-side logs for a Agent or conversation. "
             + "Returns workflow execution logs, LLM provider errors, timeouts, and internal diagnostics "
             + "that are NOT visible in conversation memory. Essential for debugging 'why did the Agent fail?' "
-            + "Filter by agentId, conversationId, and/or log level.")
+            + "Filter by agentId, conversationId, and/or log level. Without a conversationId the read is administrator-only; "
+            + "with one you must own that conversation (or be an administrator).")
     public String readAgentLogs(@ToolArg(description = "Filter by Agent ID (optional)", required = false) String agentId,
                                 @ToolArg(description = "Filter by conversation ID (optional)", required = false) String conversationId,
                                 @ToolArg(description = "Filter by log level: 'ERROR', 'WARN', 'INFO', 'DEBUG' (optional)",
@@ -783,7 +785,7 @@ public class McpConversationTools {
             // The trigger check above looks at the trigger's CURRENT targets, but a
             // retained conversation runs on the agent it was started with. After a
             // retarget or a revoked share that agent may no longer be usable by this
-            // caller — re-check the conversation's own agent, as send_message and the
+            // caller — re-check the conversation's own agent, as talk_to_agent and the
             // REST say() do. The guard refuses a non-owner and an owner without USE
             // on the agent alike, so the answer is the neutral one, not the
             // "you do not own" message below.

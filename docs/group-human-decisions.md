@@ -106,7 +106,7 @@ metrics enabled), counter `eddi.group.vote.tiebreaks{policy, resolution}` counts
 
 - A facilitator escalation deferred to the boundary where the vote tied is recorded as a `FACILITATION`
   note and dropped: the decider is about to be asked anyway, and a boundary pauses once. A facilitator's
-  `INSERT_VOTE` is still applied.
+  `CALL_VOTE` move is still applied.
 - The group conversation schema is **v5** from this release, and **every** new discussion is stamped v5,
   whether or not it uses `HUMAN_DECIDES`. A pod that predates it refuses to resume any v5 document — a
   tie-break, but also an ordinary approval or human turn — rather than re-running a vote. During a rolling

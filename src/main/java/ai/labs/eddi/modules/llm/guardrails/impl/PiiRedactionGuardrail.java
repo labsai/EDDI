@@ -21,9 +21,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code pii-redaction} — input and output. Finds e-mail addresses, US social
- * security numbers, payment card numbers (Luhn-checked) and phone numbers and
- * reports a rewrite with each one replaced by {@code [REDACTED:<kind>]}.
+ * {@code pii-redaction} — input, output and tool-call arguments. Finds e-mail
+ * addresses, US social security numbers, payment card numbers (Luhn-checked)
+ * and phone numbers and reports a rewrite with each one replaced by
+ * {@code [REDACTED:<kind>]}.
  * <p>
  * With action {@code redact} the rewrite is applied; with {@code block},
  * {@code reprompt} or {@code warn} any finding counts as a violation of that

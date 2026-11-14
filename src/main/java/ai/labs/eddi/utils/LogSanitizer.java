@@ -10,10 +10,10 @@ package ai.labs.eddi.utils;
  * <ul>
  * <li>{@link #sanitize(String)} is the <em>call-site</em> rule. A caller that
  * knows it is about to log one attacker-reachable value — an id, a name, a URI
- * — collapses every boundary character in it to {@code _}. It is lossy on
- * purpose: the values it is pointed at are short and have no legitimate
- * newlines, and {@code _} reads better in a log line than an escape
- * sequence.</li>
+ * — turns CR, LF and TAB into {@code _} and drops every other control character
+ * (the Unicode line and paragraph separators included). It is lossy on purpose:
+ * the values it is pointed at are short and have no legitimate newlines, and
+ * {@code _} reads better in a log line than an escape sequence.</li>
  * <li>{@link #escapeRecordBoundaries(String)} is the <em>record-level</em>
  * rule, applied once to a whole log record on its way out. It cannot be lossy:
  * it is pointed at text nobody vetted — including a library exception's message

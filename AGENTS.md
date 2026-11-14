@@ -37,7 +37,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
 **Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
@@ -47,7 +47,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
@@ -151,7 +151,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (96 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -284,7 +284,8 @@ LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
           (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task; the context carries the memory)
+           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
+           carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result

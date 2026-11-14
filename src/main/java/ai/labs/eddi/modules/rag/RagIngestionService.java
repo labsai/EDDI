@@ -267,8 +267,9 @@ public class RagIngestionService {
      *            of any other knowledge base is {@link #STATUS_UNKNOWN}
      * @param ingestionId
      *            the ingestion ID returned by {@link #ingest}
-     * @return status string ("pending", "processing", "completed", or "failed:
-     *         ...")
+     * @return status string ("pending", "processing", "completed", "failed: ...",
+     *         or {@link #STATUS_UNKNOWN} when this instance holds no status for the
+     *         id)
      */
     public String getStatus(String ragConfigId, String ingestionId) {
         String status = ingestionState.get(statusKey(ragConfigId, ingestionId));

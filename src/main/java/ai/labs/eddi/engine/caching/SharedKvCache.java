@@ -28,8 +28,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * A cache whose entries are shared by every node of the cluster, for the few
  * caches that hold state rather than copies: replay nonces, A2A task mappings,
- * paginated tool responses, Slack event de-duplication and channel thread
- * locks. Used only in cluster mode, only for those names (see
+ * paginated tool responses, Slack and webhook event de-duplication and channel
+ * thread locks. Used only in cluster mode, only for those names (see
  * {@link CacheFactory}); every other cache stays node-local.
  * <p>
  * <b>Point operations</b> ({@code get}, {@code put}, {@code putIfAbsent},

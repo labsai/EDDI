@@ -26,8 +26,8 @@ import java.util.stream.Collectors;
 
 /**
  * LLM tool for managing persistent user memories. Constructed per-invocation by
- * {@code AgentOrchestrator} with the conversation's userId, agentId, groupIds,
- * and memory configuration.
+ * {@code ContextualToolsProvider} with the conversation's userId, agentId,
+ * groupIds, and memory configuration.
  *
  * <p>
  * The LLM can call these tools to remember facts about the user, recall
@@ -37,7 +37,8 @@ import java.util.stream.Collectors;
  * @author ginccc
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by ContextualToolsProvider — must NOT be a CDI
+        // bean
 public class UserMemoryTool {
 
     private static final Logger LOGGER = Logger.getLogger(UserMemoryTool.class);

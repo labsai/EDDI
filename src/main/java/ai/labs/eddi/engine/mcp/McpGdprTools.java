@@ -84,8 +84,10 @@ public class McpGdprTools {
 
     @Tool(name = "delete_user_data", description = "Cascade-delete all user "
             + "data across all stores (GDPR Art. 17 Right to Erasure). "
-            + "Deletes memories and conversations. Pseudonymizes audit and log "
-            + "entries. IRREVERSIBLE — confirmation='CONFIRM' required. "
+            + "Deletes memories, conversations, attachments, journal entries, "
+            + "checkpoints, group discussions and their shared artifacts, "
+            + "schedules, connection grants and auto-vaulted secrets. "
+            + "Pseudonymizes audit and log entries. IRREVERSIBLE — confirmation='CONFIRM' required. "
             + "Returns status='completed' only when every step succeeded; "
             + "status='partially_completed' with a non-empty 'failedSteps' means "
             + "some of the user's data still exists and the erasure must NOT be "

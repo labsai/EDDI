@@ -91,7 +91,7 @@ cd EDDI
 # On Mac: brew services start mongodb-community
 # On Linux: sudo systemctl start mongod
 
-# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev)
+# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev-ui)
 ./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
@@ -116,9 +116,9 @@ cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the A
 
 ### Configuring AI Tools
 
-If you plan to use the **Web Search** or **Weather** tools in your agents, you need to set up API keys in your environment or `application.properties`.
+If you plan to use the **Web Search** or **Weather** tools in your agents, you may need to set up API keys in your environment or `application.properties`.
 
-**Web Search (Google):**
+**Web Search** uses DuckDuckGo by default (`eddi.tools.websearch.provider=duckduckgo`), which needs no key. **For Google:**
 
 - `eddi.tools.websearch.provider=google`
 - `eddi.tools.websearch.google.api-key=...`
@@ -400,8 +400,8 @@ curl -s -X POST \
 ```
 
 Any status other than `READY` — typically `ERROR` — means the agent's workflow
-references something that does not resolve. Check the server log, then
-re-deploy. The status can be re-read at any time:
+references something that does not resolve; the response then also carries an
+`error` field saying why. Check the server log, then re-deploy. The status can be re-read at any time:
 
 ```bash
 curl -s "$EDDI/administration/production/deploymentstatus/<AGENT_ID>?version=1" | jq
@@ -758,8 +758,9 @@ model:
 }
 ```
 
-Without `"occurrence": "currentStep"` an input matcher looks at the whole
-conversation, so a greeting from three turns ago would still match.
+`"occurrence": "currentStep"` is the default and is written out here for
+clarity; `"anyStep"` would look at the whole conversation, so a greeting from
+three turns ago would still match.
 
 ### Pattern 2: API Call Before LLM
 

@@ -44,7 +44,8 @@ public class ObserveConfig {
 
     /**
      * Only invoke the agent if the message contains one of these keywords
-     * (case-insensitive substring match). Empty list = match all messages.
+     * (case-insensitive substring match). An observer with neither keywords nor
+     * {@link #getTriggerMimeTypes() MIME types} configured matches every message.
      */
     public List<String> getTriggerKeywords() {
         return triggerKeywords;
@@ -91,7 +92,10 @@ public class ObserveConfig {
     }
 
     /**
-     * Dollar-based cost ceiling per day. Primary cost control. Default: $5.00.
+     * Dollar-based cost ceiling per day. Primary cost control. Default: $5.00. It
+     * is measured on tool-execution cost only, so an observer that only calls an
+     * LLM accrues nothing and is bounded by {@link #maxDailyResponses} instead.
+     * Counters are per node.
      */
     public double getMaxCostPerDay() {
         return maxCostPerDay;

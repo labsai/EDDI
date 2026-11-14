@@ -140,10 +140,12 @@ public class Expression implements Cloneable {
     }
 
     /**
-     * Returns a list of expressions that have the given expressionName.
+     * Returns this expression and its sub-expressions, at any depth, whose name is
+     * one of the given names.
      *
      * @param expressionNames
-     * @return list of expressions matching of of the expression names of the param
+     *            the names to look for
+     * @return the expressions matching one of the given names
      */
     public Expressions getAllExpressionsWithNames(String... expressionNames) {
         Expressions result = new Expressions();

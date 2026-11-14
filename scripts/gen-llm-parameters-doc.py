@@ -132,8 +132,35 @@ def constraint(p):
         hi = p.get("max", "")
         bits.append(f"{lo}–{hi}")
     if p.get("default") is not None:
-        bits.append(f"default `{p['default']}`")
+        bits.append(f"default `{fmt_value(p['default'])}`")
     return "; ".join(bits)
+
+
+def fmt_value(value):
+    # Config values are strings: a JSON boolean default is written "true"/"false", never Python's True/False.
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
+def condition_text(cond):
+    """Render a when/unless condition the way ModelParameterCatalog.Condition.holds evaluates it."""
+    if cond.get("values"):
+        text = f"`{cond['key']}` is " + " or ".join(f"`{v}`" for v in cond["values"])
+    else:
+        text = f"`{cond['key']}` is set"
+    if cond.get("whenUnset"):
+        text += " (or not set)"
+    return text
+
+
+def rule_conditions(rule):
+    parts = []
+    if rule.get("when"):
+        parts.append("when " + condition_text(rule["when"]))
+    if rule.get("unless"):
+        parts.append("unless " + condition_text(rule["unless"]))
+    return (" " + " and ".join(parts)) if parts else ""
 
 
 def render(catalog):
@@ -165,7 +192,7 @@ def render(catalog):
                 for rule in p.get("rules", []):
                     label = "Rejected" if rule["effect"] == "rejected" else "No effect"
                     carry = f" The value is sent as `{rule['migrateTo']}` instead." if rule.get("migrateTo") else ""
-                    rule_lines.append(f"- `{p['key']}` — **{label}** on models matching `{rule['models']}`: {rule['note']}{carry}")
+                    rule_lines.append(f"- `{p['key']}` — **{label}** on models matching `{rule['models']}`{rule_conditions(rule)}: {rule['note']}{carry}")
             if rule_lines:
                 out.append("\nModel-specific behaviour:\n")
                 out.extend(rule_lines)

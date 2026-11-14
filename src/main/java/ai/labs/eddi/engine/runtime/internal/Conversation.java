@@ -173,7 +173,7 @@ public class Conversation implements IConversation {
      * <p>
      * This has to happen per turn, not per conversation. The field is not part of
      * the persisted snapshot, and every request rebuilds memory from the store — so
-     * setting it only in {@link #init()} meant it was present for the
+     * setting it only in {@link #init(Map)} meant it was present for the
      * CONVERSATION_START turn and null for every turn after it. The gate in
      * {@code ContextualToolsProvider.addUserMemoryToolIfEnabled} reads exactly that
      * field, so the {@code UserMemoryTool} was never assembled on a turn a user
@@ -316,16 +316,6 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * Loads user properties from the {@code usermemories} collection. This replaces
-     * both the old {@code loadLongTermProperties()} (which read from the legacy
-     * {@code properties} collection) and the old {@code loadUserMemories()}.
-     * <p>
-     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
-     * scoping (self + group + global). Recall order and max entries come from
-     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
-     * defaults.
-     */
-    /**
      * One entry per key. A key can be visible more than once — the shared
      * {@code global} row and this agent's own {@code self} or {@code group} row are
      * different documents, and they coexist, for instance when an agent whose
@@ -359,6 +349,16 @@ public class Conversation implements IConversation {
         return visibility == Visibility.group ? 1 : 2;
     }
 
+    /**
+     * Loads user properties from the {@code usermemories} collection. This replaces
+     * both the old {@code loadLongTermProperties()} (which read from the legacy
+     * {@code properties} collection) and the old {@code loadUserMemories()}.
+     * <p>
+     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
+     * scoping (self + group + global). Recall order and max entries come from
+     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
+     * defaults.
+     */
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
@@ -871,8 +871,12 @@ public class Conversation implements IConversation {
      * Visibility is applied at the persistence boundary:
      * <ul>
      * <li>If the property has explicit visibility → use it</li>
-     * <li>If the property has no visibility (null) → default to {@code global}
-     * (matches legacy flat properties behavior)</li>
+     * <li>If the property has no visibility (null) → the agent's
+     * {@code userMemoryConfig.defaultVisibility}, else {@code global} (matches
+     * legacy flat properties behavior)</li>
+     * <li>A {@code group} property in a conversation that belongs to no group is
+     * stored as {@code self} (see
+     * {@link ConversationGroups#persistedVisibility})</li>
      * </ul>
      * <p>
      * <strong>Why the diff matters:</strong> every entry recalled at conversation
@@ -1727,7 +1731,8 @@ public class Conversation implements IConversation {
         String template = null;
         var batch = memory.getHitlPendingToolCalls();
         // Fix #1: prefer the task-scoped effective config that ACTUALLY gated this
-        // batch (persisted by AgentOrchestrator.buildPendingBatch) over the agent-level
+        // batch (persisted by ToolApprovalGateSupport.buildPendingBatch) over the
+        // agent-level
         // default. A legacy batch (null effective config) or a null batch falls back to
         // the agent-level config exactly as before.
         var cfg = batch != null && batch.getEffectiveToolApprovals() != null
@@ -1892,7 +1897,7 @@ public class Conversation implements IConversation {
     /**
      * Nulls the transient tool-pause state on the live memory (pause type, pending
      * batch, in-JVM resume decision). Distinct from {@link #clearHitlBookmark()},
-     * which owns only the six bookmark fields — this must NOT touch those.
+     * which owns only the seven bookmark fields — this must NOT touch those.
      */
     private void clearToolPauseState() {
         conversationMemory.setHitlPauseType(null);
@@ -1988,7 +1993,7 @@ public class Conversation implements IConversation {
             // Stash the decision on the live memory BEFORE clearing the bookmark so
             // LlmTask.executeResume (reached at the same index) can consume it. The
             // pending batch + pauseType survive clearHitlBookmark() — that method only
-            // owns the six bookmark fields — and are cleared by LlmTask after
+            // owns the seven bookmark fields — and are cleared by LlmTask after
             // consumption (Task 9) or by the finally safety-net below.
             if (toolPause) {
                 conversationMemory.setHitlResumeDecision(decision);

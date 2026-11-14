@@ -54,8 +54,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * {@code ProviderChatStreamingParityTest} fails when the two clients disagree.
  * <p>
  * ⚠️ Native image: medium risk — Azure SDK uses Kotlin+Jackson reflection. Ship
- * for JVM mode, fix native config during Phase 12 CI/CD (native-image agent
- * tracing).
+ * for JVM mode; native configuration is open work (native-image agent tracing,
+ * see planning/native-image-migration.md).
  */
 @ApplicationScoped
 public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {

@@ -769,6 +769,8 @@ public class EmbeddingStoreFactory {
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
      * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
+     * <li>{@code userName} and {@code password} — basic authentication (optional;
+     * used only when both are set)</li>
      * <li>{@code indexName} — index name (default: derived per knowledge base, see
      * KnowledgeBaseStorage)</li>
      * </ul>
@@ -850,6 +852,8 @@ public class EmbeddingStoreFactory {
      * <li>{@code databaseName} — database name (default: "default_database")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * the knowledge base, see KnowledgeBaseStorage)</li>
+     * <li>{@code apiVersion} — Chroma API version, {@code V1} or {@code V2}
+     * (default: "V2")</li>
      * </ul>
      */
     private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId) {

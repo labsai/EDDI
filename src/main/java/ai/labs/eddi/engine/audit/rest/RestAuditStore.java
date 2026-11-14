@@ -227,7 +227,7 @@ public class RestAuditStore implements IRestAuditStore {
      * inside the signed payload, so the surviving entries cannot be renumbered to
      * close the gap without invalidating their own HMACs.
      * <p>
-     * Two refinements keep the verdict honest in both directions:
+     * These refinements keep the verdict honest in both directions:
      * <ul>
      * <li>When {@code expectRunFromOrigin}, the expected run is anchored at
      * {@link #SEQUENCE_ORIGIN} rather than at the lowest surviving sequence —
@@ -257,14 +257,15 @@ public class RestAuditStore implements IRestAuditStore {
             return ChainStatus.INTACT;
         }
 
-        // A window that mixes sequenced and unsequenced rows cannot be judged at all.
+        // A window that mixes sequenced and unsequenced rows cannot be anchored at the
+        // origin (it is still checked for holes between the sequenced rows).
         // AuditLedgerService seeds a conversation's counter from countByConversation,
         // which COUNTS THE LEGACY ROWS — so after an upgrade the first sequenced entry
         // starts at N, not 0, and the N positions below it were never assigned to
         // anything. Anchoring at the origin would report them as missing and accuse
         // the deployment of deleting audit records it never had. Unsequenced rows also
         // make a genuine deletion undetectable, so the honest answer for a mixed window
-        // is that the chain cannot be established.
+        // is UNAVAILABLE unless a hole proves a deletion.
         boolean mixed = entries.stream().anyMatch(e -> e.sequence() < 0);
         List<Long> sequences = entries.stream().filter(e -> e.sequence() >= 0).filter(e -> !signingEnabled || signsSequence(e))
                 .map(AuditEntry::sequence).sorted().toList();

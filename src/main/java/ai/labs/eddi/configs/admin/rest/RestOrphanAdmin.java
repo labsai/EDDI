@@ -45,10 +45,18 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * <li>Enumerate all workflows → collect referenced extension resource URIs</li>
  * <li>Enumerate all parser documents → collect the dictionaries they
  * reference</li>
+ * <li>Enumerate every deployed agent version → collect the workflows and
+ * extensions it pins</li>
  * <li>For each store type, enumerate all resources via document
  * descriptors</li>
- * <li>Any resource whose URI is NOT in the referenced set = orphan</li>
+ * <li>Any resource whose identity (URI without the pinned version) is NOT in
+ * the referenced set = orphan</li>
  * </ol>
+ *
+ * <p>
+ * A purge refuses to run (409) when the reference scan was incomplete, and
+ * re-checks each candidate immediately before deleting it.
+ * </p>
  *
  * @author ginccc
  * @since 6.0.0

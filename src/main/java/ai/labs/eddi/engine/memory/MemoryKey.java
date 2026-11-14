@@ -13,8 +13,10 @@ import java.util.Objects;
  * Binds a string key name to a Java type at compile time, eliminating unchecked
  * casts and providing discoverability via the {@link MemoryKeys} registry.
  * <p>
- * The {@code isPublic} flag determines whether data stored under this key
- * should be included in client responses (see {@link IData#isPublic()}).
+ * The {@code isPublic} flag is copied onto the data stored under this key (see
+ * {@link IData#isPublic()}). It is a marker only and does not decide what a
+ * client response includes; that is chosen by key prefix when the conversation
+ * is projected.
  *
  * @param <T>
  *            the type of value stored under this key
@@ -29,16 +31,16 @@ public final class MemoryKey<T> {
     }
 
     /**
-     * Creates a private (non-public) memory key. Data stored under this key will
-     * NOT be sent to the client.
+     * Creates a memory key whose data is flagged non-public (see
+     * {@link IData#isPublic()}; the flag does not itself hide the data).
      */
     public static <T> MemoryKey<T> of(String key) {
         return new MemoryKey<>(key, false);
     }
 
     /**
-     * Creates a public memory key. Data stored under this key WILL be included in
-     * client responses.
+     * Creates a memory key whose data is flagged public (see
+     * {@link IData#isPublic()}; the flag does not itself expose the data).
      */
     public static <T> MemoryKey<T> ofPublic(String key) {
         return new MemoryKey<>(key, true);
@@ -49,7 +51,9 @@ public final class MemoryKey<T> {
         return key;
     }
 
-    /** Whether data under this key should be visible to the client. */
+    /**
+     * The public flag given to data stored under this key; a marker, not a filter.
+     */
     public boolean isPublic() {
         return isPublic;
     }

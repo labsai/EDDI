@@ -35,8 +35,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * The pre-execution counterpart of {@link ToolResultGuardrail}: a pure function
  * of (schema, policy, arguments), with no CDI state, so it can later become one
  * type of a configurable tool-call guardrail without changing what it decides.
- * Today its one caller is the httpcall tool (see
- * {@code ApiCall.argumentSchema}).
+ * Today its checks run for the httpcall tool ({@code HttpCallToolsProvider},
+ * see {@code ApiCall.argumentSchema}); {@code ToolLoopRunner} reuses
+ * {@link #refusal} for the refusals it issues itself.
  * <p>
  * <b>The subset.</b> Only keywords that constrain a value a model writes, and
  * that are safe to evaluate on model input, are honoured: {@code type},

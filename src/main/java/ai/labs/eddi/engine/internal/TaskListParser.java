@@ -21,9 +21,13 @@ import java.util.regex.Pattern;
 /**
  * Parses LLM output into a structured task list with three-tier fallback.
  * <ul>
- * <li>Tier 1: JSON array (strict schema)</li>
+ * <li>Tier 1: JSON array, or an object holding one (lenient: unknown properties
+ * are ignored and several field-name aliases are accepted, such as
+ * {@code title} for {@code subject}; entries without a subject are
+ * skipped)</li>
  * <li>Tier 2: Markdown numbered/bulleted list</li>
- * <li>Tier 3: Single task with entire goal as description</li>
+ * <li>Tier 3: Single task with the entire output as description (truncated to
+ * 2000 characters)</li>
  * </ul>
  *
  * @author ginccc
@@ -121,7 +125,9 @@ public final class TaskListParser {
 
     /**
      * Assign tasks round-robin to members when the LLM's assignment can't be
-     * resolved.
+     * resolved. HUMAN members are never picked.
+     *
+     * @return the agentId of the next non-HUMAN member, or null when there is none
      */
     public static String roundRobinAssign(int taskIndex, List<GroupMember> members) {
         // Never a HUMAN member: a person is assigned work explicitly or not at all.

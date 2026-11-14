@@ -31,7 +31,8 @@ import java.util.Map;
  * @param compatibleWithPreviousVersion
  *            the compatibility the new agent version was written with
  * @param deployment
- *            the redeploy outcome, {@code null} when none was requested
+ *            the redeploy outcome, {@code null} when none was requested or when
+ *            nothing needed writing (a redeploy is skipped then)
  */
 public record AgentCascadeResult(String agentId, int previousAgentVersion, int newAgentVersion, List<WorkflowChange> workflows, int totalWorkflows,
         int mappingsApplied, boolean compatibleWithPreviousVersion, Deployment deployment) {

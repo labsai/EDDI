@@ -40,7 +40,7 @@ public interface IRestTeamBudgets {
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-viewer"})
     @Operation(summary = "Budgets of several teams", description = "The snapshot of each listed group the caller may view (comma "
-            + "separated groupIds, at most 50; others are left out, not refused), plus the tenant's remaining monthly budget.")
+            + "separated groupIds, at most 50 or the request is a 400; groups the caller may not view are left out, not refused), plus the tenant's remaining monthly budget.")
     Response listBudgets(@QueryParam("groupIds") String groupIds);
 
     @POST

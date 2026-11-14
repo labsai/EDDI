@@ -35,8 +35,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
- * per-invocation by {@code AgentOrchestrator} with the conversation service and
- * user identity.
+ * per-invocation by {@code DynamicAgentToolsProvider} with the conversation
+ * service and user identity.
  *
  * <p>
  * Supports both single-turn (fire-and-forget) and multi-turn conversations.
@@ -50,7 +50,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class ConverseWithAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(ConverseWithAgentTool.class);
@@ -428,6 +429,8 @@ public class ConverseWithAgentTool {
                 .toList();
     }
 
+    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
+
     /**
      * Refuses when a model-supplied {@code conversationId} belongs to a user other
      * than the one this tool is bound to.
@@ -444,8 +447,6 @@ public class ConverseWithAgentTool {
      * @return a user-facing refusal string, or {@code null} when the conversation
      *         may be driven
      */
-    private static final String OWNERSHIP_UNVERIFIED = "⚠️ Conversation '%s' cannot be continued because its ownership could not be verified.";
-
     private String refuseIfNotOwnedByBoundUser(String conversationId) {
         if (userId == null || userId.isBlank()) {
             // Fail closed: with no bound identity there is nothing to compare the

@@ -402,8 +402,9 @@ public class TeamCadenceService {
             // instead wedged the whole standing team -- the claim is held, every
             // later fire is skipped as "still running", and the pulled tasks stay
             // IN_PROGRESS on the backlog until claim-ttl (default PT24H) elapses,
-            // or forever on a non-positive TTL. This is the only remaining switch
-            // over the enum in src/main; keep it exhaustive by hand.
+            // or forever on a non-positive TTL. This is the only switch over the enum
+            // in src/main, and its default arm would hide a state added later: when
+            // adding one, decide by hand which arm it belongs to.
             case FAILED, REJECTED, CANCELLED -> writebackFailure(workspace, gc);
             // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
             // has been held past its TTL. See reclaimIfStale.

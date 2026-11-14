@@ -304,7 +304,7 @@ public class A2AToolProviderManager {
         return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
 
-    /** Number of cached agent connections. */
+    /** Number of Agent Cards currently cached (one per peer URL, 5 minute TTL). */
     public int getActiveConnectionCount() {
         return agentCache.size();
     }

@@ -47,8 +47,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * raw-body signature has been verified.
  * <p>
  * Handles {@code block_actions} with action ids {@code hitl_approve} /
- * {@code hitl_reject}. The button value carries the owning integration name,
- * the subject and the id of the card it was posted on:
+ * {@code hitl_reject}, plus {@code hitl_edit} / {@code hitl_reject_reason}
+ * (which open a modal) and the modals' {@code view_submission} (see
+ * {@link SlackHitlEditModal}). The button value carries the owning integration
+ * name, the subject and the id of the card it was posted on:
  * {@code <integrationName>|<conversationId>|<cardId>} for a single conversation
  * resume, or {@code <integrationName>|group:<gcId>|<cardId>} for a group
  * discussion resume. Legacy bare values (no integration name) are treated as

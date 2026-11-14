@@ -23,7 +23,8 @@ import java.util.Set;
 
 /**
  * The {@code <style>}-block half of the mail hidden-content pass: elements a
- * {@code display:none} or {@code visibility:hidden} rule hides.
+ * {@code display:none}, {@code visibility:hidden} or {@code mso-hide:all} rule
+ * hides.
  * <p>
  * Two properties matter more than precision, because the style block is written
  * by whoever sent the mail:
@@ -488,8 +489,9 @@ final class HiddenStylesheetRules {
     }
 
     /**
-     * The rightmost compound of a complex selector, reduced to tag, id and classes,
-     * or null when the rule does not hide the element in its resting state (a state
+     * The rightmost compound of a complex selector, reduced to tag, id, classes,
+     * attribute names and the structural pseudo-classes in {@link Structural}, or
+     * null when the rule does not hide the element in its resting state (a state
      * pseudo-class) or hides generated content only.
      */
     static Compound rightmostCompound(String selector) {

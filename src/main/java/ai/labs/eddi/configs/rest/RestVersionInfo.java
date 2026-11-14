@@ -27,11 +27,11 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * The shared CRUD body behind all fifteen configuration resource types.
+ * The shared CRUD body behind all sixteen configuration resource types.
  *
  * <h3>This is where the authoring surface is guarded</h3> Every
  * {@code IRest*Store} delegates its list / read / update / delete here, so one
- * {@link ResourceAccessGuard} covers all fifteen types rather than each store
+ * {@link ResourceAccessGuard} covers all sixteen types rather than each store
  * remembering to check. MCP tools that hold an injected facade inherit it
  * through the same beans; MCP tools that resolve a store through
  * {@code IRestInterfaceFactory} make a loopback HTTP call instead and are

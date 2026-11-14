@@ -156,7 +156,7 @@ public class RestAttachmentUpload {
                        + "Returns a storage reference usable in the "
                        + "'attachment_url' context field or via STORED content source.")
     @APIResponse(responseCode = "201", description = "Attachment stored. Response contains storageRef.")
-    @APIResponse(responseCode = "400", description = "No file provided, file too large, or MIME mismatch.")
+    @APIResponse(responseCode = "400", description = "No file provided, file empty or too large, quota exceeded, or MIME mismatch.")
     @APIResponse(responseCode = "500", description = "Storage error.")
     public void uploadAttachment(
                                  @Parameter(description = "Conversation to attach the file to.")
@@ -300,7 +300,7 @@ public class RestAttachmentUpload {
                operationId = "downloadAttachment",
                summary = "Download a single attachment",
                description = "Returns the raw bytes of one attachment (buffered, not chunked). Access is checked against "
-                       + "the owning conversation (owner or explicit grant); references are "
+                       + "the owning conversation (its owner or an administrator); references are "
                        + "unguessable.")
     @APIResponse(responseCode = "200", description = "Attachment bytes with Content-Type and Content-Disposition.")
     @APIResponse(responseCode = "403", description = "The conversation is not permitted to access this attachment.")

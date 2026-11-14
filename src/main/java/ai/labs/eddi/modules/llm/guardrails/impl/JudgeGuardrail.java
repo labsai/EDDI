@@ -46,10 +46,11 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * {@code judge} — output only. Asks a model to grade the answer against the
- * author's criteria and to name what is wrong with it in a <b>closed
- * vocabulary</b>: the issue codes the guardrail declares in {@code issues},
- * each with the author's text telling the producing model how to fix it.
+ * {@code judge} — output and tool-call arguments. Asks a model to grade the
+ * answer against the author's criteria and to name what is wrong with it in a
+ * <b>closed vocabulary</b>: the issue codes the guardrail declares in
+ * {@code issues}, each with the author's text telling the producing model how
+ * to fix it.
  * <h3>Machinery</h3> Shared with {@code classifier} through
  * {@link GuardrailModelClient}: the provider is built by the registry with the
  * provider parameters passed through (vault and {@code ${vars}} resolved),
@@ -143,7 +144,7 @@ public class JudgeGuardrail implements ContentGuardrail {
         return Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
-    /** Output only; and a model call per earlier message would be too expensive. */
+    /** A model call per earlier message would be too expensive. */
     @Override
     public boolean screensHistory() {
         return false;

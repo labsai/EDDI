@@ -22,9 +22,12 @@ import java.util.Optional;
  * from the event: the rule, the agent and version, the conversation id, the
  * error kind or the rating's score, scale and tags, the criteria that matched
  * and links into the Manager. Nothing is copied wholesale, so a field added to
- * the event later does not leak by default. There is no user id anywhere on the
- * event, and no conversation text; the only user-written text is the rating
- * comment excerpt (at most {@link AlertMatch#MAX_COMMENT_EXCERPT} characters).
+ * the event later does not leak by default. No user id is ever put in the
+ * payload (the event's internal subject id stays internal), and no conversation
+ * text; the only user-written text is the rating comment excerpt and, for an
+ * OUTPUT_MATCH rule with {@code includeValue} on a reviewed agent, the matched
+ * runtime value (each at most {@link AlertMatch#MAX_COMMENT_EXCERPT}
+ * characters).
  */
 public final class AlertPayloads {
 

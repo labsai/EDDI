@@ -115,7 +115,7 @@ public interface IRestConversationRatingAdmin {
     @Path("/summary")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Summarize conversation ratings",
-               description = "count, average normalized score, distribution, CSAT (five-star share of 4-5), thumbs-up rate, "
+               description = "count, average normalized score, distribution, CSAT (the share of five-star ratings that score 4 or 5), thumbs-up rate, "
                        + "comment count and top tags, per bucket: groupBy=none|day|week|agentVersion|channel.")
     @APIResponse(responseCode = "200", description = "The summaries.")
     @APIResponse(responseCode = "400", description = "agentId missing for a non-administrator, or a parameter could not be read.")

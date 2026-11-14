@@ -170,7 +170,8 @@ public interface IRestSpaceResources {
     @Operation(summary = "Set a variable in a space")
     @APIResponse(responseCode = "200", description = "Stored.")
     @APIResponse(responseCode = "403",
-                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it), "
+                         + "or the value holds a vault or connection reference and the caller is not an eddi-admin.")
     Response storeVariable(@QueryParam("space") String space, @PathParam("key") String key, VariableWrite body);
 
     @DELETE

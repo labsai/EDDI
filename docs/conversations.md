@@ -31,7 +31,7 @@ is on every snapshot in the `ERROR` state, a plain read of the conversation as w
 { "conversationState": "ERROR",
   "error": { "code": "RATE_LIMITED", "retryable": true, "retryAfterMs": 13000,
              "message": "Task 'eddi://ai.labs.llm' failed: ...",
-             "taskId": "eddi://ai.labs.llm", "taskType": "langchain", "errorType": "LifecycleException" } }
+             "taskId": "ai.labs.llm", "taskType": "langchain", "errorType": "rate_limit" } }
 ```
 
 - `code` is a failure class (`TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`,
@@ -43,7 +43,7 @@ is on every snapshot in the `ERROR` state, a plain read of the conversation as w
 - `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body. It is the
   same sentence the streaming `task_failed` event carries.
 - `taskId`, `taskType` and `errorType` say which lifecycle task failed and how it was classified for metrics
-  and audit (for example `LifecycleException`), as the `task_failed` event does. They are omitted when the
+  and audit (`timeout`, `transport`, `rate_limit`, `content_filter`, `stack_overflow` or `unknown`), as the `task_failed` event does. They are omitted when the
   error did not come from a task, such as a rejected idempotency key. A failed turn whose entry predates
   `code`/`retryable` reports `code: "TURN_FAILED"`, `retryable: false`. The full per-task digest stays in
   `conversationOutputs[…].taskErrors`.
@@ -115,6 +115,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
 | **API endpoint**  | `/agents/{agentId}/start`                                                                     |
 | {**agentId**}     | (`Path` **parameter**):`String Id` of the agent that you wish to **start conversation with**.  |
 | environment       | (`Query` **parameter**, optional):`String` Deployment environment. **Default**: `production`.  |
+| userId            | (`Query` **parameter**, optional):`String` the user the conversation belongs to.               |
+| Request Body      | (optional) a JSON map of context entries, `{"<name>": {"type": "string", "value": "…"}}`, available to the first (`CONVERSATION_START`) step. |
 
 ### Response Model
 
@@ -141,7 +143,7 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "conversationProperties": {
         "<nameOfProperty>" : {
       "name" : "string",
-      "value" : "string" | {JsonObject},
+      "valueString" : "string",
       "scope" : "string"
     }},
   "conversationSteps": [
@@ -179,8 +181,8 @@ In this section we will explain how to **send/receive messages** from an Agent. 
 | conversationOutput.output      | (`String`) The final agent's output                                                                                                                                                                                                                                                |
 | conversationProperties         | (`Array`: <>) Array of `conversationProperty`, <`nameOfProperty`> is a dynamic value that represents the name of the property                                                                                                                                                      |
 | \<nameOfProperty>.name         | (`String`) name of the property.                                                                                                                                                                                                                                                   |
-| \<nameOfProperty>.value        | (`String`\|`JsonObject`) value of the property.                                                                                                                                                                                                                                    |
-| \<nameOfProperty>.scope        | <p>(<code>String</code>) scope can be </p><p><code>step</code> (=valid one interaction [user input to user output]), </p><p><code>conversation</code> (=valid for the entire conversation), </p><p><code>longTerm</code> (=valid across conversations [based on given userId])</p> |
+| \<nameOfProperty>.valueString  | (`String`) value of the property. A property holds one typed value field: `valueString`, `valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueBoolean`, `valueObject` or `valueList`.                                                                                       |
+| \<nameOfProperty>.scope        | <p>(<code>String</code>) scope can be </p><p><code>step</code> (=valid one interaction [user input to user output]), </p><p><code>conversation</code> (=valid for the entire conversation), </p><p><code>longTerm</code> (=valid across conversations [based on given userId]), </p><p><code>secret</code> (=vaulted, the property holds a <code>${vault:…}</code> reference)</p> |
 | conversationSteps              | (`Array`: <`conversationStep`>) Array of `conversationStep`.                                                                                                                                                                                                                       |
 | conversationStep.key           | (`String`) the element key in the conversationStep e.g key : input:initial, actions                                                                                                                                                                                                |
 | conversationStep.value         | (`String`) the element value of the conversationStep e.g in case of `actionq` as `key` it could be an array string `[ "current_weather_in_city" ]`.                                                                                                                                |
@@ -306,7 +308,7 @@ In this section we will explain how to **send/receive messages** from an Agent. 
   "conversationProperties": {
     "city": {
       "name": "city",
-      "value": "madrid",
+      "valueString": "madrid",
       "scope": "conversation"
     }
   },
@@ -555,7 +557,7 @@ true
 curl -X POST "http://localhost:7070/agents/CONV_ID/undo"
 ```
 
-**Response:** HTTP 200 (No Content)
+**Response:** HTTP 200 (No Content); `409` when there is nothing to undo.
 
 **Effect**: The last conversation step is removed from the conversation history and stored in the redo cache.
 
@@ -595,7 +597,7 @@ true
 curl -X POST "http://localhost:7070/agents/CONV_ID/redo"
 ```
 
-**Response:** HTTP 200 (No Content)
+**Response:** HTTP 200 (No Content); `409` when there is nothing to redo.
 
 **Effect**: The last undone step is restored from the redo cache and added back to the conversation history.
 

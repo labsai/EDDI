@@ -32,12 +32,13 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * {@code expression} — output only. A deterministic check over the model's
- * answer parsed as JSON: the author writes a boolean expression
- * ({@code sum(lines[*].amount) == total}), an issue code and the fix text a
- * reprompt sends when it is false. The evaluator is {@link SafeJsonExpression}
- * — a small sandboxed recursive-descent language (paths, BigDecimal arithmetic,
- * comparisons, logic and a fixed set of functions), no script engine.
+ * {@code expression} — output and tool-call arguments. A deterministic check
+ * over the model's answer parsed as JSON: the author writes a boolean
+ * expression ({@code sum(lines[*].amount) == total}), an issue code and the fix
+ * text a reprompt sends when it is false. The evaluator is
+ * {@link SafeJsonExpression} — a small sandboxed recursive-descent language
+ * (paths, BigDecimal arithmetic, comparisons, logic and a fixed set of
+ * functions), no script engine.
  * <h3>Parameters (plain strings, never templated)</h3>
  * <ul>
  * <li>{@code expr} — the expression (required);</li>
@@ -128,7 +129,7 @@ public class ExpressionGuardrail implements ContentGuardrail {
         return Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
-    /** Output only; there is no history to screen. */
+    /** There is no history to screen. */
     @Override
     public boolean screensHistory() {
         return false;

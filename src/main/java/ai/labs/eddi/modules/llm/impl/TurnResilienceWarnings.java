@@ -184,8 +184,8 @@ final class TurnResilienceWarnings {
     /**
      * Whether a failed model phase can still end in a user-presentable answer:
      * validation that falls back, or a task-level {@code onError} fallback. The
-     * latter is read reflectively — it ships separately from this check and the
-     * config class may not carry it yet.
+     * latter is still read reflectively, from when the field shipped separately
+     * from this check; {@code LlmConfiguration.Task} carries it now.
      */
     static boolean hasFallbackPath(LlmConfiguration.Task task) {
         var validation = task.getResponseValidation();

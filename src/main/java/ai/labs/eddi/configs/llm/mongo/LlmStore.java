@@ -55,8 +55,12 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     }
 
     /**
-     * Validates the per-task {@code toolApprovals} override on every LLM task at
-     * save time (tool-level HITL). Mirrors the agent-level validation seam.
+     * Validates every LLM task at save time: the per-task {@code toolApprovals}
+     * override (tool-level HITL, mirroring the agent-level validation seam), tool
+     * guardrails, quotas, display, handoff, agent-ops, secret scopes, rate limits,
+     * response validation and the answer-tool settings. A violation throws; the
+     * strict-mode approval implications only log a warning. Field paths in the
+     * messages keep the legacy {@code langchain.task[i]} prefix.
      */
     private static void validateTaskToolApprovals(LlmConfiguration content) {
         if (content == null || content.tasks() == null) {

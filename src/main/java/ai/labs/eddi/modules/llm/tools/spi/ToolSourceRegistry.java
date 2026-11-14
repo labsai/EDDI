@@ -68,13 +68,13 @@ public final class ToolSourceRegistry {
      *            entries would change the map the rate-limit, pricing and
      *            cache-scope lookups see
      * @param toolRequestResolvers
-     *            dispatch name → {@link ToolRequestResolver}, http source only.
-     *            Copied into the merged map ONLY when the spec that owns the name
-     *            actually survives collision resolution below — a name a later
-     *            source lost still had its resolver registered before that verdict
-     *            was known, and carrying it forward would let an approver be shown
-     *            a preview of, and the pre-execution re-check compare against, a
-     *            request that is not the one about to run.
+     *            dispatch name → {@link ToolRequestResolver}, http, MCP and A2A
+     *            sources only. Copied into the merged map ONLY when the spec that
+     *            owns the name actually survives collision resolution below — a
+     *            name a later source lost still had its resolver registered before
+     *            that verdict was known, and carrying it forward would let an
+     *            approver be shown a preview of, and the pre-execution re-check
+     *            compare against, a request that is not the one about to run.
      * @param failures
      *            every provider's structured failures, concatenated
      * @param toolGroups
@@ -279,17 +279,16 @@ public final class ToolSourceRegistry {
     }
 
     /**
-     * Whether {@code t} is, or wraps, an {@link InterruptedException}. Bounded and
-     * cycle-safe: a self-referential cause chain (rare, but legal — a
-     * {@code Throwable} can be its own cause via {@code initCause} misuse) would
-     * otherwise spin here, inside the very handler whose job is to keep one bad
-     * provider from taking the assembly down.
-     */
-    /**
      * Deeper than any real wrapper chain, shallow enough that a cycle cannot spin.
      */
     private static final int MAX_CAUSE_CHAIN_HOPS = 64;
 
+    /**
+     * Whether {@code t} is, or wraps, an {@link InterruptedException}. Bounded and
+     * cycle-safe: a cyclic cause chain (rare, but legal — {@code A -> B -> A} via
+     * {@code initCause}) would otherwise spin here, inside the very handler whose
+     * job is to keep one bad provider from taking the assembly down.
+     */
     private static boolean isCausedByInterrupt(Throwable t) {
         // Bounded by hop count, not by a self-cycle test. `cause != cause.getCause()`
         // only rejects A -> A, which Throwable.initCause already makes impossible

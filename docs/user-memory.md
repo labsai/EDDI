@@ -223,7 +223,7 @@ client forged before reserved keys were filtered does not keep working.
 
 ## REST API
 
-Base path: `/usermemorystore/memories`
+Base path: `/usermemorystore/memories`. Roles: `eddi-admin` or `eddi-user`; with authorization on, a non-admin may only address their own `userId` (`403` otherwise).
 
 | Method | Path | Description |
 |---|---|---|

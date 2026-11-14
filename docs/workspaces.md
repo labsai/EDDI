@@ -116,12 +116,12 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/descriptorstore/descriptors/{id}/shares` | Owner, space, visibility, grants, and the caller's effective level. |
-| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level`. The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
-| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke a subject's grant. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `private` / `space` / `internal` / `published`. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces — personal work becoming team work. Ownership does not change. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership. **Administrators only.** |
-| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, optional `message`). See [Notifications](#notifications-and-access-requests). |
+| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level` (default `VIEW`). The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
+| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke the grant of `subject`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `visibility` to `private` / `space` / `internal` / `published`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces (`spaceId`) — personal work becoming team work. Ownership does not change. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership to `ownerId`, optionally into `spaceId`. **Administrators only.** |
+| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, default `USE`; optional `message`, cut to 500 characters). See [Notifications](#notifications-and-access-requests). |
 
 Every change except a request takes `dryRun=true`, which answers with the same
 `updated` / `skipped` lists and changes nothing. The Manager uses it to show what
@@ -167,7 +167,7 @@ what sharing with an email address used to do. An unverified email is never a
 way to find somebody: whoever can set their own address could otherwise collect
 shares meant for someone else.
 
-`GET /workspaces/directory?q=` powers the share box's suggestions. The share
+`GET /workspaces/directory?q=&limit=` (default 10, at most 25) powers the share box's suggestions. The share
 dialog labels each grant with the person's name, and flags grants that match no
 recorded user (typically ones made before the directory existed) so an owner can
 remove them. The directory is covered by GDPR erasure and export. Set
@@ -244,7 +244,7 @@ every notification that names the person, at any age.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first. |
+| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first (`limit` default 50, at most 200). |
 | `GET` | `/workspaces/notifications/count` | `{"unread": n}` — cheap enough to poll. |
 | `POST` | `/workspaces/notifications/read` | Mark `{"ids": [...]}` read, or all of them with `{}`. |
 

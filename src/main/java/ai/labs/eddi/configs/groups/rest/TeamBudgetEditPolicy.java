@@ -18,9 +18,11 @@ import java.util.Objects;
  * Otherwise an editor could raise their own team's cap by saving the group,
  * which would make the budget advisory. With admin-only edits on (the default)
  * any change to the block, including removing it, needs the admin role; a group
- * that has no budget before and after stays editable by editors. Independently,
- * whoever saves an {@code oversight} list must hold VIEW on every group in it,
- * so a board can never be configured to read a team its author cannot read.
+ * that has no budget before and after stays editable by editors. Independently
+ * of the admin switch, whoever changes the block must hold VIEW on every group
+ * in its {@code oversight} list, so a board can never be configured to read a
+ * team its author cannot read. A save that leaves the block unchanged is not
+ * checked at all.
  */
 final class TeamBudgetEditPolicy {
 

@@ -34,7 +34,7 @@ public interface IRestAuditStore {
      * @param skip
      *            number of entries to skip (default: 0)
      * @param limit
-     *            maximum entries to return (default: 100)
+     *            maximum entries to return (default: 100, at most 1000)
      * @return list of audit entries, newest first
      */
     @GET
@@ -54,7 +54,7 @@ public interface IRestAuditStore {
      * @param skip
      *            number of entries to skip (default: 0)
      * @param limit
-     *            maximum entries to return (default: 100)
+     *            maximum entries to return (default: 100, at most 1000)
      * @return list of audit entries, newest first
      */
     @GET
@@ -68,8 +68,10 @@ public interface IRestAuditStore {
     /**
      * List the administrative actions recorded by {@code AdminActionAuditFilter}:
      * every mutating REST request outside the chat APIs, with its caller, method,
-     * path, endpoint and response status — newest first. Declared before the
-     * {@code /{conversationId}} template so the literal path is unmistakable.
+     * path, endpoint and response status — newest first. The literal
+     * {@code /admin-actions} segment takes precedence over the
+     * {@code /{conversationId}} template in JAX-RS matching, so it is never read as
+     * a conversation id.
      *
      * @param actor
      *            only the actions of this principal (optional)

@@ -31,7 +31,9 @@ final class PreviewRedaction {
 
     /**
      * Per resource type, the container paths the owning store does not treat as
-     * configuration (tool-parameter descriptions, cache scopes keyed by tool name).
+     * configuration (an httpcalls document's parameter descriptions; an LLM
+     * document's tool cache scopes, tool quotas and tool display, all keyed by tool
+     * name).
      */
     private static final Map<String, Set<String>> SKIPPED_PATHS = Map.of(
             AbstractBackupService.LLM_EXT, RestLlmStore.NOT_CONFIGURATION,

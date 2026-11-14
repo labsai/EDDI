@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * Implements {@link GroupDiscussionEventListener} to receive callbacks as
  * agents speak, and posts each contribution to Slack.
  * <p>
- * All discussion styles use <b>EXPANDED</b> mode: each agent's first
+ * All preset discussion styles use <b>EXPANDED</b> mode: each agent's first
  * contribution is a channel-level header with a short preview, and the full
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
@@ -40,8 +40,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     /**
      * Discussion styles that use EXPANDED mode (channel-level messages with peer
-     * threading). All styles use expanded mode in Slack for readability — compact
-     * mode (single thread) is too hard to follow with multiple agents.
+     * threading). All preset styles use expanded mode in Slack for readability —
+     * compact mode (single thread) is too hard to follow with multiple agents; only
+     * {@code CUSTOM} falls back to it.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
             "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE", "NEGOTIATION");
@@ -800,15 +801,15 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * Fire-and-forget Slack post. Catches {@link SlackDeliveryException} so that a
      * transient Slack API failure does not abort the entire group discussion.
      *
-     * @return the message ts on success, or null on any failure
-     */
-    /**
+     * <p>
      * Every message of a discussion is composed from member output, display names,
      * artifact names, task subjects or the user's question — none of it written by
      * EDDI — and none needs a Slack control sequence, so the whole text is escaped
      * here, once ({@link SlackMrkdwn}). It used to be escaped field by field, and
      * the fields that carry the most text (contributions, syntheses, feedback) were
      * not: a member replying {@code <!channel>} pinged the channel.
+     *
+     * @return the message ts on success, or null on any failure
      */
     private String postSafe(String channel, String threadTs, String text) {
         // Escaped, then split into messages Slack will not truncate; the first

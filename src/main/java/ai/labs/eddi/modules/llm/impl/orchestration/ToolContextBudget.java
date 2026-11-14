@@ -115,10 +115,10 @@ public class ToolContextBudget {
      * <p>
      * Eviction is silent to the model on purpose: no gap-marker message is
      * injected. A {@code SystemMessage} mid-transcript is not portable across the
-     * twelve supported providers (several hoist system content to a dedicated
-     * top-level field), and a {@code UserMessage} would fabricate a turn the user
-     * never took. The loss is instead reported to the agent designer through the
-     * execution trace, a Micrometer counter and a WARN log.
+     * supported providers (several hoist system content to a dedicated top-level
+     * field), and a {@code UserMessage} would fabricate a turn the user never took.
+     * The loss is instead reported to the agent designer through the execution
+     * trace, a Micrometer counter and a WARN log.
      * </p>
      *
      * <p>

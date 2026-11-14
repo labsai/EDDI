@@ -61,6 +61,12 @@ public final class RobotsPolicy {
     }
 
     /**
+     * The byte-order mark, numerically — a '\uFEFF' literal is decoded by the
+     * formatter.
+     */
+    private static final char BOM = 0xFEFF;
+
+    /**
      * Parses robots.txt for one user agent.
      *
      * @param content
@@ -69,12 +75,6 @@ public final class RobotsPolicy {
      *            the crawler's token, matched case-insensitively against
      *            {@code User-agent} lines
      */
-    /**
-     * The byte-order mark, numerically — a '\uFEFF' literal is decoded by the
-     * formatter.
-     */
-    private static final char BOM = 0xFEFF;
-
     public static RobotsPolicy parse(String content, String userAgent) {
         // A file written on Windows starts with a BOM, which would make the first
         // field "?user-agent", open no group, and drop every rule in the file —
@@ -96,7 +96,8 @@ public final class RobotsPolicy {
         boolean inSpecificGroup = false;
         boolean inWildcardGroup = false;
         boolean sawSpecificGroup = false;
-        // A blank line ends a group; consecutive User-agent lines share one body.
+        // Consecutive User-agent lines share one body; a blank line does not end a
+        // group (see below).
         boolean lastLineWasUserAgent = false;
 
         for (String rawLine : content.split("\\r?\\n")) {
@@ -198,7 +199,10 @@ public final class RobotsPolicy {
         return best == null || best.allow();
     }
 
-    /** The rate the site asks for, if it asks. */
+    /**
+     * The rate the site asks for, if it asks. A {@code Crawl-delay} above 300
+     * seconds is treated as unusable and ignored.
+     */
     public Optional<Duration> crawlDelay() {
         return Optional.ofNullable(crawlDelay);
     }

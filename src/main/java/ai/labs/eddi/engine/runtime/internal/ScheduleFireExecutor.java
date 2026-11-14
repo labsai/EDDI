@@ -72,6 +72,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
  * one whose input, identity and once-only check are the engine's, not a
  * schedule's</li>
+ * <li>{@code hitlAutonomyType=maintenance} — HITL oversight maintenance (sample
+ * expiry, earned-autonomy evaluation, retention)</li>
+ * <li>{@code emailPoll=true} — a mailbox poll of an email channel
+ * integration</li>
+ * <li>{@code ragIngestion=true} — a crawl of a knowledge base's source</li>
+ * <li>{@code teamCadenceType=team_cadence} — a backlog pull into a group
+ * discussion ({@link TeamCadenceService})</li>
+ * <li>{@code lessonType=lesson_consolidation} — a team's retro-lesson
+ * consolidation ({@link LessonConsolidationService})</li>
  * </ul>
  * All of them still run under the poller's cluster-wide claim, lease,
  * retry/backoff and fire-log machinery.
@@ -80,7 +89,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ul>
  * <li>{@code TenantQuotaService} — API call and cost quotas</li>
  * <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
- * <li>{@code ConversationCoordinator} — ordered processing</li>
+ * <li>{@code IConversationCoordinator} — ordered processing</li>
  * </ul>
  *
  * @author ginccc

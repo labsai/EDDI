@@ -100,11 +100,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * {@code say}/step machinery a normal turn uses — a second, resume-shaped copy
  * of turn execution is how post-approval behaviour drifts from ordinary
  * behaviour without anyone noticing. Hence the back-reference to
- * {@link ConversationService} for the seven facade members this cluster calls
- * ({@code say}, {@code getAgent}, {@code createPropertiesHandler},
+ * {@link ConversationService} for the facade members this cluster calls (among
+ * them {@code say}, {@code getAgent}, {@code createPropertiesHandler},
  * {@code storeConversationMemoryIfState}, {@code cacheConversationState},
- * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError}) plus
- * {@code rejectIfShuttingDown}. Same pattern and the same safety argument as
+ * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError} and
+ * {@code rejectIfShuttingDown}). Same pattern and the same safety argument as
  * {@code GroupHitlCoordinator} in R1: the constructor only stores it, never
  * calls through it before the facade's own construction completes.
  * <p>
@@ -399,6 +399,12 @@ class ConversationHitlService {
                 "The pending approval changed since this decision was made — the conversation was resumed and has "
                         + "paused again on a different request. Review the current request and decide again.");
     }
+
+    /**
+     * Resumes a conversation paused {@code AWAITING_HUMAN} with the human's (or the
+     * timeout policy's) decision. {@code handler} may be {@code null} for an
+     * internally driven resume that has no client to answer.
+     */
     public void resumeConversation(String conversationId,
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
@@ -537,8 +543,8 @@ class ConversationHitlService {
         conversationService.cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
         // From here on the pause's STATE has been consumed
-        // (AWAITING_HUMAN->IN_PROGRESS):
-        // EVERY failure path must restore it, or the approval is wedged IN_PROGRESS.
+        // (AWAITING_HUMAN->IN_PROGRESS): EVERY failure path must restore it, or the
+        // approval is wedged IN_PROGRESS.
         // The timeout schedule is deliberately NOT deleted yet (see below): a failure
         // before that point — a transient snapshot-load hiccup or an undeployed agent —
         // then leaves the original finite-policy timeout armed, so it still fires on
@@ -895,8 +901,7 @@ class ConversationHitlService {
                         // land between that check and this store, and an unconditional
                         // full-document replace would then overwrite ENDED/
                         // EXECUTION_INTERRUPTED with READY — resurrecting a terminated
-                        // conversation that then accepts new conversationService.say() input. The
-                        // atomic
+                        // conversation that then accepts new say() input. The atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
                         // A resumed turn that settled may ask to continue, like any turn:
@@ -1343,10 +1348,8 @@ class ConversationHitlService {
             return false;
         }
         // Both the flag and the placeholder: the scrub always writes the placeholder
-        // with
-        // secret=true, while a non-secret entry that happens to carry the placeholder
-        // text
-        // was never a secret and must not be re-supplied.
+        // with secret=true, while a non-secret entry that happens to carry the
+        // placeholder text was never a secret and must not be re-supplied.
         if (stored instanceof Context context) {
             return Boolean.TRUE.equals(context.getSecret()) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(context.getValue());
         }
@@ -1530,8 +1533,7 @@ class ConversationHitlService {
         }
 
         // The auto-approval CAP being reached is its own guard signal (distinct from
-        // the
-        // fixed >=2 no-progress threshold) — record it so operators can tell a
+        // the fixed >=2 no-progress threshold) — record it so operators can tell a
         // config-limited stop from the built-in loop breaker.
         if (capReached) {
             recordGuard("auto_approve_cap");
@@ -1966,8 +1968,8 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
             // An agent without hitlConfig can still pause on a task-level toolApprovals
-            // rule: the renderer then
-            // takes the blocks of the effective configuration stored on the pending batch.
+            // rule: the renderer then takes the blocks of the effective configuration
+            // stored on the pending batch.
             memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
                     hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
@@ -2042,7 +2044,7 @@ class ConversationHitlService {
     void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
         // Fix #1: the TOOL-LEVEL source is the config that ACTUALLY gated the paused
         // batch — the task-level override rides on the batch (persisted by
-        // AgentOrchestrator.buildPendingBatch). Prefer it; fall back to the
+        // ToolApprovalGateSupport.buildPendingBatch). Prefer it; fall back to the
         // agent-level hitlConfig.toolApprovals for a legacy batch (null field) or a
         // null batch. The inherit-from-outer fallback and the AUTO_APPROVE-demotion
         // below still read the OUTER hitlConfig — Task 10 semantics unchanged.

@@ -1,6 +1,6 @@
 # MCP Client — connecting EDDI to external MCP servers
 
-> EDDI is an MCP **server** (see [MCP Server](mcp-server.md), 96 tools) *and* an
+> EDDI is an MCP **server** (see [MCP Server](mcp-server.md), 108 tools) *and* an
 > MCP **client**. This page is about the client half: pointing one of your agents
 > at somebody else's MCP server so its tools become the agent's tools.
 

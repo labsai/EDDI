@@ -80,8 +80,13 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentD
  * agent. For each selected resource in the preview, writes the source content
  * into the target's existing resource (creating a new version).
  * <p>
- * The target agent's URI structure stays unchanged — only content is updated
- * and version numbers incremented.
+ * Matched resources are written as new versions of the target's own resources
+ * and the agent is re-pointed at them. Beyond that, a run can create resources
+ * and whole workflows the target lacks, take off the workflows the source no
+ * longer has, reorder workflows, and adopt the source agent's own settings; a
+ * resource the target changed locally since the last sync (CONFLICT) is only
+ * overwritten when it is named in the selection. Nothing is written when the
+ * source changes nothing.
  * <p>
  * Adding an extension type takes two edits: register the resource authority in
  * {@link WorkflowExtensions} (file extension + remote REST path) and add its
@@ -1498,20 +1503,6 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Whether the source workflow's steps may replace the target's, or the reason
-     * they may not.
-     * <p>
-     * Only when both sides wire up the same extensions. A source step referencing
-     * something the target workflow does not have would be written pointing at a
-     * resource id from the other instance — a pipeline step loading a config that
-     * is not in this database. That is the same refusal
-     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
-     * the step that would reference it.
-     *
-     * @return null when the source config can be adopted, otherwise the reason for
-     *         the operator
-     */
-    /**
      * A copy of the workflow whose steps' maps and lists are its own, so repointing
      * a reference in it leaves the original as it was.
      */
@@ -1550,6 +1541,20 @@ public class UpgradeExecutor {
         return value;
     }
 
+    /**
+     * Whether the source workflow's steps may replace the target's, or the reason
+     * they may not.
+     * <p>
+     * Only when both sides wire up the same extensions. A source step referencing
+     * something the target workflow does not have would be written pointing at a
+     * resource id from the other instance — a pipeline step loading a config that
+     * is not in this database. That is the same refusal
+     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
+     * the step that would reference it.
+     *
+     * @return null when the source config can be adopted, otherwise the reason for
+     *         the operator
+     */
     private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs,
                                          Set<String> createdForAdoption) {
         for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {

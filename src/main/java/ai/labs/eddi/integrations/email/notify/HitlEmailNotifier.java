@@ -85,10 +85,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * mail, with the Message-ID the row was given. A pause that has been decided
  * meanwhile is not mailed — the row ends {@code SUPPRESSED}.
  * <p>
- * Every terminal outcome is counted ({@code eddi.email.outbound}) and every
- * sent or failed notification audited (kind, conversation, the
- * {@link GdprPseudonymizer} pseudonym and the domain of the recipient,
- * Message-ID — never the body).
+ * Every outcome, retries included, is counted ({@code eddi.email.outbound}) and
+ * every sent notification, and every one that failed to render or send, is
+ * audited (a row that fails only because its pause could not be read is counted
+ * but not audited), with kind, conversation, the {@link GdprPseudonymizer}
+ * pseudonym and the domain of the recipient, Message-ID — never the body).
  */
 @ApplicationScoped
 public class HitlEmailNotifier {

@@ -25,7 +25,9 @@ public interface IGroupWorkspaceStore {
      * workspace is stored under the group id itself with an insert-only write, so
      * of two concurrent creators — on one node or several — exactly one inserts and
      * every other adopts that same document. All callers get the one workspace
-     * every later read returns.
+     * every later read returns. (A group id the backend cannot use as a storage id
+     * falls back to a generated id, with a duplicate guard that makes racers
+     * converge on one document.)
      */
     GroupWorkspace readOrCreate(String groupId) throws IResourceStore.ResourceStoreException;
 
@@ -62,7 +64,8 @@ public interface IGroupWorkspaceStore {
      * document only the first lands, so it too never lands blind.
      *
      * @return {@code true} if the write landed; {@code false} if a concurrent
-     *         writer changed the workspace first (re-read before retrying)
+     *         writer changed the workspace first (re-read before retrying) or the
+     *         workspace was deleted meanwhile
      */
     boolean casRevision(GroupWorkspace workspace) throws IResourceStore.ResourceStoreException;
 }

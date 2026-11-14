@@ -26,10 +26,11 @@ import java.util.TreeMap;
  * </ol>
  * <p>
  * <strong>Note:</strong> This is NOT a full RFC 8785 (JCS) implementation —
- * Jackson's default numeric serialization is used. Since EDDI's signed payloads
- * contain only string fields, this is sufficient for inter-agent signature
- * verification. If numeric canonicalization becomes necessary, a dedicated JCS
- * library should be adopted.
+ * Jackson's default numeric serialization is used. The only numbers EDDI's
+ * signed envelopes carry themselves are integral ({@code timestampMs},
+ * {@code keyVersion}), which Jackson writes the same way JCS does; a payload
+ * with floating-point values may not. If numeric canonicalization becomes
+ * necessary, a dedicated JCS library should be adopted.
  * <p>
  * Strict duplicate key detection is enabled to prevent collision attacks where
  * different JSON payloads produce identical canonical output.
@@ -58,9 +59,7 @@ public final class JacksonCanonicalizer {
      * <strong>Not RFC 8785 (JCS).</strong> Numbers keep Jackson's default
      * serialization, so a payload containing numbers may canonicalize to different
      * bytes than a true JCS implementation would produce — see the class-level
-     * note. This method's Javadoc used to claim RFC 8785 outright, which would send
-     * a peer implementing verification against JCS number formatting straight into
-     * failing signature checks.
+     * note.
      *
      * @param json
      *            the input JSON string

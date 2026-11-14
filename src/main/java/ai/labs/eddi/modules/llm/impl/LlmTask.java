@@ -2241,8 +2241,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
      * for the paused task, hands the frozen batch + human decision to
      * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
-     * applies the verdicts — implemented in Task 9), then stores the final result
-     * EXACTLY like the normal path and runs {@code postResponse}.
+     * applies the verdicts), then stores the final result EXACTLY like the normal
+     * path and runs {@code postResponse}.
      * <p>
      * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
      * deliberately skips every side-effecting step that already ran before the
@@ -2322,7 +2322,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
 
-        // === Hand off to the resume loop (Task 9) ===
+        // === Hand off to the resume loop ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
         // Same JSON policy the live loop would have applied — a resumed continuation
@@ -3799,7 +3799,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * @param context
      *            the retrieved context (may be null)
      * @param maxChars
-     *            character ceiling; {@code -1} = unbounded
+     *            character ceiling; {@code <= 0} = unbounded
      * @param source
      *            human-readable source name, used in the warning
      * @return the context, truncated with an explanatory marker when it exceeded

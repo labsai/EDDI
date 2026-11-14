@@ -30,7 +30,9 @@ public record TeamBudgetMonth(String groupId, String month, double spentUsd, dou
 
     /**
      * @param kind
-     *            {@code SET}, {@code TRANSFER_OUT} or {@code TRANSFER_IN}
+     *            {@code SET}, {@code TRANSFER_OUT}, {@code TRANSFER_IN} or
+     *            {@code TRANSFER_OUT_REVERSED} (a debit undone after its credit
+     *            failed)
      * @param actor
      *            the admin principal
      * @param capAfterUsd

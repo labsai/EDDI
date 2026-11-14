@@ -64,7 +64,7 @@ import java.util.Map;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP tools for administering EDDI agents, packages, and resources. Exposes
+ * MCP tools for administering EDDI agents, workflows, and resources. Exposes
  * deploy, undeploy, CRUD, batch cascade, and introspection as MCP-compliant
  * tools via the Quarkus MCP Server extension.
  *
@@ -308,12 +308,12 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "create_agent", description = "Create a new Agent with a given name and optional packages. "
+    @Tool(name = "create_agent", description = "Create a new Agent with a given name and optional workflows. "
             + "The Agent is created and its descriptor is updated with the provided name and description. "
             + "Returns the Agent ID and Location URI of the newly created agent.")
     public String createAgent(@ToolArg(description = "Agent name (required)") String name,
                               @ToolArg(description = "Agent description (optional)", required = false) String description,
-                              @ToolArg(description = "Comma-separated list of package URIs to include (optional, format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)",
+                              @ToolArg(description = "Comma-separated list of workflow URIs to include (optional, format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)",
                                        required = false) String workflowUris) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (name == null || name.isBlank())
@@ -361,12 +361,12 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced packages and resources.")
+    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources.")
     public String deleteAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "Permanently delete? (default: false)", required = false,
                                        defaultValue = "false") Boolean permanent,
-                              @ToolArg(description = "Cascade-delete packages and resources? (default: false)", required = false,
+                              @ToolArg(description = "Cascade-delete workflows and resources? (default: false)", required = false,
                                        defaultValue = "false") Boolean cascade) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
@@ -382,8 +382,8 @@ public class McpAdminTools {
     }
 
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
-            + "For structural changes (adding/removing packages, modifying resources), use the "
-            + "individual resource tools (read_workflow, read_resource) and the REST API directly.")
+            + "For structural changes (adding/removing workflows, modifying resources), use the "
+            + "individual resource tools (read_workflow, read_resource, update_resource, apply_agent_changes) or the REST API directly.")
     public String updateAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "New Agent name (optional)", required = false) String name,
@@ -437,7 +437,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "read_workflow", description = "Read a workflow's full workflow configuration. "
-            + "Returns the list of package extensions (parser, behavior, langchain, httpcalls, output, etc.) "
+            + "Returns the list of workflow steps (parser, behavior, langchain, httpcalls, output, etc.) "
             + "with their types and resource URIs. Use this to understand what's inside an agent's workflow.")
     public String readWorkflow(@ToolArg(description = "Workflow ID (required)") String workflowId,
                                @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
@@ -642,9 +642,9 @@ public class McpAdminTools {
     }
 
     @Tool(name = "apply_agent_changes", description = "Batch-cascade multiple resource URI changes through "
-            + "package → Agent in ONE pass. After updating resources with update_resource, use this to wire "
-            + "the new versions into the agent's packages and optionally redeploy. "
-            + "This replaces ALL URIs in-memory and saves each package/agent ONCE — no wasteful intermediate versions. "
+            + "workflow → Agent in ONE pass. After updating resources with update_resource, use this to wire "
+            + "the new versions into the agent's workflows and optionally redeploy. "
+            + "This replaces ALL URIs in-memory and saves each workflow/agent ONCE — no wasteful intermediate versions. "
             + "Each oldUri must be a reference the agent actually holds (a workflow step's resource or the workflow itself), "
             + "and newUri the same kind of resource with a version; otherwise nothing is written. Shared with the REST "
             + "endpoint POST /agentstore/agents/{id}/cascade.")
@@ -688,7 +688,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "list_agent_resources", description = "Get a complete inventory of all resources in an agent's workflow. "
-            + "Walks Agent → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. "
+            + "Walks Agent → workflows → steps and returns a flat summary with all resource IDs, types, and URIs. "
             + "This is the fastest way to understand an agent's full configuration before making changes.")
     public String listAgentResources(@ToolArg(description = "Agent ID (required)") String agentId,
                                      @ToolArg(description = "Agent version (default: latest)", required = false) Integer version) {
@@ -1013,6 +1013,7 @@ public class McpAdminTools {
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
             + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
+            + "A cron interval or heartbeat below eddi.schedule.min-interval-seconds (default 60) is refused. "
             + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
             + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")

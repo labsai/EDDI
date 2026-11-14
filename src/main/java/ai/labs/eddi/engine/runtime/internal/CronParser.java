@@ -79,6 +79,12 @@ public final class CronParser {
      * @param zoneId
      *            time zone for evaluation
      * @return next fire instant (UTC)
+     * @throws IllegalArgumentException
+     *             if the expression does not have exactly 5 fields or a field is
+     *             invalid
+     * @throws IllegalStateException
+     *             if the expression has no fire within two years after
+     *             {@code after}
      */
     public static Instant computeNextFire(String cronExpression, Instant after, ZoneId zoneId) {
         String[] parts = cronExpression.trim().split("\\s+");
@@ -211,6 +217,10 @@ public final class CronParser {
         return local.toInstant(offsets.get(0));
     }
 
+    private static final int SECONDS_PER_HOUR = 3600;
+
+    private static final int SECONDS_PER_MINUTE = 60;
+
     /**
      * The calendar window the day scan below covers: a full 28-year Gregorian
      * cycle, and one that contains no century exception (2100 is not a leap year,
@@ -224,10 +234,6 @@ public final class CronParser {
      * cycle, which is what makes the answer a property of the EXPRESSION and not of
      * the year in which someone asks.
      */
-    private static final int SECONDS_PER_HOUR = 3600;
-
-    private static final int SECONDS_PER_MINUTE = 60;
-
     private static final int SCAN_FIRST_YEAR = 2001;
 
     /** @see #SCAN_FIRST_YEAR */

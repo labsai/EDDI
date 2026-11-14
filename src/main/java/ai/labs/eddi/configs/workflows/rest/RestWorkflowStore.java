@@ -788,7 +788,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     private void duplicateDictionaryInParser(WorkflowStep workflowStep) throws ServiceException {
-        // Same guard as deleteParserDictionaries: a stored parser step may carry no
+        // Same guard as collectParserDictionaries: a stored parser step may carry no
         // extensions block at all, and a deep copy that NPEs leaves the sub-resources
         // it already created behind.
         // Pattern-matched, not cast, for the same reason collectParserDictionaries

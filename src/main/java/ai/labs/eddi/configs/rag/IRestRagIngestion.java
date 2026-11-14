@@ -56,7 +56,8 @@ public interface IRestRagIngestion {
     @GET
     @Path("/{id}/ingestion/{ingestionId}/status")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(responseCode = "200", description = "Ingestion status: pending, processing, completed, or failed.")
+    @APIResponse(responseCode = "200",
+                 description = "Ingestion status: pending, processing, completed, or 'failed: reason'. 404 when the id is unknown or its status has expired.")
     @Operation(summary = "Get ingestion status", description = "Poll the status of an async ingestion operation.")
     Response getIngestionStatus(@PathParam("id") String ragConfigId, @PathParam("ingestionId") String ingestionId);
 
@@ -66,7 +67,7 @@ public interface IRestRagIngestion {
     @Path("/{id}/sources/{sourceId}/run")
     @Produces(MediaType.APPLICATION_JSON)
     @APIResponse(responseCode = "202", description = "Run started; poll the runs endpoint for progress.")
-    @APIResponse(responseCode = "409", description = "A run is already in flight for this source.")
+    @APIResponse(responseCode = "409", description = "The source is disabled, or a run is already in flight for it.")
     @Operation(summary = "Run an ingestion source",
                description = "Crawls the source and updates the knowledge base. Runs async on a virtual thread.")
     Response runSource(@PathParam("id") String ragConfigId,
@@ -80,7 +81,8 @@ public interface IRestRagIngestion {
     @APIResponse(responseCode = "200", description = "What a run would change, having embedded nothing.")
     @Operation(summary = "Preview an ingestion source",
                description = "Crawls the source and reports what would change without embedding or recording "
-                       + "anything. Blocks for the length of the crawl, so keep the source's limits small.")
+                       + "anything. Blocks for the length of the crawl, so keep the source's limits small. "
+                       + "Answers 429 with Retry-After when no preview slot is free.")
     Response previewSource(@PathParam("id") String ragConfigId,
                            @PathParam("sourceId") String sourceId,
                            @Parameter(name = "version", required = true, example = "1")
