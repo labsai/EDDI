@@ -230,7 +230,14 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         V previous = local.remove(key);
         localOnly.remove(key(key));
         try {
-            Optional<ISharedKv.Versioned> stored = shared.get(key(key));
+            // The value read only feeds the return value: a failed read must not skip the
+            // delete.
+            Optional<ISharedKv.Versioned> stored = Optional.empty();
+            try {
+                stored = shared.get(key(key));
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Shared cache %s: could not read %s before removing it: %s", shared.bucket(), key, e.getMessage());
+            }
             shared.delete(key(key));
             V removed = stored.map(versioned -> decode(versioned.value())).orElse(null);
             return removed != null ? removed : previous;

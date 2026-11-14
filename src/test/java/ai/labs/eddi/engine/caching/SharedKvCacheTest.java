@@ -39,7 +39,9 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("Cluster-shared and cluster-invalidated caches")
@@ -163,6 +165,21 @@ class SharedKvCacheTest {
         assertEquals("conv-1", nodeB.remove("task-1"));
         assertNull(nodeA.get("task-1"));
         assertNull(nodeB.remove("task-1"), "a second remove finds nothing");
+    }
+
+    @Test
+    @DisplayName("a failed pre-read does not stop remove from deleting the shared record")
+    void removeDeletesEvenWhenTheValueReadFails() {
+        var kv = spy(new InMemorySharedKv("A2A_TASKS", Duration.ofMinutes(5)));
+        ICache<String, String> node = new SharedKvCache<>(local("a"), kv, true);
+        node.put("task-1", "conv-1");
+        doThrow(new ClusterUnavailableException("read failed")).when(kv).get(any());
+
+        node.remove("task-1");
+
+        verify(kv).delete(any());
+        reset(kv);
+        assertTrue(kv.get(KvKeys.hashed("task-1")).isEmpty(), "the shared record is gone");
     }
 
     @Test
