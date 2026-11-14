@@ -783,6 +783,11 @@ public class HtmlToMarkdownConverter {
         if (href == null || href.isEmpty()) {
             return "";
         }
+        // A backslash escapes the next character in a Markdown destination, so "a\()x"
+        // has balanced parentheses to the count below but ends the link at its ")" and
+        // spills the rest into the text. Percent-encoded, as a browser sends it, no
+        // backslash is left to escape anything - in either destination form.
+        href = href.replace("\\", "%5C");
         if (!href.contains(" ") && parenthesesBalance(href)) {
             return href;
         }

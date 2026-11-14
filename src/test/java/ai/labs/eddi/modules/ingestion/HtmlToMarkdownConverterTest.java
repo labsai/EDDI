@@ -242,6 +242,17 @@ class HtmlToMarkdownConverterTest {
     }
 
     @Test
+    @DisplayName("a backslash in a destination cannot escape a parenthesis and break out of the link")
+    void convert_backslashInDestinationCannotBreakOut() {
+        String result = converter.convert("<p><a href=\"https://example.com/a\\()INJECTED\">Link</a> "
+                + "<img src=\"https://example.com/b\\()INJECTED\" alt=\"Logo\"></p>", "https://example.com/");
+
+        assertTrue(result.contains("[Link](https://example.com/a%5C()INJECTED)"), result);
+        assertTrue(result.contains("![Logo](https://example.com/b%5C()INJECTED)"), result);
+        assertFalse(result.contains("\\("), result);
+    }
+
+    @Test
     @DisplayName("an overlong destination is dropped, mailto is kept")
     void convert_destinationLimits() {
         String longHref = "https://example.com/" + "a".repeat(HtmlToMarkdownConverter.MAX_DESTINATION_LENGTH);

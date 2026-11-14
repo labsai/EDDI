@@ -85,6 +85,17 @@ Seven confirmed findings from a security review of the outbound paths.
   under the fragment's own `$id`. **`properties` beside a `$ref`** are united with the target's (a property both
   define is merged the same way), so the target's properties, and its `required` entries for them, survive.
 - **Markdown destinations** with an embedded line ending or control character are dropped.
+### Third review round
+
+- **Callback Reference Objects** (`callbacks.onEvent: {$ref: ...}`, in an operation or `components.callbacks`) are
+  followed; a Callback Object's `x-` extensions stay data. Relocated schema names use a counter per stem, so many
+  mappings sharing one name are allocated in linear time.
+- **Crawl scope**: an ambiguous path (an encoded `/` or `\`) keeps its raw form through canonicalization instead of
+  a normalized one that a scope check would approve; the URL that will be fetched is scope-checked too, for links and
+  sitemap entries. The parameter-preserving path reading resolves only complete dot segments (`..;` is a segment to
+  nginx), and the parameter-free reading merges a segment that is only a parameter (`/docs/;x=1/../private`).
+- **Markdown destinations**: a backslash is percent-encoded, so `a\()x` cannot escape a parenthesis and end the link
+  early.
 ### Design decisions
 
 - Inline-and-bundle rather than refusing remote refs: multi-file specs keep working, and no new property is needed.
