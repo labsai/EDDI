@@ -27,6 +27,7 @@ public class AlertSettings {
     private final Duration eventRetention;
     private final Duration webhookTimeout;
     private final Optional<String> managerUrl;
+    private final int maxRulesPerAgent;
 
     @Inject
     public AlertSettings(@ConfigProperty(name = "eddi.alerts.enabled", defaultValue = "true") boolean enabled,
@@ -37,7 +38,8 @@ public class AlertSettings {
             @ConfigProperty(name = "eddi.alerts.claim-lease", defaultValue = "2m") Duration claimLease,
             @ConfigProperty(name = "eddi.alerts.event-retention", defaultValue = "90d") Duration eventRetention,
             @ConfigProperty(name = "eddi.alerts.webhook-timeout", defaultValue = "10s") Duration webhookTimeout,
-            @ConfigProperty(name = "eddi.alerts.manager-url") Optional<String> managerUrl) {
+            @ConfigProperty(name = "eddi.alerts.manager-url") Optional<String> managerUrl,
+            @ConfigProperty(name = "eddi.alerts.max-rules-per-agent", defaultValue = "50") int maxRulesPerAgent) {
         this.enabled = enabled;
         this.queueCapacity = Math.max(1, queueCapacity);
         this.maintenanceInterval = maintenanceInterval;
@@ -47,6 +49,7 @@ public class AlertSettings {
         this.eventRetention = eventRetention;
         this.webhookTimeout = clampTimeout(webhookTimeout);
         this.managerUrl = managerUrl.map(String::strip).filter(url -> !url.isEmpty()).map(url -> url.replaceAll("/+$", ""));
+        this.maxRulesPerAgent = Math.max(1, maxRulesPerAgent);
     }
 
     /**
@@ -64,7 +67,7 @@ public class AlertSettings {
     /** Defaults, for tests. */
     public static AlertSettings defaults() {
         return new AlertSettings(true, 1000, Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2), Duration.ofDays(90),
-                Duration.ofSeconds(10), Optional.empty());
+                Duration.ofSeconds(10), Optional.empty(), 50);
     }
 
     public boolean enabled() {
@@ -105,6 +108,15 @@ public class AlertSettings {
      */
     public Optional<String> managerUrl() {
         return managerUrl;
+    }
+
+    /**
+     * The most rules that may list one agent, and the most rules over every agent
+     * (at least 1). Every rule watching an agent is evaluated on each of its
+     * ratings and failed turns, so at most twice this many apply to one agent.
+     */
+    public int maxRulesPerAgent() {
+        return maxRulesPerAgent;
     }
 
     /**

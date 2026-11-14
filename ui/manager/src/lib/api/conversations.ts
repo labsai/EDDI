@@ -361,6 +361,19 @@ export function parseConversationUri(resource: string): string {
   }
 }
 
+/** Options of {@link getConversationDescriptors} beyond its positional filters. */
+export interface ConversationListingOptions {
+  /**
+   * Only the caller's own conversations (`mine=true`). An admin's listing
+   * otherwise holds every user's, so anything that picks a conversation to
+   * CONTINUE must set this, or it continues somebody else's. The owner is
+   * matched server-side against the principal the backend resolved, which the
+   * Manager does not reliably know, so it cannot be filtered here instead.
+   * Without a signed-in user (authorization off) the backend ignores it.
+   */
+  mine?: boolean;
+}
+
 // API functions — using low-level /conversationstore/conversations endpoints
 //
 // NOTE on pagination: `index` is a 0-based page of RESULTS, not a row offset:
@@ -375,7 +388,8 @@ export async function getConversationDescriptors(
   agentId = "",
   agentVersion?: number,
   conversationState?: ConversationState,
-  viewState?: ViewState
+  viewState?: ViewState,
+  options: ConversationListingOptions = {}
 ): Promise<ConversationDescriptor[]> {
   const params = new URLSearchParams({
     limit: String(limit),
@@ -386,6 +400,7 @@ export async function getConversationDescriptors(
   if (agentVersion) params.set("agentVersion", String(agentVersion));
   if (conversationState) params.set("conversationState", conversationState);
   if (viewState) params.set("viewState", viewState);
+  if (options.mine) params.set("mine", "true");
   const raw = await api.get<ConversationDescriptorRaw[] | { value: ConversationDescriptorRaw[]; Count?: number }>(
     `/conversationstore/conversations?${params.toString()}`
   );

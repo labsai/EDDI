@@ -305,7 +305,15 @@ public class RemoteApiResourceSource implements IResourceSource {
             failuresByPath.put(path, e);
             throw e;
         }
-        String scrubbed = json == null ? null : secretScrubber.apply(json);
+        String scrubbed;
+        try {
+            scrubbed = json == null ? null : secretScrubber.apply(json);
+        } catch (RuntimeException e) {
+            // A document the scrubber refuses (one it cannot parse) is a failed read
+            // too, and remembered as one for the same reason.
+            failuresByPath.put(path, e);
+            throw e;
+        }
         if (scrubbed != null) {
             documentsByPath.put(path, scrubbed);
         }
@@ -889,7 +897,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
         }
 
-        throw new RuntimeException("Agent " + agentId + " is not listed on " + baseUrl
+        throw new RemoteReadException("Agent " + agentId + " is not listed on " + baseUrl
                 + " — cannot determine its latest version. Pass an explicit sourceAgentVersion.");
     }
 
