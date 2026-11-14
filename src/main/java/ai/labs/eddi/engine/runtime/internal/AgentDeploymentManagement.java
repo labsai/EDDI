@@ -355,10 +355,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 // ready.
                 continue;
             }
-            worthWaiting = true;
-            if (status == null && deployAllowed) {
+            if (status == null) {
+                if (!deployAllowed) {
+                    // Not here, and nothing will deploy it before the migrations are done:
+                    // waiting would only cost the request the full maxWait.
+                    continue;
+                }
                 deployOnDemand(environment, agentId, version);
             }
+            worthWaiting = true;
         }
         if (!worthWaiting) {
             return null;
@@ -1067,10 +1072,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
         runDeferredDocumentMigrations();
         try {
-            // Before the records are read, not after: an undeploy drops the agent from
-            // the registry and then flips its record. Read the other way round, an
-            // undeploy landing between the two reads finds the record still deployed and
-            // the agent no longer served, and this sweep would deploy it again.
+            // The registry before the records, not after, and every undeploy path
+            // (REST, the daily retirement, sub-agent teardown, the end-of-discussion
+            // cleanup) flips the record BEFORE it leaves the registry. Together that
+            // means a registry read that no longer finds the agent is always followed
+            // by a records read that no longer wants it. Either half alone redeploys
+            // an undeploy in flight: with the records read first, one landing between
+            // the two reads; with the registry dropped first, one whose gap held both
+            // reads — and on a single node the agent then stayed served under an
+            // undeployed record until a restart.
             untrackWhatIsNotServed();
             List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
@@ -1471,11 +1481,34 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         if (successor == null || successor.getAgentVersion() <= agentVersion) {
             return false;
         }
-        agentFactory.undeployAgent(environment, agentId, agentVersion);
-        deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+        undeployRecordFirst(environment, agentId, agentVersion);
         LOGGER.info(format("Retired Agent (id: %s, version: %d): its conversations continue on compatible version %d", sanitize(agentId),
                 agentVersion, successor.getAgentVersion()));
         return true;
+    }
+
+    /**
+     * Retires a version whose record says deployed: the record first, the registry
+     * second. The daily retirement does not hold the sweep's lock, and the sweep
+     * deploys what is recorded deployed and not served — with the registry dropped
+     * first, a sweep that read both between the drop and the record write deployed
+     * the version again, and on a single node it then stayed served under an
+     * undeployed record. A registry removal that fails puts the record back, so the
+     * two never disagree that way.
+     */
+    private void undeployRecordFirst(Environment environment, String agentId, Integer agentVersion) {
+        deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+        try {
+            agentFactory.undeployAgent(environment, agentId, agentVersion);
+        } catch (RuntimeException e) {
+            try {
+                deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, deployed);
+            } catch (RuntimeException restoreFailure) {
+                LOGGER.errorf("Agent %s version %d is still deployed in %s, but its deployment record now says undeployed: %s",
+                        sanitize(agentId), agentVersion, environment, restoreFailure.getMessage());
+            }
+            throw e;
+        }
     }
 
     private void manageDeploymentOfOldAgent(Environment environment, String agentId, Integer agentVersion)
@@ -1485,8 +1518,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         if (conversationCount == 0) {
             // this old Agent version has no more active conversations connected to it,
             // so we undeploy it
-            agentFactory.undeployAgent(environment, agentId, agentVersion);
-            deploymentStore.setDeploymentInfo(environment.toString(), agentId, agentVersion, undeployed);
+            undeployRecordFirst(environment, agentId, agentVersion);
             LOGGER.info(format("Successfully undeployed Agent (id: %s, version: %d)", agentId, agentVersion));
         } else {
             // not the latest agent, but still has active conversations connected to it,

@@ -18,6 +18,7 @@ import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -133,11 +134,17 @@ public class TeardownAgentTool {
             }
 
             // --- Undeploy ---
+            // The records first, the registry second: the deployment sweep deploys what
+            // is recorded deployed and not served, so a sweep running between a
+            // registry drop and the record write would deploy the agent again.
+            List<Integer> flipped = markDeploymentRecordsUndeployed(agentId);
             try {
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
-                markDeploymentRecordsUndeployed(agentId);
                 LOGGER.infof("[TEARDOWN] Undeployed agent '%s'", agentId);
             } catch (Exception e) {
+                // Still served: the records go back to deployed, or they would say
+                // undeployed for an agent that answers.
+                restoreDeploymentRecords(agentId, flipped);
                 LOGGER.warnf("[TEARDOWN] Undeploy failed for agent '%s': %s", agentId, e.getMessage());
                 return "❌ Failed to undeploy agent '%s': %s".formatted(agentId, e.getMessage());
             }
@@ -231,20 +238,39 @@ public class TeardownAgentTool {
      * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
      * REST undeploy does. The deployment sweep deploys what is recorded and no
      * longer served, so a record left saying deployed would undo this undeploy
-     * within about ten seconds. Never fatal.
+     * within about ten seconds. Called BEFORE the registry removal, for the same
+     * reason. Never fatal.
+     *
+     * @return the versions whose record this flipped, so a registry removal that
+     *         fails can put them back
      */
-    private void markDeploymentRecordsUndeployed(String agentId) {
+    private List<Integer> markDeploymentRecordsUndeployed(String agentId) {
+        List<Integer> flipped = new ArrayList<>();
         if (deploymentStore == null) {
-            return;
+            return flipped;
         }
         try {
             for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
                 if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
                     deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                    flipped.add(info.getAgentVersion());
                 }
             }
         } catch (Exception e) {
             LOGGER.warnf("[TEARDOWN] Could not mark the deployment record(s) of agent '%s' undeployed: %s", sanitize(agentId), e.getMessage());
+        }
+        return flipped;
+    }
+
+    /** Puts back the records {@link #markDeploymentRecordsUndeployed} flipped. */
+    private void restoreDeploymentRecords(String agentId, List<Integer> versions) {
+        for (Integer version : versions) {
+            try {
+                deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, version, DeploymentStatus.deployed);
+            } catch (Exception e) {
+                LOGGER.errorf("[TEARDOWN] Agent '%s' version %d is still deployed, but its deployment record now says undeployed: %s",
+                        sanitize(agentId), version, e.getMessage());
+            }
         }
     }
 

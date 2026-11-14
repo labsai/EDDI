@@ -177,6 +177,32 @@ class GroupLifecycleOpsTest {
         verify(deploymentStore, never()).setDeploymentInfo(any(), eq("other"), any(), any());
     }
 
+    @Test
+    void cleanupEphemeralAgents_flipsTheRecordsBeforeLeavingTheRegistry() throws Exception {
+        // The sweep deploys what is recorded deployed and not served: a sweep between a
+        // registry drop and the record write would deploy the agent again.
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production)));
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+
+        var order = inOrder(deploymentStore, agentFactory);
+        order.verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.undeployed);
+        order.verify(agentFactory).undeployAgent(Environment.production, AGENT_A, null);
+    }
+
+    @Test
+    void cleanupEphemeralAgents_failedRegistryRemovalPutsTheRecordsBack() throws Exception {
+        var ops = ops();
+        when(deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)).thenReturn(List.of(record(AGENT_A, 1, Environment.production)));
+        doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(Environment.production, AGENT_A, null);
+
+        ops.cleanupEphemeralAgents(gc(AGENT_A), configWithPolicy(LifecyclePolicy.UNDEPLOY_ONLY));
+
+        verify(deploymentStore).setDeploymentInfo("production", AGENT_A, 1, DeploymentStatus.deployed);
+        verify(agentStore, never()).deleteAllPermanently(any());
+    }
+
     private static DeploymentInfo record(String agentId, int version, Environment environment) {
         var info = new DeploymentInfo();
         info.setAgentId(agentId);

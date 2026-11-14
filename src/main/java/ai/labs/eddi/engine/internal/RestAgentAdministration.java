@@ -922,8 +922,24 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     private void undeploy(Deployment.Environment environment, String agentId, Integer version, boolean disableSchedules) {
         Callable<Void> undeployAgentCallable = () -> {
             try {
-                agentFactory.undeployAgent(environment, agentId, version);
+                // The record first, the registry second. The deployment sweep reads the
+                // registry and then the records, and deploys what is recorded deployed
+                // but not served; with the registry dropped first, a sweep whose two
+                // reads both fell between the drop and the record write deployed the
+                // agent again, and on a single node it then stayed served under an
+                // undeployed record until a restart.
+                boolean wasRecordedDeployed = recordedDeployed(environment, agentId, version);
                 deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.undeployed);
+                try {
+                    agentFactory.undeployAgent(environment, agentId, version);
+                } catch (RuntimeException e) {
+                    // Still served: put the record back, or it says undeployed for an agent
+                    // that answers — which nothing reconciles on a single node.
+                    if (wasRecordedDeployed) {
+                        restoreDeployedRecord(environment, agentId, version);
+                    }
+                    throw e;
+                }
 
                 // Lifecycle hook: auto-disable the agent's schedules once no version of
                 // it is left to run them — see undeployAgent.
@@ -939,6 +955,31 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         };
 
         runtime.submitCallable(undeployAgentCallable, ThreadContext.getResources());
+    }
+
+    /**
+     * Whether the record of this version says deployed. A read that fails answers
+     * false: the undeploy goes ahead, and only the compensation for a failed
+     * registry removal is skipped.
+     */
+    private boolean recordedDeployed(Deployment.Environment environment, String agentId, Integer version) {
+        try {
+            DeploymentInfo info = deploymentStore.getDeploymentInfo(environment.toString(), agentId, version);
+            return info != null && info.getDeploymentStatus() == DeploymentInfo.DeploymentStatus.deployed;
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            log.debugf("Could not read the deployment record of Agent %s v%d before undeploying it: %s", sanitize(agentId), version,
+                    sanitize(e.getMessage()));
+            return false;
+        }
+    }
+
+    private void restoreDeployedRecord(Deployment.Environment environment, String agentId, Integer version) {
+        try {
+            deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
+        } catch (RuntimeException e) {
+            log.errorf("Agent %s v%d is still deployed in %s, but its deployment record now says undeployed: %s", sanitize(agentId), version,
+                    environment, sanitize(e.getMessage()));
+        }
     }
 
     @Override
