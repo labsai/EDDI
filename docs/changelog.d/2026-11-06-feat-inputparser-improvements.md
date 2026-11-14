@@ -82,7 +82,7 @@ applies its length bound before lower-casing each dictionary word.
 [`SemanticFallback.java`](../../src/main/java/ai/labs/eddi/modules/nlp/semantic/SemanticFallback.java),
 [`RegularDictionary.java`](../../src/main/java/ai/labs/eddi/modules/nlp/extensions/dictionaries/RegularDictionary.java),
 [`VaultGrantChecker.java`](../../src/main/java/ai/labs/eddi/secrets/VaultGrantChecker.java),
-[`semantic-parser.md`](../semantic-parser.md); Platform Operator prompt (revision 61).
+[`semantic-parser.md`](../semantic-parser.md); Platform Operator prompt (revision 63).
 
 ### Behaviour changes for existing agents
 
