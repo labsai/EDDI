@@ -1,0 +1,19 @@
+{
+  "$comment": "First-load budgets in KB (1000 bytes) of gzip -9, checked by ui/scripts/check-bundle-budget.mjs in CI. baselineKb is origin/main before phase 0 (2026-11-04); the budgets are the phase-0 result plus a little headroom. Raising one is a decision (planning/frontend-unification-plan.md §8), not a fix. Manager raised 630 -> 650 KB on 2026-11-14 by the owner's decision: #1272 measured 630 against a main that did not yet include the UI PRs merged alongside it, and together they reached 641.1 KB.",
+  "apps": {
+    "manager": {
+      "dist": "manager/dist",
+      "pages": {
+        "manage.html": { "baselineKb": 743.8, "budgetKb": 650 },
+        "workforce.html": { "baselineKb": 743.8, "budgetKb": 650 },
+        "welcome.html": { "baselineKb": 743.8, "budgetKb": 650 }
+      }
+    },
+    "chat": {
+      "dist": "chat/dist",
+      "pages": {
+        "chat.html": { "baselineKb": 224.8, "budgetKb": 170 }
+      }
+    }
+  }
+}

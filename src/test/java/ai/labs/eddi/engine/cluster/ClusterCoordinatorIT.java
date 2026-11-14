@@ -452,7 +452,7 @@ class ClusterCoordinatorIT {
         held.onLost(() -> lost.set(true));
 
         // The listing is one KV watch; its renewal time is the server's write time.
-        List<KvLeaseManager.LeaseSnapshot> listed = c.leases.snapshot("c.", 100);
+        List<KvLeaseManager.LeaseSnapshot> listed = c.leases.snapshot(100);
         KvLeaseManager.LeaseSnapshot snapshot = listed.stream().filter(s -> s.key().equals("c.conv-admin")).findFirst().orElseThrow();
         assertEquals("n1", snapshot.holder().node());
         assertTrue(Math.abs(System.currentTimeMillis() - snapshot.renewedAt()) < 10_000, "renewedAt from the server: " + snapshot.renewedAt());

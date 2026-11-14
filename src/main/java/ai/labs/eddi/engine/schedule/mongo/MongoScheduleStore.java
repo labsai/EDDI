@@ -29,6 +29,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -557,18 +558,43 @@ public class MongoScheduleStore implements IScheduleStore {
 
     // ========================= Polling & Claiming =========================
 
+    /**
+     * The database's clock in epoch milliseconds, the unit {@code claimedAt} is
+     * stored in. A claim writes {@code claimedAt} with it and every lease check
+     * compares against it, so the instances' own clocks never meet in one
+     * comparison — see {@link IScheduleStore#tryClaim}.
+     */
+    private static Document dbNowMs() {
+        return new Document("$toLong", "$$NOW");
+    }
+
+    /**
+     * A CLAIMED row's lease has run out: {@code claimedAt <= dbNow - lease}. The
+     * one definition {@link #findDueSchedules} and the claim share — they MUST
+     * agree, else expired CLAIMED rows are returned every poll but never re-fired.
+     * <p>
+     * {@code $expr} orders a null or missing {@code claimedAt} below every number,
+     * so a CLAIMED row without one counts as expired and is reclaimed rather than
+     * left stuck. Every claim writes the field; such a row comes only from
+     * {@link #createSchedule}, which stores the caller's {@code fireStatus} as
+     * given (PostgreSQL's always inserts PENDING, so it never holds one).
+     */
+    private static Bson leaseExpired(Duration lease) {
+        return and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()),
+                expr(new Document("$lte", List.of("$" + CLAIMED_AT, new Document("$subtract", List.of(dbNowMs(), lease.toMillis()))))));
+    }
+
     @Override
-    public List<ScheduleConfiguration> findDueSchedules(Instant now, Instant leaseExpiry, int maxRetries)
+    public List<ScheduleConfiguration> findDueSchedules(Instant now, Duration lease, int maxRetries)
             throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(now);
-            long leaseMs = epochMillis(leaseExpiry);
 
             // Due = enabled AND nextFire <= now AND
             // (PENDING OR (CLAIMED + lease expired) OR (FAILED + retry due + under max
             // retries))
             Bson pendingFilter = eq(FIRE_STATUS, FireStatus.PENDING.name());
-            Bson leaseExpiredFilter = and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs));
+            Bson leaseExpiredFilter = leaseExpired(lease);
             Bson retryDueFilter = and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs), lt(FAIL_COUNT, maxRetries));
 
             Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
@@ -589,28 +615,49 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Duration lease) throws IResourceStore.ResourceStoreException {
+        return claim(scheduleId, instanceId, now, lease, true);
+    }
+
+    @Override
+    public boolean tryClaimAnyTime(String scheduleId, String instanceId, Instant now, Duration lease)
+            throws IResourceStore.ResourceStoreException {
+        return claim(scheduleId, instanceId, now, lease, false);
+    }
+
+    /**
+     * The CAS claim behind {@link #tryClaim} ({@code dueOnly}) and
+     * {@link #tryClaimAnyTime}.
+     */
+    private boolean claim(String scheduleId, String instanceId, Instant now, Duration lease, boolean dueOnly)
+            throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(now);
-            long leaseMs = epochMillis(leaseExpiry);
 
             // Atomic CAS with complete guards. Claim if PENDING, FAILED with retry
-            // due, OR a CLAIMED row whose lease expired (claimedAt <= leaseExpiry) —
-            // the last clause steals a crashed/wedged instance's claim and MUST mirror
-            // findDueSchedules' leaseExpiredFilter, else expired CLAIMED rows are
-            // returned every poll but never re-fired.
+            // due, OR a CLAIMED row whose lease expired — the last clause steals a
+            // crashed/wedged instance's claim.
             // enabled is re-checked here, not only in findDueSchedules: a schedule
-            // disabled between the poll's read and this claim was fired anyway.
-            Bson filter = and(eq(ID, scheduleId), eq(ENABLED, true),
+            // disabled between the poll's read and this claim was fired anyway. The
+            // due term likewise: a schedule another instance fired and re-armed in
+            // that window is PENDING again, with a future nextFire.
+            Bson claimable = and(eq(ID, scheduleId), eq(ENABLED, true),
                     or(eq(FIRE_STATUS, FireStatus.PENDING.name()),
                             and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)),
                             // Note: maxRetries guard is in findDueSchedules —
                             // we trust the poller already filtered, but adding
                             // the retryAt guard prevents premature claiming
-                            and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs))));
+                            leaseExpired(lease)));
+            Bson filter = dueOnly ? and(claimable, lte(NEXT_FIRE, nowMs)) : claimable;
 
-            Bson update = combine(set(FIRE_STATUS, FireStatus.CLAIMED.name()), set(CLAIMED_BY, instanceId), set(CLAIMED_AT, nowMs),
-                    set(FIRE_ID, IScheduleStore.fireIdOf(scheduleId, now)), set(UPDATED_AT, nowMs));
+            // A pipeline update, so that claimedAt comes from the database's clock.
+            // $literal keeps a string value that starts with '$' from being read as
+            // a field path.
+            List<Bson> update = List.of(new Document("$set",
+                    new Document(FIRE_STATUS, FireStatus.CLAIMED.name()).append(CLAIMED_BY, new Document("$literal", instanceId))
+                            .append(CLAIMED_AT, dbNowMs())
+                            .append(FIRE_ID, new Document("$literal", IScheduleStore.fireIdOf(scheduleId, now)))
+                            .append(UPDATED_AT, nowMs)));
 
             Document result = scheduleCollection.findOneAndUpdate(filter, update);
             if (result != null) {

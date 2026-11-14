@@ -5,7 +5,9 @@
 package ai.labs.eddi.datastore;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.configs.properties.model.UserMemoryEntry.Assessment;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorage;
@@ -34,7 +36,9 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The same store contract, run against a real MongoDB and a real PostgreSQL.
@@ -181,6 +185,114 @@ class DatastoreParityTest extends MongoTestBase {
         }
 
         assertEquals(IUserMemoryStore.MAX_FILTER_RESULTS, store.filterEntries(user, "word").size(), backend);
+    }
+
+    // ─── user-memory assessment ─────────────────────────────────
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory assessment: a new entry is ACCEPTED, and a compare-and-set marks it without touching updatedAt")
+    void userMemoryAssessmentRoundTrip(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-assess-" + UUID.randomUUID();
+        String id = store.upsert(entry(user, "language", "English"));
+        UserMemoryEntry stored = store.findEntryById(id).orElseThrow();
+        assertEquals(Assessment.ACCEPTED, stored.assessment(), backend);
+        assertNull(stored.supersededBy(), backend);
+
+        assertTrue(store.setAssessmentIfUnchanged(id, Assessment.SUPERSEDED, "other-id", stored.updatedAt()), backend);
+        UserMemoryEntry superseded = store.findEntryById(id).orElseThrow();
+        assertEquals(Assessment.SUPERSEDED, superseded.assessment(), backend);
+        assertEquals("other-id", superseded.supersededBy(), backend);
+        assertEquals(stored.updatedAt(), superseded.updatedAt(), backend + ": an assessment is not a write of the fact");
+        assertEquals("English", superseded.value(), backend);
+
+        assertTrue(store.setAssessmentIfUnchanged(id, Assessment.CONTESTED, "ignored", stored.updatedAt()), backend);
+        UserMemoryEntry contested = store.findEntryById(id).orElseThrow();
+        assertEquals(Assessment.CONTESTED, contested.assessment(), backend);
+        assertNull(contested.supersededBy(), backend + ": only a SUPERSEDED entry keeps a pointer");
+        assertTrue(contested.conflicted(), backend + ": conflicted mirrors CONTESTED");
+        assertTrue(store.getAllEntries(user).getFirst().conflicted(), backend + ": and reads back through every loader");
+        assertEquals(Assessment.CONTESTED, store.getVisibleEntries(user, "parity-agent", List.of(), "most_recent", 10).getFirst().assessment(),
+                backend);
+        assertEquals(Assessment.CONTESTED, store.filterEntries(user, "").getFirst().assessment(), backend);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory assessment: the compare-and-set loses to a write made since the read")
+    void userMemoryAssessmentLosesToANewerWrite(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-assess-cas-" + UUID.randomUUID();
+        String id = store.upsert(entry(user, "language", "English"));
+        UserMemoryEntry read = store.findEntryById(id).orElseThrow();
+        Thread.sleep(5);
+        store.upsert(entry(user, "language", "German"));
+
+        assertFalse(store.setAssessmentIfUnchanged(id, Assessment.CONTESTED, null, read.updatedAt()), backend);
+        assertEquals(Assessment.ACCEPTED, store.findEntryById(id).orElseThrow().assessment(), backend);
+        assertFalse(store.setAssessmentIfUnchanged("000000000000000000000000", Assessment.CONTESTED, null, null), backend + ": unknown id");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory assessment: rewriting a key — upsert or flat property merge — resolves its contest")
+    void userMemoryRewriteResolves(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-assess-rewrite-" + UUID.randomUUID();
+        String id = store.upsert(entry(user, "language", "English"));
+        store.setAssessmentIfUnchanged(id, Assessment.CONTESTED, null, store.findEntryById(id).orElseThrow().updatedAt());
+
+        store.upsert(entry(user, "language", "English"));
+        UserMemoryEntry rewritten = store.findEntryById(id).orElseThrow();
+        assertEquals(Assessment.ACCEPTED, rewritten.assessment(), backend);
+        assertFalse(rewritten.conflicted(), backend);
+
+        var global = new UserMemoryEntry(null, user, "city", "Vienna", "fact", Visibility.global, "parity-agent", List.of(), null, false, 0, null,
+                null);
+        String globalId = store.upsert(global);
+        store.setAssessmentIfUnchanged(globalId, Assessment.SUPERSEDED, id, store.findEntryById(globalId).orElseThrow().updatedAt());
+        var props = new Properties();
+        props.put("city", "Graz");
+        store.mergeProperties(user, props);
+        UserMemoryEntry merged = store.findEntryById(globalId).orElseThrow();
+        assertEquals(Assessment.ACCEPTED, merged.assessment(), backend);
+        assertNull(merged.supersededBy(), backend);
+    }
+
+    /**
+     * Every value write is a new statement of the fact. An entry that arrives
+     * carrying a verdict — a REST client echoing what it read, a caller building
+     * one from a stored entry — is stored ACCEPTED on every path, so conflicted can
+     * never disagree with assessment.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("userMemoryStores")
+    @DisplayName("user-memory assessment: no value write stores the verdict it was handed")
+    void userMemoryValueWritesStoreAccepted(String backend, Supplier<IUserMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        String user = "parity-assess-echo-" + UUID.randomUUID();
+
+        String upserted = store.upsert(entry(user, "a", "x").withAssessment(Assessment.CONTESTED, null));
+        assertAccepted(backend + " upsert", store.findEntryById(upserted).orElseThrow());
+
+        String inserted = store.insertIfAbsent(entry(user, "b", "x").withAssessment(Assessment.SUPERSEDED, upserted));
+        assertAccepted(backend + " insertIfAbsent", store.findEntryById(inserted).orElseThrow());
+
+        UserMemoryEntry read = store.findEntryById(upserted).orElseThrow();
+        assertTrue(store.replaceIfUnchanged(upserted, read.withAssessment(Assessment.SUPERSEDED, inserted), read.updatedAt()), backend);
+        assertAccepted(backend + " replaceIfUnchanged", store.findEntryById(upserted).orElseThrow());
+
+        var global = new UserMemoryEntry(null, user, "c", "x", "fact", Visibility.global, "parity-agent", List.of(), null, true, 0, null, null,
+                Assessment.CONTESTED, null);
+        assertTrue(store.upsertIfOwnedBy(global, "parity-agent"), backend);
+        assertAccepted(backend + " upsertIfOwnedBy", store.getAllEntries(user).stream().filter(e -> "c".equals(e.key())).findFirst().orElseThrow());
+    }
+
+    private static void assertAccepted(String what, UserMemoryEntry stored) {
+        assertEquals(Assessment.ACCEPTED, stored.assessment(), what);
+        assertNull(stored.supersededBy(), what);
+        assertFalse(stored.conflicted(), what);
     }
 
     private static UserMemoryEntry entry(String user, String key, Object value) {

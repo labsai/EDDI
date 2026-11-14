@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "budget": "node ../scripts/check-bundle-budget.mjs manager",
     "preview": "vite preview",
     "lint": "eslint src/ e2e/ --max-warnings 0",
     "audit:prod": "node scripts/audit-prod.mjs",

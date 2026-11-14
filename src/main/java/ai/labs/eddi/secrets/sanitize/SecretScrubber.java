@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.sanitize;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -239,12 +240,24 @@ public class SecretScrubber {
     }
 
     /**
-     * Scrub potential plaintext secrets from a JSON string. Returns the sanitized
-     * JSON, or the original string if parsing fails.
+     * Scrub potential plaintext secrets from a JSON string.
+     * <p>
+     * Fails closed, like {@link #containsCredential(String)}: a document that
+     * cannot be parsed has not been shown to be free of credentials, so it is never
+     * handed back as it stands. Even serializer output can fail here: Jackson's
+     * read constraints, such as the nesting depth, do not bind the writer. The
+     * export then aborts, or skips the section it was building; an agent sync's
+     * remote source skips the document.
+     * <p>
+     * The exception carries neither the input nor the parser's exception as its
+     * cause: a parse error quotes the source text it stopped at, which may be the
+     * credential, and a cause is printed with the stack trace that logs it.
      *
      * @param json
      *            the JSON string to scrub
      * @return sanitized JSON with secrets replaced by ${vault:REDACTED}
+     * @throws IllegalStateException
+     *             when {@code json} cannot be parsed or written back
      */
     public String scrubJson(String json) {
         if (json == null || json.isBlank()) {
@@ -255,9 +268,9 @@ public class SecretScrubber {
             JsonNode root = objectMapper.readTree(json);
             scrubNode(root, null);
             return objectMapper.writeValueAsString(root);
-        } catch (Exception e) {
-            LOGGER.warnv("Failed to parse JSON for scrubbing, returning original: {0}", e.getMessage());
-            return json;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not parse a document for secret scrubbing; refusing to pass it on unscrubbed ("
+                    + e.getClass().getSimpleName() + ")");
         }
     }
 

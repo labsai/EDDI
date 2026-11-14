@@ -216,8 +216,11 @@ A default team never files somebody's work in a team they are not in: their
 work would otherwise be readable and editable by people they never chose to
 share it with.
 
-A header naming a space the caller is not a member of is refused with 403
-before anything is created.
+A header naming none of the caller's spaces is refused with 403 before
+anything is created. The value must be one of the ids `GET /workspaces` lists,
+exactly: it is compared case-sensitively (group names are case-sensitive) and
+only surrounding whitespace is ignored, so `TEAM:engineering` or
+`team:engineering/` is refused as well. The refusal quotes the value received.
 
 ### Notifications and access requests
 
@@ -439,6 +442,12 @@ administrator — in the Manager's **Workspaces** page, or:
 | `GET` | `/spacestore/tenant?space=` | The tenant id to use in references. |
 | `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. A create under `enforce` carries `allowedAgents` and `allowedHosts` (`["*"]` for "any"), as on [the tenant vault](secrets-vault.md#required-on-a-create). |
 | `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
+
+Space ids are opaque and may contain `%` — a group `a|b` is `team:a%7Cb` — so
+`space` is sent URL-encoded, exactly as `GET /workspaces` lists it
+(`encodeURIComponent(id)`, here `team%3Aa%257Cb`). Sent raw, the id is decoded
+once on the way in, arrives as `team:a|b`, and is refused with 403: it matches
+none of the caller's spaces.
 
 Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
 `${vars:<tenant>/model}`, where every response names the tenant. Membership is

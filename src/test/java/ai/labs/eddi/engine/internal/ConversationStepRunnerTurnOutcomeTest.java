@@ -163,7 +163,7 @@ class ConversationStepRunnerTurnOutcomeTest {
         }).when(engine).evaluateTurn(any());
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         dispatcher = new AlertDispatcher(engine, new AlertMetrics(registry), new AlertSettings(true, 5, Duration.ofSeconds(60), 5,
-                Duration.ofSeconds(30), Duration.ofMinutes(2), Duration.ofDays(90), Duration.ofSeconds(10), Optional.empty()));
+                Duration.ofSeconds(30), Duration.ofMinutes(2), Duration.ofDays(90), Duration.ofSeconds(10), Optional.empty(), 50));
         // The CDI event, as the container delivers it: synchronously, to the
         // dispatcher.
         doAnswer(inv -> {

@@ -835,6 +835,13 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   the target with the same \`targetId\` only, and a masked URL without a
   known \`targetId\` is refused with INVALID_RULE (re-open the rule in the
   editor, or enter the URL again).
+- At most \`eddi.alerts.max-rules-per-agent\` (default 50) rules, enabled or
+  not, may list one agent, and at most the same number may watch every agent.
+  A save that adds a scope to a full pool is refused with 409
+  RULE_LIMIT_REACHED; a per-agent error names the agent, an every-agent error
+  reports the every-agent count. Only scopes the save adds count, so rules
+  already over a lowered limit stay editable. To make room, delete rules from
+  the full pool, or raise the property.
 - You cannot acknowledge alerts, retry a delivery, send a test alert or change
   a rule: the admin does that on the Alerts page in the manager
   (/manage/alerts).`;

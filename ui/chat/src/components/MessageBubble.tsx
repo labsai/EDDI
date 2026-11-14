@@ -14,7 +14,6 @@ import {
 import { Check, Copy, X } from "lucide-react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "@/types";
 import type { RatingInput, RatingProfile, StoredRating } from "@/api/rating-api";
@@ -162,8 +161,12 @@ function CodeBlock({
  * the model chose — a tracking pixel, or a way to carry conversation data out
  * in a query string — and only the CSP stopped it when EDDI served the page,
  * not when the widget is embedded elsewhere.
+ *
+ * rehype-raw runs in front of it only for a message that contains HTML, once
+ * its chunk has loaded (markdown-plugins.ts). Without HTML in the text it has
+ * nothing to parse, so leaving it out changes nothing but the bundle.
  */
-const BASE_REHYPE: PluggableList = [rehypeRaw, rehypeSanitize];
+const BASE_REHYPE: PluggableList = [rehypeSanitize];
 const REMARK_PLAIN: PluggableList = [remarkGfm];
 
 /**
@@ -262,12 +265,12 @@ export const MessageBubble = memo(function MessageBubble({
     [rich.math],
   );
   const rehype = useMemo<PluggableList>(() => {
-    if (!rich.math && !rich.highlight) return BASE_REHYPE;
-    const plugins: PluggableList = [...BASE_REHYPE];
+    if (!rich.math && !rich.highlight && !rich.raw) return BASE_REHYPE;
+    const plugins: PluggableList = rich.raw ? [rich.raw.rehypeRaw, ...BASE_REHYPE] : [...BASE_REHYPE];
     if (rich.math) plugins.push(rich.math.rehypeKatex);
     if (rich.highlight) plugins.push(rich.highlight.rehypeHighlight);
     return plugins;
-  }, [rich.math, rich.highlight]);
+  }, [rich.math, rich.highlight, rich.raw]);
 
   // A notice is the widget talking, not the agent: no avatar, no speaker.
   if (message.kind === "notice") {
