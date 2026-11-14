@@ -39,7 +39,9 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -640,6 +642,26 @@ class ApiCallExecutorConfigReferenceTest {
             for (Object value : stored.getAllValues()) {
                 assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
             }
+        }
+
+        @Test
+        @DisplayName("B11: a base64 echo of the key is redacted from a success body, a response header and an error body")
+        void base64EchoRedacted() throws Exception {
+            String encoded = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
+            IResponse echo = respond(200, "you sent " + encoded);
+            when(echo.getHttpHeader()).thenReturn(new HashMap<>(Map.of("Content-Type", "text/plain", "X-Echo", "key=" + encoded)));
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(encoded), "tool result: " + result);
+            assertEquals("you sent " + RequestRedactor.REDACTED, templateData.get("response"));
+            assertFalse(String.valueOf(templateData.get("responseHeaders")).contains(encoded), "headers: " + templateData.get("responseHeaders"));
+
+            respond(401, "{\"error\":\"invalid key " + encoded + "\"}");
+            var errorData = data("hi");
+            executor.execute(savingCall(), memory, errorData, SERVER);
+            assertFalse(String.valueOf(errorData.get("responseError")).contains(encoded), "error: " + errorData.get("responseError"));
         }
     }
 
