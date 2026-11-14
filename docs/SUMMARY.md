@@ -48,6 +48,7 @@
 - [Group Conversations](group-conversations.md)
   - [Group Human Decisions: Tie-Breaks and Tasks](group-human-decisions.md)
   - [Group Convergence Judge: SERVICE](group-service-judge.md)
+  - [Group Approved-Result Actions](group-approved-result-actions.md)
   - [Cross-Team Handoff](team-handoff.md)
   - [Team Learning Loop](team-learning-loop.md)
 - [Human-in-the-Loop (HITL)](hitl.md)

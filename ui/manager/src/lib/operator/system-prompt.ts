@@ -1627,6 +1627,46 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
+- Approved-result actions: phases[n].onApproved = {action: {type HTTPCALL
+  (default, the only kind), uri (an httpcalls URI with an explicit ?version=),
+  call (a call name in it)}, onFailure FAIL_TASK (default) | KEEP_COMPLETED}.
+  Valid only on an EXECUTE phase with requiresApproval in a group with
+  hitlConfig.granularity TASK (else a 400 at save). On each task a PERSON
+  approves (or approves with an edit) the group makes that one call with the
+  approved result as {task.result} (data, never template), at most once:
+  recorded with the approval, claimed (RUNNING) before it is sent, never
+  resent; a crash mid-call leaves it RUNNING until a later leg or the end of
+  the discussion marks it OUTCOME_UNKNOWN, which does not prove whether the
+  target got the request: tell the admin to check the target. An action still
+  owed (PENDING) when the discussion ends — completed, failed, cancelled,
+  crash recovery included — reads NOT_SENT and was not sent (no audit entry,
+  no metric for it). A claim that cannot be written sends nothing and is
+  settled FAILED, or SKIPPED when the discussion was cancelled. A task is
+  approved once per discussion: RETRY resets only a task rejected while
+  awaiting approval (it has no action yet), and VERIFY rework is not applied
+  when the EXECUTE phase gates tasks, so a task whose action FAILED stays
+  FAILED (FAIL_TASK) or COMPLETED (KEEP_COMPLETED) — do not tell the admin to
+  send it back and approve it again. To publish it after all: check the target,
+  then post it by hand; on a standing team a FAILED task returns to the backlog
+  and is approved in a later discussion. A SUCCEEDED or OUTCOME_UNKNOWN action
+  is never sent again. Calls with
+  preRequest.propertyInstructions are refused. At most once covers the
+  claim, not the call's own retries: postResponse.retryApiCallInstruction on
+  the referenced call can repeat the request, so for a non-idempotent publish
+  advise turning those retries off or deduplicating on the target with
+  {action.idempotencyKey} (stable per task; a standing team's backlog task
+  keeps it across discussions only when its subject is unambiguous — one
+  pulled backlog task and one discussion task — else it is per discussion). Rejected and RETRY-reset tasks get no action record
+  at all (nothing to look for); a system:* approval (AUTO_APPROVE timeout) or a
+  discussion cancelled first gets a record with status SKIPPED. The outcome
+  is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
+  responseUrl, summary), audit task id group.approved_action, metric
+  eddi_group_approved_action_total{outcome}. The call's \${vault:…} secrets
+  must be granted to all agents; \${connection:…}, \${caller:…}, \${context:…},
+  fire-and-forget, batch and forEach calls are refused. Not in the Manager's
+  phase editor (JSON only). This is the answer when a team must publish only
+  human-approved text: a member's own gated tool call is rejected in a group
+  turn (inGroupTurns REJECT).
 - Edit-on-approve: an agent's hitlConfig.review (allowAnswerEdits, default
   false), screenEdits (OUTPUT_GUARDRAILS default, or NONE), maxEditChars
   (default 16000), approvalCategory (default rule:<agentId>), reasonCodes (code

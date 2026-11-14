@@ -1,0 +1,760 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.internal.groups;
+
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedAction;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionFailurePolicy;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.OnApprovedConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionRecord;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionStatus;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.ReviewerEdit;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
+import ai.labs.eddi.configs.groups.validation.ApprovedResultActionValidation;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+class GroupApprovedResultActionsTest {
+
+    private static final String URI = "eddi://ai.labs.apicalls/apicallstore/apicalls/6740a1b2c3d4e5f6a7b8c9d0?version=2";
+    private static final String CALL = "postComment";
+
+    private IApiCallsStore apiCallsStore;
+    private IApiCallExecutor executor;
+    private ApprovedResultActionValidation validation;
+    private AuditLedgerService ledger;
+    private SimpleMeterRegistry meters;
+    private IGroupConversationStore store;
+    private GroupApprovedResultActions actions;
+    private ApiCall call;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        apiCallsStore = mock(IApiCallsStore.class);
+        executor = mock(IApiCallExecutor.class);
+        validation = mock(ApprovedResultActionValidation.class);
+        ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        meters = new SimpleMeterRegistry();
+        store = mock(IGroupConversationStore.class);
+        actions = new GroupApprovedResultActions(apiCallsStore, executor, validation, ledger, meters);
+
+        call = new ApiCall();
+        call.setName(CALL);
+        var httpCalls = new ApiCallsConfiguration();
+        httpCalls.setTargetServerUrl("https://api.github.com");
+        httpCalls.setHttpCalls(List.of(call));
+        when(apiCallsStore.read("6740a1b2c3d4e5f6a7b8c9d0", 2)).thenReturn(httpCalls);
+        when(validation.referenceProblems(anyString(), any())).thenReturn(List.of());
+    }
+
+    private static DiscussionPhase phase(ApprovedActionFailurePolicy onFailure) {
+        return new DiscussionPhase("Draft", PhaseType.EXECUTE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true, null,
+                false, null, null, new OnApprovedConfig(new ApprovedAction(ApprovedActionType.HTTPCALL, URI, CALL), onFailure));
+    }
+
+    /** A discussion with one task submitted for approval, and the task's id. */
+    private static GroupConversation awaitingGc(TaskItem task, String agentResult) {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.setUserId("user-1");
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        var list = new SharedTaskList();
+        list.addTask(task);
+        list.assignTask(task.id(), "writer", "Writer");
+        list.startTask(task.id());
+        list.submitForApproval(task.id(), agentResult);
+        gc.setTaskList(list);
+        return gc;
+    }
+
+    private static Map<String, Object> created(int code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("httpCode", code);
+        result.put("body", Map.of("html_url", "https://github.com/acme/repo/issues/7#issuecomment-1", "id", 1));
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> taskData(ArgumentCaptor<Map<String, Object>> data) {
+        return (Map<String, Object>) data.getValue().get("task");
+    }
+
+    @Nested
+    class ApprovedRunsOnce {
+
+        @Test
+        void editedResult_isSentExactlyAsApproved_once() throws Exception {
+            var task = new TaskItem("Reply to issue #7", "draft a reply", 0);
+            var gc = awaitingGc(task, "agent draft");
+            gc.getTaskList().approveTaskWithEditedResult(task.id(), "Edited by the reviewer.", new ReviewerEdit("alice", "now", "sha", 11));
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+
+            assertEquals(1, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            actions.runOwed(gc, store, () -> false);
+            actions.runOwed(gc, store, () -> false); // a second leg finds nothing owed
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(executor, times(1)).execute(same(call), any(), data.capture(), eq("https://api.github.com"));
+            assertEquals("Edited by the reviewer.", taskData(data).get("result"));
+            assertEquals(true, taskData(data).get("edited"));
+            assertEquals("alice", taskData(data).get("approvedBy"));
+            ApprovedActionRecord record = gc.getTaskList().getApprovedActions().get(task.id());
+            assertEquals(ApprovedActionStatus.SUCCEEDED, record.status());
+            assertEquals(201, record.httpCode());
+            assertEquals("https://github.com/acme/repo/issues/7#issuecomment-1", record.responseUrl());
+            assertNotNull(record.startedAt());
+            assertNotNull(record.finishedAt());
+            assertEquals(TaskStatus.COMPLETED, gc.getTaskList().findById(task.id()).status());
+            assertEquals(1.0, meters.counter(GroupApprovedResultActions.METRIC, "outcome", "succeeded").count());
+        }
+
+        @Test
+        void theClaimIsPersistedBeforeTheRequestIsSent() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenAnswer(inv -> {
+                assertEquals(ApprovedActionStatus.RUNNING, gc.getTaskList().getApprovedActions().get(task.id()).status(),
+                        "the request is sent only after it was claimed");
+                return created(200);
+            });
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            InOrder order = inOrder(store, executor);
+            order.verify(store).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+            order.verify(executor).execute(any(), any(), anyMap(), anyString());
+            order.verify(store).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+        }
+
+        @Test
+        void aRetriedApproval_doesNotAddASecondAction() {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+
+            assertEquals(1, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            assertEquals(0, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "bob"));
+            assertEquals("alice", gc.getTaskList().getApprovedActions().get(task.id()).approvedBy());
+        }
+
+        @Test
+        void theAuditEntryNamesTheApproverTheTargetAndTheOutcome() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            var entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(ledger).submit(entry.capture());
+            assertEquals(GroupApprovedResultActions.AUDIT_TASK_ID, entry.getValue().taskId());
+            assertEquals("gc-1", entry.getValue().conversationId());
+            assertEquals("group-1", entry.getValue().agentId());
+            assertEquals("alice", entry.getValue().output().get("approvedBy"));
+            assertEquals(URI + "#" + CALL, entry.getValue().output().get("target"));
+            assertEquals("SUCCEEDED", entry.getValue().output().get("status"));
+            assertEquals("group:group-1", entry.getValue().output().get("runAs"));
+            assertFalse(entry.getValue().output().containsValue("text"), "the result is audited by digest, not verbatim");
+        }
+    }
+
+    @Nested
+    class NothingRuns {
+
+        @Test
+        void aRejectedTask_owesNothing() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().rejectTask(task.id(), "no");
+
+            assertEquals(0, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertTrue(gc.getTaskList().getApprovedActions().isEmpty());
+        }
+
+        @Test
+        void aTaskResetForRetry_owesNothing() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().resetFromAnyToAssigned(task.id(), "try again");
+
+            assertEquals(0, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            verifyNoInteractions(executor);
+        }
+
+        @Test
+        void aTimeoutAutoApproval_isRecordedAndSkipped_notSent() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "system:timeout");
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.COMPLETED, gc.getTaskList().findById(task.id()).status(), "a skip is not a failure");
+        }
+
+        @Test
+        void aCancelledDiscussion_skipsWhatItOwes() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> true);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        }
+
+        @Test
+        void aPhaseWithoutOnApproved_recordsNothing() {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            var plain = new DiscussionPhase("Draft", PhaseType.EXECUTE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true);
+
+            assertEquals(0, actions.recordApprovals(gc, plain, 0, Set.of(task.id()), "alice"));
+        }
+    }
+
+    @Nested
+    class CrashSafety {
+
+        @Test
+        void aRecordLeftRunningByACrash_isNeverSentAgain_andFailsTheTask() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            // what the store holds after a pod died between the claim and the outcome
+            var record = gc.getTaskList().getApprovedActions().get(task.id());
+            gc.getTaskList().updateApprovedAction(task.id(), record.running(Instant.now()));
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.OUTCOME_UNKNOWN, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status(), "FAIL_TASK treats an unknown outcome as a failure");
+        }
+
+        @Test
+        void aCrashBetweenApprovalAndClaim_sendsOnTheNextLeg_once() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            // the record was persisted PENDING with the approval; the first leg never ran
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+
+            actions.runOwed(gc, store, () -> false);
+            actions.runOwed(gc, store, () -> false);
+
+            verify(executor, times(1)).execute(any(), any(), anyMap(), anyString());
+        }
+
+        @Test
+        void aClaimThatCannotBePersisted_sendsNothing_andSettlesFailed() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("state changed")).when(store).updateIfState(any(), any());
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            // Not left PENDING: the discussion may complete without another leg.
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status(), "FAIL_TASK keeps dependents from running");
+        }
+
+        @Test
+        void aClaimRefusedAfterACancel_sendsNothing_andSettlesSkipped() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled")).when(store).updateIfState(any(), any());
+            // the cancel lands between the cancellation check and the claim
+            var checks = new AtomicInteger();
+
+            actions.runOwed(gc, store, () -> checks.getAndIncrement() > 0);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        }
+
+        @Test
+        void aClaimRefusedByACancelStoredByAnotherPod_settlesSkipped_notFailed() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("cancelled")).when(store).updateIfState(any(), any());
+            // another pod stored the cancel; this pod's token never flips
+            var stored = new GroupConversation();
+            stored.setState(GroupConversationState.CANCELLED);
+            when(store.read(gc.getId())).thenReturn(stored);
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.COMPLETED, gc.getTaskList().findById(task.id()).status(), "a cancel does not fail the task");
+        }
+    }
+
+    @Nested
+    class Failures {
+
+        @Test
+        void aNon2xx_failsTheTaskUnderFailTask() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(Map.of("httpCode", 422, "body", "Validation Failed"));
+            actions.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            var record = gc.getTaskList().getApprovedActions().get(task.id());
+            assertEquals(ApprovedActionStatus.FAILED, record.status());
+            assertEquals(422, record.httpCode());
+            assertTrue(record.summary().contains("422"));
+            var failed = gc.getTaskList().findById(task.id());
+            assertEquals(TaskStatus.FAILED, failed.status());
+            assertTrue(failed.verificationNote().contains("Approved-result action FAILED"));
+        }
+
+        @Test
+        void aRefusedCall_keepsTheTaskUnderKeepCompleted() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenThrow(new LifecycleException("connect timed out"));
+            actions.recordApprovals(gc, phase(ApprovedActionFailurePolicy.KEEP_COMPLETED), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.COMPLETED, gc.getTaskList().findById(task.id()).status());
+            assertEquals(1.0, meters.counter(GroupApprovedResultActions.METRIC, "outcome", "failed").count());
+        }
+
+        @Test
+        void aGrantNarrowedAfterTheSave_refusesTheCallAtRunTime() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(validation.referenceProblems(anyString(), any())).thenReturn(List.of("references vault secret x, which is not granted"));
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            var record = gc.getTaskList().getApprovedActions().get(task.id());
+            assertEquals(ApprovedActionStatus.FAILED, record.status());
+            assertTrue(record.summary().startsWith("Refused: "));
+        }
+    }
+
+    @Nested
+    class ResultIsData {
+
+        @Test
+        void aResultWithTemplateSyntax_reachesTheCallVerbatim() throws Exception {
+            String hostile = "Ship it {task.id} {#eval 'x'/} {json:serialize(group)} ${vault:github-token} {{x}}";
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, hostile);
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            actions.runOwed(gc, store, () -> false);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(executor).execute(any(), any(), data.capture(), anyString());
+            assertEquals(hostile, taskData(data).get("result"), "a value in the template data, never rendered before the call");
+            assertEquals(Set.of("task", "group", "action"), data.getValue().keySet());
+        }
+
+        @Test
+        void templateData_carriesTheTaskTheGroupAndAStableIdempotencyKey() {
+            var task = new TaskItem("Post", "describe", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            var record = gc.getTaskList().getApprovedActions().get(task.id());
+
+            var data = GroupApprovedResultActions.templateData(gc, gc.getTaskList().findById(task.id()), record);
+
+            assertEquals(Map.of("id", "group-1", "conversationId", "gc-1"), data.get("group"));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()), ((Map<?, ?>) data.get("action")).get("idempotencyKey"));
+            assertEquals(32, record.idempotencyKey().length());
+            assertNotEquals(GroupApprovedResultActions.idempotencyKey("gc-2", task.id()), record.idempotencyKey());
+        }
+    }
+
+    /**
+     * A task approved again after a retry/rework reset (finding: a FAILED action
+     * used to block every later approval of the task silently).
+     */
+    @Nested
+    class ReApproval {
+
+        /** Sends the task back for another attempt and approves it again. */
+        private void reworkAndApproveAgain(GroupConversation gc, String taskId) {
+            SharedTaskList list = gc.getTaskList();
+            if (list.findById(taskId).status() != TaskStatus.FAILED) {
+                list.failTask(taskId, "VERIFY failed it");
+            }
+            list.reworkTask(taskId, "try again");
+            list.startTask(taskId);
+            list.submitForApproval(taskId, "second draft");
+            list.approveTask(taskId);
+        }
+
+        @Test
+        void aFailedAction_isOwedAgain_whenThePersonApprovesTheReworkedTask() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "first draft");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString()))
+                    .thenReturn(Map.of("httpCode", 502, "body", "Bad Gateway"))
+                    .thenReturn(created(201));
+            actions.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "alice");
+            actions.runOwed(gc, store, () -> false);
+            String firstKey = gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey();
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
+
+            reworkAndApproveAgain(gc, task.id());
+            assertEquals(1, actions.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "bob"));
+            actions.runOwed(gc, store, () -> false);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, Object>> data = ArgumentCaptor.forClass(Map.class);
+            verify(executor, times(2)).execute(any(), any(), data.capture(), anyString());
+            assertEquals("second draft", taskData(data).get("result"), "the new attempt sends the newly approved result");
+            ApprovedActionRecord record = gc.getTaskList().getApprovedActions().get(task.id());
+            assertEquals(ApprovedActionStatus.SUCCEEDED, record.status());
+            assertEquals("bob", record.approvedBy());
+            assertEquals(firstKey, record.idempotencyKey(), "the same task keeps its key, so a deduplicating target is safe");
+        }
+
+        @Test
+        void aSkippedAction_isOwedOnALaterHumanApproval() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "system:timeout");
+            actions.runOwed(gc, store, () -> false);
+            assertEquals(ApprovedActionStatus.SKIPPED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+
+            reworkAndApproveAgain(gc, task.id());
+            assertEquals(1, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            actions.runOwed(gc, store, () -> false);
+
+            verify(executor, times(1)).execute(any(), any(), anyMap(), anyString());
+            assertEquals(ApprovedActionStatus.SUCCEEDED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        }
+
+        @Test
+        void aSucceededAction_isNeverSentTwice_evenAfterReworkAndReApproval() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(created(201));
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            actions.runOwed(gc, store, () -> false);
+
+            reworkAndApproveAgain(gc, task.id());
+            assertEquals(0, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "bob"));
+            actions.runOwed(gc, store, () -> false);
+
+            verify(executor, times(1)).execute(any(), any(), anyMap(), anyString());
+            ApprovedActionRecord record = gc.getTaskList().getApprovedActions().get(task.id());
+            assertEquals(ApprovedActionStatus.SUCCEEDED, record.status());
+            assertEquals("alice", record.approvedBy(), "the record of what was sent is kept");
+        }
+
+        @Test
+        void anOutcomeUnknownAction_isNeverResent_afterReApproval() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            var record = gc.getTaskList().getApprovedActions().get(task.id());
+            gc.getTaskList().updateApprovedAction(task.id(), record.running(Instant.now()));
+            actions.runOwed(gc, store, () -> false); // RUNNING → OUTCOME_UNKNOWN, task FAILED
+
+            reworkAndApproveAgain(gc, task.id());
+            assertEquals(0, actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "bob"));
+            actions.runOwed(gc, store, () -> false);
+
+            verifyNoInteractions(executor);
+            assertEquals(ApprovedActionStatus.OUTCOME_UNKNOWN, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        }
+
+        @Test
+        void aFailedClaim_tellsTheUserWhatActuallyWorks() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            actions.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            doThrow(new IResourceStore.ResourceModifiedException("store down")).when(store).updateIfState(any(), any());
+
+            actions.runOwed(gc, store, () -> false);
+
+            String summary = gc.getTaskList().getApprovedActions().get(task.id()).summary();
+            assertTrue(summary.contains("post it by hand"), summary);
+            // no engine path returns an approved task to approval, so the summary must not
+            // promise one
+            assertFalse(summary.contains("approve it again"), summary);
+        }
+    }
+
+    /**
+     * Finding: on a standing team a task returns to the backlog and is worked again
+     * in a new discussion; a key derived from the discussion changed with it.
+     */
+    @Nested
+    class StandingTeamIdempotencyKey {
+
+        private IGroupWorkspaceStore workspaceStore;
+        private GroupApprovedResultActions withWorkspace;
+        private TaskItem backlogTask;
+        private GroupWorkspace workspace;
+
+        @BeforeEach
+        void setUpWorkspace() throws Exception {
+            workspaceStore = mock(IGroupWorkspaceStore.class);
+            withWorkspace = new GroupApprovedResultActions(apiCallsStore, executor, validation, ledger, meters, workspaceStore);
+            workspace = new GroupWorkspace();
+            backlogTask = workspace.getBacklog().addTask(new TaskItem("Post", "publish the weekly note", 0));
+            workspace.getBacklog().addTask(new TaskItem("Other", "unrelated", 0));
+            when(workspaceStore.find("group-1")).thenReturn(workspace);
+        }
+
+        private String keyInDiscussion(String conversationId) {
+            workspace.setRunningDiscussionId(conversationId);
+            workspace.setPulledTaskIds(workspace.getBacklog().all().stream().map(TaskItem::id).toList());
+            var task = new TaskItem("Post", "publish the weekly note", 0); // the discussion's own copy, own id
+            var gc = awaitingGc(task, "text");
+            gc.setId(conversationId);
+            gc.getTaskList().approveTask(task.id());
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+            return gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey();
+        }
+
+        @Test
+        void aBacklogTask_keepsItsKeyAcrossDiscussions() {
+            String first = keyInDiscussion("gc-1");
+            String second = keyInDiscussion("gc-2");
+
+            assertEquals(first, second, "the same backlog task offers the same key in every discussion that works it");
+            assertEquals(GroupApprovedResultActions.backlogIdempotencyKey("group-1", backlogTask.id()), first);
+        }
+
+        @Test
+        void aTaskNotPulledByThisDiscussion_fallsBackToThePerDiscussionKey() {
+            workspace.setRunningDiscussionId("another-discussion");
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()),
+                    gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey());
+        }
+
+        @Test
+        void anUnreadableWorkspace_fallsBackAndStillRecords() throws Exception {
+            when(workspaceStore.find("group-1")).thenThrow(new IResourceStore.ResourceStoreException("down"));
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+
+            assertEquals(1, withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()),
+                    gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey());
+        }
+
+        /** Adds a second task to the discussion, approved alongside the first. */
+        private TaskItem addApproved(GroupConversation gc, String subject) {
+            var task = gc.getTaskList().addTask(new TaskItem(subject, "d", 0));
+            gc.getTaskList().assignTask(task.id(), "writer", "Writer");
+            gc.getTaskList().startTask(task.id());
+            gc.getTaskList().submitForApproval(task.id(), "text");
+            gc.getTaskList().approveTask(task.id());
+            return task;
+        }
+
+        private String keyOf(GroupConversation gc, TaskItem task) {
+            return gc.getTaskList().getApprovedActions().get(task.id()).idempotencyKey();
+        }
+
+        private GroupConversation runningDiscussionWith(TaskItem task) {
+            workspace.setRunningDiscussionId("gc-1");
+            workspace.setPulledTaskIds(workspace.getBacklog().all().stream().map(TaskItem::id).toList());
+            var gc = awaitingGc(task, "text");
+            gc.getTaskList().approveTask(task.id());
+            return gc;
+        }
+
+        @Test
+        void aSubjectTwoPulledBacklogTasksShare_isAmbiguous_soEachTaskKeepsItsOwnPerDiscussionKey() {
+            workspace.getBacklog().addTask(new TaskItem("Post", "a second weekly note", 0));
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Post");
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", first.id()), keyOf(gc, first));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", second.id()), keyOf(gc, second));
+            assertNotEquals(keyOf(gc, first), keyOf(gc, second), "two publishes never share a key");
+        }
+
+        @Test
+        void aSubjectTwoPulledBacklogTasksShare_isAmbiguousEvenForASingleDiscussionTask() {
+            workspace.getBacklog().addTask(new TaskItem("Post", "a second weekly note", 0));
+            var task = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(task);
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()), keyOf(gc, task));
+        }
+
+        @Test
+        void aSubjectTwoDiscussionTasksShare_isAmbiguous_soTheyDoNotBothTakeTheBacklogKey() {
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Post");
+
+            withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id()), "alice");
+
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", first.id()), keyOf(gc, first));
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", second.id()), keyOf(gc, second));
+            assertNotEquals(keyOf(gc, first), keyOf(gc, second));
+        }
+
+        @Test
+        void manyApprovedTasks_readTheWorkspaceOnce() throws Exception {
+            var first = new TaskItem("Post", "p", 0);
+            var gc = runningDiscussionWith(first);
+            var second = addApproved(gc, "Other");
+            var third = addApproved(gc, "Third");
+
+            assertEquals(3, withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(first.id(), second.id(), third.id()), "alice"));
+
+            verify(workspaceStore, times(1)).find("group-1");
+            assertEquals(GroupApprovedResultActions.backlogIdempotencyKey("group-1", backlogTask.id()), keyOf(gc, first),
+                    "the unambiguous backlog match still gets the backlog key");
+        }
+
+        /**
+         * Finding: a new attempt recomputed the key, so a workspace unreadable at the
+         * first approval and readable at the second gave the same publish two keys.
+         */
+        @Test
+        void aNewAttempt_keepsTheEarlierRecordsKey_evenWhenTheWorkspaceBecameReadable() throws Exception {
+            when(workspaceStore.find("group-1")).thenThrow(new IResourceStore.ResourceStoreException("down")).thenReturn(workspace);
+            when(executor.execute(any(), any(), anyMap(), anyString())).thenReturn(Map.of("httpCode", 502, "body", "Bad Gateway"));
+            var task = new TaskItem("Post", "publish the weekly note", 0);
+            var gc = runningDiscussionWith(task);
+            withWorkspace.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "alice");
+            withWorkspace.runOwed(gc, store, () -> false);
+            String firstKey = keyOf(gc, task);
+            assertEquals(GroupApprovedResultActions.idempotencyKey("gc-1", task.id()), firstKey, "unreadable: per-discussion key");
+            assertEquals(ApprovedActionStatus.FAILED, gc.getTaskList().getApprovedActions().get(task.id()).status());
+
+            SharedTaskList list = gc.getTaskList();
+            list.reworkTask(task.id(), "try again");
+            list.startTask(task.id());
+            list.submitForApproval(task.id(), "second draft");
+            list.approveTask(task.id());
+            assertEquals(1, withWorkspace.recordApprovals(gc, phase(ApprovedActionFailurePolicy.FAIL_TASK), 0, Set.of(task.id()), "bob"));
+
+            assertEquals(ApprovedActionStatus.PENDING, gc.getTaskList().getApprovedActions().get(task.id()).status());
+            assertEquals(firstKey, keyOf(gc, task), "the new attempt offers the target the key it may already have acted on");
+        }
+
+        @Test
+        void noTaskToRecord_readsNoWorkspace() throws Exception {
+            var task = new TaskItem("Post", "p", 0);
+            var gc = awaitingGc(task, "text"); // still awaiting approval: owes nothing
+
+            assertEquals(0, withWorkspace.recordApprovals(gc, phase(null), 0, Set.of(task.id()), "alice"));
+
+            verify(workspaceStore, never()).find(anyString());
+        }
+    }
+
+    @Test
+    void responseUrl_readsHtmlUrlThenUrl_httpOnly() {
+        assertEquals("https://x/1", GroupApprovedResultActions.responseUrl(Map.of("html_url", "https://x/1", "url", "https://api/1")));
+        assertEquals("https://api/1", GroupApprovedResultActions.responseUrl(Map.of("url", "https://api/1")));
+        assertNull(GroupApprovedResultActions.responseUrl(Map.of("url", "javascript:alert(1)")));
+        assertNull(GroupApprovedResultActions.responseUrl("plain text"));
+    }
+
+    @Test
+    void actionOf_splitsTheTargetOnTheLastHash() {
+        var action = GroupApprovedResultActions.actionOf(URI + "#" + CALL);
+        assertEquals(URI, action.uri());
+        assertEquals(CALL, action.call());
+    }
+}
