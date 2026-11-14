@@ -517,6 +517,60 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("additionalProperties beside a $ref is a constraint: a holder's true does not lift the target's false")
+    void additionalPropertiesFalseSurvivesTheSiblingMerge() throws Exception {
+        String defs = "{\"Closed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},\"additionalProperties\":false},"
+                + "\"Typed\":{\"type\":\"object\",\"additionalProperties\":{\"type\":\"string\"}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{
+                   "S":{"$ref":"https://example.com/defs.json#/Closed","additionalProperties":true},
+                   "T":{"$ref":"https://example.com/defs.json#/Typed","additionalProperties":true}}}}
+                """;
+
+        // The bundle itself keeps the stricter value under 3.1 ...
+        JsonNode bundled = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher));
+        assertFalse(bundled.at("/components/schemas/S/additionalProperties").asBoolean(true), bundled.toString());
+        assertTrue(bundled.at("/components/schemas/T/additionalProperties").isObject(), "a schema beats true");
+
+        // ... and through the converter (3.0: swagger-parser reads a 3.1 boolean as a
+        // schema)
+        OpenAPI openAPI = McpApiToolBuilder.parseSpec(spec.replace("3.1.0", "3.0.0"), fetcher);
+
+        Map<String, Object> closed = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+        assertEquals(Boolean.FALSE, closed.get("additionalProperties"), closed.toString());
+        Object typed = openAPI.getComponents().getSchemas().get("T").getAdditionalProperties();
+        assertTrue(typed instanceof Schema<?>, "a schema beats true: " + typed);
+    }
+
+    @Test
+    @DisplayName("merging properties beside many references to a schema with a large literal shares it, and the output cap refuses")
+    void propertyMergeSharesLargeLiterals() {
+        // Each holder's empty "properties" sibling makes the merge copy the target's
+        // properties. A deep copy duplicated the 100,000-object example once per
+        // reference - 200 million nodes on the heap - before the output cap ran.
+        StringBuilder example = new StringBuilder();
+        for (int i = 0; i < 100_000; i++) {
+            example.append(i == 0 ? "" : ",").append("{\"a\":1}");
+        }
+        String defs = "{\"Big\":{\"type\":\"object\",\"properties\":{\"p\":{\"type\":\"array\",\"example\":[" + example + "]}}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        StringBuilder props = new StringBuilder();
+        for (int i = 0; i < 1_000; i++) {
+            props.append(i == 0 ? "" : ",").append("\"q").append(i)
+                    .append("\":{\"$ref\":\"https://example.com/defs.json#/Big\",\"properties\":{}}");
+        }
+        String spec = "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"T\",\"version\":\"1\"},\"paths\":{},"
+                + "\"components\":{\"schemas\":{\"S\":{\"type\":\"object\",\"properties\":{" + props + "}}}}}";
+
+        IllegalArgumentException e = assertTimeoutPreemptively(Duration.ofSeconds(15),
+                () -> assertThrows(IllegalArgumentException.class, () -> OpenApiRefBundler.bundle(spec, null, fetcher)));
+
+        assertTrue(e.getMessage().contains("characters once its $refs are inlined"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("intersecting two large enums is linear")
     void largeEnumIntersectionIsFast() throws Exception {
         StringBuilder target = new StringBuilder();

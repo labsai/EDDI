@@ -562,7 +562,13 @@ final class OpenApiRefBundler {
      * with {@link #stricter} for a field both have.
      */
     private static ObjectNode mergeSchemas(ObjectNode target, JsonNode holder) {
-        ObjectNode merged = target.deepCopy();
+        // A new container sharing the unchanged children: a deep copy duplicated every
+        // subtree - a large literal example included - once per reference, on the heap
+        // before the node budget or the output cap saw any of it. Nothing mutates a
+        // shared child afterwards: every in-place write goes to a container expand()
+        // has just created, and the bundled tree is only serialized.
+        ObjectNode merged = NODES.objectNode();
+        merged.setAll(target);
         for (Map.Entry<String, JsonNode> field : holder.properties()) {
             JsonNode existing = merged.get(field.getKey());
             merged.set(field.getKey(), existing == null ? field.getValue() : stricter(field.getKey(), existing, field.getValue()));
@@ -575,7 +581,8 @@ final class OpenApiRefBundler {
             // Both sides' properties apply: union them, merging a property both define
             // the same way. Taking the holder's map dropped the target's properties, and
             // the argument converter then dropped them from "required" too.
-            ObjectNode properties = ((ObjectNode) target).deepCopy();
+            ObjectNode properties = NODES.objectNode();
+            properties.setAll((ObjectNode) target);
             for (Map.Entry<String, JsonNode> property : holder.properties()) {
                 JsonNode existing = properties.get(property.getKey());
                 properties.set(property.getKey(), existing instanceof ObjectNode existingSchema && property.getValue().isObject()
@@ -583,6 +590,18 @@ final class OpenApiRefBundler {
                         : property.getValue());
             }
             return properties;
+        }
+        if ("additionalProperties".equals(name)) {
+            // A constraint, not a description: the holder's "true" must not lift the
+            // target's "false". false on either side wins; a schema beats true; two
+            // schemas are merged the same way.
+            if (target.isBoolean() && !target.asBoolean() || holder.isBoolean() && !holder.asBoolean()) {
+                return NODES.booleanNode(false);
+            }
+            if (target.isObject() && holder.isObject()) {
+                return mergeSchemas((ObjectNode) target, holder);
+            }
+            return target.isObject() ? target : holder;
         }
         if (target.isNumber() && holder.isNumber()) {
             int order = new BigDecimal(target.asText()).compareTo(new BigDecimal(holder.asText()));

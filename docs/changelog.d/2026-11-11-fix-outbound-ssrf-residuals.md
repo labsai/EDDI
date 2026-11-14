@@ -89,7 +89,10 @@ Seven confirmed findings from a security review of the outbound paths.
 
 - **Callback Reference Objects** (`callbacks.onEvent: {$ref: ...}`, in an operation or `components.callbacks`) are
   followed; a Callback Object's `x-` extensions stay data. Relocated schema names use a counter per stem, so many
-  mappings sharing one name are allocated in linear time.
+  mappings sharing one name are allocated in linear time. Merging `properties` beside a `$ref` builds new containers that share
+  the unchanged subtrees instead of deep-copying them, so a large literal referenced many times is not duplicated on
+  the heap before the output cap runs. `additionalProperties` beside a `$ref` is merged as a constraint: `false` on
+  either side wins, a schema beats `true`, two schemas are merged.
 - **Crawl scope**: an ambiguous path (an encoded `/` or `\`) keeps its raw form through canonicalization instead of
   a normalized one that a scope check would approve; the URL that will be fetched is scope-checked too, for links and
   sitemap entries. The parameter-preserving path reading resolves only complete dot segments (`..;` is a segment to
