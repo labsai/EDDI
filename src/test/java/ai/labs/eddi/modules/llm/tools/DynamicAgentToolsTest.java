@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -1235,6 +1236,29 @@ class DynamicAgentToolsTest {
             tool.teardownAgent("created-1", false);
 
             verify(deploymentStore, never()).deleteDeploymentInfos(any());
+        }
+
+        @Test
+        void teardownAgent_undeployMarksTheDeploymentRecordsUndeployed() throws Exception {
+            // A record left saying deployed is redeployed by the next deployment sweep,
+            // which deploys what is recorded and no longer served.
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(record("created-1", 1, Environment.production), record("created-1", 1, Environment.test),
+                            record("created-2", 1, Environment.production)));
+
+            tool.teardownAgent("created-1", false);
+
+            verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.undeployed);
+            verify(deploymentStore, never()).setDeploymentInfo(eq("test"), any(), any(), any());
+            verify(deploymentStore, never()).setDeploymentInfo(any(), eq("created-2"), any(), any());
+        }
+
+        private static DeploymentInfo record(String agentId, int version, Environment environment) {
+            var info = new DeploymentInfo();
+            info.setAgentId(agentId);
+            info.setAgentVersion(version);
+            info.setEnvironment(environment);
+            return info;
         }
 
         @Test

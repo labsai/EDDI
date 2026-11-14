@@ -88,6 +88,9 @@ public interface IRestAlertRules {
     @APIResponse(responseCode = "201", description = "The created rule.")
     @APIResponse(responseCode = "400", description = "The rule is not valid (INVALID_RULE).")
     @APIResponse(responseCode = "403", description = "The scope or a target is an administrator's, or the caller lacks EDIT on the agent.")
+    @APIResponse(responseCode = "409",
+                 description = "An agent in the scope already has eddi.alerts.max-rules-per-agent rules, or the rules over every agent "
+                         + "have reached it (RULE_LIMIT_REACHED).")
     Response createRule(AlertRule rule);
 
     @PUT
@@ -100,6 +103,8 @@ public interface IRestAlertRules {
     @APIResponse(responseCode = "400", description = "The rule is not valid (INVALID_RULE).")
     @APIResponse(responseCode = "403", description = "The caller may not change this rule, or the new one.")
     @APIResponse(responseCode = "404", description = "No such rule.")
+    @APIResponse(responseCode = "409", description = "The new scope adds an agent that already has eddi.alerts.max-rules-per-agent rules, or widens "
+            + "the rule to every agent when those have reached it (RULE_LIMIT_REACHED).")
     AlertRule updateRule(@PathParam("ruleId") String ruleId, AlertRule rule);
 
     @DELETE
