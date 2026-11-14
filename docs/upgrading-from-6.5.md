@@ -160,6 +160,16 @@ What to check:
   and connect with `authSource=eddi`. If you changed `mongodb.database`, use that name instead
   of `eddi` throughout.
 
+## NATS: cluster mode replaces the build-profile coordinator
+
+Only for a 6.5 deployment that ran `eddi.messaging.type=nats` on an image built with the `nats`
+Quarkus build profile (the 6.5 NATS coordinator existed only in such a build). 6.6 removes that
+coordinator; the published image selects cluster mode at runtime. The old
+`eddi.nats.stream-name`, `eddi.nats.max-retries`, `eddi.nats.ack-wait-seconds` and
+`eddi.nats.stream-max-*` settings no longer do anything (a WARN names each one that is still set),
+and the `EDDI_CONVERSATIONS` stream is unused. See
+[Upgrading from the build-profile NATS coordinator](clustering.md#upgrading-from-the-build-profile-nats-coordinator).
+
 ## Newly reserved names
 
 - **`CONTINUE_CONVERSATION` is a reserved action** ([self-continuation](long-jobs.md)). A behaviour

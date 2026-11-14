@@ -24,7 +24,7 @@ Behavior Rules examine the conversation memory (including parsed input, context 
 - **Rules are IF-THEN logic**: If all conditions match, execute the specified actions
 - **Rules are grouped**: Multiple rules can be organized into groups for better structure
 - **Sequential execution**: Rules within a group execute in order until one succeeds
-- **First match wins**: Once a rule in a group succeeds, remaining rules in that group are skipped
+- **First match wins**: Once a rule in a group succeeds, remaining rules in that group are skipped (the default; a group can opt out with `"executionStrategy": "executeAll"`)
 - **Actions trigger other lifecycle tasks**: Actions like `get_weather` or `send_to_llm` (arbitrary strings, matched by equality against each task's own `actions` list) activate other parts of the pipeline
 
 ## Behavior Rules Structure
@@ -412,8 +412,9 @@ rule. It was meant to match the agent's tags, but agents carry no tags, so a rul
 fired. To vary behavior per agent, match a value the client sends with a `contextmatcher`, or give
 the agents different rulesets.
 
-The environment is read from the system property `eddi.deployment.env`, falling back to the
-environment variable `EDDI_DEPLOYMENT_ENV` and then to `development`. Prefer this over passing an
+`when` is compared case-insensitively. The environment is the MicroProfile Config property
+`eddi.deployment.env` (a system property, the environment variable `EDDI_DEPLOYMENT_ENV`, or
+`application.properties`), falling back to `development`. Prefer this over passing an
 `env` context variable from the client and matching it with `contextmatcher`: a client that forgets
 the variable makes a production agent behave like a test one, silently.
 
@@ -474,16 +475,11 @@ _Request Body_
           ],
           "conditions": [
             {
-              "type": "negation",
-              "conditions": [
-                {
-                  "type": "occurrence",
-                  "configs": {
-                    "maxTimesOccurred": "1",
-                    "behaviorRuleName": "Welcome"
-                  }
-                }
-              ]
+              "type": "occurrence",
+              "configs": {
+                "maxTimesOccurred": "0",
+                "behaviorRuleName": "Welcome"
+              }
             }
           ]
         },

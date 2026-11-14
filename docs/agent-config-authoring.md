@@ -17,7 +17,7 @@ EDDI v6 uses **Qute templates** with `{expression}` syntax, NOT Thymeleaf `[[${e
 ❌ WRONG:     {properties.agentName.valueString}  → fails at runtime (String has no .valueString)
 ```
 
-This is because `ConversationProperties.put()` stores `property.getValueString()` (or `getValueObject()`, etc.) directly into the internal `propertiesMap`. By the time templates see it, the Property wrapper is gone.
+This is because `ConversationProperties.toMap()` unwraps each `Property` to its value (`valueString`, `valueObject`, etc.) every time the template map is built, and omits properties whose value is null. By the time templates see it, the Property wrapper is gone.
 
 ### Template variables available in all contexts
 
@@ -100,7 +100,7 @@ Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 7 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
+> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 
@@ -213,7 +213,7 @@ request is written to conversation memory. Disable with
 
 ### Requesting specialized input fields from the UI
 
-The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `secret-input-field.tsx`, rendered by `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
 
 ```json
 {
@@ -226,7 +226,7 @@ The output system supports an `inputField` output type that tells the UI to swit
 }
 ```
 
-Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+Supported `subType` values: `"password"` (the default when omitted), `"text"`, `"email"`. The Chat UI masks and sends only a `password` response as a secret turn; the Manager sends the response of all three subtypes as a secret turn and masks it in the conversation. The item also accepts `defaultValue` and a `validation` object (`minLength`, `maxLength`, `validationErrorMessage`). Neither the Chat UI nor the Manager enforces `validation`, so a response can be shorter or longer than the limits; validate it in the agent's own rules. A `sizematcher` is not a safe length check for this: it reads a numeric string as a number, so `"123"` has size 123 and passes a minimum of 8. Do not rely on it to enforce a minimum length for numeric input. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
 

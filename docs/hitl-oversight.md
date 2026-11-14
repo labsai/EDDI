@@ -60,7 +60,7 @@ At most 50 rules; a `match` may appear once.
 
 ### `autonomyPolicy`
 
-Only the categories named in `categories` are evaluated; `defaults` fills the fields a category leaves out. A category
+Only the categories named in `categories` (at most 200) are evaluated; `defaults` fills the fields a category leaves out. A category
 key is an approval category as [HITL Review & Audit](hitl-review-and-audit.md#configuration) assigns it — `tool:<the
 requireApproval pattern that gated the call>`, a rule's `approvalCategory`, or a `sampledAudit` category.
 
@@ -202,6 +202,7 @@ approvers see every agent; anyone else must pass an `agentId` they hold `EDIT` o
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/hitl/analytics/summary` | `agentId`, `groupId`, `category`, `from`, `to`, `surface`, `pauseType`, `channel`, `agentVersion`, `groupBy` |
+| GET | `/hitl/analytics/outcomes` | Per approval category, the decided units joined with the real-world outcomes reported against them; needs `groupId` (see [Team Learning Loop](team-learning-loop.md)) |
 | GET | `/hitl/analytics/decisions` | Decision rows, newest first; `index`, `limit` (≤ 100); `userId` for administrators only |
 | POST | `/hitl/analytics/rebuild` | eddi-admin; `from`, `to` (default last 90 days); runs in the background |
 | GET | `/hitl/samples` | `agentId`, `category`, `status` (PENDING default, OK, FLAGGED, EXPIRED, ALL), `from`, `to`, `index`, `limit` |

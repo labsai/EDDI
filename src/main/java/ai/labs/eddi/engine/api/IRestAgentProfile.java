@@ -110,7 +110,8 @@ public interface IRestAgentProfile {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "What a chat window shows about an agent",
-               description = "Name, description, and the conversation-review notice for the deployed version. Requires USE.")
+               description = "Name, description, the conversation-review notice and the rating settings for the deployed version. "
+                       + "Requires USE.")
     @APIResponse(responseCode = "200", description = "The profile.")
     @APIResponse(responseCode = "403", description = "The caller may not use this agent.")
     AgentProfile readProfile(@PathParam("agentId") String agentId,

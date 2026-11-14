@@ -296,7 +296,7 @@ An event's `state`: `PENDING` (delivering, or a target waits for its next retry)
 `lastError`), `INBOX_ONLY`, `DIGEST_PENDING`, `DIGESTED`. `duplicates` counts later
 alerts folded into this one.
 
-Rules: `GET /alerts/rules` (`agentId`), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
+Rules: `GET /alerts/rules` (`agentId`, required unless the caller is an administrator; `index`, `limit` ≤ 100, default 20), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
 `POST /alerts/rules`. Deleting a rule keeps its events.
 
 ## Who may do what

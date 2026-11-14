@@ -35,8 +35,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * LLM tool for conversing with another deployed EDDI agent. Constructed
- * per-invocation by {@code AgentOrchestrator} with the conversation service and
- * user identity.
+ * per-invocation by {@code DynamicAgentToolsProvider} with the conversation
+ * service and user identity.
  *
  * <p>
  * Supports both single-turn (fire-and-forget) and multi-turn conversations.
@@ -50,7 +50,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class ConverseWithAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(ConverseWithAgentTool.class);

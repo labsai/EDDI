@@ -60,9 +60,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 /**
  * MongoDB implementation of {@link IConversationMemoryStore}.
  * <p>
- * Annotated {@code @DefaultBean} so that future database backends (e.g.,
- * PostgreSQL) can provide an alternative implementation activated via
- * {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
+ * {@code DataStoreProducers} picks this store or
+ * {@code PostgresConversationMemoryStore} by {@code eddi.datastore.type}.
  *
  * @author ginccc
  */

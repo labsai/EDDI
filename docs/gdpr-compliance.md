@@ -52,7 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
-> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, `groupOutcomes`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -173,7 +173,9 @@ principal, not a user: erasing or exporting it is refused with 400.
     `email-anon:` identities of unauthenticated senders hold no memory and are not
     linked to an address. All of it is
     **permanently deleted**. Each reports under its own step name
-    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`)
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`).
+    The exception is the `groupOutcomes` participant: team outcome events describe a team's work, so
+    they are **kept** and the principal that posted one is replaced by the ledger's pseudonym
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
@@ -226,6 +228,7 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   Erasure blanks those values and forgets the user as acknowledger and rule author
 - A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
   message sent, the reply, state and timestamps)
+- Team outcome events the user posted (`groupOutcomes`; capped at 10,000)
 - Group discussions the user started (`groupConversations`: question, transcript,
   state and dates; capped at 1,000, `groupConversationsTruncated` when the cap bit),
   and the shared artifacts of those discussions (`sharedArtifacts`: content and

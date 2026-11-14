@@ -152,7 +152,7 @@ Two things are deliberately **not** measured, each argued in
 - **static mutants** — module-level constants. Stryker cannot swap one in
   without reloading the module, so each costs a full suite restart; measured,
   they were 14% of the mutants and 98% of the runtime.
-- **`api-client.ts`** — 75 importers, so virtually every component test
+- **`api-client.ts`** — 75 importers when measured (about 150 now), so virtually every component test
   executes it and each of its mutants replays most of the suite.
 
 (Tests themselves — `src/**/__tests__/**` — are excluded for the obvious
@@ -251,7 +251,7 @@ want the real backend.
 ### What to Avoid
 
 - MUI, Redux, or legacy React patterns
-- `moment.js` — use native `Intl` or `date-fns`
+- `moment.js` — use native `Intl` (`date-fns` is not a dependency either)
 - Mixing component exports with utility function exports in the same file
 
 ## Commit Convention
@@ -328,7 +328,7 @@ The Manager's checks run in the EDDI repository's root workflow,
 
 | Job                   | What It Does                                                                 | When |
 | --------------------- | ---------------------------------------------------------------------------- | ---- |
-| **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
+| **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs, `e2e/` and the `.design-sync/` previews), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
 | **UI Manager E2E (MSW)** | The Playwright UI tier against MSW mocks | Same |
 | **Build Image**       | The production build of both UIs through Maven, and a check of what it emitted and packaged | Every change that affects the image |
 | **OpenAPI Snapshot**  | Compares `src/test/mocks/openapi-operations.json` with the OpenAPI document the Maven build stores — no running backend, a minute after the image build | Every change that affects the image |

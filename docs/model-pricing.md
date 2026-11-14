@@ -168,7 +168,8 @@ into the catalog only when an admin saves — from then on the admin owns every
 number. Upgrading EDDI never changes what a tenant is charged.
 
 Prices go stale. The Manager flags entries whose `asOf` is older than 120 days, and
-`eddi.llm.price.catalog.oldest_asof_days` exposes the age of the oldest one.
+`eddi.llm.price.catalog.oldest_asof_days` exposes the age of the oldest one
+(`eddi.llm.price.catalog.entries` counts the entries).
 
 ## What the providers report
 

@@ -52,10 +52,10 @@ public class ProcessingRestrictionUnavailableExceptionMapper implements Exceptio
      * <p>
      * Shared with the {@code AsyncResponse} branches in
      * {@code RestAgentEngine.sayInternal} and
-     * {@code RestAgentEngineStreaming.buildErrorEvent}, which cannot reach this
-     * mapper and so reproduce its body themselves — the class Javadoc's "change all
-     * three together" is only enforceable if the three read the same text from one
-     * place.
+     * {@code RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent}, which
+     * cannot reach this mapper and so reproduce its body themselves — the class
+     * Javadoc's "change all three together" is only enforceable if the three read
+     * the same text from one place.
      *
      * @param exception
      *            the failure being reported

@@ -147,6 +147,11 @@ public class SecretScrubber {
             "authorization", "pwd", "passphrase", "privatekey", "private_key");
 
     /**
+     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
+     */
+    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
+
+    /**
      * Qualifiers that turn a credential noun into a COUNT of them.
      * <p>
      * Without this the suffix rule above is a round-trip bug on the most common LLM
@@ -165,11 +170,6 @@ public class SecretScrubber {
      * {@code accessToken}, {@code refreshToken} and {@code authToken} do not begin
      * with a quantity.
      */
-    /**
-     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
-     */
-    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
-
     private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
 
     /**
@@ -788,7 +788,6 @@ public class SecretScrubber {
         return url.substring(0, queryStart) + "?" + out + fragment;
     }
 
-    /** An http(s) URL — the only shape {@link UriRedactor} is meant to be given. */
     /**
      * Any {@code scheme://authority} value, not just the two web schemes.
      * <p>

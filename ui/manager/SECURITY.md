@@ -4,7 +4,7 @@
 
 | Version | Supported              |
 | ------- | ---------------------- |
-| Latest release (6.6.x; 6.7 in development) | ✅ Supported |
+| Latest release (6.7.x; 6.8 in development) | ✅ Supported |
 | Older versions | ❌ Not supported. Security fixes ship only in new versions, so upgrade to the latest release |
 
 ## Reporting a Vulnerability
