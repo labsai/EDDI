@@ -427,10 +427,12 @@ public class OutboundHttp {
                 throw new IOException("Redirect " + status + " with an unparsable Location header from: " + withoutQuery(uri));
             }
             // Prevents SSRF via 302 → internal.
-            check = hopCheck(ssrf, request.hopValidator());
+            check = hopCheck(ssrf, request.hopValidator(), request.additionalHopCheck());
             validate(check, target);
             // A caller's own hop validator decides what a hop may reach, at the address
-            // level too: the peer check follows the policy only when none was given.
+            // level too: the peer check follows the policy only when none was given. An
+            // additional hop check only narrows the policy, so the policy's peer check
+            // still runs with it.
             peerCheck = request.hopValidator() != null ? null : ConnectedPeers.forPolicy(ssrf, true);
             // Both URIs come from the server (Location): sanitized so a crafted header
             // cannot forge log lines.
@@ -461,14 +463,26 @@ public class OutboundHttp {
     }
 
     /** The check a redirect hop gets, or {@code null} for none. */
-    private TargetValidator hopCheck(SsrfPolicy policy, TargetValidator override) {
-        if (override != null) {
-            return override;
-        }
-        return switch (policy) {
+    /**
+     * The check of one redirect hop: the caller's replacement validator when one
+     * was given, else the policy's — and then the caller's additional check, which
+     * only narrows what a hop may reach.
+     */
+    private TargetValidator hopCheck(SsrfPolicy policy, TargetValidator override, TargetValidator additional) {
+        TargetValidator policyCheck = override != null ? override : switch (policy) {
             case STRICT, HOPS_ONLY -> strictCheck;
             case METADATA_ONLY -> metadataCheck;
             case NONE, FOLLOW_GLOBAL_FLAG -> null;
+        };
+        if (additional == null) {
+            return policyCheck;
+        }
+        if (policyCheck == null) {
+            return additional;
+        }
+        return url -> {
+            policyCheck.validate(url);
+            additional.validate(url);
         };
     }
 

@@ -45,10 +45,14 @@ import java.util.TreeSet;
  *            initial URL), for a caller whose own gate is stricter than, or
  *            different from, the SSRF rules; {@code null} for the policy's
  *            check
+ * @param additionalHopCheck
+ *            run after the hop check above, on every redirect hop: it can only
+ *            refuse more, and unlike {@code hopValidator} it leaves the
+ *            policy's connected-peer check in place; {@code null} for none
  */
 public record OutboundRequest(Profile profile, String method, URI uri, Map<String, List<String>> headers,
         Set<String> callerDerivedHeaders, RequestBody body, Duration timeoutOverride, RedirectPolicy redirectOverride,
-        SsrfPolicy ssrfOverride, TargetValidator hopValidator) {
+        SsrfPolicy ssrfOverride, TargetValidator hopValidator, TargetValidator additionalHopCheck) {
 
     public OutboundRequest {
         Objects.requireNonNull(profile, "profile");
@@ -106,6 +110,7 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
         private RedirectPolicy redirects;
         private SsrfPolicy ssrf;
         private TargetValidator hopValidator;
+        private TargetValidator additionalHopCheck;
 
         private Builder(Profile profile, URI uri) {
             this.profile = profile;
@@ -158,9 +163,19 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
             return this;
         }
 
+        /**
+         * A check every redirect hop must also pass, on top of the SSRF policy's —
+         * which, unlike {@link #hopValidator}, stays in force, connected-peer check
+         * included.
+         */
+        public Builder additionalHopCheck(TargetValidator additionalHopCheck) {
+            this.additionalHopCheck = additionalHopCheck;
+            return this;
+        }
+
         public OutboundRequest build() {
             return new OutboundRequest(profile, method, uri, headers, callerDerived, body, timeout, redirects, ssrf,
-                    hopValidator);
+                    hopValidator, additionalHopCheck);
         }
     }
 }
