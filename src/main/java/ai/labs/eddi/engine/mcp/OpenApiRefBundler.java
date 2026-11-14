@@ -104,6 +104,8 @@ final class OpenApiRefBundler {
     private final Map<String, String> relocatedNames = new HashMap<>();
     /** Their expanded content, by the root component name they were given. */
     private final ObjectNode relocated = NODES.objectNode();
+    /** The next suffix to try per name stem, so suffixes are not searched again. */
+    private final Map<String, Integer> nextSuffix = new HashMap<>();
     /** Component schema names the root document already has. */
     private final Set<String> rootSchemaNames = new HashSet<>();
 
@@ -273,7 +275,9 @@ final class OpenApiRefBundler {
         }
         return switch (context) {
             case NAMES, NAMES_WITH_EXTENSIONS -> Context.KEYWORDS;
-            case CALLBACKS -> Context.NAMES_WITH_EXTENSIONS;
+            // A callbacks map holds Callback Objects (expressions plus extensions) or a
+            // Reference Object in their place, whose $ref must be followed.
+            case CALLBACKS -> value.has("$ref") ? Context.KEYWORDS : Context.NAMES_WITH_EXTENSIONS;
             case KEYWORDS, COMPONENTS -> {
                 if ("components".equals(name) && context == Context.KEYWORDS) {
                     yield Context.COMPONENTS;
@@ -675,10 +679,16 @@ final class OpenApiRefBundler {
             base.append(Character.isLetterOrDigit(c) || c == '.' || c == '_' || c == '-' ? c : '_');
         }
         String stem = base.isEmpty() ? "Schema" : base.toString();
-        String name = stem;
-        for (int n = 2; rootSchemaNames.contains(name) || relocated.has(name); n++) {
+        // A counter per stem: many targets sharing one stem would otherwise rescan
+        // every
+        // suffix already taken, quadratic in the number of mappings.
+        int n = nextSuffix.getOrDefault(stem, 1);
+        String name = n == 1 ? stem : stem + "_" + n;
+        while (rootSchemaNames.contains(name) || relocated.has(name)) {
+            n++;
             name = stem + "_" + n;
         }
+        nextSuffix.put(stem, n + 1);
         return name;
     }
 

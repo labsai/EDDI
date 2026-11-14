@@ -473,6 +473,50 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("a Callback Reference Object is followed, in an operation and in components.callbacks; a Callback Object's extension stays data")
+    void callbackReferencesAreFollowed() throws Exception {
+        String callback = "{\"{$request.body#/url}\":{\"post\":{\"responses\":{\"200\":{\"description\":\"ok\"}}}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/cb.json", callback));
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"T","version":"1"},
+                 "paths":{"/subscribe":{"post":{"responses":{"200":{"description":"ok"}},
+                   "callbacks":{"onEvent":{"$ref":"https://example.com/cb.json"},
+                                "inline":{"x-note":{"$ref":"https://example.com/data.json"},
+                                          "{$request.body#/other}":{"post":{"responses":{"200":{"description":"ok"}}}}}}}}},
+                 "components":{"callbacks":{"shared":{"$ref":"https://example.com/cb.json"}}}}
+                """;
+
+        JsonNode bundled = JSON.readTree(OpenApiRefBundler.bundle(spec, null, fetcher));
+
+        JsonNode callbacks = bundled.at("/paths/~1subscribe/post/callbacks");
+        assertTrue(callbacks.get("onEvent").has("{$request.body#/url}"), callbacks.toString());
+        assertTrue(bundled.at("/components/callbacks/shared").has("{$request.body#/url}"), bundled.toString());
+        assertEquals("https://example.com/data.json", callbacks.at("/inline/x-note/$ref").asText(), "a Callback Object extension is data");
+        verify(fetcher, never()).fetchSpec("https://example.com/data.json");
+    }
+
+    @Test
+    @DisplayName("relocating many mapped schemas that share a name stays linear")
+    void manyRelocatedNamesAreAllocatedLinearly() {
+        int count = 40_000;
+        StringBuilder mapping = new StringBuilder();
+        StringBuilder groups = new StringBuilder();
+        for (int i = 0; i < count; i++) {
+            mapping.append(i == 0 ? "" : ",").append("\"m").append(i).append("\":\"#/g").append(i).append("/S\"");
+            groups.append(",\"g").append(i).append("\":{\"S\":{\"type\":\"object\"}}");
+        }
+        String defs = "{\"Base\":{\"type\":\"object\",\"discriminator\":{\"propertyName\":\"kind\",\"mapping\":{" + mapping + "}}}" + groups
+                + "}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = "{\"openapi\":\"3.0.0\",\"info\":{\"title\":\"T\",\"version\":\"1\"},\"paths\":{},"
+                + "\"components\":{\"schemas\":{\"Pet\":{\"$ref\":\"https://example.com/defs.json#/Base\"}}}}";
+
+        String bundled = assertTimeoutPreemptively(Duration.ofSeconds(20), () -> OpenApiRefBundler.bundle(spec, null, fetcher));
+
+        assertTrue(bundled.contains("\"S_" + count + "\""), "every mapped schema got its own name");
+    }
+
+    @Test
     @DisplayName("intersecting two large enums is linear")
     void largeEnumIntersectionIsFast() throws Exception {
         StringBuilder target = new StringBuilder();
