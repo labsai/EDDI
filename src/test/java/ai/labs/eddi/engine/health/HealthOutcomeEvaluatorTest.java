@@ -558,6 +558,33 @@ class HealthOutcomeEvaluatorTest {
         }
 
         @Test
+        @DisplayName("a newer capture the forward feed reads in the pass whose direct retry gave the conversation up still starts a new "
+                + "retry window")
+        void newerCaptureInTheGivingUpPass() {
+            MovableClock clock = new MovableClock();
+            evaluator = new HealthOutcomeEvaluator(turns, outcomes, policy, ratings, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    clock);
+            Instant first = NOW.minus(Duration.ofMinutes(30));
+            List<ConversationActivity> feed = new ArrayList<>(List.of(new ConversationActivity("bad", first)));
+            List<String> evaluated = new ArrayList<>();
+            fakeFeed(feed, evaluated, Set.of("bad"));
+            cursor = HealthFeedCursor.at(first.minusSeconds(60));
+            evaluator.run(NOW.plusSeconds(60));
+            assertEquals(first, cursor.replayAt());
+
+            // At the retry limit the conversation changes again: the direct retry of the
+            // old capture gives it up, and the forward feed reads the new one, which fails.
+            clock.now = NOW.plus(HealthOutcomeEvaluator.MAX_RETRY);
+            Instant later = clock.now.minus(Duration.ofMinutes(5));
+            feed.set(0, new ConversationActivity("bad", later));
+            evaluated.clear();
+            evaluator.run(clock.now.plusSeconds(60));
+
+            assertEquals(2, evaluated.stream().filter("bad"::equals).count(), "the retry and the newer capture: " + evaluated);
+            assertEquals(later, cursor.replayAt(), "the newer capture is retried: " + cursor);
+        }
+
+        @Test
         @DisplayName("M4: due sessions are judged before the feed, so a backfill cannot starve them")
         void dueFirst() {
             HealthOutcome due = stored("c1", 0, NOW.minus(Duration.ofDays(2)));

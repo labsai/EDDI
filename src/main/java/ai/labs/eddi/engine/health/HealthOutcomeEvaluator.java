@@ -309,6 +309,8 @@ public class HealthOutcomeEvaluator {
             replayAfter = null;
         }
         Set<String> seen = new HashSet<>();
+        // A failed direct retry, by the capture it tried: see firstInPass.
+        Map<String, Instant> retriedCaptures = new HashMap<>();
         Instant failedAt = null;
         boolean read = false;
 
@@ -343,6 +345,12 @@ public class HealthOutcomeEvaluator {
             lastRetried = retry.getKey();
             if (seen.add(retry.getKey())) {
                 failedAt = evaluateInFeed(new ConversationActivity(retry.getKey(), retry.getValue().capturedAt()), done, failedAt);
+                if (feedFailures.asMap().containsKey(retry.getKey())) {
+                    // Still failing, or given up: a newer capture the replay or the forward
+                    // feed reads in this pass must still reach evaluateInFeed, which starts
+                    // a new retry window for it. The same capture is not tried twice.
+                    retriedCaptures.put(retry.getKey(), retry.getValue().capturedAt());
+                }
             }
         }
 
@@ -365,7 +373,7 @@ public class HealthOutcomeEvaluator {
                 if (!clock.instant().isBefore(replayDeadline) || done[0] >= replayLimit) {
                     break replay;
                 }
-                if (seen.add(activity.conversationId())) {
+                if (firstInPass(activity, seen, retriedCaptures)) {
                     failedAt = evaluateInFeed(activity, done, failedAt);
                 }
                 replayAt = activity.lastUpdatedAt();
@@ -395,7 +403,7 @@ public class HealthOutcomeEvaluator {
                     // Resumed right after the last conversation read.
                     break forward;
                 }
-                if (seen.add(activity.conversationId())) {
+                if (firstInPass(activity, seen, retriedCaptures)) {
                     failedAt = evaluateInFeed(activity, done, failedAt);
                 }
                 forwardAt = activity.lastUpdatedAt();
@@ -477,6 +485,23 @@ public class HealthOutcomeEvaluator {
      * A conversation the feed failed to evaluate: since when, whether it was given
      * up, and the capture it was read at (the order of the direct retries).
      */
+    /**
+     * Whether this pass has not evaluated the conversation yet, or only tried an
+     * older capture of it in a failed direct retry, so that a newer one read by the
+     * replay or the forward feed still reaches {@link #evaluateInFeed}.
+     */
+    private static boolean firstInPass(ConversationActivity activity, Set<String> seen, Map<String, Instant> retriedCaptures) {
+        if (seen.add(activity.conversationId())) {
+            return true;
+        }
+        Instant retried = retriedCaptures.get(activity.conversationId());
+        if (retried != null && activity.lastUpdatedAt() != null && activity.lastUpdatedAt().isAfter(retried)) {
+            retriedCaptures.remove(activity.conversationId());
+            return true;
+        }
+        return false;
+    }
+
     private record FeedFailure(Instant first, boolean givenUp, Instant capturedAt) {
     }
 

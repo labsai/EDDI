@@ -132,8 +132,14 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             // Late rows only: the self-heal finds them by when they were written.
             "CREATE INDEX IF NOT EXISTS idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"};
 
-    /** Columns added after the table first shipped on development branches. */
-    static final String[] ADD_COLUMNS = {"ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"};
+    /**
+     * The late-write stamp, added after the table first shipped on development
+     * branches; checked in the catalog first, like
+     * {@link #HAS_SELF_REPORTED_COLUMN}.
+     */
+    static final String HAS_WRITTEN_AT_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'written_at_ms' AND NOT attisdropped";
+    static final String ADD_WRITTEN_AT_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT";
 
     /**
      * Added in H3; a table created before lacks it. Checked in the catalog first:
@@ -217,24 +223,33 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         this.dataSourceInstance = dataSourceInstance;
     }
 
+    /**
+     * Adds a column only when the catalog lacks it: even with {@code IF NOT EXISTS}
+     * an {@code ALTER TABLE} waits for an ACCESS EXCLUSIVE lock, and a node
+     * starting during a long streaming read would queue every later reader behind
+     * it.
+     */
+    private static void addColumnIfMissing(Statement statement, String hasColumn, String addColumn) throws SQLException {
+        boolean present;
+        try (ResultSet column = statement.executeQuery(hasColumn)) {
+            present = column != null && column.next();
+        }
+        if (!present) {
+            statement.execute(addColumn);
+        }
+    }
+
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
-            for (String column : ADD_COLUMNS) {
-                statement.execute(column);
-            }
+            // Before the indexes: one of them is on written_at_ms.
+            addColumnIfMissing(statement, HAS_WRITTEN_AT_COLUMN, ADD_WRITTEN_AT_COLUMN);
+            addColumnIfMissing(statement, HAS_SELF_REPORTED_COLUMN, ADD_SELF_REPORTED_COLUMN);
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
-            }
-            boolean hasColumn;
-            try (ResultSet column = statement.executeQuery(HAS_SELF_REPORTED_COLUMN)) {
-                hasColumn = column != null && column.next();
-            }
-            if (!hasColumn) {
-                statement.execute(ADD_SELF_REPORTED_COLUMN);
             }
             schemaInitialized = true;
         } catch (SQLException e) {

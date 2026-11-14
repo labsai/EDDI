@@ -196,6 +196,42 @@ public class UpgradeExecutor {
      *            whether the new agent version continues the previous one's
      *            compatibility generation
      */
+    /**
+     * Refuses, before the caller writes anything of its own, agent settings that
+     * {@link #executeUpgrade} would refuse: the same preview, the same selection,
+     * the same checks. A ZIP upgrade imports the archive's connections before it
+     * calls the upgrade, and a refusal there could only roll them back on a best
+     * effort basis; checked here first, nothing is written. Settings the upgrade
+     * would not adopt (no change, or an unselected conflict) are not checked.
+     *
+     * @throws jakarta.ws.rs.BadRequestException
+     *             naming the offending field
+     */
+    public void checkAdoptedSettings(IResourceSource source, String targetAgentId, Set<String> selectedSourceIds) throws IOException {
+        if (resourceAccessGuard != null) {
+            resourceAccessGuard.requireAccess(targetAgentId, AccessLevel.EDIT, "agent");
+        }
+        ImportPreview preview = structuralMatcher.buildPreview(source, targetAgentId, true);
+        String agentSettings = adoptedSettings(preview, selectedSourceIds, new Outcome());
+        if (agentSettings != null) {
+            validateAdoptedSettings(agentSettings);
+        }
+    }
+
+    /**
+     * The source agent's settings the upgrade will write: the preview's agent row
+     * when it is an UPDATE, a CONFLICT only when named; {@code null} otherwise.
+     */
+    private String adoptedSettings(ImportPreview preview, Set<String> selectedSourceIds, Outcome outcome) {
+        ResourceDiff agentDiff = preview.resources().stream()
+                .filter(diff -> "agent".equals(diff.resourceType()))
+                .findFirst().orElse(null);
+        DiffAction agentAction = agentDiff != null && isSelected(selectedSourceIds, agentDiff.sourceId())
+                ? resolveConflict(agentDiff, selectedSourceIds, "agent", agentDiff.name(), outcome)
+                : null;
+        return agentAction == DiffAction.UPDATE ? agentDiff.sourceContent() : null;
+    }
+
     public UpgradeResult executeUpgrade(IResourceSource source,
                                         String targetAgentId,
                                         Set<String> selectedSourceIds,
@@ -230,15 +266,9 @@ public class UpgradeExecutor {
             // agent UPDATE in the preview and then never arrived. The preview's
             // source content is already rewritten onto the target (its workflows, its
             // identity, its secrets), so it is exactly what is written.
-            ResourceDiff agentDiff = preview.resources().stream()
-                    .filter(diff -> "agent".equals(diff.resourceType()))
-                    .findFirst().orElse(null);
             // A CONFLICT — settings changed here since the last sync — is taken only
             // when named; the workflow changes below are written either way.
-            DiffAction agentAction = agentDiff != null && isSelected(selectedSourceIds, agentDiff.sourceId())
-                    ? resolveConflict(agentDiff, selectedSourceIds, "agent", agentDiff.name(), outcome)
-                    : null;
-            String agentSettings = agentAction == DiffAction.UPDATE ? agentDiff.sourceContent() : null;
+            String agentSettings = adoptedSettings(preview, selectedSourceIds, outcome);
 
             // Refused before the first write. The agent store checks these settings
             // only at the agent update, the LAST write: an invalid healthConfig or

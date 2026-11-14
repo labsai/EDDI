@@ -3640,6 +3640,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // removed again if the import or the upgrade throws. An upgrade that
                 // completes with per-resource failures (207) keeps them: part of it
                 // landed, and what landed may reference them.
+                // The agent settings the upgrade would refuse are refused before the
+                // connections land: a connection created here and removed again is a
+                // best-effort rollback, and nothing at all is better.
+                upgradeExecutor.checkAdoptedSettings(source, targetAgentId, selectedSet);
+
                 var transaction = new ImportTransaction();
                 int connectionsNotImported;
                 UpgradeResult result;

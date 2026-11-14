@@ -44,6 +44,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -455,6 +457,26 @@ class UpgradeExecutorSyncTest {
     }
 
     @Test
+    @DisplayName("checkAdoptedSettings refuses what the upgrade would refuse, writes nothing, and passes settings it would not adopt")
+    void checkAdoptedSettingsBeforeAnyWrite() throws Exception {
+        givenEverySourceResourceWouldBeWritten(DiffAction.UPDATE, INVALID_HEALTH);
+        var source = sourceWithSnippet();
+        var thrown = assertThrows(BadRequestException.class, () -> inCdi(() -> {
+            check(source);
+            return null;
+        }));
+        assertTrue(thrown.getMessage().contains("healthConfig.outcomes"), thrown.getMessage());
+        verify(snippetStore, never()).createSnippet(any());
+        verify(agentStore, never()).updateAgent(any(), any(), any(), any());
+
+        givenEverySourceResourceWouldBeWritten(DiffAction.CONFLICT, INVALID_HEALTH);
+        inCdi(() -> {
+            check(source);
+            return null;
+        });
+    }
+
+    @Test
     @DisplayName("a settings conflict that was not selected is not adopted, so its settings are not checked")
     void unadoptedSettingsAreNotChecked() throws Exception {
         givenEverySourceResourceWouldBeWritten(DiffAction.CONFLICT, INVALID_HEALTH);
@@ -600,6 +622,14 @@ class UpgradeExecutorSyncTest {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
+    private void check(IResourceSource source) {
+        try {
+            executor.checkAdoptedSettings(source, AGENT, null);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private <T> T inCdi(Supplier<T> action) {
         MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
         try (cdiMock) {

@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.health.model.HealthTurn;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.sql.DataSource;
 import java.sql.Array;
@@ -31,7 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -209,10 +213,39 @@ class PostgresHealthTurnStoreTest {
         assertTrue(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE.contains("OR (written_at_ms >= ? AND written_at_ms < ?))"));
         assertEquals(7, placeholders(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE));
         assertTrue(PostgresHealthTurnStore.CREATE_TABLE.contains("written_at_ms BIGINT"));
-        assertEquals(List.of("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"),
-                List.of(PostgresHealthTurnStore.ADD_COLUMNS));
+        assertEquals("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT", PostgresHealthTurnStore.ADD_WRITTEN_AT_COLUMN);
+        assertTrue(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN.contains("attrelid = to_regclass('health_turns')"));
+        assertTrue(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN.contains("attname = 'written_at_ms'"));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES)
                 .contains("idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"), "late rows only");
+    }
+
+    @ParameterizedTest(name = "present={0}")
+    @ValueSource(booleans = {true, false})
+    @SuppressWarnings("unchecked")
+    @DisplayName("a column the catalog already has is not altered again: no ACCESS EXCLUSIVE lock on every node start")
+    void addedColumnsCheckedInTheCatalog(boolean present) throws Exception {
+        Instance<DataSource> instance = mock(Instance.class);
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement ddl = mock(Statement.class);
+        ResultSet catalog = mock(ResultSet.class);
+        when(instance.get()).thenReturn(dataSource);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(ddl);
+        when(ddl.executeQuery(anyString())).thenReturn(catalog);
+        when(catalog.next()).thenReturn(present);
+        when(connection.prepareStatement(anyString())).thenReturn(mock(PreparedStatement.class));
+
+        new PostgresHealthTurnStore(instance).upsert(turn());
+
+        var order = inOrder(ddl);
+        order.verify(ddl).execute(PostgresHealthTurnStore.CREATE_TABLE);
+        order.verify(ddl).executeQuery(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN);
+        order.verify(ddl, times(present ? 0 : 1)).execute(PostgresHealthTurnStore.ADD_WRITTEN_AT_COLUMN);
+        order.verify(ddl).executeQuery(PostgresHealthTurnStore.HAS_SELF_REPORTED_COLUMN);
+        order.verify(ddl, times(present ? 0 : 1)).execute(PostgresHealthTurnStore.ADD_SELF_REPORTED_COLUMN);
+        order.verify(ddl).execute(PostgresHealthTurnStore.CREATE_INDEXES[0]);
     }
 
     @Test
