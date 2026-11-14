@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
@@ -27,6 +28,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -155,6 +157,16 @@ public class DreamService {
     @Inject
     VaultGrantGate vaultGrantGate;
 
+    /**
+     * The GDPR Art. 18 restriction flag, read before every scheduled cycle: a cycle
+     * prunes, rewrites and sends the user's memories to a model, all of which a
+     * restriction forbids. An {@link Instance} so the service graph stays acyclic;
+     * field-injected and null-checked so tests constructing the service directly
+     * need not provide it.
+     */
+    @Inject
+    Instance<GdprComplianceService> gdprComplianceService;
+
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
     private Counter contradictionsFoundCounter;
@@ -229,6 +241,44 @@ public class DreamService {
         if (userId == null || userId.isBlank() || SCHEDULER_PLACEHOLDER_USER_ID.equals(userId)) {
             return rejected(userId, start, "Dream schedule for agent '" + agentId + "' has no real userId (got '" + userId
                     + "'). Set 'userId' on the schedule to the user whose memories should be consolidated.");
+        }
+
+        // GDPR Art. 18: a user under processing restriction keeps their data stored,
+        // and nothing else happens to it — no prune, no consolidation rewrite, no LLM
+        // call over it. Checked before anything is read. A skip is a successful fire,
+        // not a failure: the restriction is a legal state, and a failed fire would
+        // spend the schedule's retry budget and dead-letter it, so consolidation would
+        // not resume once the restriction is lifted. A flag that cannot be read skips
+        // the cycle as well (fail closed, see below).
+        // GdprComplianceService is an unconditional @ApplicationScoped bean, so under
+        // CDI
+        // the Instance always resolves; unresolvable means a broken bean graph, and is
+        // treated like an unreadable flag. Null is only a test constructing the service
+        // with new and no GDPR wiring.
+        if (gdprComplianceService != null && !gdprComplianceService.isResolvable()) {
+            LOGGER.warnf("[DREAM] Dream cycle of agent '%s' skipped: the GDPR processing-restriction check is not available; "
+                    + "nothing was processed", LogSanitizer.sanitize(agentId));
+            return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
+        }
+        if (gdprComplianceService != null) {
+            try {
+                if (gdprComplianceService.get().isProcessingRestricted(userId)) {
+                    // No user id in this line: the GDPR code names users by pseudonym only.
+                    LOGGER.debugf("[DREAM] Dream cycle of agent '%s' skipped: the user's processing is restricted (GDPR Art. 18)",
+                            LogSanitizer.sanitize(agentId));
+                    return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
+                }
+            } catch (RuntimeException e) {
+                // Fail closed — nothing is read or processed — but as a skip, not a failed
+                // fire. A failed fire walks the schedule's retry ladder (15 s, 1 min, 4 min,
+                // 16 min) and then dead-letters it, where it stays until an operator re-arms
+                // it: a twenty-minute store outage would switch the user's consolidation off
+                // for good. Skipped, the cycle simply runs at the next cadence.
+                LOGGER.warnf("[DREAM] Dream cycle of agent '%s' skipped: the GDPR processing-restriction status could not be read (%s); "
+                        + "nothing was processed, the next scheduled cycle tries again", LogSanitizer.sanitize(agentId),
+                        LogSanitizer.sanitize(describe(e)));
+                return new DreamResult(userId, 0, 0, 0, Duration.between(start, Instant.now()).toMillis(), 0.0, null);
+            }
         }
 
         AgentConfiguration agentConfiguration;

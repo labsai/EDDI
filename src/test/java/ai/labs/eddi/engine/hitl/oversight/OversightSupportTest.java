@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.hitl.model.OversightConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.ThirdPartyIdentifiers;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecision;
 import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyState;
@@ -241,6 +242,38 @@ class OversightSupportTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> both = (Map<String, Object>) participant.export("alice");
             assertEquals(2, both.size());
+        }
+
+        @Test
+        @DisplayName("export masks other people — approver, reviewer, conversation owner — and keeps the subject's own id")
+        void exportMasksThirdParties() {
+            // user-1 owns the conversation; alice approved in it and reviewed its sample
+            ApprovalDecision byAlice = decision("APPROVED", NOW);
+            ApprovalDecision bySystem = decision("REJECTED", NOW, "system:timeout", ApprovalDecision.DeciderKind.SYSTEM, "TIMEOUT", null);
+            when(decisions.readByUser(eq("user-1"), anyInt())).thenReturn(List.of(byAlice, bySystem));
+            when(samples.readByUser(eq("user-1"), anyInt()))
+                    .thenReturn(List.of(sample("s1").reviewed(AuditSample.Status.OK, null, null, "alice", NOW)));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> owner = (Map<String, Object>) participant.export("user-1");
+            @SuppressWarnings("unchecked")
+            List<ApprovalDecision> ownerDecisions = (List<ApprovalDecision>) owner.get("approvalDecisions");
+            assertEquals("user-1", ownerDecisions.get(0).userId());
+            assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, ownerDecisions.get(0).decidedBy());
+            assertEquals("system:timeout", ownerDecisions.get(1).decidedBy(), "a system principal names no person");
+            @SuppressWarnings("unchecked")
+            List<AuditSample> ownerSamples = (List<AuditSample>) owner.get("auditSamples");
+            assertEquals("user-1", ownerSamples.get(0).userId());
+            assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, ownerSamples.get(0).reviewedBy());
+
+            // alice's own export of the decision she made: her id stays, the owner's goes
+            when(decisions.readByUser(eq("alice"), anyInt())).thenReturn(List.of(byAlice));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> approver = (Map<String, Object>) participant.export("alice");
+            @SuppressWarnings("unchecked")
+            List<ApprovalDecision> approverDecisions = (List<ApprovalDecision>) approver.get("approvalDecisions");
+            assertEquals("alice", approverDecisions.get(0).decidedBy());
+            assertEquals(ThirdPartyIdentifiers.OTHER_PERSON, approverDecisions.get(0).userId());
         }
 
         @Test

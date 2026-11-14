@@ -76,6 +76,12 @@ import java.util.Map;
  * @param failedCategories
  *            categories whose export failed outright (a store error), so they
  *            are absent rather than empty. Counts against {@link #complete()}
+ * @param notices
+ *            what the caller must act on although nothing failed — data a
+ *            participant deliberately did not export (an unverified directory
+ *            e-mail address, say) and the remedy, each prefixed with the
+ *            participant's name; never an identifier. Does not affect
+ *            {@link #complete()}
  *
  * @author ginccc
  * @since 6.0.0
@@ -97,7 +103,24 @@ public record UserDataExport(
         boolean groupConversationsTruncated,
         List<SharedArtifactExportEntry> sharedArtifacts,
         boolean sharedArtifactsTruncated,
-        List<String> failedCategories) {
+        List<String> failedCategories,
+        List<String> notices) {
+
+    /**
+     * Backward-compatible constructor for the shape that predates {@code notices} —
+     * none.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds,
+            List<ConnectionGrantExportEntry> connectionGrants, Map<String, Object> additionalData,
+            List<GroupConversationExportEntry> groupConversations, boolean groupConversationsTruncated,
+            List<SharedArtifactExportEntry> sharedArtifacts, boolean sharedArtifactsTruncated, List<String> failedCategories) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments, totalConversations,
+                conversationsTruncated, failedConversationIds, connectionGrants, additionalData, groupConversations,
+                groupConversationsTruncated, sharedArtifacts, sharedArtifactsTruncated, failedCategories, List.of());
+    }
 
     public UserDataExport {
         failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
@@ -106,6 +129,7 @@ public record UserDataExport(
         groupConversations = groupConversations == null ? List.of() : List.copyOf(groupConversations);
         sharedArtifacts = sharedArtifacts == null ? List.of() : List.copyOf(sharedArtifacts);
         failedCategories = failedCategories == null ? List.of() : List.copyOf(failedCategories);
+        notices = notices == null ? List.of() : List.copyOf(notices);
     }
 
     /**

@@ -4,14 +4,23 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.model.LogEntry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -42,6 +51,205 @@ class BoundedLogStoreTest {
     private LogEntry createEntry(String level, String agentId, String conversationId, String message) {
         return new LogEntry(System.currentTimeMillis(), level, "test.Logger", message, "production", agentId, 1, conversationId, "user-1",
                 "test-host-abcd");
+    }
+
+    /** A clock the test moves by hand. */
+    static final class MutableClock extends Clock {
+        private volatile Instant now;
+
+        MutableClock(Instant start) {
+            this.now = start;
+        }
+
+        void advance(Duration by) {
+            now = now.plus(by);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    // ==================== GDPR erasure ====================
+
+    @Nested
+    class Erasure {
+
+        private LogEntry entryOf(String userId, String level) {
+            return new LogEntry(System.currentTimeMillis(), level, "test.Logger", "m", "production", "agent-1", 1, "conv-1", userId,
+                    "test-host-abcd");
+        }
+
+        @Test
+        void erasureRewritesTheBufferedEntriesOfTheUserOnly() {
+            store.publish(entryOf("alice", "INFO"));
+            store.publish(entryOf("bob", "INFO"));
+            store.publish(entryOf("alice", "WARN"));
+
+            assertEquals(2, store.markUserErased("alice", "gdpr-erased:k1:abc"));
+
+            List<String> users = store.getEntries(null, null, null, 10).stream().map(LogEntry::userId).toList();
+            assertEquals(List.of("gdpr-erased:k1:abc", "bob", "gdpr-erased:k1:abc"), users);
+        }
+
+        @Test
+        void entriesLoggedAfterTheErasureCarryThePseudonym() {
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals("gdpr-erased:k1:abc", store.getEntries(null, null, null, 10).getFirst().userId());
+        }
+
+        @Test
+        void entriesQueuedForTheDatabaseBeforeTheErasureLeaveWithThePseudonym() {
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.publish(entryOf("alice", "WARN"));
+            dbStore.publish(entryOf("bob", "WARN"));
+
+            dbStore.markUserErased("alice", "gdpr-erased:k1:abc");
+            dbStore.flushToDb();
+
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            ArgumentCaptor<List<LogEntry>> captor = (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
+            verify(databaseLogs).addLogsBatch(captor.capture());
+            List<LogEntry> flushed = captor.getValue();
+            assertEquals(List.of("gdpr-erased:k1:abc", "bob"), flushed.stream().map(LogEntry::userId).toList());
+        }
+
+        @Test
+        void theStoreKeepsOnlyTheHashOfAnErasedUser_neverTheRawId() {
+            store.markUserErased("alice@example.com", "gdpr-erased:k1:abc");
+
+            assertEquals(Set.of(KvKeys.sha256("alice@example.com")), store.markKeys());
+        }
+
+        @Test
+        void anExpiredMarkIsPrunedByTheNextPublish_notOnlyByTheNextErasure() {
+            MutableClock clock = new MutableClock(Instant.parse("2026-11-12T10:00:00Z"));
+            store.setClockForTesting(clock);
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
+            assertEquals(1, store.markKeys().size());
+            clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusSeconds(1));
+
+            store.publish(entryOf("bob", "INFO"));
+
+            assertTrue(store.markKeys().isEmpty());
+        }
+
+        /**
+         * A flush blocked on the database for longer than a mark lives: the mark's
+         * lifetime must be measured from when it gets the monitor, and the queue
+         * rewrite must not depend on it.
+         */
+        @Test
+        void aMarkPlacedBehindAFlushBlockedPastTheWindowStillPseudonymisesTheQueue() throws Exception {
+            MutableClock clock = new MutableClock(Instant.parse("2026-11-12T10:00:00Z"));
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.setClockForTesting(clock);
+            CountDownLatch flushEntered = new CountDownLatch(1);
+            CountDownLatch releaseFlush = new CountDownLatch(1);
+            List<List<String>> batches = Collections.synchronizedList(new ArrayList<>());
+            doAnswer(invocation -> {
+                List<LogEntry> batch = invocation.getArgument(0);
+                batches.add(batch.stream().map(LogEntry::userId).toList());
+                if (batches.size() == 1) {
+                    flushEntered.countDown();
+                    assertTrue(releaseFlush.await(30, TimeUnit.SECONDS));
+                }
+                return null;
+            }).when(databaseLogs).addLogsBatch(any());
+
+            dbStore.publish(entryOf("carol", "WARN"));
+            Thread flusher = new Thread(dbStore::flushToDb);
+            flusher.start();
+            assertTrue(flushEntered.await(30, TimeUnit.SECONDS));
+            // queued while the flush is stuck: not in its batch
+            dbStore.publish(entryOf("alice", "WARN"));
+
+            // loaded now, so the only thing the marker can block on is the flush's monitor
+            String aliceHash = KvKeys.sha256("alice");
+            Thread marker = new Thread(() -> dbStore.markUserErased("alice", "gdpr-erased:k1:abc"));
+            marker.start();
+            // waits until the marker sits on the flush's monitor (it has already been
+            // called)
+            while (marker.getState() != Thread.State.BLOCKED && marker.getState() != Thread.State.TERMINATED) {
+                Thread.onSpinWait();
+            }
+            assertEquals(Thread.State.BLOCKED, marker.getState());
+            // the flush stays stuck for longer than a mark lives
+            clock.advance(BoundedLogStore.ERASED_USER_REWRITE_WINDOW.plusMinutes(5));
+            releaseFlush.countDown();
+            flusher.join(30_000);
+            marker.join(30_000);
+
+            dbStore.flushToDb();
+
+            assertEquals(List.of(List.of("carol"), List.of("gdpr-erased:k1:abc")), batches);
+            assertEquals(Set.of(aliceHash), dbStore.markKeys(), "the mark lives a full window from when it was placed");
+        }
+
+        @Test
+        void anEntryQueuedBeforeTheErasureLeavesWithThePseudonymEvenAfterTheMarkExpired() {
+            BoundedLogStore dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 5, true, 3600, "WARN");
+            dbStore.publish(entryOf("alice", "WARN"));
+            dbStore.markUserErased("alice", "gdpr-erased:k1:abc");
+            // a flush stuck for longer than the mark lives
+            dbStore.dropMarksForTesting();
+
+            dbStore.flushToDb();
+
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            ArgumentCaptor<List<LogEntry>> captor = (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
+            verify(databaseLogs).addLogsBatch(captor.capture());
+            assertEquals(List.of("gdpr-erased:k1:abc"), captor.getValue().stream().map(LogEntry::userId).toList());
+            assertEquals(0, dbStore.getDbQueueSize(), "the rewrite kept the queue count right: the one entry left");
+        }
+
+        @Test
+        void anEntryCapturedBeforeTheMarkButDeliveredAfterItReachesTheLiveTailPseudonymised() {
+            List<LogEntry> delivered = new ArrayList<>();
+            store.addListener(delivered::add);
+            // captured (and published under the lock) before the erasure ...
+            LogEntry raw = entryOf("alice", "INFO");
+            // ... the erasure marks the user ...
+            store.markUserErased("alice", "gdpr-erased:k1:abc");
+            // ... and only then does the delivery to the listeners run
+            store.notifyListeners(raw);
+
+            assertEquals(List.of("gdpr-erased:k1:abc"), delivered.stream().map(LogEntry::userId).toList());
+        }
+
+        @Test
+        void anErasureOnAnotherNodeMatchesByHash() {
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals(1, store.markUserErasedHash(KvKeys.sha256("alice")));
+
+            assertEquals(BoundedLogStore.REMOTE_ERASURE_MARKER, store.getEntries(null, null, null, 10).getFirst().userId());
+        }
+
+        @Test
+        void theParticipantMarksTheUserWithTheKeyedPseudonym() {
+            GdprPseudonymizer pseudonymizer = mock(GdprPseudonymizer.class);
+            when(pseudonymizer.pseudonymFor("alice")).thenReturn("gdpr-erased:k1:abc");
+            var participant = new LogBufferErasureParticipant(store, pseudonymizer);
+            store.publish(entryOf("alice", "INFO"));
+
+            assertEquals(0, participant.stopInFlightWork("alice"), "no work is signalled");
+            assertEquals("logBuffer", participant.erasureStepName());
+            assertEquals("gdpr-erased:k1:abc", store.getEntries(null, null, null, 10).getFirst().userId());
+        }
     }
 
     // ==================== Ring Buffer ====================

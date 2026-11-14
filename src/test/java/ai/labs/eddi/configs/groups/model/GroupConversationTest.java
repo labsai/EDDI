@@ -5,6 +5,9 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation.*;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -451,6 +454,56 @@ class GroupConversationTest {
             assertTrue(gc.getMemberDisplayNames().isEmpty());
             assertDoesNotThrow(() -> gc.addMemberDisplayName("a", "Alice"));
             assertEquals("Alice", gc.getMemberDisplayNames().get("a"));
+        }
+    }
+
+    /**
+     * The human-member record must tell "absent" (a document written before it
+     * existed) from "present but empty" through the persistence mapper both MongoDB
+     * and PostgreSQL documents go through ({@code IDocumentBuilder} →
+     * {@code JsonSerialization}, which omits nulls only).
+     */
+    @Nested
+    @DisplayName("humanMemberIds")
+    class HumanMemberRecord {
+
+        private final JsonSerialization json = new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+
+        @Test
+        @DisplayName("a document without the field reads back as no record, and recording does not create one")
+        void absentIsNull() throws Exception {
+            GroupConversation legacy = json.deserialize("{\"id\":\"gc-old\"}", GroupConversation.class);
+            assertNull(legacy.getHumanMemberIds());
+            legacy.setPendingHumanInput(new PendingHumanInput("h", "H", 0, 0, 0, "HUMAN_INPUT", null, null, Instant.EPOCH));
+            assertNull(legacy.getHumanMemberIds(), "a partial record would pass for a complete one");
+            assertFalse(json.serialize(legacy).contains("humanMemberIds"));
+        }
+
+        @Test
+        @DisplayName("a started, empty record survives the round trip as empty, not absent")
+        void emptyStaysEmpty() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-new");
+            gc.startHumanMemberRecord();
+
+            GroupConversation back = json.deserialize(json.serialize(gc), GroupConversation.class);
+
+            assertNotNull(back.getHumanMemberIds());
+            assertTrue(back.getHumanMemberIds().isEmpty());
+        }
+
+        @Test
+        @DisplayName("a pause for a human turn records the member, and the record survives the round trip")
+        void recordedSurvives() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-new");
+            gc.startHumanMemberRecord();
+            gc.setPendingHumanInput(new PendingHumanInput("h", "H", 0, 0, 0, "VOTE", null, null, Instant.EPOCH));
+            gc.setPendingHumanInput(null);
+
+            GroupConversation back = json.deserialize(json.serialize(gc), GroupConversation.class);
+
+            assertEquals(List.of("h"), back.getHumanMemberIds());
         }
     }
 }

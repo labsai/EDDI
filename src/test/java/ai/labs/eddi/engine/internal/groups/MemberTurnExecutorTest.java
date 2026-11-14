@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -668,6 +669,7 @@ class MemberTurnExecutorTest {
     @Test
     void executeAgentTurn_humanMember_skippedInAutomatedContexts() throws Exception {
         var gc = new GroupConversation();
+        gc.startHumanMemberRecord();
         gc.setId("gc-1");
         gc.setGroupId("group-1");
         var human = new GroupMember("h-1", "Hannah", 1, null, MemberType.HUMAN);
@@ -679,5 +681,9 @@ class MemberTurnExecutorTest {
         assertEquals("h-1", entry.speakerAgentId());
         assertEquals("Hannah", entry.speakerDisplayName());
         assertTrue(entry.errorReason().contains("Human member"), entry.errorReason());
+        // the GDPR export reads this reason back as evidence of a person
+        assertTrue(entry.errorReason().startsWith(HumanTurnSkipReasons.AUTOMATED_TURN), entry.errorReason());
+        assertTrue(HumanTurnSkipReasons.isHumanSkipReason(entry.errorReason()));
+        assertEquals(List.of("h-1"), gc.getHumanMemberIds());
     }
 }

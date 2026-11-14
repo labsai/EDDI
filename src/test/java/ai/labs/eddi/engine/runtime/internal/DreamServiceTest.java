@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
 import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
 import ai.labs.eddi.engine.pricing.model.ModelPriceCatalog;
@@ -24,6 +26,7 @@ import ai.labs.eddi.modules.llm.pricing.UsageNormalizer;
 import dev.langchain4j.model.output.TokenUsage;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -1670,6 +1673,92 @@ class DreamServiceTest {
         assertTrue(result.isSuccess(), "expected success, got: " + result.error());
         assertEquals(1, result.entriesPruned());
         verify(store).deleteEntry("1");
+    }
+
+    /**
+     * GDPR Art. 18: a restricted user's memories are stored and nothing else — the
+     * cycle must not prune them, rewrite them or send them to a model. The skip is
+     * a successful fire, so the schedule is not dead-lettered and resumes once the
+     * restriction is lifted.
+     */
+    @Test
+    void processScheduledFire_skipsAUserUnderProcessingRestriction() throws Exception {
+        var gdpr = mock(GdprComplianceService.class);
+        when(gdpr.isProcessingRestricted("user-1")).thenReturn(true);
+        dreamService.gdprComplianceService = resolvable(gdpr);
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "a restriction is not a failed fire: " + result.error());
+        assertEquals(0, result.entriesPruned());
+        verify(store, never()).getAllEntries(anyString());
+        verify(agentStore, never()).read(anyString(), anyInt());
+        verifyNoInteractions(summarizationService);
+    }
+
+    /**
+     * Fail closed without a failed fire: a failed fire would walk the retry ladder
+     * and dead-letter the user's schedule over a transient store outage.
+     */
+    @Test
+    void processScheduledFire_unreadableRestriction_processesNothingAndDoesNotFailTheFire() throws Exception {
+        var gdpr = mock(GdprComplianceService.class);
+        when(gdpr.isProcessingRestricted("user-1")).thenThrow(new ProcessingRestrictionUnavailableException("store down",
+                new IllegalStateException("down")));
+        dreamService.gdprComplianceService = resolvable(gdpr);
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "a failed fire spends the retry budget and dead-letters the schedule: " + result.error());
+        verify(agentStore, never()).read(anyString(), anyInt());
+        verify(store, never()).getAllEntries(anyString());
+        verifyNoInteractions(summarizationService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void processScheduledFire_unresolvableRestrictionCheck_processesNothing() throws Exception {
+        Instance<GdprComplianceService> unresolvable = mock(Instance.class);
+        when(unresolvable.isResolvable()).thenReturn(false);
+        dreamService.gdprComplianceService = unresolvable;
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "skipped, not failed: " + result.error());
+        verify(agentStore, never()).read(anyString(), anyInt());
+        verify(store, never()).getAllEntries(anyString());
+        verifyNoInteractions(summarizationService);
+    }
+
+    @Test
+    void processScheduledFire_runsForAnUnrestrictedUser() throws Exception {
+        var gdpr = mock(GdprComplianceService.class);
+        when(gdpr.isProcessingRestricted("user-1")).thenReturn(false);
+        dreamService.gdprComplianceService = resolvable(gdpr);
+        var dream = new AgentConfiguration.DreamConfig();
+        dream.setEnabled(true);
+        dream.setPruneStaleAfterDays(30);
+        dream.setDetectContradictions(false);
+        dream.setSummarizeInteractions(false);
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDream(dream);
+        var agentConfiguration = new AgentConfiguration();
+        agentConfiguration.setUserMemoryConfig(memoryConfig);
+        when(agentStore.read("agent-1", 7)).thenReturn(agentConfiguration);
+        when(store.getAllEntries("user-1")).thenReturn(List.of());
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertTrue(result.isSuccess(), "expected success, got: " + result.error());
+        verify(store).getAllEntries("user-1");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Instance<GdprComplianceService> resolvable(GdprComplianceService service) {
+        Instance<GdprComplianceService> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(service);
+        return instance;
     }
 
     @Test
