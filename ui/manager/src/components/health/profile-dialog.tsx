@@ -220,7 +220,7 @@ function ProfileForm({
           <span />
         )}
         <div className="flex gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onDone}>{t("common.cancel", "Cancel")}</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onDone} data-testid="health-profile-cancel">{t("common.cancel", "Cancel")}</Button>
           <Button type="submit" size="sm" disabled={busy} data-testid="health-profile-save">{t("common.save", "Save")}</Button>
         </div>
       </div>
@@ -245,10 +245,14 @@ export function ProfileDialog({
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">
       {/* The draft starts from the profile as the server has it now: a reopened dialog
-          waits for its refetch, so a save cannot overwrite a newer profile with a cached one. */}
+          waits for its refetch, so a save cannot overwrite a newer profile with a cached one.
+          A failed refetch keeps the cached profile in `data`, so the editor needs the latest
+          fetch to have succeeded, not merely some data to show. */}
       {profile.isFetching && <Skeleton className="h-40 w-full" />}
-      {profile.isError && !profile.isFetching && <p className="text-sm text-destructive" role="alert">{getErrorMessage(profile.error)}</p>}
-      {profile.data && !profile.isFetching && <ProfileForm agentId={agentId} initial={profile.data} info={info} onDone={onClose} />}
+      {profile.isError && !profile.isFetching && (
+        <p className="text-sm text-destructive" role="alert" data-testid="health-profile-load-error">{getErrorMessage(profile.error)}</p>
+      )}
+      {profile.data && !profile.isFetching && !profile.isError && <ProfileForm agentId={agentId} initial={profile.data} info={info} onDone={onClose} />}
     </AccessibleDialog>
   );
 }

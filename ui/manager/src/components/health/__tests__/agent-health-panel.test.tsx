@@ -5,7 +5,7 @@ import { http, HttpResponse } from "msw";
 import { Link } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
-import { HEALTH_AGENTS } from "@/test/mocks/health-fixtures";
+import { HEALTH_AGENTS, compareFor } from "@/test/mocks/health-fixtures";
 import { resetHealthMockState } from "@/test/mocks/health-handlers";
 import { AgentHealthPanel } from "../agent-health-panel";
 import { formatShortDate } from "../format";
@@ -353,6 +353,17 @@ describe("version compare", () => {
     expect(verdictOf(4)).toBe("neutral");
   });
 
+  it("the mocked comparison agrees with itself: each delta is its two sides' values", () => {
+    const compare = compareFor("a", 7, 8);
+    const value = (sections: typeof compare.from.sections, id: string) =>
+      Object.values(sections).flatMap((section) => section?.measures ?? []).find((m) => m.id === id)?.value ?? null;
+    for (const d of compare.deltas) {
+      expect(d.from).toBe(value(compare.from.sections, d.measureId));
+      expect(d.to).toBe(value(compare.to.sections, d.measureId));
+      expect(d.delta).toBeCloseTo(d.to! - d.from!, 6);
+    }
+  });
+
   it("derives its defaults from the latest version when it arrives late, and keeps older below newer", async () => {
     const view = renderPanel(HEALTH_AGENTS.healthy, { latestVersion: 1 });
     await screen.findByTestId("health-section-reliability");
@@ -546,7 +557,7 @@ describe("health profile editor", () => {
   it("a reopened editor starts from the profile the server has now, not a cached one", async () => {
     renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
-    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await userEvent.click(screen.getByTestId("health-profile-cancel"));
     await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
     // Someone else saved meanwhile.
     server.use(
@@ -564,6 +575,18 @@ describe("health profile editor", () => {
     );
     await openProfile();
     expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("7");
+  });
+
+  it("a reopened editor whose refetch fails shows the error and no form, never the cached profile", async () => {
+    renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    await userEvent.click(screen.getByTestId("health-profile-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
+    // The cached profile is still in the query; the refetch on reopening fails.
+    server.use(http.get("*/agents/:agentId/health/profile", () => HttpResponse.json({ error: "X", message: "down" }, { status: 503 })));
+    await userEvent.click(screen.getByTestId("health-open-profile"));
+    expect(await screen.findByTestId("health-profile-load-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("health-profile-form")).toBeNull();
   });
 
   it("offers thresholds and critical flags for measures that are not on screen", async () => {
@@ -638,7 +661,8 @@ describe("health profile editor", () => {
     await openProfile();
     await userEvent.click(screen.getByTestId("health-add-override"));
     const select = within(screen.getByTestId("health-override")).getAllByRole("combobox")[0]!;
-    expect(within(select).getByRole("option", { name: "Business outcomes" })).toBeInTheDocument();
+    // By value, not label: the label is localised copy.
+    expect(select.querySelector('option[value="business"]')).not.toBeNull();
   });
 
   it("shows an error when the reset fails", async () => {

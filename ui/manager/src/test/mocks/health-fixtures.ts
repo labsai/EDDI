@@ -331,19 +331,44 @@ export function periodFor(count: number): { period: AgentHealth["period"]; basel
 
 // ── Compare, portfolio, sessions ──────────────────────────────────
 
+/** The value of a measure in a health response's sections, wherever it is listed. */
+function valueIn(sections: AgentHealth["sections"], measureId: string): number | null {
+  for (const section of Object.values(sections)) {
+    const found = section?.measures.find((m) => m.id === measureId);
+    if (found) return found.value;
+  }
+  return null;
+}
+
+/** A copy of `sections` with the given measures' values replaced. */
+function withValues(sections: AgentHealth["sections"], values: Record<string, number>): AgentHealth["sections"] {
+  const copy = structuredClone(sections);
+  for (const section of Object.values(copy)) {
+    for (const m of section?.measures ?? []) if (m.id in values) m.value = values[m.id]!;
+  }
+  return copy;
+}
+
 export function compareFor(agentId: string, from: number, to: number): HealthCompare {
-  const a = healthFor(HEALTH_AGENTS.healthy);
-  const b = healthFor(HEALTH_AGENTS.attention);
+  const fromSections = healthFor(HEALTH_AGENTS.healthy).sections;
+  // The newer version got cheaper, so one delta is an improvement.
+  const toSections = withValues(healthFor(HEALTH_AGENTS.attention).sections, { costPerSession: 0.024 });
+  // Each delta is read from the two sides, so the response cannot contradict itself.
+  const delta = (measureId: string, significant: boolean, better: boolean | null) => {
+    const a = valueIn(fromSections, measureId);
+    const b = valueIn(toSections, measureId);
+    return { measureId, from: a, to: b, delta: a == null || b == null ? null : Number((b - a).toFixed(6)), significant, better };
+  };
   return {
     agentId,
-    from: { version: from, window: { from: "2026-10-12", to: "2026-10-25" }, sections: a.sections },
-    to: { version: to, window: { from: "2026-10-26", to: "2026-11-10" }, sections: b.sections },
+    from: { version: from, window: { from: "2026-10-12", to: "2026-10-25" }, sections: fromSections },
+    to: { version: to, window: { from: "2026-10-26", to: "2026-11-10" }, sections: toSections },
     deltas: [
-      { measureId: "resolutionRate", from: 0.53, to: 0.41, delta: -0.12, significant: true, better: false },
-      { measureId: "agentFailureRate", from: 0.004, to: 0.012, delta: 0.008, significant: true, better: false },
-      { measureId: "costPerSession", from: 0.034, to: 0.031, delta: -0.003, significant: true, better: true },
-      { measureId: "turnDurationP95", from: 3100, to: 3200, delta: 100, significant: false, better: null },
-      { measureId: "sessions", from: 900, to: 920, delta: 20, significant: true, better: null },
+      delta("resolutionRate", true, false),
+      delta("agentFailureRate", true, false),
+      delta("costPerSession", true, true),
+      delta("turnDurationP95", false, null),
+      delta("sessions", false, null),
     ],
   };
 }
