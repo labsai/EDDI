@@ -3099,7 +3099,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * vault, so conversation data in them may carry anything — including the
      * characters of a vault reference — without releasing a secret.
      */
-    static final Set<String> PROMPT_PARAMS = Set.of(KEY_SYSTEM_MESSAGE, KEY_PROMPT);
+    static final Set<String> PROMPT_PARAMS = Set.of(KEY_SYSTEM_MESSAGE, KEY_PROMPT, KEY_EMPTY_INPUT_PROMPT);
 
     /**
      * Render the task parameters, refusing a credential reference that came from
