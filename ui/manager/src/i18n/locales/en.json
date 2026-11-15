@@ -1017,7 +1017,11 @@
       "errDisabled": "This agent version does not ask for ratings.",
       "errOwner": "Only the person who had this conversation can rate it.",
       "errGeneric": "The rating could not be saved."
-    }
+    },
+    "toolArgs": "Arguments",
+    "toolResult": "Result",
+    "toolArgsShowFields": "Fields",
+    "toolArgsShowJson": "JSON"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -1798,9 +1802,18 @@
     "grModeReplace": "Use only the extra patterns",
     "grPiiKinds": "Kinds to find",
     "grPiiEmail": "E-mail addresses",
-    "grPiiSsn": "US social security numbers",
     "grPiiCard": "Payment card numbers (Luhn-checked)",
     "grPiiPhone": "Phone numbers",
+    "grPiiIban": "IBANs (checksum-validated)",
+    "grPiiDateOfBirth": "Dates of birth (next to a keyword such as “born”)",
+    "grPiiIpAddress": "IP addresses (IPv4 and IPv6)",
+    "grPiiPassportMrz": "Passport machine-readable zones (any country)",
+    "grPiiCountries": "National identifiers",
+    "grPiiCountriesHint": "Tick a country to find all of its identifiers, or tick single identifiers. Each is checked against its own format and check digit; some also need a keyword such as “PESEL” or “NHS” just before the number.",
+    "grPiiRegionEurope": "Europe",
+    "grPiiRegionAmericas": "Americas",
+    "grPiiRegionAsiaPacific": "Asia-Pacific",
+    "grPiiRegionAfrica": "Africa",
     "grReplacement": "Replacement",
     "grPiiReplacementHint": "Default [REDACTED:<kind>]. A custom value may contain {kind}, which is replaced by the kind found.",
     "grPatterns": "Patterns",
@@ -4619,7 +4632,12 @@
     "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
     "conversationColumn": "Conversation",
     "groupReviewLoadError": "The discussion could not be loaded.",
-    "groupReviewNoEntries": "Nothing has been said yet."
+    "groupReviewNoEntries": "Nothing has been said yet.",
+    "argsViewLabel": "Show arguments as",
+    "argsViewFields": "Fields",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Raw",
+    "amendRedactedMarker": "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written."
   },
   "hitlReview": {
     "approveEdited": "Approve with edits",
@@ -6274,7 +6292,6 @@
     "rules": "Rules",
     "property": "Property Setter",
     "apicalls": "API Calls",
-    "httpcallsLegacy": "API Calls (legacy)",
     "llm": "LLM",
     "output": "Output",
     "templating": "Templating",

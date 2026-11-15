@@ -6,13 +6,13 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 E.D.D.I ships three dashboards that the Kubernetes monitoring component and
 `docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
-`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 36 panels, NATS cluster mode; see
 [Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 240 panels, 28 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -87,7 +87,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
-`Conversation Ratings` · `Alerts`
+`Model Pricing` · `Team Budgets` · `Conversation Ratings` · `Alerts`
 
 ---
 
@@ -333,6 +333,15 @@ eddi_team_budget_refusals_total             # New work refused for a spent budge
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
+### Input Parser Metrics
+
+The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The counter appears on the
+first consultation, so a deployment whose parsers have no `semanticFallback` shows no data.
+
+```text
+eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure, or a consultation skipped during the back-off after one, counts as no_match; not the provider request volume
+```
+
 ### Scheduled Trigger Metrics
 
 ```text
@@ -489,7 +498,7 @@ eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
 backlog: work is arriving faster than it drains. Both coordinators register the
-same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+same seven meters (from their shared base class); `dead_letters > 0` means a turn failed and is waiting for an
 operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
 
 `dead_lettered_total` counts turns that failed after they had started (alert
@@ -1096,7 +1105,18 @@ earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolut
 eddi_summarization_calls_total              # Rolling-summary generations attempted
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
+eddi_summary_citation_checks_total          # Summaries checked under citeSources, by source and outcome
 ```
+
+`eddi_summary_citation_checks_total` carries `source` (`conversation` for the rolling summary,
+`dream` for a Dream consolidation group) and `outcome`: `passed` (the first answer passed),
+`retried` (it failed and the one retry passed), `kept` (it failed and was stored anyway under
+`onValidationFailure: keep`) and `fallback` (it failed and was discarded — the previous summary,
+or for Dream the original entries, stay). It stays at zero unless `citeSources` is on. A steady
+`fallback` rate on `conversation` is worth a look: each one leaves the summary boundary where it
+was, so the next turn pays for another summarizer call. See
+[langchain.md](langchain.md#traceable-summaries-citesources) and
+[user-memory.md](user-memory.md#traceable-consolidation-citesources).
 
 ### RAG Ingestion Metrics
 
@@ -1255,7 +1275,7 @@ They cover availability (`EddiDown`, `EddiMetricsAbsent`, `EddiRestartLoop`),
 the 5xx ratio, the coordinator backlog and dead letters, pipeline task errors,
 executor saturation, LLM error ratio and p95 latency, the tool failure ratio, the
 vault, the Platform Operator gate and canary, audit drops, queue fill and chain
-collisions, quota-store failures, schedule and NATS dead letters, and heap after
+collisions, quota-store failures, schedule dead letters, and heap after
 GC. Every rule has a runbook in
 [monitoring-guide.md → Alert runbooks](monitoring/monitoring-guide.md#alert-runbooks),
 linked from its `runbook_url` annotation; `promtool test rules` cases in

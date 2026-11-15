@@ -988,7 +988,11 @@
       "errDisabled": "このエージェントのバージョンは評価を求めていません。",
       "errOwner": "この会話を行った本人だけが評価できます。",
       "errGeneric": "評価を保存できませんでした。"
-    }
+    },
+    "toolArgs": "引数",
+    "toolResult": "結果",
+    "toolArgsShowFields": "フィールド",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -1756,9 +1760,18 @@
     "grModeReplace": "追加パターンのみを使用する",
     "grPiiKinds": "検出する種類",
     "grPiiEmail": "メールアドレス",
-    "grPiiSsn": "米国の社会保障番号",
     "grPiiCard": "支払いカード番号（Luhn チェック済み）",
     "grPiiPhone": "電話番号",
+    "grPiiIban": "IBAN（チェックサム検証済み）",
+    "grPiiDateOfBirth": "生年月日（「生まれ」などのキーワードの近く）",
+    "grPiiIpAddress": "IP アドレス（IPv4 と IPv6）",
+    "grPiiPassportMrz": "パスポートの機械読取領域（全ての国）",
+    "grPiiCountries": "国別の識別番号",
+    "grPiiCountriesHint": "国にチェックを入れるとその国の識別番号をすべて検出します。個別の識別番号だけを選ぶこともできます。それぞれ独自の形式とチェックディジットで検証され、一部は番号の直前に「PESEL」や「NHS」などのキーワードが必要です。",
+    "grPiiRegionEurope": "ヨーロッパ",
+    "grPiiRegionAmericas": "南北アメリカ",
+    "grPiiRegionAsiaPacific": "アジア太平洋",
+    "grPiiRegionAfrica": "アフリカ",
     "grReplacement": "置換文字列",
     "grPiiReplacementHint": "デフォルトは [REDACTED:<kind>] です。カスタム値には {kind} を含められ、検出された種類に置き換えられます。",
     "grPatterns": "パターン",
@@ -4578,7 +4591,12 @@
     "regularTruncated": "会話の承認を最初の {{limit}} 件のみ表示しています — ほかにも保留中のものがあります。いくつか処理すると残りが表示されます。",
     "conversationColumn": "会話",
     "groupReviewLoadError": "ディスカッションを読み込めませんでした。",
-    "groupReviewNoEntries": "まだ発言はありません。"
+    "groupReviewNoEntries": "まだ発言はありません。",
+    "argsViewLabel": "引数の表示形式",
+    "argsViewFields": "フィールド",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "そのまま",
+    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。"
   },
   "hitlReview": {
     "approveEdited": "編集して承認",
@@ -6274,7 +6292,6 @@
     "rules": "ルール",
     "property": "プロパティ設定",
     "apicalls": "API 呼び出し",
-    "httpcallsLegacy": "API 呼び出し（旧形式）",
     "llm": "LLM",
     "output": "出力",
     "templating": "テンプレート",

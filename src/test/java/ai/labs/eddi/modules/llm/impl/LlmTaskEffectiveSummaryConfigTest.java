@@ -30,6 +30,8 @@ class LlmTaskEffectiveSummaryConfigTest {
         configured.setMaxTurnsPerUpdate(3);
         configured.setMaxCharsPerUpdate(4_000);
         configured.setSummarizationPrompt("summarise");
+        configured.setCiteSources(true);
+        configured.setOnValidationFailure("retry_once");
 
         var effective = LlmTask.resolveEffectiveSummaryConfig(configured, "openai", "gpt-x");
 
@@ -44,5 +46,7 @@ class LlmTaskEffectiveSummaryConfigTest {
         assertEquals(3, effective.getMaxTurnsPerUpdate());
         assertEquals(4_000, effective.getMaxCharsPerUpdate());
         assertEquals("summarise", effective.getSummarizationPrompt());
+        assertEquals(true, effective.isCiteSources());
+        assertEquals("retry_once", effective.getOnValidationFailure());
     }
 }

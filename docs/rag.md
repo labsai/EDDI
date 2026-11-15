@@ -207,7 +207,9 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `POST` | `/ragstore/rags` | Create a new KB |
 | `PUT` | `/ragstore/rags/{id}?version=N` | Update a KB |
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
-| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
+| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB (`permanent=true` removes the history too) |
+| `GET` | `/ragstore/rags/{id}/currentversion` | Current version number |
+| `POST` | `/ragstore/rags/{id}/currentversion` | `303` redirect to the latest version |
 
 > **There is no retrieval endpoint.** `/ragstore/rags/` covers configuration and ingestion only —
 > there is no `/query`, `/search` or `/retrieve`, and requests to those return `404`. Retrieval is
@@ -219,6 +221,7 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). `kbId` is deprecated — see below |
+| `DELETE` | `/ragstore/rags/{id}/documents?version=N&documentName=...` | Remove a document ingested through `/ingest` (see [Deleting a document](#deleting-a-document)) |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
 > **Documents always go into the knowledge base in the path.** `kbId` no longer selects a store. Up
@@ -276,6 +279,39 @@ is refused with a `400` without one: every document ingested without a name shar
 replacing that would delete all of them. On a vector store that cannot delete by metadata, the
 ingestion still completes and the status response carries a `warning` saying the previous version is
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+#### Deleting a document
+
+```bash
+curl -X DELETE "http://localhost:7070/ragstore/rags/abc123/documents?version=1&documentName=pricing.md"
+```
+
+Removes everything ingested through `/ingest` under that `documentName` in this knowledge base — the
+same chunks `replace=true` supersedes: every version of the name, including chunks written before
+chunks carried an ingestion id, and nothing of another knowledge base sharing the store. It needs
+EDIT on the knowledge base, like ingesting, and it is synchronous.
+
+| Status | Meaning |
+| --- | --- |
+| `200` `{"status": "deleted", ...}` | The document's chunks are gone. A name nothing was ingested under is also `200`: there is nothing left to remove |
+| `200` with `warning` | The vector store cannot delete by metadata, so nothing was removed and the text is still retrievable (`status: "not_deleted"`) |
+| `400` | `documentName` is missing, blank or `unnamed` — every document ingested without a name shares `unnamed`, and deleting that would delete all of them |
+| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement of the same name is still embedding after 30 seconds |
+| `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
+
+**A delete and a replacement of one name never interleave.** Both take the same per-document lock, so
+a delete waits for a replacement in flight and then removes its chunks too, rather than landing
+between the replacement's store and its cleanup. As with replacements, the lock is per instance. An
+ingestion *without* `replace` takes no lock, so one still in flight when the delete answers can store
+its chunks afterwards.
+
+**What a source ingested is removed through the source.** Its chunks carry `sourceName` and a
+`sourceKey`, never the `source` key this endpoint matches on, so a delete could not touch them — and
+answering "deleted" while the source's text stays retrievable would be wrong. The endpoint therefore
+refuses a name a source holds with `409` and the source's id: delete an uploaded file through
+[its endpoint](#file-endpoints), or exclude a crawled page and run the source. The check is by name,
+so a document pushed through `/ingest` under the same name as a source's file cannot be deleted here
+until that file is gone.
 
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
@@ -866,6 +902,9 @@ with `replaceUnsupported` not raised. The other supported stores — `mongodb-at
 `elasticsearch`, `qdrant` — are expected to support it through their langchain4j drivers but are not
 covered by these tests. Where a store does not, the run still succeeds and reports
 `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that backend.
+The same `removeAll(Filter)` serves `replace=true` and
+[deleting a document](#deleting-a-document) on `/ingest`'s documents; where it is missing, both answer
+with a `warning` instead.
 
 ## Evaluating retrieval
 
@@ -1039,7 +1078,7 @@ RAG operations write audit traces to conversation memory:
 | `rag:context:{taskId}` | Formatted context string injected into the LLM |
 | `rag:httpcall:trace:{taskId}` | httpCall RAG execution metadata (httpCall name, context length) |
 
-These are visible in the conversation memory snapshot and the audit ledger.
+All three are stored in the conversation document. `rag:context:{taskId}` is returned by a snapshot with `returnDetailed=true`; the two `:trace:` keys are withheld from that view and are read from the raw conversation (`GET /conversationstore/conversations/{conversationId}`, the conversation's owner or an admin). The audit ledger does not copy them, but its `llmDetail.compiledPrompt` contains the injected context.
 
 ## Troubleshooting
 
@@ -1165,11 +1204,11 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host` (one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation). Index and throughput settings — `layout`, `vectorIndex`, `hnswM`, `hnswEfConstruction`, `hnswEfSearch`, `insertBatchSize` — are in [pgvector at scale](#pgvector-at-scale) |
-| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
-| `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host` (default `localhost`; one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port` (default `5432`), `database` (default `eddi`), `user` (default `eddi`), `table`, `dimension` (default `1536` — must match the embedding model's vector size). `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation). Index and throughput settings — `layout`, `vectorIndex`, `hnswM`, `hnswEfConstruction`, `hnswEfSearch`, `insertBatchSize` — are in [pgvector at scale](#pgvector-at-scale) |
+| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName` (default `eddi`), `collectionName`, `indexName` (default `vector_index`) |
+| `elasticsearch` | — | `serverUrl` (default: `http://localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
-| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
+| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName`; `tenantName` (default `default_tenant`), `databaseName` (default `default_database`), `apiVersion` (`V2` default, or `V1`) |
 
 > **`in-memory` is a dev/test option, not a small-corpus one.** For this store the object in the
 > EDDI process *is* the data, so it is kept apart from the cache of external-store clients: it is

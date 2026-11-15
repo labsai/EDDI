@@ -37,7 +37,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
 **Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
@@ -47,7 +47,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
@@ -56,7 +56,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
 | `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
-> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
+> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` once at `ui/` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm ci` once in `ui/`, then `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). `ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the shared packages under `ui/packages/` install from one `ui/package-lock.json` into `ui/node_modules`, while each app keeps its own scripts. Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
 
 > **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; `.claude/skills/ship-pr/SKILL.md` groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
 
@@ -162,7 +162,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (96 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -295,7 +295,8 @@ LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
           (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task; the context carries the memory)
+           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
+           carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -541,7 +542,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
 | `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |
