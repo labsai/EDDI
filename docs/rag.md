@@ -472,7 +472,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
-| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
+| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.technology)` | Sent on every request, and matched against robots.txt groups |
 | `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
 
 `settings` — what to do with what was crawled:
