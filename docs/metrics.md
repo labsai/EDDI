@@ -333,6 +333,15 @@ eddi_team_budget_refusals_total             # New work refused for a spent budge
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
+### Input Parser Metrics
+
+The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The counter appears on the
+first consultation, so a deployment whose parsers have no `semanticFallback` shows no data.
+
+```text
+eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure, or a consultation skipped during the back-off after one, counts as no_match; not the provider request volume
+```
+
 ### Scheduled Trigger Metrics
 
 ```text
@@ -1096,7 +1105,18 @@ earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolut
 eddi_summarization_calls_total              # Rolling-summary generations attempted
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
+eddi_summary_citation_checks_total          # Summaries checked under citeSources, by source and outcome
 ```
+
+`eddi_summary_citation_checks_total` carries `source` (`conversation` for the rolling summary,
+`dream` for a Dream consolidation group) and `outcome`: `passed` (the first answer passed),
+`retried` (it failed and the one retry passed), `kept` (it failed and was stored anyway under
+`onValidationFailure: keep`) and `fallback` (it failed and was discarded — the previous summary,
+or for Dream the original entries, stay). It stays at zero unless `citeSources` is on. A steady
+`fallback` rate on `conversation` is worth a look: each one leaves the summary boundary where it
+was, so the next turn pays for another summarizer call. See
+[langchain.md](langchain.md#traceable-summaries-citesources) and
+[user-memory.md](user-memory.md#traceable-consolidation-citesources).
 
 ### RAG Ingestion Metrics
 

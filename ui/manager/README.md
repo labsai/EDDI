@@ -43,7 +43,7 @@ If you want to develop the Manager UI itself:
 
 ```bash
 # Prerequisites: Node.js 22.22.2+, 24.15.0+ or 26+ (jsdom's floor for the test suite; the build pins 26.13.0), EDDI backend on localhost:7070
-npm install
+(cd .. && npm ci)    # once, at ui/: the npm workspaces root and its one lockfile
 npm run dev          # Vite dev server on http://localhost:3000
 ```
 

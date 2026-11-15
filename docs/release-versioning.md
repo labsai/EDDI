@@ -214,7 +214,7 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 ```
 
 Nothing is published until every gate above `docker` has passed. Its `needs` list is
-`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]`, so a failing
+`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]`, so a failing
 CVE scan, a secret leak, a CodeQL finding, a coverage shortfall or a failing end-to-end tier each block the push on their
 own. The diagram above shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
 job that runs the JaCoCo 90/80 coverage gate.
@@ -229,7 +229,7 @@ job that runs the JaCoCo 90/80 coverage gate.
 | **trivy-scan** | `code` filter | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
 | **gitleaks** | Every push/PR/tag | Secret scanning; blocks `docker` | ~1 min |
 | **sbom** | Pushes on the `code` filter | CycloneDX SBOM; does not block `docker` | ~2 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate and ui-gate | ~3-4 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate and ui-gate | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **release** | Tag pushes only, after `docker` | GitHub release with the signed `SHA256SUMS`; a pre-release for an RC tag | — |
 | **post-release** | Stable tags only, after `docker`, `smoke-test` and `release` | Calls `post-release.yml` ([After a GA Release](#after-a-ga-release)) | — |
