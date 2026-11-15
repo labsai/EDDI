@@ -79,6 +79,10 @@ public class AgentConfiguration {
      * the USE check, and an unlisted agent stays reachable by anyone who has its id
      * and may use it. With workspaces enforced, {@code published} and
      * {@code internal} visibility count as listed too.
+     * <p>
+     * The catalog reads this flag from the <em>deployed</em> version of the agent,
+     * not from the latest stored one: listing or unlisting takes effect only once
+     * the version carrying the change is deployed.
      *
      * @since 6.7.0
      */

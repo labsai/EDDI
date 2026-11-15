@@ -113,8 +113,9 @@ Set it in the Manager with the **Listed in the catalog** switch, which sits on a
 in a group's panel (and in a team's settings in Workforce). You can also put it in the JSON with
 `PUT /agentstore/agents/{id}` or `PUT /groupstore/groups/{id}`, which take the full document. Over
 MCP only a group's flag can be set, with `update_group`: no MCP tool writes the agent document
-(`update_resource` does not take the agent type). An agent change takes effect for the catalog
-once the new version is deployed. The flag is part of the configuration document, so ZIP
+(`update_resource` does not take the agent type). The catalog reads the flag from the
+**deployed** version of an agent, so listing or unlisting takes effect only once the version carrying
+the change is deployed, not when it is saved. The flag is part of the configuration document, so ZIP
 export/import and [agent sync](agent-sync-guide.md) carry it like any other field.
 
 ---
