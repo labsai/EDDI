@@ -55,7 +55,8 @@ describe("ApprovalsPage — tool-call pauses", () => {
 
     expect(await screen.findByTestId("tool-badge-conv-tool-1")).toBeInTheDocument();
     // Tool names replace the generic reason so the reviewer sees what's gated.
-    expect(screen.getByText("sendEmail, transfer_funds")).toBeInTheDocument();
+    // In words: the inbox is read, the identifiers stay on the approval card.
+    expect(screen.getByText("Send email, Transfer funds")).toBeInTheDocument();
     // Safe: a Review link, and NO inline Approve/Reject that would approve blind.
     expect(screen.getByTestId("review-conv-tool-1")).toBeInTheDocument();
     expect(screen.queryByTestId("approve-conv-tool-1")).not.toBeInTheDocument();
