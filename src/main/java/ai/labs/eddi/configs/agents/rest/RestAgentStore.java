@@ -845,7 +845,7 @@ public class RestAgentStore implements IRestAgentStore {
      * Every check {@link #updateAgent} — here and in {@code AgentStore.update} —
      * applies to an agent's own settings, as opposed to its workflow list: the
      * security flags, {@code ratingConfig}, {@code healthConfig}, the HITL config,
-     * the Dream settings and the continuation bounds.
+     * the Dream settings, the continuation bounds and the presentation blocks.
      * <p>
      * An upgrade or a sync ({@code UpgradeExecutor}) writes snippets, extensions
      * and workflows before the agent, so it runs these on the settings it is about

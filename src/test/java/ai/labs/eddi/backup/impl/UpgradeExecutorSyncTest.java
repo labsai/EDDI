@@ -431,7 +431,9 @@ class UpgradeExecutorSyncTest {
                 Arguments.of("maxContinuations", "{\"maxContinuations\":1000000}"),
                 Arguments.of("userMemoryConfig.dream.summarizeTargetEntries",
                         "{\"userMemoryConfig\":{\"dream\":{\"summarizeTargetEntries\":0}}}"),
-                Arguments.of("signInterAgentMessages", "{\"security\":{\"signInterAgentMessages\":true}}"));
+                Arguments.of("signInterAgentMessages", "{\"security\":{\"signInterAgentMessages\":true}}"),
+                Arguments.of("appearance.accentColor", "{\"appearance\":{\"accentColor\":\"red\"}}"),
+                Arguments.of("titleGeneration.maxLength", "{\"titleGeneration\":{\"maxLength\":5}}"));
     }
 
     @ParameterizedTest(name = "{0}")
