@@ -378,16 +378,49 @@ class TaskForceEngineTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void verifyPass_twoTasksShownAsTheSameLine_neitherIsSettledByThatLabel_failModeFailsBoth() throws Exception {
+        var engine = engine();
+        var gc = taskGc();
+        var first = completedTask(gc, "Review\nlogs");
+        var second = completedTask(gc, "Review logs");
+        var data = ArgumentCaptor.forClass(Map.class);
+        when(templatingEngine.processTemplate(anyString(), data.capture(), any())).thenReturn("rendered");
+        // The verifier passes "Review logs" — the label both tasks were shown with.
+        String verdict = "[{\"subject\":\"Review logs\",\"passed\":true}]";
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any()))
+                .thenReturn(new TranscriptEntry(MODERATOR, MODERATOR, verdict, 2, "Verify", TranscriptEntryType.OPINION, Instant.now(), null,
+                        null));
+        when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(Map.of("subject", "Review logs", "passed", true)));
+        var config = new AgentGroupConfiguration();
+        config.setTaskListConfig(new GroupTaskConfig(false, 0, 0, null, AgentGroupConfiguration.UnparseableVerdictPolicy.FAIL));
+
+        engine.executeTaskVerificationPhase(gc, config, List.of(member(MODERATOR)), new DiscussionPhase("Verify", PhaseType.VERIFY),
+                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 0, MemberUnavailablePolicy.SKIP), "Q?", 2, null, new AtomicInteger(), 0);
+
+        var rendered = (List<Map<String, Object>>) data.getValue().get("completedTasks");
+        assertEquals("```\nReview logs\n```", rendered.get(0).get("subject"));
+        assertEquals("```\nReview logs\n```", rendered.get(1).get("subject"), "both tasks are shown with the same label");
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(first.id()).status(),
+                "the label cannot have meant this task: it is unsettled, and FAIL fails it");
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(second.id()).status(),
+                "nor the other one, whose subject is written exactly that way");
+    }
+
+    @Test
     void verdictTarget_exactFirst_thenTheOneShownMatch_neverAnAmbiguousOne() {
         var gc = taskGc();
         var a = completedTask(gc, "Review\nlogs");
         var b = completedTask(gc, "Review logs");
         var c = completedTask(gc, "Ship\n\nit");
 
-        assertSame(b, TaskForceEngine.verdictTarget(List.of(a, b, c), "review logs"), "an exact subject wins");
+        assertNull(TaskForceEngine.verdictTarget(List.of(a, b, c), "review logs"),
+                "an exact subject does not win when another task shows as the same line");
+        assertNull(TaskForceEngine.verdictTarget(List.of(a, b, c), "Review\nlogs"), "nor does the other one's exact subject");
         assertNull(TaskForceEngine.verdictTarget(List.of(a, b, c), "Review  logs"),
                 "two tasks show as this line, so neither is chosen");
         assertSame(c, TaskForceEngine.verdictTarget(List.of(a, b, c), "Ship it"), "the shown form of a unique subject matches");
+        assertSame(b, TaskForceEngine.verdictTarget(List.of(b, c), "review logs"), "without a collision the exact subject matches");
     }
 
     @Test

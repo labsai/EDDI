@@ -166,7 +166,9 @@ docs: [`group-conversations.md`](../group-conversations.md).
   (`Review\nlogs`, `Review logs`) match no bid; both tasks fall back to ROLE.
 - **VERIFY prompt:** the planner-written subject (on one line) and description are
   fenced like the result, the assignee name reduced to one line; a verdict naming
-  the subject as shown still lands on its task, and an ambiguous one on neither.
+  the subject as shown still lands on its task. When two tasks show as the same
+  line, a verdict naming that line settles neither — not even the task whose
+  subject is written exactly that way — and `onUnparseableVerdict` decides both.
 - **Votes:** a label with no text rejects the synthesis even when it is the last
   option (`Option A: Adopt\nOption B:` used to give `["Adopt"]`).
 

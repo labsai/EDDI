@@ -1317,27 +1317,33 @@ public class TaskForceEngine {
     /**
      * The task a verdict entry's {@code subject} names: the task with that exact
      * subject (any case) or, failing that, the one task whose subject shows as that
-     * line in the VERIFY prompt ({@link TaskBidEngine#subjectLine}). Two tasks that
-     * show as the same line match neither, so the verdict cannot land on the wrong
-     * one.
+     * line in the VERIFY prompt ({@link TaskBidEngine#subjectLine}).
+     * <p>
+     * When two tasks show as the same line ({@code Review\nlogs} and
+     * {@code Review logs} both show as "Review logs") the verdict names neither,
+     * exact match included: the verifier saw two identical labels and cannot have
+     * meant one of them by that text, so picking the exact match would land a
+     * verdict on whichever task happened to be written that way. Both stay
+     * unsettled, and {@code onUnparseableVerdict} decides them.
      */
     static TaskItem verdictTarget(List<TaskItem> tasks, String subject) {
-        for (TaskItem task : tasks) {
-            if (task.subject() != null && task.subject().equalsIgnoreCase(subject)) {
-                return task;
-            }
-        }
         String shown = TaskBidEngine.subjectLine(subject);
+        TaskItem exact = null;
         TaskItem match = null;
+        int sameLine = 0;
         for (TaskItem task : tasks) {
+            if (exact == null && task.subject() != null && task.subject().equalsIgnoreCase(subject)) {
+                exact = task;
+            }
             if (TaskBidEngine.subjectLine(task.subject()).equalsIgnoreCase(shown)) {
-                if (match != null) {
-                    return null;
-                }
+                sameLine++;
                 match = task;
             }
         }
-        return match;
+        if (sameLine > 1) {
+            return null;
+        }
+        return exact != null ? exact : match;
     }
 
     private static String stringOrNull(Object value) {
