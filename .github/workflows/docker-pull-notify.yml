@@ -1023,7 +1023,7 @@ jobs:
                 {
                   \"type\": \"context\",
                   \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"${FROM} → ${TO} · <https://hub.docker.com/r/labsai/eddi|Docker Hub> · <https://github.com/labsai/EDDI|GitHub> · <https://eddi.labs.ai|Website>\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"${FROM} → ${TO} · <https://hub.docker.com/r/labsai/eddi|Docker Hub> · <https://github.com/labsai/EDDI|GitHub> · <https://eddi.technology|Website>\" }
                   ]
                 }
               ]

@@ -63,7 +63,7 @@ import {
   extractOutputImages,
   findInputField,
   isTurnPaused,
-  parseToolCallName,
+  parseToolCallActivity,
   UNCONSUMED_STREAM_ERROR_CODES,
   type DoneSnapshot,
   type OutputImage,
@@ -679,10 +679,19 @@ export function ChatWidget() {
         // tool, and the silence while that tool runs is exactly the wait worth
         // explaining. The next token clears it again.
         case "tool_call": {
-          const tool = parseToolCallName(event.data);
+          const tool = parseToolCallActivity(event.data);
           if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
           return false;
         }
+
+        // EDDI 6.7: `{tool, callId, status, durationMs}` once per call, right
+        // after it ran (never its arguments or result). Calls run one after
+        // another, so the call on screen is finished: back to "Thinking…"
+        // rather than naming a tool that is no longer running.
+        case "tool_result":
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
+          if (turn.tokenCount === 0) dispatch({ type: "SET_THINKING", value: true });
+          return false;
 
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come

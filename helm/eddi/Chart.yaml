@@ -29,7 +29,7 @@ type: application
 # either fails to render or silently drops a setting.
 version: 2.15.0
 appVersion: "6.6.0"
-home: https://eddi.labs.ai
+home: https://eddi.technology
 sources:
   - https://github.com/labsai/EDDI
 maintainers:
@@ -45,4 +45,4 @@ keywords:
   - quarkus
   - mcp
   - a2a
-icon: https://eddi.labs.ai/img/eddi-logo.png
+icon: https://eddi.technology/eddi-icon.png

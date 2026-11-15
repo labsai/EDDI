@@ -12,6 +12,7 @@
 import { encodeSegment, request, requestJson } from "./http";
 import type { ConversationState } from "@/types";
 import { t } from "@/i18n";
+import { humanizeToolName } from "@/tool-labels";
 
 export interface PendingToolCall {
   callId: string;
@@ -104,7 +105,10 @@ export function approvalDeadline(status: ApprovalStatus): number | null {
 export function gatedToolNames(status: ApprovalStatus): string[] {
   const details = status.pauseDetails;
   if (!details || details.type !== "TOOL_CALL") return [];
-  return (details.calls ?? []).map((c) => c.toolName).filter(Boolean);
+  // In words, once each: an end user reads this, and a batch may call one tool twice.
+  return Array.from(
+    new Set((details.calls ?? []).map((c) => humanizeToolName(c.toolName)).filter(Boolean)),
+  );
 }
 
 /** One line explaining why the turn stalled. */

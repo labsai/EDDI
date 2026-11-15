@@ -420,7 +420,7 @@ banner() {
   echo -e "${BOLD} /_____/  /_____/ /_____/ /___/    ${RESET}"
   echo ""
   echo -e "   ${BOLD}Multi-Agent Orchestration Middleware${RESET}"
-  echo -e "   ${DIM}https://eddi.labs.ai${RESET}"
+  echo -e "   ${DIM}https://eddi.technology${RESET}"
   echo ""
 }
 
