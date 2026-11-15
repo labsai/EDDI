@@ -1044,17 +1044,6 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     /**
-     * G3: refuses a create/update whose request BODY declares the schedule as a
-     * HITL approval timeout. These schedules are only ever minted internally (they
-     * bypass REST), so no REST caller — admin or editor — has a legitimate reason
-     * to forge one; letting them would hand an attacker a way to force-resume/abort
-     * another user's pending approval with a system actor and no authorization
-     * check.
-     *
-     * @return a 400 {@link Response} to short-circuit the caller when the body is a
-     *         HITL timeout schedule; {@code null} when the operation may proceed
-     */
-    /**
      * Refuses a schedule body that claims to be a RAG ingestion schedule.
      *
      * <p>
@@ -1165,6 +1154,17 @@ public class RestScheduleStore implements IRestScheduleStore {
                 || HitlAutonomySchedules.isSystem(schedule) || HealthSchedules.isSystem(schedule));
     }
 
+    /**
+     * G3: refuses a create/update whose request BODY declares the schedule as a
+     * HITL approval timeout. These schedules are only ever minted internally (they
+     * bypass REST), so no REST caller — admin or editor — has a legitimate reason
+     * to forge one; letting them would hand an attacker a way to force-resume/abort
+     * another user's pending approval with a system actor and no authorization
+     * check.
+     *
+     * @return a 400 {@link Response} to short-circuit the caller when the body is a
+     *         HITL timeout schedule; {@code null} when the operation may proceed
+     */
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
         if (isHitlSchedule(schedule)) {
             LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
