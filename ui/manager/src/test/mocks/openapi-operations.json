@@ -37,6 +37,7 @@
     "DELETE /propertiesstore/properties/{userId}",
     "DELETE /propertysetterstore/propertysetters/{id}",
     "DELETE /ragstore/rags/{id}",
+    "DELETE /ragstore/rags/{id}/documents",
     "DELETE /ragstore/rags/{id}/sources/{sourceId}/documents",
     "DELETE /ragstore/rags/{id}/sources/{sourceId}/files/{fileId}",
     "DELETE /rulestore/rulesets/{id}",
