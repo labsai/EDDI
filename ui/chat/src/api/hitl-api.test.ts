@@ -101,7 +101,7 @@ describe("gatedToolNames", () => {
       }),
     );
 
-    expect(names).toEqual(["send_email", "delete_record"]);
+    expect(names).toEqual(["Send email", "Delete record"]);
   });
 
   it("is empty for a RULE pause", () => {
@@ -130,7 +130,7 @@ describe("pauseHeadline", () => {
       }),
     );
 
-    expect(text).toContain("send_email");
+    expect(text).toContain("Send email");
   });
 
   it("falls back to the pause reason on a RULE pause", () => {
