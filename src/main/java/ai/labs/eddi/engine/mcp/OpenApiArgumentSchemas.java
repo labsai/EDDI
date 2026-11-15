@@ -148,15 +148,27 @@ final class OpenApiArgumentSchemas {
      * Adds an object's {@code properties} (each converted, {@code readOnly} ones
      * left out), its {@code required} names that are still declared, and a boolean
      * {@code additionalProperties}: a schema-valued one becomes {@code true} (any
-     * key; the value schema is not carried).
+     * key; the value schema is not carried). A property whose schema is
+     * {@code false} is left out and closes the contract
+     * ({@code additionalProperties:
+     * false}), the one way the contract can keep it from being sent.
      */
     private static void putObjectShape(Map<String, Object> out, Schema<?> schema, OpenAPI openAPI, Set<String> resolving, int depth) {
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
+        boolean forbidden = false;
         if (properties != null && !properties.isEmpty()) {
             Map<String, Object> converted = new LinkedHashMap<>();
             for (var entry : properties.entrySet()) {
                 if (entry.getValue() != null && Boolean.TRUE.equals(entry.getValue().getReadOnly())) {
+                    continue;
+                }
+                if (isFalseSchema(entry.getValue())) {
+                    // A property whose schema is false is forbidden. The contract cannot say
+                    // "forbidden" for one key while extra keys are otherwise allowed, so the
+                    // property is left out and the contract is closed below: the stricter,
+                    // safe direction - the tool can only send less than the spec permits.
+                    forbidden = true;
                     continue;
                 }
                 converted.put(entry.getKey(), convert(entry.getValue(), openAPI, resolving, depth + 1));
@@ -170,7 +182,9 @@ final class OpenApiArgumentSchemas {
             }
         }
         Object additional = schema.getAdditionalProperties();
-        if (additional instanceof Boolean allowed) {
+        if (forbidden) {
+            out.put("additionalProperties", false);
+        } else if (additional instanceof Boolean allowed) {
             out.put("additionalProperties", allowed);
         } else if (additional instanceof Schema<?> additionalSchema) {
             // OpenAPI 3.1 parses "additionalProperties: false" into a boolean schema, not a
@@ -178,6 +192,24 @@ final class OpenApiArgumentSchemas {
             // contract accepted the undeclared properties the spec forbids.
             out.put("additionalProperties", !Boolean.FALSE.equals(additionalSchema.getBooleanSchemaValue()));
         }
+    }
+
+    /**
+     * A schema that admits no value: the 3.1 boolean schema {@code false}, or
+     * {@code {"not": {}}}, the way OpenAPI 3.0 says it.
+     */
+    static boolean isFalseSchema(Schema<?> schema) {
+        if (schema == null) {
+            return false;
+        }
+        if (Boolean.FALSE.equals(schema.getBooleanSchemaValue())) {
+            return true;
+        }
+        Schema<?> not = schema.getNot();
+        return not != null && not.getBooleanSchemaValue() == null && not.getType() == null && (not.getTypes() == null || not.getTypes().isEmpty())
+                && not.get$ref() == null && not.getProperties() == null && not.getItems() == null && not.getAllOf() == null
+                && not.getAnyOf() == null && not.getOneOf() == null && not.getNot() == null && not.getEnum() == null
+                && not.getFormat() == null && not.getPattern() == null;
     }
 
     /**

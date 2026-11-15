@@ -612,7 +612,7 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
-    @DisplayName("a boolean property schema meets the other side's additionalProperties schema: true takes it, false is dropped or refused")
+    @DisplayName("a boolean property schema meets the other side's additionalProperties schema: true takes it, false is kept or refused")
     void booleanPropertySchemasAreIntersected() throws Exception {
         String defs = "{\"Typed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
                 + "\"additionalProperties\":{\"type\":\"string\",\"maxLength\":5}}}";
@@ -625,7 +625,23 @@ class OpenApiRefBundlerTest {
         JsonNode properties = JSON.readTree(OpenApiRefBundler.bundle(spec.formatted(""), null, fetcher)).at("/components/schemas/S/properties");
 
         assertEquals(5, properties.at("/b/maxLength").asInt(), "true is {}, so b takes the additionalProperties schema: " + properties);
-        assertFalse(properties.has("c"), "false admits nothing: " + properties);
+        // false is kept: dropped, c would fall under the additionalProperties schema
+        // and
+        // {"c":"ok"} would pass
+        assertTrue(properties.get("c").isBoolean() && !properties.get("c").asBoolean(), "c: false stays: " + properties);
+        // 3.0 has no boolean schemas: the same constraint is written as {"not": {}}
+        JsonNode properties30 = JSON.readTree(OpenApiRefBundler.bundle(spec.formatted("").replace("3.1.0", "3.0.0"), null, fetcher))
+                .at("/components/schemas/S/properties");
+        assertEquals("{\"not\":{}}", properties30.get("c").toString(), "3.0: " + properties30);
+
+        // the argument contract leaves c out and closes, the one way it can forbid c
+        for (String version : new String[]{"3.1.0", "3.0.0"}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec(spec.formatted("").replace("3.1.0", version), fetcher);
+            Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+            Map<?, ?> convertedProperties = (Map<?, ?>) converted.get("properties");
+            assertFalse(convertedProperties.containsKey("c"), version + ": " + converted);
+            assertEquals(Boolean.FALSE, converted.get("additionalProperties"), version + ": " + converted);
+        }
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> OpenApiRefBundler.bundle(spec.formatted(",\"required\":[\"c\"]"), null, fetcher));
         assertTrue(e.getMessage().contains("whose schema is false"), e.getMessage());

@@ -98,7 +98,10 @@ Seven confirmed findings from a security review of the outbound paths.
   spec when it is required; a schema is merged into it. `patternProperties` are not evaluated (ECMA regexes from an
   untrusted spec: backtracking and dialect risk); a side with them is taken to match nothing, which errs toward the
   stricter contract, and a required property it would forbid is refused saying so. A 3.1 boolean property schema meets an
-  `additionalProperties` schema as `true` = `{}` (it takes that schema) or `false` (dropped, refused when required), and
+  `additionalProperties` schema as `true` = `{}` (it takes that schema) or `false` (kept, so the property stays forbidden
+  rather than falling under that schema; refused when required; the argument contract leaves such a property out and
+  closes with `additionalProperties: false`, the stricter direction; a 3.0 document, which has no boolean schemas and
+  whose parser drops one, gets `false` written as `{"not": {}}`), and
   `required` is read into a set once per merge, so the check is linear.
 - **Crawl scope**: an ambiguous path (an encoded `/` or `\`) keeps its raw form through canonicalization instead of
   a normalized one that a scope check would approve; the URL that will be fetched is scope-checked too, for links and

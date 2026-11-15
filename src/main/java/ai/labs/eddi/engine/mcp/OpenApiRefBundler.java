@@ -154,6 +154,9 @@ final class OpenApiRefBundler {
         root.path("components").path("schemas").properties().forEach(entry -> bundler.rootSchemaNames.add(entry.getKey()));
         JsonNode bundled = bundler.expand(root, new Doc(bundler.rootUrl, root, true), new ArrayDeque<>());
         bundler.attachRelocated(bundled);
+        if (root.path("openapi").asText("").startsWith("3.0")) {
+            expressBooleanPropertySchemasFor30(bundled);
+        }
         requireInternalRefsOnly(bundled);
         // Written through a bounded writer, not into one String: inlining shares a
         // referenced value instead of copying it, so the node cap does not measure
@@ -167,6 +170,29 @@ final class OpenApiRefBundler {
                     + " characters once its $refs are inlined, or could not be re-serialized; refused", e);
         }
         return out.toString();
+    }
+
+    /**
+     * OpenAPI 3.0 has no boolean schemas, and swagger-parser drops a property whose
+     * schema is {@code false} - which leaves the property allowed under an
+     * {@code additionalProperties} schema although the merge forbade it. For a 3.0
+     * document a boolean property schema is written the way 3.0 can say it:
+     * {@code false} as {@code {"not": {}}}, {@code true} as {@code {}}.
+     */
+    private static void expressBooleanPropertySchemasFor30(JsonNode bundled) {
+        forEachKeywordObject(bundled, Context.KEYWORDS, node -> {
+            if (node.get("properties") instanceof ObjectNode properties) {
+                for (Map.Entry<String, JsonNode> property : properties.properties()) {
+                    if (property.getValue().isBoolean()) {
+                        ObjectNode schema = NODES.objectNode();
+                        if (!property.getValue().asBoolean()) {
+                            schema.putObject("not");
+                        }
+                        property.setValue(schema);
+                    }
+                }
+            }
+        });
     }
 
     /** Collects serialized output and refuses to grow past a fixed size. */
@@ -629,15 +655,14 @@ final class OpenApiRefBundler {
                 mergedProperties.set(key, mergeSchemas(objectSchema, additional));
             } else if (additional.isObject() && propertySchema != null && propertySchema.isBoolean()) {
                 // An OpenAPI 3.1 boolean schema: true is {} - intersected with the other
-                // side's schema, it is that schema; false admits nothing, so the property
-                // is dropped, and a required one makes the spec unsatisfiable.
+                // side's schema, it is that schema. false admits nothing and is KEPT: dropped,
+                // the property would fall under the additionalProperties schema and
+                // {"c": "ok"} would pass. A required one makes the spec unsatisfiable.
                 if (propertySchema.asBoolean()) {
                     mergedProperties.set(key, additional);
                 } else if (required.contains(key)) {
                     throw new IllegalArgumentException("OpenAPI spec requires property '" + key + "', whose schema is false: no value can "
                             + "satisfy it; refused");
-                } else {
-                    mergedProperties.remove(key);
                 }
             }
         }
