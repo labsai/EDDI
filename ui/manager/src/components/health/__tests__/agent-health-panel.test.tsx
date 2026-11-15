@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { Link } from "react-router-dom";
@@ -8,6 +8,7 @@ import { server } from "@/test/mocks/server";
 import { HEALTH_AGENTS, compareFor } from "@/test/mocks/health-fixtures";
 import { resetHealthMockState } from "@/test/mocks/health-handlers";
 import { AgentHealthPanel } from "../agent-health-panel";
+import { healthKeys } from "../use-agent-health";
 import { formatShortDate } from "../format";
 import { api } from "../deps";
 
@@ -575,6 +576,46 @@ describe("health profile editor", () => {
     );
     await openProfile();
     expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("7");
+  });
+
+  it("a background refetch while editing keeps the form and what is being typed", async () => {
+    let gets = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.get("*/agents/:agentId/health/profile", async ({ params }) => {
+        gets += 1;
+        // The refetch is held, so the test sees the dialog while it is in flight.
+        if (gets > 1) await held;
+        return HttpResponse.json({
+          agentId: String(params.agentId),
+          stored: true,
+          preset: "support",
+          critical: ["agentFailureRate"],
+          thresholds: { resolutionRate: { green: 0.7, red: 0.4 } },
+          budgets: {},
+          slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
+          overrides: [],
+        });
+      }),
+    );
+    const { queryClient } = renderPanel(HEALTH_AGENTS.healthy);
+    await openProfile();
+    const red = screen.getByTestId("health-threshold-resolutionRate-red");
+    await userEvent.clear(red);
+    await userEvent.type(red, "33");
+    // A background refetch, as window focus or a save elsewhere triggers one.
+    let refetch: Promise<void> = Promise.resolve();
+    act(() => {
+      refetch = queryClient.invalidateQueries({ queryKey: healthKeys.profile(HEALTH_AGENTS.healthy) });
+    });
+    await waitFor(() => expect(gets).toBe(2));
+    // In flight: the form is still there, with what was typed.
+    expect(screen.getByTestId("health-profile-form")).toBeInTheDocument();
+    expect(screen.getByTestId("health-threshold-resolutionRate-red")).toHaveValue("33");
+    release();
+    await act(() => refetch);
+    expect(screen.getByTestId("health-threshold-resolutionRate-red")).toHaveValue("33");
   });
 
   it("a reopened editor whose refetch fails shows the error and no form, never the cached profile", async () => {

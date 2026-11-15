@@ -17,3 +17,16 @@ Review findings on PR #1390.
   its own sections. They are now read from the two sides, and a test checks each delta against its two values.
 - **Stable selectors.** The profile tests find Cancel by `health-profile-cancel` and the override's section target by
   its option value, not by English copy.
+
+## 🐛 fix(manager): a background refetch no longer throws away the profile being edited (2026-11-15)
+
+**Repo:** EDDI (`feat/agent-health-ui-wiring`)
+
+### What changed and why
+
+Review finding on PR #1390. `ProfileDialog` hid the form whenever the profile query was fetching. So a background
+refetch, from window focus or a save elsewhere, unmounted `ProfileForm` mid-edit, and its draft was lost. The dialog
+now holds the profile from its first successful fetch after opening (`opened`). It keeps the form mounted on that
+profile until the dialog closes, and closing clears it, so the next opening still waits for the server. New test: "a
+background refetch while editing keeps the form and what is being typed". It holds the refetch in flight and fails
+with the previous code.

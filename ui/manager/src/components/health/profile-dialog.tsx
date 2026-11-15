@@ -242,17 +242,25 @@ export function ProfileDialog({
 }) {
   const { t } = useTranslation();
   const profile = useHealthProfile(agentId, open);
+  // The profile the editor opened on: the first successful fetch after opening. Held
+  // until the dialog closes, so a background refetch (window focus, a save elsewhere)
+  // never unmounts the form and throws away what is being typed; closing clears it, so
+  // the next opening waits for the server again.
+  const [opened, setOpened] = useState<HealthProfile | null>(null);
+  const fresh = profile.data !== undefined && !profile.isFetching && !profile.isError;
+  if (!open && opened !== null) setOpened(null);
+  if (open && opened === null && fresh) setOpened(profile.data!);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">
       {/* The draft starts from the profile as the server has it now: a reopened dialog
           waits for its refetch, so a save cannot overwrite a newer profile with a cached one.
           A failed refetch keeps the cached profile in `data`, so the editor needs the latest
           fetch to have succeeded, not merely some data to show. */}
-      {profile.isFetching && <Skeleton className="h-40 w-full" />}
-      {profile.isError && !profile.isFetching && (
+      {opened === null && profile.isFetching && <Skeleton className="h-40 w-full" />}
+      {opened === null && profile.isError && !profile.isFetching && (
         <p className="text-sm text-destructive" role="alert" data-testid="health-profile-load-error">{getErrorMessage(profile.error)}</p>
       )}
-      {profile.data && !profile.isFetching && !profile.isError && <ProfileForm agentId={agentId} initial={profile.data} info={info} onDone={onClose} />}
+      {opened !== null && <ProfileForm agentId={agentId} initial={opened} info={info} onDone={onClose} />}
     </AccessibleDialog>
   );
 }
