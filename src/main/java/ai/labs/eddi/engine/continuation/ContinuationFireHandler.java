@@ -204,9 +204,11 @@ public class ContinuationFireHandler {
      * <p>
      * The owner's team subjects are the ones their most recent sign-in listed in
      * the user directory, so a share with one of their teams still counts. With no
-     * directory record of them there is nothing to decide a team share by, and the
-     * fire is left alone — the same rule {@code creatorUseCheck} applies to a
-     * schedule without an access snapshot. Denied: the chain stops
+     * directory (switched off, or no record of the owner) the owner's own access is
+     * checked without teams: admitted, the fire runs; denied, the chain stops —
+     * unless the agent is shared with some team
+     * ({@link ResourceAccessGuard#someTeamMayUse}), which cannot be decided without
+     * the owner's teams, so the fire is then left alone. Denied: the chain stops
      * ({@link ConversationContinuations#REASON_ACCESS_REVOKED}). A descriptor store
      * that cannot answer fails the fire, so it is retried rather than run
      * unchecked. With workspaces off everything is admitted, as everywhere else.
@@ -224,10 +226,15 @@ public class ContinuationFireHandler {
             return null;
         }
         List<String> teams = ownerTeams(owner);
-        if (teams == null) {
+        boolean teamsKnown = teams != null;
+        ResourceAccessGuard.UseCheck check = resourceAccessGuard.checkPrincipalUse(agentId, owner, teamsKnown ? teams : List.of(),
+                bookedByAdmin);
+        if (check == ResourceAccessGuard.UseCheck.DENIED && !teamsKnown && resourceAccessGuard.someTeamMayUse(agentId)) {
+            // No directory (or no record of the owner) and the owner's own access is gone,
+            // but a team could still admit them: that cannot be decided without their
+            // teams, so the fire is left alone rather than stopping a team-shared chain.
             return null;
         }
-        ResourceAccessGuard.UseCheck check = resourceAccessGuard.checkPrincipalUse(agentId, owner, teams, bookedByAdmin);
         if (check == ResourceAccessGuard.UseCheck.DENIED) {
             return stop(ConversationContinuations.REASON_ACCESS_REVOKED, conversationId,
                     "the conversation's owner may no longer use its agent");

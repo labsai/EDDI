@@ -1713,9 +1713,12 @@ your tool schemas do not cover it, not as a routine first step:
   pauseId from approval-status a 400; deployment-wide eddi.hitl.require-pause-id,
   which also covers group approvals). A task-level toolApprovals can narrow these
   three but never loosen them, in strict and replace mode alike. Timeouts and
-  other system:* decisions are not affected. A call whose arguments were too
-  large to show the approver in full (argsTruncated) is never executed on
-  approval. Earned-autonomy apply, dismiss and lift need eddi-admin or
+  other system:* decisions are not affected. A call the API marks argsTruncated
+  (arguments over the 32 KB an approver can be shown) is never executed on
+  approval. That is not the same as a Slack or email card showing only the
+  first 300 characters of a call: the card says so, and its Approve still runs
+  the whole call, so long calls should be reviewed in the manager or
+  approval-status first. Earned-autonomy apply, dismiss and lift need eddi-admin or
   eddi-editor; an approver alone gets 403. Docs "hitl" (Who May Decide).
 - Plan binding (6.8): every pause gets a planHash ("v1:" + 64 hex) over exactly
   what it would let run: a tool pause's call ids, tool names and canonicalized

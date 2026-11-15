@@ -309,6 +309,36 @@ class ContinuationFireHandlerTest {
         }
 
         @Test
+        @DisplayName("directory switched off: the owner's own access is still re-checked, and a revoked one stops the chain")
+        void inactiveDirectoryStillChecksTheOwner() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            when(handler.userDirectory.isActive()).thenReturn(false);
+            when(guard.someTeamMayUse("agent-1")).thenReturn(false);
+
+            var result = handler.fire(booked(2, false), "owner", "", TIMEOUT);
+
+            assertEquals(FireStatus.COMPLETED.name(), result.status());
+            assertTrue(result.error().contains("may no longer use its agent"), result.error());
+            verify(guard).checkPrincipalUse("agent-1", "owner", List.of(), false);
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("no directory record of the owner: checked without teams; a team-shared agent is left alone rather than stopped")
+        void missingRecordWithTeamShareIsLeftAlone() throws Exception {
+            ownedOnAgent();
+            var guard = enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            when(handler.userDirectory.findForAccessCheck("owner")).thenReturn(Optional.empty());
+            when(guard.someTeamMayUse("agent-1")).thenReturn(true);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
+            verify(guard).checkPrincipalUse("agent-1", "owner", List.of(), false);
+            assertEquals(1.0, run(), "a team could admit the owner: not decidable without their teams, so it runs as before");
+        }
+
+        @Test
         @DisplayName("enforced workspaces: an owner whose USE on the agent was revoked gets no further continuation")
         void revokedOwnerStopsTheChain() throws Exception {
             ownedOnAgent();

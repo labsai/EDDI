@@ -139,7 +139,9 @@ the conversation's owner; anything else completes without a turn (`owner_mismatc
 workspaces every fire also re-checks that the owner may still `USE` the agent — the check every other
 scheduled fire gets — counting the teams their last sign-in listed in the user directory; a revoked
 grant or share stops the chain (`access_revoked`), and a descriptor store that cannot answer fails the
-fire so it is retried. An owner the directory has no record of is not re-checked. Like a schedule's
+fire so it is retried. Without the directory (switched off, or no record of the owner) the owner's own
+access is checked without teams; a denial stops the chain unless the agent is shared with some team,
+which cannot be decided without the owner's teams, so that fire is left alone. Like a schedule's
 `creatorAdmin`, the continuation schedule records whether the chain was booked by an administrator in
 their own conversation (`bookedByAdmin`, taken from the live caller and handed on from link to link),
 and such a chain keeps running. A chain booked before this marker existed carries none and is not
