@@ -102,7 +102,7 @@ never run npm — so `http://localhost:7070/manage` is only there if an earlier
 run it from its own dev server:
 
 ```bash
-cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the API to :7070
+cd ui && npm ci && cd manager && npm run dev    # http://localhost:3000, proxies the API to :7070
 ```
 
 > **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${vault:...}` references, set the vault master key first:

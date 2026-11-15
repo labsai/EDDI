@@ -6343,7 +6343,6 @@
     "rules": "Règles",
     "property": "Définisseur de propriétés",
     "apicalls": "Appels d’API",
-    "httpcallsLegacy": "Appels d’API (hérités)",
     "llm": "LLM",
     "output": "Sortie",
     "templating": "Gabarits",
