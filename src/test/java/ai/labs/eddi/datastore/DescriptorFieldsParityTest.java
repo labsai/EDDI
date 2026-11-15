@@ -91,6 +91,27 @@ class DescriptorFieldsParityTest extends MongoTestBase {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("storages")
+    void aNullValueClearsTheStoredField(String backend, Supplier<IResourceStorage<ConversationDescriptor>> factory) throws Exception {
+        var storage = factory.get();
+        String id = store(storage);
+        assertTrue(storage.setFieldsIf(id, title("Old", TitleSource.USER), null, List.of()), backend);
+
+        Map<String, Object> clear = new LinkedHashMap<>();
+        clear.put(ConversationDescriptor.FIELD_TITLE, null);
+        clear.put(ConversationDescriptor.FIELD_TITLE_SOURCE, null);
+        assertTrue(storage.setFieldsIf(id, clear, null, List.of()), backend);
+
+        ConversationDescriptor read = storage.read(id, storage.getCurrentVersion(id)).getData();
+        assertNull(read.getTitle(), backend + ": a null value is stored, not dropped from the patch");
+        assertNull(read.getTitleSource(), backend);
+        assertEquals("alice", read.getUserId(), backend + ": other fields survive");
+        // The cleared guard admits a generated title again.
+        assertTrue(storage.setFieldsIf(id, title("First message", TitleSource.AUTO), ConversationDescriptor.FIELD_TITLE_SOURCE, List.of()),
+                backend);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("storages")
     void aDescriptorWithoutTheFieldsReadsUntitledAndUnpinned(String backend, Supplier<IResourceStorage<ConversationDescriptor>> factory)
             throws Exception {
         var storage = factory.get();

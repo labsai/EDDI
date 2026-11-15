@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.ISubstringSearchIndexing;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jboss.logging.Logger;
 import org.postgresql.PGStatement;
 
@@ -19,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -405,12 +406,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         if (!PostgresIds.isStorableId(id)) {
             return false;
         }
-        String patch;
-        try {
-            patch = jsonSerialization.serialize(new LinkedHashMap<>(fields));
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to serialize fields " + fields.keySet(), e);
-        }
+        String patch = toJsonPatch(fields);
         List<String> allowed = allowedGuardValues == null ? List.of() : List.copyOf(allowedGuardValues);
         // One UPDATE on the live row: || merges only these keys at the top level, and
         // the guard is part of the same statement, so the check and the write are
@@ -439,6 +435,27 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         } catch (SQLException e) {
             throw new RuntimeException("Failed to set fields " + fields.keySet(), e);
         }
+    }
+
+    /**
+     * The {@code ||} operand for {@link #setFieldsIf}, built as a tree rather than
+     * through the persistence mapper: that mapper omits null map entries, so a
+     * field set to null would drop out of the patch and keep its old value, while
+     * the contract stores it as JSON null. The values are only strings, booleans
+     * and nulls ({@link IResourceStorage#requireSettableFields}).
+     */
+    private static String toJsonPatch(Map<String, Object> fields) {
+        ObjectNode patch = JsonNodeFactory.instance.objectNode();
+        fields.forEach((name, value) -> {
+            if (value == null) {
+                patch.putNull(name);
+            } else if (value instanceof Boolean flag) {
+                patch.put(name, flag);
+            } else {
+                patch.put(name, (String) value);
+            }
+        });
+        return patch.toString();
     }
 
     @Override
