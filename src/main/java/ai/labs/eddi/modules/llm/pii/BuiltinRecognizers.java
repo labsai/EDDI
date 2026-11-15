@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.IntUnaryOperator;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,19 +57,28 @@ public final class BuiltinRecognizers {
     /** Finds the values of one entity type. */
     @FunctionalInterface
     private interface Recognizer {
-        List<PiiSpan> find(String text, long deadline);
+        List<PiiSpan> find(String text, long deadline, KeywordText keywords);
     }
 
     /** Decides on one raw match: the value's {@code [start, end)}, or null. */
     @FunctionalInterface
     private interface Acceptor {
-        int[] accept(String text, int start, int end, long deadline);
+        int[] accept(String text, int start, int end, long deadline, KeywordText keywords);
     }
 
     /** Where the scan resumes after a rejected match; must be past its start. */
     @FunctionalInterface
     private interface Resume {
         int after(String text, int start, int end);
+    }
+
+    /**
+     * The text keywords are looked for in when it is not the scanned text: the
+     * original a partly rewritten text came from, and where each position of the
+     * scanned text lies in it ({@code toOriginal}, defined for {@code 0} to the
+     * scanned text's length).
+     */
+    public record KeywordText(String original, IntUnaryOperator toOriginal) {
     }
 
     private static final Resume AFTER_MATCH = (text, start, end) -> end;
@@ -157,7 +167,7 @@ public final class BuiltinRecognizers {
     private static final Pattern JP_MY_NUMBER = bounded("\\d{4} ?\\d{4} ?\\d{4}");
     private static final Pattern JP_MY_NUMBER_TRIGGER = trigger("my ?number|individual number", "マイナンバー|個人番号");
     private static final Pattern KR_RRN = bounded("\\d{6}-[1-8]\\d{6}");
-    private static final Pattern SG_NRIC = boundedCi("[STFG]\\d{7}[A-Z]");
+    private static final Pattern SG_NRIC = boundedCi("[STFGM]\\d{7}[A-Z]");
     private static final Pattern AU_TFN = bounded("\\d{3} ?\\d{3} ?\\d{3}");
     private static final Pattern AU_TFN_TRIGGER = trigger("tfn|tax file", null);
     private static final Pattern AU_MEDICARE = bounded("[2-6]\\d{3} ?\\d{5} ?\\d{1,2}");
@@ -172,10 +182,10 @@ public final class BuiltinRecognizers {
         // The pii-redaction guardrail applies these one after another in this order:
         // e-mail first, then the long and checked formats, then the shorter and
         // keyword-bound ones, and the loose card and phone patterns last.
-        RECOGNIZERS.put(PiiEntities.EMAIL, scanner(PiiEntities.EMAIL, EMAIL, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
+        RECOGNIZERS.put(PiiEntities.EMAIL, scanner(PiiEntities.EMAIL, EMAIL, CHECKED, (t, s, e, d, k) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.IBAN, scanner(PiiEntities.IBAN, IBAN, CHECKED, BuiltinRecognizers::acceptIban, (t, s, e) -> s + 1));
         RECOGNIZERS.put(PiiEntities.PASSPORT_MRZ, scanner(PiiEntities.PASSPORT_MRZ, PASSPORT_MRZ, CHECKED,
-                (t, s, e, d) -> NationalChecksums.passportMrz(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+                (t, s, e, d, k) -> NationalChecksums.passportMrz(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
         checked(PiiEntities.IT_FISCAL_CODE, IT_FISCAL_CODE, NationalChecksums::itFiscalCode);
         checked(PiiEntities.MX_CURP, MX_CURP, NationalChecksums::mxCurp);
         checked(PiiEntities.CN_RESIDENT_ID, CN_RESIDENT_ID, NationalChecksums::cnResidentId);
@@ -189,15 +199,15 @@ public final class BuiltinRecognizers {
         // The century sign (-, +, A …) is part of the value, so it is not normalized
         // away.
         RECOGNIZERS.put(PiiEntities.FI_HETU, scanner(PiiEntities.FI_HETU, FI_HETU, CHECKED,
-                (t, s, e, d) -> NationalChecksums.fiHetu(t.substring(s, e).toUpperCase(Locale.ROOT)) ? new int[]{s, e} : null, AFTER_MATCH));
+                (t, s, e, d, k) -> NationalChecksums.fiHetu(t.substring(s, e).toUpperCase(Locale.ROOT)) ? new int[]{s, e} : null, AFTER_MATCH));
         keyed(PiiEntities.PL_PESEL, PL_PESEL, PL_PESEL_TRIGGER, NationalChecksums::plPesel);
         RECOGNIZERS.put(PiiEntities.DE_TAX_ID,
-                scanner(PiiEntities.DE_TAX_ID, DE_TAX_ID, CHECKED, (t, s, e, d) -> PiiChecksums.deTaxId(compact(t, s, e)) ? new int[]{s, e} : null,
+                scanner(PiiEntities.DE_TAX_ID, DE_TAX_ID, CHECKED, (t, s, e, d, k) -> PiiChecksums.deTaxId(compact(t, s, e)) ? new int[]{s, e} : null,
                         AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.DE_ID_CARD,
                 scanner(PiiEntities.DE_ID_CARD, DE_ID_CARD, CONTEXTUAL, BuiltinRecognizers::acceptIdCard, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.DE_SOCIAL_SECURITY, scanner(PiiEntities.DE_SOCIAL_SECURITY, DE_SOCIAL_SECURITY, CHECKED,
-                (t, s, e, d) -> PiiChecksums.deSocialSecurity(compact(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+                (t, s, e, d, k) -> PiiChecksums.deSocialSecurity(compact(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
         keyed(PiiEntities.DK_CPR, DK_CPR, DK_CPR_TRIGGER, NationalChecksums::dkCpr);
         keyed(PiiEntities.AT_SOCIAL_SECURITY, AT_SOCIAL_SECURITY, AT_SOCIAL_SECURITY_TRIGGER, NationalChecksums::atSocialSecurity);
         checked(PiiEntities.GB_NINO, GB_NINO, NationalChecksums::gbNino);
@@ -217,11 +227,12 @@ public final class BuiltinRecognizers {
         checked(PiiEntities.US_ITIN, US_ITIN, v -> true);
         RECOGNIZERS.put(PiiEntities.DATE_OF_BIRTH,
                 scanner(PiiEntities.DATE_OF_BIRTH, DATE, CONTEXTUAL, BuiltinRecognizers::acceptBirthDate, AFTER_MATCH));
-        RECOGNIZERS.put(PiiEntities.US_SSN, scanner(PiiEntities.US_SSN, US_SSN, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
+        RECOGNIZERS.put(PiiEntities.US_SSN, scanner(PiiEntities.US_SSN, US_SSN, CHECKED, (t, s, e, d, k) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.IP_ADDRESS, ipAddress());
         RECOGNIZERS.put(PiiEntities.CREDIT_CARD,
-                scanner(PiiEntities.CREDIT_CARD, CREDIT_CARD, CHECKED, (t, s, e, d) -> cardWithin(t, s, e), BuiltinRecognizers::afterFirstSeparator));
-        RECOGNIZERS.put(PiiEntities.PHONE, scanner(PiiEntities.PHONE, PHONE, CONTEXTUAL, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
+                scanner(PiiEntities.CREDIT_CARD, CREDIT_CARD, CHECKED, (t, s, e, d, k) -> cardWithin(t, s, e),
+                        BuiltinRecognizers::afterFirstSeparator, false));
+        RECOGNIZERS.put(PiiEntities.PHONE, scanner(PiiEntities.PHONE, PHONE, CONTEXTUAL, (t, s, e, d, k) -> new int[]{s, e}, AFTER_MATCH));
     }
 
     /**
@@ -252,7 +263,7 @@ public final class BuiltinRecognizers {
      */
     private static void checked(String entity, Pattern pattern, Predicate<String> valid) {
         RECOGNIZERS.put(entity,
-                scanner(entity, pattern, CHECKED, (t, s, e, d) -> valid.test(normalized(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+                scanner(entity, pattern, CHECKED, (t, s, e, d, k) -> valid.test(normalized(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
     }
 
     /**
@@ -262,18 +273,26 @@ public final class BuiltinRecognizers {
      */
     private static void keyed(String entity, Pattern pattern, Pattern trigger, Predicate<String> valid) {
         RECOGNIZERS.put(entity, scanner(entity, pattern, CHECKED,
-                (t, s, e, d) -> valid.test(normalized(t, s, e)) && hasTriggerBefore(trigger, t, s, d) ? new int[]{s, e} : null, AFTER_MATCH));
+                (t, s, e, d, k) -> valid.test(normalized(t, s, e)) && hasTriggerBefore(trigger, t, s, d, k) ? new int[]{s, e} : null, AFTER_MATCH));
     }
 
     /** IPv4 and IPv6 addresses, left to right. */
     private static Recognizer ipAddress() {
-        Recognizer v4 = scanner(PiiEntities.IP_ADDRESS, IPV4, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH);
+        Recognizer v4 = scanner(PiiEntities.IP_ADDRESS, IPV4, CHECKED, (t, s, e, d, k) -> new int[]{s, e}, AFTER_MATCH);
         Recognizer v6 = scanner(PiiEntities.IP_ADDRESS, IPV6, CHECKED,
-                (t, s, e, d) -> NationalChecksums.ipv6(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH);
-        return (text, deadline) -> {
-            List<PiiSpan> spans = new ArrayList<>(v4.find(text, deadline));
-            for (PiiSpan span : v6.find(text, deadline)) {
-                if (spans.stream().noneMatch(other -> other.overlaps(span.start(), span.end()))) {
+                (t, s, e, d, k) -> NationalChecksums.ipv6(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH);
+        return (text, deadline, keywords) -> {
+            // Both scans return disjoint spans left to right, so one pass over the IPv4
+            // spans decides every IPv6 match: an IPv4 span ending at or before an IPv6
+            // match cannot overlap it or any later one.
+            List<PiiSpan> v4Spans = v4.find(text, deadline, keywords);
+            List<PiiSpan> spans = new ArrayList<>(v4Spans);
+            int next = 0;
+            for (PiiSpan span : v6.find(text, deadline, keywords)) {
+                while (next < v4Spans.size() && v4Spans.get(next).end() <= span.start()) {
+                    next++;
+                }
+                if (next == v4Spans.size() || !v4Spans.get(next).overlaps(span.start(), span.end())) {
                     spans.add(span);
                 }
             }
@@ -305,11 +324,22 @@ public final class BuiltinRecognizers {
      *             once {@code deadline} ({@link System#nanoTime()}) has passed
      */
     public static List<PiiSpan> find(String entity, String text, long deadline) {
+        return find(entity, text, deadline, null);
+    }
+
+    /**
+     * {@link #find(String, String, long)} on a text that earlier rewrites derived
+     * from {@code keywords.original()}: the keyword a value needs is looked for in
+     * the original text, before the value's original position, so a redaction can
+     * neither move a keyword out of the window nor put one ("[REDACTED:...]") into
+     * it. {@code null} looks in {@code text} itself.
+     */
+    public static List<PiiSpan> find(String entity, String text, long deadline, KeywordText keywords) {
         Recognizer recognizer = RECOGNIZERS.get(entity);
         if (recognizer == null) {
             throw new IllegalArgumentException("unsupported entity type " + entity);
         }
-        return recognizer.find(text, deadline);
+        return recognizer.find(text, deadline, keywords);
     }
 
     /**
@@ -318,20 +348,31 @@ public final class BuiltinRecognizers {
      * {@code resume} says, at least one character on.
      */
     private static Recognizer scanner(String entity, Pattern pattern, double score, Acceptor acceptor, Resume resume) {
-        return (text, deadline) -> {
+        return scanner(entity, pattern, score, acceptor, resume, true);
+    }
+
+    /**
+     * {@link #scanner}; {@code resumeAtValue} false resumes after the whole raw
+     * match even when the accepted value is shorter.
+     */
+    private static Recognizer scanner(String entity, Pattern pattern, double score, Acceptor acceptor, Resume resume, boolean resumeAtValue) {
+        return (text, deadline, keywords) -> {
             Matcher matcher = RegexDeadline.matcher(pattern, text, deadline);
             List<PiiSpan> spans = new ArrayList<>();
             int from = 0;
             while (from <= text.length() && matcher.find(from)) {
                 int start = matcher.start();
                 int end = matcher.end();
-                from = end;
-                int[] value = acceptor.accept(text, start, end, deadline);
+                int[] value = acceptor.accept(text, start, end, deadline, keywords);
                 if (value == null) {
                     from = Math.max(resume.after(text, start, end), start + 1);
                     continue;
                 }
                 spans.add(new PiiSpan(value[0], value[1], entity, score, DETECTOR_ID));
+                // Resume after the value, not the raw match: a greedy run can reach
+                // into the next value ("<IBAN> <IBAN>"), whose start must still be seen.
+                // The card scan keeps the legacy rewrite's behaviour and skips the run.
+                from = resumeAtValue ? Math.max(value[1], start + 1) : end;
             }
             return spans;
         };
@@ -344,7 +385,7 @@ public final class BuiltinRecognizers {
      * inner spaces, that is a valid IBAN: a run may have swallowed a following
      * upper-case word ("… 0130 00 OK").
      */
-    private static int[] acceptIban(String text, int start, int end, long deadline) {
+    private static int[] acceptIban(String text, int start, int end, long deadline, KeywordText keywords) {
         for (int e = end; e > start; e--) {
             if (e != end && text.charAt(e) != ' ') {
                 continue;
@@ -362,7 +403,7 @@ public final class BuiltinRecognizers {
      * A German ID-card or passport serial: it must contain a digit, a ten-character
      * value must carry a valid ICAO check digit, and a keyword must precede it.
      */
-    private static int[] acceptIdCard(String text, int start, int end, long deadline) {
+    private static int[] acceptIdCard(String text, int start, int end, long deadline, KeywordText keywords) {
         String value = text.substring(start, end).toUpperCase(Locale.ROOT);
         if (value.chars().noneMatch(Character::isDigit)) {
             return null;
@@ -370,18 +411,18 @@ public final class BuiltinRecognizers {
         if (value.length() == 10 && PiiChecksums.icaoCheckDigit(value.substring(0, 9)) != value.charAt(9) - '0') {
             return null;
         }
-        return hasTriggerBefore(DE_ID_CARD_TRIGGER, text, start, deadline) ? new int[]{start, end} : null;
+        return hasTriggerBefore(DE_ID_CARD_TRIGGER, text, start, deadline, keywords) ? new int[]{start, end} : null;
     }
 
     // ---- date of birth ----
 
     /** A date that is plausible as a birth date and follows a birth keyword. */
-    private static int[] acceptBirthDate(String text, int start, int end, long deadline) {
+    private static int[] acceptBirthDate(String text, int start, int end, long deadline, KeywordText keywords) {
         Matcher date = DATE.matcher(text.substring(start, end));
         if (!date.matches() || !plausibleDate(date)) {
             return null;
         }
-        return hasTriggerBefore(BIRTH_TRIGGER, text, start, deadline) ? new int[]{start, end} : null;
+        return hasTriggerBefore(BIRTH_TRIGGER, text, start, deadline, keywords) ? new int[]{start, end} : null;
     }
 
     /**
@@ -418,9 +459,13 @@ public final class BuiltinRecognizers {
 
     /**
      * Whether {@code trigger} matches within the {@code TRIGGER_WINDOW} characters
-     * before {@code start}.
+     * before {@code start} — in the original text when {@code keywords} names one.
      */
-    private static boolean hasTriggerBefore(Pattern trigger, String text, int start, long deadline) {
+    private static boolean hasTriggerBefore(Pattern trigger, String text, int start, long deadline, KeywordText keywords) {
+        if (keywords != null) {
+            start = keywords.toOriginal().applyAsInt(start);
+            text = keywords.original();
+        }
         int from = Math.max(0, start - TRIGGER_WINDOW);
         return RegexDeadline.matcher(trigger, text.substring(from, start), deadline).find();
     }

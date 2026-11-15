@@ -1171,7 +1171,7 @@ finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
 | `cn_resident_id` (CN) | Resident identity card number | birth date, mod-11 |
 | `jp_my_number` (JP) | My Number | check digit, keyword |
 | `kr_rrn` (KR) | Resident registration number | date and sex digit (no check digit since 2020) |
-| `sg_nric` (SG) | NRIC and FIN (S, T, F, G series) | check letter |
+| `sg_nric` (SG) | NRIC and FIN (S, T, F, G and M series) | check letter |
 | `au_tfn`, `au_medicare` (AU) | Tax file number; Medicare card number | mod-11 and keyword; check digit and keyword |
 | `nz_ird` (NZ) | IRD number | mod-11, keyword |
 | `za_id` (ZA) | Identity number | Luhn, birth date |

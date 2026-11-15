@@ -17,7 +17,12 @@ public final class PiiChecksums {
     public static final int CARD_MIN_DIGITS = 13;
     public static final int CARD_MAX_DIGITS = 19;
 
-    /** IBAN length per country (ISO 13616 registry). */
+    /**
+     * IBAN length per country: every country of the SWIFT IBAN registry (ISO
+     * 13616), including its recent additions (BI, DJ, FK, HN, LY, MN, NI, OM, RU,
+     * SD, SO, YE). Partial or experimental national formats outside the registry
+     * are left out.
+     */
     private static final Map<String, Integer> IBAN_LENGTHS = Map.ofEntries(Map.entry("AD", 24), Map.entry("AE", 23), Map.entry("AL", 28),
             Map.entry("AT", 20), Map.entry("AZ", 28), Map.entry("BA", 20), Map.entry("BE", 16), Map.entry("BG", 22), Map.entry("BH", 22),
             Map.entry("BR", 29), Map.entry("BY", 28), Map.entry("CH", 21), Map.entry("CR", 22), Map.entry("CY", 28), Map.entry("CZ", 24),
@@ -31,7 +36,10 @@ public final class PiiChecksums {
             Map.entry("PS", 29), Map.entry("PT", 25), Map.entry("QA", 29), Map.entry("RO", 24), Map.entry("RS", 22), Map.entry("SA", 24),
             Map.entry("SC", 31), Map.entry("SE", 24), Map.entry("SI", 19), Map.entry("SK", 24), Map.entry("SM", 27), Map.entry("ST", 25),
             Map.entry("SV", 28), Map.entry("TL", 23), Map.entry("TN", 24), Map.entry("TR", 26), Map.entry("UA", 29), Map.entry("VA", 22),
-            Map.entry("VG", 24), Map.entry("XK", 20));
+            Map.entry("VG", 24), Map.entry("XK", 20), Map.entry("BI", 27), Map.entry("DJ", 27), Map.entry("FK", 18), Map.entry("HN", 28),
+            Map.entry("LY", 25),
+            Map.entry("MN", 20), Map.entry("NI", 28), Map.entry("OM", 23), Map.entry("RU", 33), Map.entry("SD", 18), Map.entry("SO", 23),
+            Map.entry("YE", 30));
 
     /**
      * Weights of the German pension insurance number check digit, applied to its

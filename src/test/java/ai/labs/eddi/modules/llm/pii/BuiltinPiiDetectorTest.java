@@ -44,6 +44,7 @@ class BuiltinPiiDetectorTest {
     @CsvSource(delimiter = '|', value = {"IBAN|Bitte an DE89 3704 0044 0532 0130 00 überweisen|DE89 3704 0044 0532 0130 00",
             "IBAN|IBAN: GB82WEST12345698765432.|GB82WEST12345698765432",
             "IBAN|DE89 3704 0044 0532 0130 00 OK danke|DE89 3704 0044 0532 0130 00",
+            "IBAN|Oman OM81 0180 0000 0129 9123 456 ok|OM81 0180 0000 0129 9123 456", "IBAN|MN580050099123456789|MN580050099123456789",
             "DE_TAX_ID|Steuer-ID 86 095 742 719 liegt bei|86 095 742 719", "DE_TAX_ID|IdNr. 86095742719|86095742719",
             "DE_SOCIAL_SECURITY|Rentenversicherungsnummer 15070649C103|15070649C103",
             "DE_SOCIAL_SECURITY|RVNR 15 070649 C 103 vorhanden|15 070649 C 103", "DE_ID_CARD|Personalausweis Nr. L01X00T47|L01X00T47",
@@ -64,6 +65,15 @@ class BuiltinPiiDetectorTest {
             "DATE_OF_BIRTH|geb. 32.13.1980", "DATE_OF_BIRTH|born 12.03.1850"})
     void ignores(String entity, String text) throws DetectorUnavailableException {
         assertEquals(List.of(), detect(text, entity), text);
+    }
+
+    @Test
+    @DisplayName("two IBANs in a row are both found, though the greedy run reaches into the second")
+    void adjacentIbans() throws DetectorUnavailableException {
+        String text = "DE89 3704 0044 0532 0130 00 DE89 3704 0044 0532 0130 00";
+        List<PiiSpan> spans = detect(text, PiiEntities.IBAN);
+        assertEquals(List.of("DE89 3704 0044 0532 0130 00", "DE89 3704 0044 0532 0130 00"),
+                spans.stream().map(s -> text.substring(s.start(), s.end())).toList());
     }
 
     @Test

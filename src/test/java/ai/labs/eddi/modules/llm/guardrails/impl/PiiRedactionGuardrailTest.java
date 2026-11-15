@@ -121,6 +121,21 @@ class PiiRedactionGuardrailTest {
         }
 
         @Test
+        @DisplayName("an earlier redaction cannot move a keyword out of the window: it is looked for in the original text")
+        void keywordWindowIgnoresEarlierRedactions() {
+            String text = "NHS a@b.co" + " ".repeat(25) + "9434765919";
+            assertEquals("NHS [REDACTED:email]" + " ".repeat(25) + "[REDACTED:gb_nhs]", rewrite(text, Map.of("patterns", "email,gb_nhs")));
+        }
+
+        @Test
+        @DisplayName("nor bring one in: a replacement text that names a keyword does not count as one")
+        void replacementIsNoKeyword() {
+            Map<String, String> parameters = Map.of("patterns", "se_personnummer,dk_cpr", "replacement", "(personnummer removed)");
+            assertEquals("(personnummer removed) 0101901234", rewrite("811228-9874 0101901234", parameters));
+            assertEquals("(personnummer removed) CPR (personnummer removed)", rewrite("811228-9874 CPR 0101901234", parameters));
+        }
+
+        @Test
         @DisplayName("an entity name works as a patterns alias, and selects only that kind")
         void entityAlias() {
             assertEquals("[REDACTED:iban] a@b.io", rewrite("GB82 WEST 1234 5698 7654 32 a@b.io", Map.of("patterns", "IBAN")));

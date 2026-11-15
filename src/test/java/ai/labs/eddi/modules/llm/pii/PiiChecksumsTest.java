@@ -28,7 +28,10 @@ class PiiChecksumsTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"DE89370400440532013000", "GB82WEST12345698765432", "AT611904300234573201", "CH9300762011623852957",
-            "FR1420041010050500013M02606", "NL91ABNA0417164300", "NO9386011117947"})
+            "FR1420041010050500013M02606", "NL91ABNA0417164300", "NO9386011117947",
+            // Registered since 2021: Oman (SWIFT registry example), Mongolia, Russia (33,
+            // the longest)
+            "OM810180000001299123456", "MN580050099123456789", "RU0204452560040702810412345678901"})
     void iban_valid(String iban) {
         assertTrue(PiiChecksums.iban(iban), iban);
     }

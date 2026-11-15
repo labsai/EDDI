@@ -5,14 +5,17 @@
 package ai.labs.eddi.modules.llm.pii;
 
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Predicate;
 
 import static java.util.Map.entry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Every validator on compact input, including each way a value is rejected:
@@ -101,7 +104,11 @@ class NationalChecksumsTest {
             "krRrn, 9001010234567, false", "krRrn, 9013011234567, false",
             // Singapore
             "sgNric, S1234567D, true", "sgNric, T1234567J, true", "sgNric, F1234567N, true", "sgNric, G1234567X, true", "sgNric, S1234567E, false",
-            "sgNric, X1234567D, false", "sgNric, S12A4567D, false", "sgNric, S1234567, false",
+            "sgNric, X1234567D, false",
+            // M series (FINs from 2022): ICA publishes no valid example, so this one
+            // follows
+            // the commonly implemented rule (offset 3, table KLJNPQRTUWX)
+            "sgNric, M1234567X, true", "sgNric, M1234567K, false", "sgNric, S12A4567D, false", "sgNric, S1234567, false",
             // Australia
             "auTfn, 123456782, true", "auTfn, 12345678, false", "auTfn, 12345678A, false", "auTfn, 123456783, false",
             "auMedicare, 2123456701, true", "auMedicare, 21234567011, true", "auMedicare, 212345670, false", "auMedicare, 212345670111, false",
@@ -125,5 +132,17 @@ class NationalChecksumsTest {
             "ipv6, 12345::1, false", "ipv6, ::, false"})
     void validates(String validator, String value, boolean expected) {
         assertEquals(expected, VALIDATORS.get(validator).test(value), validator + "(" + value + ")");
+    }
+
+    @Test
+    @DisplayName("a JVM locale with non-ASCII digits does not reject a Swedish personnummer")
+    void personnummerUnderArabicDigits() {
+        Locale saved = Locale.getDefault(Locale.Category.FORMAT);
+        try {
+            Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("ar-EG-u-nu-arab"));
+            assertTrue(NationalChecksums.sePersonnummer("8112289874"));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, saved);
+        }
     }
 }

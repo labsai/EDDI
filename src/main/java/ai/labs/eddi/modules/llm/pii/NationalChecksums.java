@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.pii;
 
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -273,7 +274,7 @@ public final class NationalChecksums {
             return false;
         }
         int day = (int) value(v.substring(4, 6));
-        String dd = String.format("%02d", day > 60 ? day - 60 : day);
+        String dd = String.format(Locale.ROOT, "%02d", day > 60 ? day - 60 : day);
         return date(v.substring(2, 4), dd) && luhn(v);
     }
 
@@ -359,7 +360,10 @@ public final class NationalChecksums {
     }
 
     /**
-     * Singapore NRIC or FIN (S, T, F or G series), weighted mod-11 check letter.
+     * Singapore NRIC or FIN (S, T, F, G or M series), weighted mod-11 check letter.
+     * ICA does not publish the algorithm; the M series (FINs issued from 1 January
+     * 2022) uses the commonly implemented offset 3 and its own letter table. ICA's
+     * own illustration "M1234567B" fails it: it shows the format only.
      */
     public static boolean sgNric(String v) {
         if (v.length() != 9 || !allDigits(v.substring(1, 8))) {
@@ -367,13 +371,18 @@ public final class NationalChecksums {
         }
         char series = v.charAt(0);
         int[] weights = {2, 7, 6, 5, 4, 3, 2};
-        int sum = series == 'T' || series == 'G' ? 4 : 0;
+        int sum = switch (series) {
+            case 'T', 'G' -> 4;
+            case 'M' -> 3;
+            default -> 0;
+        };
         for (int i = 0; i < 7; i++) {
             sum += digit(v, i + 1) * weights[i];
         }
         String table = switch (series) {
             case 'S', 'T' -> "JZIHGFEDCBA";
             case 'F', 'G' -> "XWUTRQPNMLK";
+            case 'M' -> "KLJNPQRTUWX";
             default -> null;
         };
         return table != null && table.charAt(sum % 11) == v.charAt(8);

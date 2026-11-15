@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.pii.BuiltinRecognizers;
+import ai.labs.eddi.modules.llm.pii.BuiltinRecognizers.KeywordText;
 import ai.labs.eddi.modules.llm.pii.PiiCountries;
 import ai.labs.eddi.modules.llm.pii.PiiEntities;
 import ai.labs.eddi.modules.llm.pii.PiiSpan;
@@ -43,12 +44,13 @@ import java.util.TreeSet;
  * format; those whose check digit is weak also need a keyword just before the
  * value. Unknown kinds and countries are deploy warnings.
  * <p>
- * Kinds are applied one after another on the text the previous one left, in the
- * fixed order of {@link BuiltinRecognizers#entities()} — e-mail first, so an
- * address is redacted whole even when its local part is an IBAN; the loose
- * phone pattern last, so it cannot take an identifier's digit groups — and for
- * a text with none of the newer kinds the result is exactly what the four
- * original kinds produced.
+ * Kinds are applied one after another on the text the previous one left (the
+ * keyword a value needs is still looked for in the original text), in the fixed
+ * order of {@link BuiltinRecognizers#entities()} — e-mail first, so an address
+ * is redacted whole even when its local part is an IBAN; the loose phone
+ * pattern last, so it cannot take an identifier's digit groups — and for a text
+ * with none of the newer kinds the result is exactly what the four original
+ * kinds produced.
  * <p>
  * With action {@code redact} the rewrite is applied; with {@code block},
  * {@code reprompt} or {@code warn} any finding counts as a violation of that
@@ -125,12 +127,20 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
     public GuardrailVerdict evaluate(String text, GuardrailContext context) {
         String replacement = context.parameter("replacement", DEFAULT_REPLACEMENT);
         String result = text;
+        // toOriginal[i]: where position i of result lies in text. Keywords are looked
+        // for in text, so an earlier redaction can neither move a value's keyword out
+        // of its window nor bring one ("[REDACTED:...]") into it.
+        int[] toOriginal = null;
         Set<String> found = new TreeSet<>();
         for (String entity : enabledEntities(context.parameter("patterns", null), context.parameter("countries", null))) {
-            List<PiiSpan> spans = BuiltinRecognizers.find(entity, result, BuiltinRecognizers.NO_DEADLINE);
+            int[] map = toOriginal;
+            KeywordText keywords = map == null ? null : new KeywordText(text, i -> map[i]);
+            List<PiiSpan> spans = BuiltinRecognizers.find(entity, result, BuiltinRecognizers.NO_DEADLINE, keywords);
             if (!spans.isEmpty()) {
                 String kind = kindOf(entity);
-                result = replace(result, spans, replacement.replace("{kind}", kind));
+                String with = replacement.replace("{kind}", kind);
+                toOriginal = remap(toOriginal, result.length(), spans, with.length());
+                result = replace(result, spans, with);
                 found.add(kind);
             }
         }
@@ -194,6 +204,36 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
             }
         }
         return parts;
+    }
+
+    /**
+     * The position map of {@link #replace}'s result: each copied character keeps
+     * its original position, each replacement character takes the replaced span's
+     * original start. {@code map} is the current one (null: identity), defined for
+     * {@code 0} to {@code length}.
+     */
+    private static int[] remap(int[] map, int length, List<PiiSpan> spans, int replacementLength) {
+        int removed = 0;
+        for (PiiSpan span : spans) {
+            removed += span.end() - span.start();
+        }
+        int[] next = new int[length - removed + spans.size() * replacementLength + 1];
+        int j = 0;
+        int copied = 0;
+        for (PiiSpan span : spans) {
+            for (int i = copied; i < span.start(); i++) {
+                next[j++] = map == null ? i : map[i];
+            }
+            int origin = map == null ? span.start() : map[span.start()];
+            for (int r = 0; r < replacementLength; r++) {
+                next[j++] = origin;
+            }
+            copied = span.end();
+        }
+        for (int i = copied; i <= length; i++) {
+            next[j++] = map == null ? i : map[i];
+        }
+        return next;
     }
 
     /** {@code text} with each span (sorted, disjoint) replaced. */

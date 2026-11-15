@@ -41,7 +41,8 @@ class NationalRecognizersTest {
             "SE_PERSONNUMMER|pnr 19811228-9874|19811228-9874", "DK_CPR|CPR-nr. 070761-4285|070761-4285", "FI_HETU|HETU 131052-308T|131052-308T",
             "IN_AADHAAR|Aadhaar 2341 2341 2346|2341 2341 2346", "IN_PAN|PAN ABCPE1234F|ABCPE1234F",
             "CN_RESIDENT_ID|身份证 11010519491231002X|11010519491231002X", "JP_MY_NUMBER|マイナンバー 1234 5678 9018|1234 5678 9018",
-            "KR_RRN|주민등록번호 900101-1234567|900101-1234567", "SG_NRIC|NRIC S1234567D|S1234567D", "AU_TFN|TFN 123 456 782|123 456 782",
+            "KR_RRN|주민등록번호 900101-1234567|900101-1234567", "SG_NRIC|NRIC S1234567D|S1234567D", "SG_NRIC|FIN M1234567X|M1234567X",
+            "AU_TFN|TFN 123 456 782|123 456 782",
             "AU_MEDICARE|Medicare 2123 45670 1|2123 45670 1", "NZ_IRD|IRD 49-091-850|49-091-850", "ZA_ID|ID 8001015009087|8001015009087",
             "PASSPORT_MRZ|L898902C36UTO7408122F1204159ZE184226B<<<<<10|L898902C36UTO7408122F1204159ZE184226B<<<<<10",
             "IP_ADDRESS|from 192.168.0.12.|192.168.0.12", "IP_ADDRESS|host 2001:db8::8a2e:370:7334 up|2001:db8::8a2e:370:7334",
@@ -86,6 +87,14 @@ class NationalRecognizersTest {
             assertTrue(universal.contains(entity) ^ seen.contains(entity), entity);
         }
         assertTrue(BuiltinRecognizers.entities().containsAll(PiiCountries.STANDARD));
+    }
+
+    @Test
+    @DisplayName("an IPv6 match inside an IPv4 address is dropped; separate addresses of both kinds are all found")
+    void ipv4AndIpv6Together() {
+        String text = "a 10.0.0.1 b 2001:db8::1 c ::ffff:192.168.0.1 d fe80::1 e 172.16.0.5";
+        List<String> found = find(PiiEntities.IP_ADDRESS, text).stream().map(s -> text.substring(s.start(), s.end())).toList();
+        assertEquals(List.of("10.0.0.1", "2001:db8::1", "192.168.0.1", "fe80::1", "172.16.0.5"), found);
     }
 
     @Test
