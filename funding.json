@@ -8,7 +8,8 @@
     "email": "gregor.jarisch@eddi.solutions",
     "description": "EDDI Solutions builds and maintains EDDI, an open-source, config-driven middleware for orchestrating conversational AI agents. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
     "webpageUrl": {
-      "url": "https://eddi.solutions"
+      "url": "https://eddi.solutions",
+      "wellKnown": "https://eddi.solutions/.well-known/funding-manifest-urls"
     }
   },
   "projects": [
@@ -17,7 +18,8 @@
       "name": "EDDI",
       "description": "EDDI (Enhanced Dialog Driven Interface) is an open-source multi-agent orchestration middleware for conversational AI. Agent behaviour is defined in versioned JSON configurations and executed by a Java/Quarkus engine: a lifecycle pipeline of rules, API calls and LLM tasks across 19 model providers, with persistent memory, RAG, group conversations, human-in-the-loop approvals, an MCP server and client, a secrets vault, an audit ledger and GDPR tooling. It runs on MongoDB or PostgreSQL and ships with a web Manager and Chat UI.",
       "webpageUrl": {
-        "url": "https://eddi.technology"
+        "url": "https://eddi.technology",
+        "wellKnown": "https://eddi.technology/.well-known/funding-manifest-urls"
       },
       "repositoryUrl": {
         "url": "https://github.com/labsai/EDDI"

@@ -10,7 +10,8 @@
 
 - **No bank details in the repo.** The channel's `address` is empty and its description says to ask `gregor.jarisch@eddi.solutions`; an IBAN in a public file is scraped and never goes away.
 - **Same host as the repository.** The manifest lives in `labsai/EDDI`, so `repositoryUrl` needs no `wellKnown` proof.
+- **The web pages are on other hosts**, so both `webpageUrl` entries carry a `wellKnown` URL: `https://eddi.solutions/.well-known/funding-manifest-urls` (entity) and `https://eddi.technology/.well-known/funding-manifest-urls` (project). Each file lists `https://github.com/labsai/EDDI/blob/main/funding.json` and is added in `labsai/website-eddi-solutions` and `labsai/EDDI-LABS-AI-Website` (branch `chore/funding-manifest-urls` in both).
 
 ### What's next
 
-- `https://eddi.solutions` (entity) and `https://eddi.technology` (project) are other hosts, so directories show those web pages as *unverified* until each site serves `/.well-known/funding-manifest-urls` containing `https://github.com/labsai/EDDI/blob/main/funding.json`; then add `wellKnown` to the matching `webpageUrl` entry.
+- The two URLs verify only once both website PRs are deployed and this one is merged, since the listed manifest URL points at `main`.
