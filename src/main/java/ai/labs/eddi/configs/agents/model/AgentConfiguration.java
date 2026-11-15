@@ -478,6 +478,56 @@ public class AgentConfiguration {
     }
 
     /**
+     * How the agent presents itself in a chat window — display name, avatar, accent
+     * colour, conversation starters. Absent: the client's defaults.
+     *
+     * @since 6.7.0
+     */
+    private AgentAppearance appearance;
+
+    public AgentAppearance getAppearance() {
+        return appearance;
+    }
+
+    public void setAppearance(AgentAppearance appearance) {
+        this.appearance = appearance;
+    }
+
+    /**
+     * Which controls a chat window offers — undo, redo, attachments, rating, quick
+     * replies, streaming, and whether HTML in replies is rendered. Absent keeps
+     * every control as before, except that HTML is shown as text unless
+     * {@code rawHtml} is {@code true}.
+     *
+     * @since 6.7.0
+     */
+    private ConversationControls conversationControls;
+
+    public ConversationControls getConversationControls() {
+        return conversationControls;
+    }
+
+    public void setConversationControls(ConversationControls conversationControls) {
+        this.conversationControls = conversationControls;
+    }
+
+    /**
+     * Model-written conversation titles; absent or disabled — the default — titles
+     * a conversation with its first non-secret user message, truncated.
+     *
+     * @since 6.7.0
+     */
+    private TitleGeneration titleGeneration;
+
+    public TitleGeneration getTitleGeneration() {
+        return titleGeneration;
+    }
+
+    public void setTitleGeneration(TitleGeneration titleGeneration) {
+        this.titleGeneration = titleGeneration;
+    }
+
+    /**
      * Conversation ratings: how (and whether) the people chatting with this agent
      * are asked for feedback.
      *
@@ -1173,6 +1223,28 @@ public class AgentConfiguration {
          * An unknown value is logged as a warning and treated as {@code keep_newest}.
          */
         private String contradictionResolution = "keep_newest";
+
+        /**
+         * When true, a consolidation numbers the group's entries, asks every
+         * consolidated entry to cite the ones it came from ({@code "sources"}) and
+         * checks each answer without a model before anything is written: every cited
+         * ref must exist and every number of the value must appear verbatim in the
+         * cited entries. A written entry records the cited originals' ids in
+         * {@code UserMemoryEntry.sourceEntryIds}. Off by default; while off the
+         * request, parsing and writes are unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What a consolidation group that fails the {@link #citeSources} check does:
+         * {@code fallback_to_previous} (the default — nothing is written, the originals
+         * stay), {@code retry_once} (one more call with the problems listed, bounded by
+         * the same cost ceilings; falls back if that fails too) or {@code keep} (write
+         * it anyway). The default is the safe one because a consolidation deletes its
+         * originals. Unknown values log a WARN and act as the default. Ignored while
+         * {@code citeSources} is false.
+         */
+        private String onValidationFailure = "fallback_to_previous";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
         private String llmProvider = "anthropic";
@@ -1325,6 +1397,22 @@ public class AgentConfiguration {
 
         public void setContradictionResolution(String contradictionResolution) {
             this.contradictionResolution = contradictionResolution;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
 
         public int getPruneStaleAfterDays() {

@@ -333,6 +333,15 @@ eddi_team_budget_refusals_total             # New work refused for a spent budge
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
+### Input Parser Metrics
+
+The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The counter appears on the
+first consultation, so a deployment whose parsers have no `semanticFallback` shows no data.
+
+```text
+eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure, or a consultation skipped during the back-off after one, counts as no_match; not the provider request volume
+```
+
 ### Scheduled Trigger Metrics
 
 ```text
@@ -409,6 +418,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_conversation_titles_total{outcome}     # Conversation titles: auto / auto_skipped (already titled) / llm / llm_skipped (owner renamed meanwhile) / llm_empty / llm_busy / llm_refused_budget / llm_refused_unpriced / llm_error / error
 eddi_tenant_cost_reservation_total{outcome} # Hard-ceiling reservations (opt-in): reserved / refused / unavailable / release_failed
 eddi_tenant_cost_reservation_usd_total{direction} # USD held (held) and given back (released) by those reservations
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
@@ -1096,7 +1106,18 @@ earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolut
 eddi_summarization_calls_total              # Rolling-summary generations attempted
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
+eddi_summary_citation_checks_total          # Summaries checked under citeSources, by source and outcome
 ```
+
+`eddi_summary_citation_checks_total` carries `source` (`conversation` for the rolling summary,
+`dream` for a Dream consolidation group) and `outcome`: `passed` (the first answer passed),
+`retried` (it failed and the one retry passed), `kept` (it failed and was stored anyway under
+`onValidationFailure: keep`) and `fallback` (it failed and was discarded — the previous summary,
+or for Dream the original entries, stay). It stays at zero unless `citeSources` is on. A steady
+`fallback` rate on `conversation` is worth a look: each one leaves the summary boundary where it
+was, so the next turn pays for another summarizer call. See
+[langchain.md](langchain.md#traceable-summaries-citesources) and
+[user-memory.md](user-memory.md#traceable-consolidation-citesources).
 
 ### RAG Ingestion Metrics
 
@@ -1294,6 +1315,23 @@ GET    /llm/tools/costs/conversation/{conversationId}
 GET    /llm/tools/costs/tool/{toolName}
 POST   /llm/tools/costs/reset
 ```
+
+The history endpoint reads the conversation's stored tool-loop trace and answers
+`{"toolCalls": [...], "hasErrors": bool}`. Each call carries `toolName`,
+`callId`, `arguments`, `result`, `success` and `error`. `success` is false for a
+result the tool-outcome classifier (the one the repeat guard uses) reads as a
+failure, such as a non-2xx `httpCode`, an `{"error": ...}` object or an `Error:`
+string; for a call refused before it ran (argument schema, budget, quota,
+repeat guard, call cap, not-yet-activated LAZY tool, a gated call a human
+rejected or the resume refused); and for a result the tool-result guardrail
+blocked. `error` says why: the trace's own error code or message, the
+refusal's trace type (such as `hitl_rejected`), or the result's outcome
+(`failed_retryable`, `failed_terminal`, `not_executed`). Two kinds of call are
+not listed, because the trace cannot identify them: a call a
+`toolCallGuardrails` entry refused, and an approved call replayed from the
+HITL journal. The trace records no per-call timing, cost or cache hits, so the
+history does not report them; a conversation's tool spend comes from
+`/llm/tools/costs/conversation/{conversationId}`.
 
 > The pre-v6 prefix `/langchain/tools` still answers, because
 > `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility

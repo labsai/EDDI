@@ -84,17 +84,17 @@ src/
   `task_failed`, `token`, `tool_call`, `tool_result`, `cascade_step_start`,
   `cascade_escalation`, `guardrail_triggered`, `llm_retry`, `approval_required`
   (just before `done` when the turn pauses), `hitl_resume` (resume streams only),
-  `done`, `error`. The widget ignores `tool_result`, `guardrail_triggered`,
-  `llm_retry`, `approval_required` and `hitl_resume` (of these, the Manager's
-  `use-chat.ts` handles only `guardrail_triggered`). There is **no `thinking` event** — the backend never emits one.
-- **`tool_call` is `{"tool":"<name>","callId":…}`, sent right before each tool runs**
-  (plus `displayName`/`display` only when the designer configured `toolDisplay`;
-  `display` then holds the selected argument values, redacted and truncated) —
-  never the full arguments; those reach the client later, redacted, in
-  `task_complete`'s `toolTrace`. A `tool_result` (`tool`, `callId`, `status`,
-  `durationMs`, never the result) follows when it finishes, but the widget does not
-  read it: it shows "Using {tool}…" (the Manager's wording) until the next `token`,
-  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
+  `done`, `error`. The widget ignores `guardrail_triggered`, `llm_retry`,
+  `approval_required` (the paused `done` drives the approval card) and `hitl_resume`
+  (it does not call `/resume/stream`). There is **no `thinking` event** — the backend never emits one.
+- **`tool_call` is `{"tool","callId","displayName"?,"display"?}`, sent right before each tool runs** —
+  never the full arguments; they reach the client later, redacted, in
+  `task_complete`'s `toolTrace`. `displayName`/`display` are present only for a tool the
+  agent's `toolDisplay` names (a static label and up to three allow-listed, redacted,
+  truncated values); the widget then shows "label: values…", otherwise "Using {tool}…" with the
+  identifier in words (`tool-labels.ts`). **`tool_result`** (`{tool, callId, status,
+  durationMs}`, never the result, 6.7+) follows each call; it, the next `token`, a `task_failed`, an
+  escalation or the end of the turn clears the tool line. It is not token-gated — a
   model can write a sentence and then call a tool.
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
   refused BEFORE it ran — every condition the non-streaming endpoint answers with a
@@ -187,9 +187,16 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 npm run build    # Outputs to dist/
 ```
 
+Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
+shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).
+Change a dependency from `ui/` with `npm install <pkg> -w chat`, keep a version the Manager also
+uses identical in both `package.json` files, and put any `overrides` in
+`ui/package.json`. On Windows, run `npm run lockfile:check` in `ui/` afterwards — the
+`oxide-wasm32-wasi` trap described in `ui/manager/AGENTS.md` now applies to this lock too.
+
 ### Quality gates
 
-CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
+CI's `UI Chat` job runs `npm ci` (at `ui/`, the npm workspaces root), `npm run typecheck`, `npm run lint` and `npm test` on every
 PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
 no CI at all), then builds and runs `npm run budget`. Run them all before pushing.
 

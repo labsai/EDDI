@@ -6,6 +6,7 @@ package ai.labs.eddi.datastore;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -320,6 +321,56 @@ public interface IResourceStorage<T> {
     default boolean setNumberField(String id, String fieldName, long value) {
         throw new UnsupportedOperationException(
                 "setNumberField is not implemented by " + getClass().getName());
+    }
+
+    /**
+     * Sets top-level fields of the <em>current</em> version of a resource in place,
+     * in a single conditional write — like {@link #setNumberField}, nothing is read
+     * first, nothing is historized, and every other field and the version stay as
+     * they are.
+     * <p>
+     * The condition makes it a compare-and-set: when {@code guardField} is not
+     * null, the write happens only if the stored document's {@code guardField} is
+     * absent, null, or one of {@code allowedGuardValues}. That is what lets a
+     * generated conversation title never overwrite one the owner set, without a
+     * read-modify-write that could interleave with the owner's rename.
+     *
+     * @param fields
+     *            top-level field names (letters, digits, underscore) to values,
+     *            each a {@link String}, {@link Boolean} or {@code null} (stored as
+     *            JSON null); not empty
+     * @param guardField
+     *            the field the condition reads, or null for an unconditional write
+     * @param allowedGuardValues
+     *            the stored values of {@code guardField}, besides absent and null,
+     *            that admit the write; may be empty
+     * @return {@code false} when nothing was written: no current version of
+     *         {@code id}, or the condition did not hold
+     * @throws UnsupportedOperationException
+     *             when the backend cannot do it; callers fall back to a full write
+     */
+    default boolean setFieldsIf(String id, Map<String, Object> fields, String guardField, Collection<String> allowedGuardValues) {
+        throw new UnsupportedOperationException(
+                "setFieldsIf is not implemented by " + getClass().getName());
+    }
+
+    /**
+     * Guards {@link #setFieldsIf}: every name a plain top-level name, every value a
+     * string, a boolean or null.
+     */
+    static void requireSettableFields(Map<String, Object> fields, String guardField) {
+        if (fields == null || fields.isEmpty()) {
+            throw new IllegalArgumentException("No fields to set");
+        }
+        fields.forEach((name, value) -> {
+            requireTopLevelFieldName(name);
+            if (value != null && !(value instanceof String) && !(value instanceof Boolean)) {
+                throw new IllegalArgumentException("Field " + name + " must be a string, a boolean or null, got: " + value.getClass().getName());
+            }
+        });
+        if (guardField != null) {
+            requireTopLevelFieldName(guardField);
+        }
     }
 
     /**

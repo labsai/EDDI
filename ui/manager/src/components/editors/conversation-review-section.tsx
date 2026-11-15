@@ -100,6 +100,7 @@ export const ConversationReviewSection = memo(function ConversationReviewSection
               id="review-notice"
               value={review.notice ?? ""}
               onChange={(e) => patch({ notice: e.target.value.trim() ? e.target.value : null })}
+              disabled={disabled}
               rows={2}
               maxLength={300}
               className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"

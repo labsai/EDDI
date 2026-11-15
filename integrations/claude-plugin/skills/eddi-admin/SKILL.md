@@ -72,6 +72,18 @@ Manager or REST change. Before hand-writing any configuration JSON,
 read [config-gotchas.md](references/config-gotchas.md) — each gotcha saves and deploys
 cleanly and then misbehaves at runtime.
 
+How chat windows present an agent lives on the agent document, which `get_agent` shows
+but no MCP tool writes (the Manager's "Presentation & titles" section or the REST agent
+store does): `appearance` (display name, an https or small `data:image` avatar,
+`#rrggbb` accent, up to 6 starters), `conversationControls` (switches default on, except
+`rawHtml`, which is **off unless true** — but only a widget that reads
+`conversationControls` honours it; until that widget release the Chat UI still renders
+HTML for every agent, so `rawHtml: false` has no visible effect yet, and an agent whose
+replies contain HTML should get `rawHtml: true` now), and `titleGeneration` (model-written conversation titles, off by default,
+charged to the cost budget). Conversations from `list_conversations` carry `title` and
+`pinned`; a title is the first non-secret message unless the agent opts in, and one the
+user set is never replaced. `read_docs("agent-config-authoring")` has the fields.
+
 ## Test
 
 An agent test suite is a set of scripted conversations with expectations per turn

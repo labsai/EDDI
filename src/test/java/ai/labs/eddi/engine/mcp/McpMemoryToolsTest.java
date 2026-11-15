@@ -183,6 +183,15 @@ class McpMemoryToolsTest {
     }
 
     @Test
+    void upsertUserMemory_recordsNoSourceEntryIds() throws Exception {
+        when(userMemoryStore.upsert(any())).thenReturn("id-1");
+
+        tools.upsertUserMemory("user1", "lang", "en", "agent1", "preference", "self", null);
+
+        verify(userMemoryStore).upsert(argThat(e -> e.sourceEntryIds().isEmpty()));
+    }
+
+    @Test
     void upsertUserMemory_nullUserId() {
         var result = tools.upsertUserMemory(null, "key", "val", "agent", null, null, null);
         assertTrue(result.contains("userId is required"));
