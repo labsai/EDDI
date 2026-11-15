@@ -247,8 +247,16 @@ export function ProfileDialog({
   // never unmounts the form and throws away what is being typed; closing clears it, so
   // the next opening waits for the server again.
   const [opened, setOpened] = useState<HealthProfile | null>(null);
-  const fresh = profile.data !== undefined && !profile.isFetching && !profile.isError;
-  if (!open && opened !== null) setOpened(null);
+  // When this opening began: only a profile the server answered after it is fresh, never
+  // one the cache held from an earlier opening.
+  const [openedAt, setOpenedAt] = useState<number | null>(null);
+  if (!open && (opened !== null || openedAt !== null)) {
+    setOpened(null);
+    setOpenedAt(null);
+  }
+  if (open && openedAt === null) setOpenedAt(Date.now());
+  const fresh =
+    profile.data !== undefined && !profile.isFetching && !profile.isError && openedAt !== null && profile.dataUpdatedAt >= openedAt;
   if (open && opened === null && fresh) setOpened(profile.data!);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">

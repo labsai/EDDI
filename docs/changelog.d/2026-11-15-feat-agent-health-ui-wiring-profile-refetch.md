@@ -30,3 +30,20 @@ now holds the profile from its first successful fetch after opening (`opened`). 
 profile until the dialog closes, and closing clears it, so the next opening still waits for the server. New test: "a
 background refetch while editing keeps the form and what is being typed". It holds the refetch in flight and fails
 with the previous code.
+
+## 🐛 fix(manager): each opening of the health profile editor asks the server (2026-11-15)
+
+**Repo:** EDDI (`feat/agent-health-ui-wiring`)
+
+### What changed and why
+
+Review finding on PR #1390. The app's query client treats cached data as fresh for 30 seconds. A profile editor
+reopened within that window was handed the cached profile without a request, and accepted it, even if another admin
+had saved since. Two changes close this:
+
+- `useHealthProfile` sets `staleTime: 0`, so every opening fetches. Only the editor uses this hook.
+- `ProfileDialog` records when each opening began and accepts a profile only once `dataUpdatedAt` is at or after that
+  time. Cache data from an earlier opening never starts a draft.
+
+New test: "a reopening asks the server again even when the app's cache would still call the profile fresh". It runs
+with `staleTime: 30_000` and fails without the change.

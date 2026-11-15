@@ -153,8 +153,12 @@ export function useHealthPortfolio(period: HealthPeriod, sort: "attention" | "na
 }
 
 /** The agent's health profile; disabled while `enabled` is false (the dialog is closed). */
+/**
+ * The stored profile, for the editor only. Never fresh from the cache (`staleTime` 0): each opening
+ * of the editor asks the server, so a draft never starts from a profile someone has saved over since.
+ */
 export function useHealthProfile(agentId: string, enabled = true) {
-  return useQuery({ queryKey: healthKeys.profile(agentId), queryFn: () => getHealthProfile(agentId), enabled, retry: false });
+  return useQuery({ queryKey: healthKeys.profile(agentId), queryFn: () => getHealthProfile(agentId), enabled, retry: false, staleTime: 0 });
 }
 
 /** The preset list. Presets are static, so they are cached ten times longer than health data. */

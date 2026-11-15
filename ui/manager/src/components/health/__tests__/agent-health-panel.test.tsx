@@ -578,6 +578,34 @@ describe("health profile editor", () => {
     expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("7");
   });
 
+  it("a reopening asks the server again even when the app's cache would still call the profile fresh", async () => {
+    let budget = 5;
+    server.use(
+      http.get("*/agents/:agentId/health/profile", ({ params }) =>
+        HttpResponse.json({
+          agentId: String(params.agentId),
+          stored: true,
+          preset: "support",
+          critical: ["agentFailureRate"],
+          thresholds: { resolutionRate: { green: 0.7, red: 0.4 } },
+          budgets: { costPerResolvedUsd: budget },
+          slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
+          overrides: [],
+        })),
+    );
+    const { queryClient } = renderPanel(HEALTH_AGENTS.healthy);
+    // As the app configures it: cached data counts as fresh for 30 s.
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    await openProfile();
+    expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("5");
+    await userEvent.click(screen.getByTestId("health-profile-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
+    // Someone else saved within the 30 s.
+    budget = 9;
+    await openProfile();
+    expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("9");
+  });
+
   it("a background refetch while editing keeps the form and what is being typed", async () => {
     let gets = 0;
     let release: () => void = () => {};
