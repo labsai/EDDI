@@ -261,7 +261,8 @@ export const READ_ENDPOINTS: readonly string[] = [
   // `${vault:...}` references resolved at runtime (`VaultGrantChecker` reads
   // this store for exactly that reason), not plaintext the read hands back.
   //
-  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, a source's `run`
+  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, the matching
+  // `DELETE /ragstore/rags/{id}/documents`, a source's `run`
   // and `preview`, file upload and delete, and the state purge all stay
   // excluded, as `planning/operator-write-scope-plan.md` §5 requires — but
   // "did the documents actually land?" is the question an admin asks about a
@@ -993,7 +994,7 @@ export function grantsIngestionFileReads(endpoints: readonly string[]): boolean 
 
 /**
  * Whether the granted endpoints can change a knowledge base — create or edit a
- * configuration, or ingest a document into one.
+ * configuration, or ingest a document into one or delete one from it.
  *
  * Currently always `false`; it exists so the prompt's "you cannot author one"
  * sentence is derived rather than asserted. If a RAG write is ever allow-listed,
@@ -1008,7 +1009,8 @@ export function grantsKnowledgeBaseAuthoring(endpoints: readonly string[]): bool
     // so an operator holding this can create one — omitting it would leave the
     // prompt appending "you cannot create a knowledge base" to an agent that can.
     set.has("POST /ragstore/rags/{id}") ||
-    set.has("POST /ragstore/rags/{id}/ingest")
+    set.has("POST /ragstore/rags/{id}/ingest") ||
+    set.has("DELETE /ragstore/rags/{id}/documents")
   );
 }
 

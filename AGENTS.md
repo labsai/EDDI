@@ -37,7 +37,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
 **Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
@@ -47,7 +47,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
@@ -56,7 +56,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
 | `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
-> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
+> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` once at `ui/` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm ci` once in `ui/`, then `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). `ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the shared packages under `ui/packages/` install from one `ui/package-lock.json` into `ui/node_modules`, while each app keeps its own scripts. Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
 
 > **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; `.claude/skills/ship-pr/SKILL.md` groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
 
@@ -89,6 +89,17 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
    - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
    - Opening the PR and working its review comments to the end is written down in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant.
+   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until all of these hold:
+     - CodeRabbit has reviewed the PR's **current head**. If commits landed after its last review, request another one: `@coderabbitai review` for new commits, `@coderabbitai full review` after a stretch where pushes went unreviewed.
+     - Every CodeRabbit finding — inline comments, nitpicks and outside-diff-range comments in the review body included — is either fixed or answered on the PR.
+     - Every CodeRabbit thread is resolved.
+
+     A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed**. Wait (`@coderabbitai rate limit` shows when capacity returns) and ask again; never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
+   - **Never merge into a red `main` (except the one PR that fixes or reverts the breakage), and never merge PRs in bulk.** A PR's green CI only proves it works against the `main` it was tested on. "Require branches to be up to date" is off, so two PRs that are each green can break `main` together: on 2026-11-12, #1352 renamed `ResourceAccessGuard.callerIsAdmin()` to `isAdmin()`, #1345 added a test calling `callerIsAdmin()`, both were merged minutes apart, and `main` stopped compiling its tests. Therefore:
+     - Before every merge, check the `CI/CD` run for `main`'s **current commit**: compare `gh run list -b main -w CI/CD -L 1 --json headSha,status,conclusion` with `gh api repos/labsai/EDDI/commits/main --jq .sha`. The run's `headSha` must equal the current `main` SHA; a green run for an older commit says nothing about the newest one. If no run for that commit exists yet, or it is queued or in progress, wait for it to finish ("not red yet" is not green). It must be **finished and green**. If it is red, fix `main` first: no other PR merges until it is green again.
+     - When `main` has a merge queue, merge only through it (`gh pr merge <n> --squash --auto` adds the PR to the queue). Never use `--admin` to bypass it.
+     - Without a queue, merge one PR at a time. Before the next merge, merge `origin/main` into that PR's branch and wait for its CI to pass again whenever `main` changed in a file the PR touches or depends on, including a renamed or removed symbol. If you must land several, first build `main` plus all of them together and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
+     - After merging, watch `main`'s `CI/CD` run for that commit. If it goes red, revert or fix it before anything else merges.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -151,7 +162,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (96 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -284,7 +295,8 @@ LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
           (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task; the context carries the memory)
+           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
+           carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -319,7 +331,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -530,7 +542,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
 | `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |

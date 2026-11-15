@@ -1062,7 +1062,11 @@
       "errDisabled": "إصدار الوكيل هذا لا يطلب تقييمات.",
       "errOwner": "لا يمكن تقييم هذه المحادثة إلا من الشخص الذي أجراها.",
       "errGeneric": "تعذّر حفظ التقييم."
-    }
+    },
+    "toolArgs": "الوسائط",
+    "toolResult": "النتيجة",
+    "toolArgsShowFields": "الحقول",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "العودة إلى مسار العمل",
@@ -1862,9 +1866,18 @@
     "grModeReplace": "استخدام الأنماط الإضافية فقط",
     "grPiiKinds": "الأنواع المطلوب اكتشافها",
     "grPiiEmail": "عناوين البريد الإلكتروني",
-    "grPiiSsn": "أرقام الضمان الاجتماعي الأمريكية",
     "grPiiCard": "أرقام بطاقات الدفع (مع فحص Luhn)",
     "grPiiPhone": "أرقام الهواتف",
+    "grPiiIban": "أرقام IBAN (مع التحقق من المجموع الاختباري)",
+    "grPiiDateOfBirth": "تواريخ الميلاد (بجوار كلمة مفتاحية مثل «مولود»)",
+    "grPiiIpAddress": "عناوين IP (IPv4 و IPv6)",
+    "grPiiPassportMrz": "المناطق المقروءة آليًا في جوازات السفر (أي دولة)",
+    "grPiiCountries": "المعرّفات الوطنية",
+    "grPiiCountriesHint": "حدّد دولة للعثور على جميع معرّفاتها، أو حدّد معرّفات منفردة. يُتحقَّق من كلٍّ منها وفق صيغته ورقم التحقق الخاص به؛ ويحتاج بعضها أيضًا إلى كلمة مفتاحية مثل «PESEL» أو «NHS» قبل الرقم مباشرة.",
+    "grPiiRegionEurope": "أوروبا",
+    "grPiiRegionAmericas": "الأمريكتان",
+    "grPiiRegionAsiaPacific": "آسيا والمحيط الهادئ",
+    "grPiiRegionAfrica": "أفريقيا",
     "grReplacement": "البديل",
     "grPiiReplacementHint": "الافتراضي [REDACTED:<kind>]. يمكن أن تتضمن القيمة المخصصة {kind}، ويُستبدل بنوع ما تم اكتشافه.",
     "grPatterns": "الأنماط",
@@ -4796,7 +4809,12 @@
     "regularTruncated": "يتم عرض أول {{limit}} من موافقات المحادثات — توجد موافقات أخرى معلّقة. اتخذ قرارًا بشأن بعضها لرؤية البقية.",
     "conversationColumn": "المحادثة",
     "groupReviewLoadError": "تعذّر تحميل المناقشة.",
-    "groupReviewNoEntries": "لم يُقل أي شيء بعد."
+    "groupReviewNoEntries": "لم يُقل أي شيء بعد.",
+    "argsViewLabel": "عرض الوسائط كـ",
+    "argsViewFields": "الحقول",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "خام",
+    "amendRedactedMarker": "لا تزال الوسائط المعدّلة تحتوي على <REDACTED>. استبدلها بالقيمة الحقيقية، أو وافق دون تعديل: يُرسل التعديل كما هو مكتوب تمامًا."
   },
   "hitlReview": {
     "approveEdited": "الموافقة مع التعديلات",
@@ -6540,7 +6558,6 @@
     "rules": "القواعد",
     "property": "مُعيّن الخصائص",
     "apicalls": "استدعاءات API",
-    "httpcallsLegacy": "استدعاءات API (قديمة)",
     "llm": "نموذج لغوي",
     "output": "الإخراج",
     "templating": "القوالب",

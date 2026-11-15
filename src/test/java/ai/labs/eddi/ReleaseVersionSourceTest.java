@@ -446,7 +446,7 @@ class ReleaseVersionSourceTest {
         assertFalse(pkg.has("version"),
                 MANAGER_PACKAGE_JSON + " declares \"version\": " + pkg.path("version")
                         + ". The Manager is a private package inside this repository and takes its version from"
-                        + " pom.xml; remove the field (and the matching root entries in package-lock.json)");
+                        + " pom.xml; remove the field (and the matching \"manager\" entry in ui/package-lock.json)");
     }
 
     /**

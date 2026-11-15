@@ -37,7 +37,7 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > `scope: "secret"` property setter then fails the whole turn. Nothing in the
 > startup log mentions the variable you set.
 >
-> To check what actually bound, read the value back from the Dev UI at `/q/dev`,
+> To check what actually bound, read the value back from the Dev UI at `/q/dev-ui`,
 > or compare against the spellings already used in `docker-compose.yml`,
 > `.env.example` and `k8s/`.
 
@@ -281,6 +281,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
 
 ---
 
@@ -289,6 +290,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.rag.in-memory.max-segments` | `50000` | Most segments all `in-memory` knowledge bases may hold together. In-memory stores are never evicted, so this is what bounds their heap use — at 1536 dimensions, 50,000 segments are roughly 300 MB of vectors plus their text. A write past it fails (an ingestion run reports `FAILED` naming this setting) and nothing is evicted to make room. `0` or negative disables the cap — see [rag.md](rag.md#vector-stores) |
+| `eddi.rag.pgvector.pool.max-size` | `10` | Most connections one pgvector connection pool opens. EDDI keeps one pool per PostgreSQL server and login (host, port, database, user, password), shared by every knowledge base that uses it; each starts empty and closes idle connections after two minutes. Applies when a pool is created — see [rag.md](rag.md#pgvector-at-scale) |
 | `eddi.rag.evaluation.max-queries` | `100` | Most golden queries one `POST /ragstore/rags/{id}/evaluate` request may run; more is refused with a 400 naming this setting. Each query costs one embedding call and the request is synchronous, so this bounds both the provider bill and how long one request holds a worker — see [rag.md](rag.md#evaluating-retrieval) |
 
 ---
