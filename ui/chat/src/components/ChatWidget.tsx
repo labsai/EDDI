@@ -63,7 +63,7 @@ import {
   extractOutputImages,
   findInputField,
   isTurnPaused,
-  parseToolCallName,
+  parseToolCallActivity,
   UNCONSUMED_STREAM_ERROR_CODES,
   type DoneSnapshot,
   type OutputImage,
@@ -679,10 +679,19 @@ export function ChatWidget() {
         // tool, and the silence while that tool runs is exactly the wait worth
         // explaining. The next token clears it again.
         case "tool_call": {
-          const tool = parseToolCallName(event.data);
+          const tool = parseToolCallActivity(event.data);
           if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
           return false;
         }
+
+        // EDDI 6.7: `{tool, callId, status, durationMs}` once per call, right
+        // after it ran (never its arguments or result). Calls run one after
+        // another, so the call on screen is finished: back to "Thinking…"
+        // rather than naming a tool that is no longer running.
+        case "tool_result":
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
+          if (turn.tokenCount === 0) dispatch({ type: "SET_THINKING", value: true });
+          return false;
 
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come
@@ -1021,9 +1030,11 @@ export function ChatWidget() {
   const [profileSettled, setProfileSettled] = useState(false);
   // Read at click time by handleSend, which quick replies and the secret input
   // call directly: gating only the composer let a quick reply through before the
-  // notice appeared. Synced after commit, like the refs above.
+  // notice appeared. Synced in the commit that renders the notice (a layout
+  // effect runs before the browser paints or handles the next click), so there
+  // is no moment where the notice is on screen and a click is still dropped.
   const profileSettledRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     profileSettledRef.current = profileSettled;
   }, [profileSettled]);
   // The agent behind a managed route, which names an intent rather than an agent.
@@ -1059,9 +1070,13 @@ export function ChatWidget() {
         // Absent on an older server, or when the deployed version asks for no
         // ratings: no rating control is shown.
         dispatch({ type: "SET_RATING_PROFILE", profile: parseRatingProfile(profile?.rating) });
+        // In the same batch as the notice, so both land in one commit: settling a
+        // microtask later (in a finally) let the notice show while clicks were
+        // still refused.
+        setProfileSettled(true);
       })
-      .catch(() => { /* no profile endpoint: no notice, no ratings */ })
-      .finally(() => {
+      .catch(() => {
+        // No profile endpoint: no notice, no ratings, and nothing to wait for.
         if (!cancelled) setProfileSettled(true);
       });
     return () => {

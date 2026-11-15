@@ -9,7 +9,7 @@ description: >-
 
 Welcome to the official documentation for **E.D.D.I** (Enhanced Dialog Driven Interface) — open-source multi-agent orchestration middleware for conversational AI.
 
-[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases) · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
+[![Version](https://img.shields.io/github/v/release/labsai/EDDI?label=version&color=blue)](https://github.com/labsai/EDDI/releases) · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.technology/)
 
 ---
 
@@ -47,7 +47,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 ### Protocols & Interoperability
 
-- **[MCP Server](mcp-server.md)** — 96 tools for managing agents and holding conversations from Claude Desktop, IDE plugins, or any MCP client
+- **[MCP Server](mcp-server.md)** — 108 tools for managing agents and holding conversations from Claude Desktop, IDE plugins, or any MCP client
 - **[MCP Client](mcp-client.md)** — Point an agent at somebody else's MCP server, including stdio servers via a bridge sidecar
 - **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
 - **[Connections](connections.md)** — One credential model for every outbound call: static keys, HTTP Basic, OAuth service accounts, and per-end-user OAuth

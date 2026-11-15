@@ -4,7 +4,7 @@
 
 Memory Policy controls what happens when a lifecycle task fails during a conversation turn. By default, failed task output (stack traces, HTTP error bodies, raw error messages) is written to conversation memory and becomes visible to the LLM on subsequent turns. This pollutes the LLM's context with noise it can't act on.
 
-**Strict Write Discipline** solves this by marking failed task output as **uncommitted** — excluded from the LLM's view — and injecting a concise **error digest** that the LLM can understand and react to.
+**Strict Write Discipline** solves this by marking failed task output as **uncommitted** — excluded from the LLM's view — and recording a concise **error digest** for the caller, plus a `task_failed_<taskId>` action that behavior rules can react to.
 
 ## Configuration
 
@@ -33,7 +33,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 
 | Mode | Behavior |
 |------|----------|
-| `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is injected so the LLM knows what failed and can adapt. **Recommended.** |
+| `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is recorded for the caller (`taskErrors`) and as step data, and behavior rules can route on the `task_failed_<taskId>` action. **Recommended.** |
 | `exclude_all` | Failed task output is marked uncommitted. No error digest is injected. The LLM sees nothing about the failure. |
 | `keep_all` | Opt-in backwards-compatible mode — failed task output remains committed and visible to the LLM. The `task_failed_<taskId>` action is still emitted. |
 
@@ -93,11 +93,12 @@ The error digest is stored as a special output type:
   "errorType": "<classification>",
   "code": "<machine-readable code>",
   "retryable": false,
+  "message": "<reason>",
   "text": "Task 'eddi://ai.labs.httpcalls' failed: <reason>"
 }
 ```
 
-`errorType`, `code` and `retryable` (plus `retryAfterMs` when the provider asked callers to wait) are the machine-readable half that also feeds the `error` object of the REST response.
+`errorType` (`timeout`, `transport`, `rate_limit`, `content_filter`, `stack_overflow` or `unknown`), `code`, `retryable` and `message` (plus `retryAfterMs` when the provider asked callers to wait) are the machine-readable half that also feeds the `error` object of the REST response.
 
 `text` is always `Task '<eddi:// task id>' failed: ` followed by the reason. The reason is kept short
 on purpose: HTTP(S) URLs are replaced with `[url]` (other schemes, such as a `mongodb://` URL, are not), stack frames and fully-qualified exception class names are
@@ -192,7 +193,7 @@ When a task fails with strict write discipline enabled, the action `task_failed_
 
 1. **Enable `digest` mode for production agents** — It prevents LLM context pollution while preserving observability
 2. **Use behavior rules for graceful degradation** — React to `task_failed_*` actions to provide fallback responses
-3. **Monitor error digests** — They appear in conversation memory for debugging even though the LLM only sees the summary
+3. **Monitor error digests** — They appear in conversation memory for debugging; the LLM sees neither the raw failure nor the digest
 4. **Set `keep_all` for development** — Full error output is useful during agent development and debugging
 
 ## See Also

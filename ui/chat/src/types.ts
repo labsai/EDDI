@@ -89,6 +89,8 @@ export type SSEEventType =
   | "task_complete"
   | "task_failed"
   | "tool_call"
+  /** EDDI 6.7: `{tool, callId, status, durationMs}` once per call, after it ran. */
+  | "tool_result"
   | "cascade_step_start"
   | "cascade_escalation"
   | "done"
