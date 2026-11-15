@@ -1,30 +1,16 @@
-import js from "@eslint/js";
 import globals from "globals";
-import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
+import { NO_ALWAYS_TRUE_LENGTH, reactApp } from "../eslint.config.base.js";
 
-// The same base as ui/manager: ESLint and typescript-eslint recommended, plus
-// the rules of hooks. The Chat UI had no lint configuration at all, so hook
-// dependency mistakes and unused code reached review unflagged.
+// The same base as ui/manager (ui/eslint.config.base.js): ESLint and
+// typescript-eslint recommended, plus the rules of hooks. The Chat UI had no lint
+// configuration at all, so hook dependency mistakes and unused code reached
+// review unflagged.
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  ...reactApp({ ecmaVersion: 2022 }),
   {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
-    languageOptions: {
-      ecmaVersion: 2022,
-      globals: globals.browser,
-    },
-    plugins: {
-      "react-hooks": reactHooks,
-    },
     rules: {
-      // The two classic hook rules, pinned by name as in ui/manager.
-      // eslint-plugin-react-hooks 7 folded the React Compiler rules
-      // (set-state-in-effect, refs, purity, ...) into `recommended`; adopting
-      // those is a separate decision, not part of a dependency bump.
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
       // A leading underscore marks a parameter kept for its position.
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
@@ -36,15 +22,7 @@ export default tseslint.config(
       globals: { ...globals.browser, ...globals.node },
     },
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "CallExpression[callee.property.name='toBeGreaterThanOrEqual'][arguments.0.type='Literal'][arguments.0.value=0]",
-          message:
-            "toBeGreaterThanOrEqual(0) is always true for a length or count. Assert the value you actually expect.",
-        },
-      ],
+      "no-restricted-syntax": ["error", NO_ALWAYS_TRUE_LENGTH],
     },
   },
 );
