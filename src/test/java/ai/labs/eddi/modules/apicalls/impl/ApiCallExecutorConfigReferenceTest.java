@@ -524,7 +524,7 @@ class ApiCallExecutorConfigReferenceTest {
         @Test
         @DisplayName("an empty error body falls back to a status message whose base64 echo of the key is redacted")
         void statusMessageEncodedEchoRedacted() throws Exception {
-            String encoded = java.util.Base64.getEncoder().encodeToString(SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String encoded = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
             IResponse echo = respond(401, "");
             when(echo.getHttpCodeMessage()).thenReturn("rejected " + encoded);
 
