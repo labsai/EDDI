@@ -6,18 +6,7 @@
  * can build the same link after it has saved a step.
  */
 
-const STORE_TO_SLUG: Record<string, string> = {
-  rulestore: "rules",
-  apicallstore: "apicalls",
-  llmstore: "llm",
-  outputstore: "output",
-  dictionarystore: "dictionary",
-  propertysetterstore: "propertysetter",
-  mcpcallsstore: "mcpcalls",
-  ragstore: "rag",
-  snippetstore: "snippets",
-  parserstore: "parser",
-};
+import { getResourceTypeByStore } from "@/lib/api/resources";
 
 /** Parse an eddi:// URI to extract the resource type slug and ID */
 export function parseExtensionUri(uri: string): { slug: string; id: string } | null {
@@ -30,7 +19,8 @@ export function parseExtensionUri(uri: string): { slug: string; id: string } | n
       const storeName = segments[0];
       const resourceId = segments[2];
       if (storeName && resourceId) {
-        return { slug: STORE_TO_SLUG[storeName] ?? storeName, id: resourceId };
+        // The store table in RESOURCE_TYPES, the same one the Studio resolves by.
+        return { slug: getResourceTypeByStore(storeName)?.slug ?? storeName, id: resourceId };
       }
     }
   } catch {

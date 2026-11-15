@@ -152,6 +152,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `name` | string | — | Display name. Engine-minted schedules are named `hitl-timeout-<conversationId>` and `continuation-<conversationId>` |
 | `agentId` | string | required | Agent to trigger |
 | `agentVersion` | int | `0` (latest) | Agent version (0 = latest deployed) |
 | `triggerType` | enum | `CRON` | `CRON` or `HEARTBEAT` |
@@ -475,6 +476,17 @@ target must be written:
   node down in turn, forever.
 - A **disabled** schedule cannot be claimed, by the poller or by `POST /{id}/fire`:
   one disabled between the poll's read and its claim is no longer fired.
+- The poller's claim also requires the schedule to **still be due**. A poll reads
+  its batch once and claims it row by row, so another instance can claim, fire and
+  re-arm a schedule in between; that schedule is waiting for its next fire time
+  and is not fired a second time. `POST /{id}/fire` (and `fire_schedule_now`)
+  claims regardless of `nextFire`, since firing early is its purpose.
+- **A lease's age is measured on the database's clock.** The claim time is
+  written by the database, and the lease-expiry test compares against the same
+  clock, so instances whose clocks disagree cannot take over each other's
+  running fires. Clock skew between instances still shifts *when* a schedule
+  counts as due on each of them, by the amount of the skew, but it no longer
+  causes duplicate fires.
 - `POST /{id}/fire` (and the MCP `fire_schedule_now` tool) runs under the same bound as a polled fire
   (`eddi.schedule.fire-timeout` plus a 30 s grace) instead of without limit, so a
   manual Dream or ingestion run cannot outlast its claim's lease and be started a
@@ -506,9 +518,9 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.poll-batch-size` | `100` | Max due schedules looked at per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
 | `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll takes a free slot before it claims a schedule, so nothing is claimed that cannot start; the rest stay due for the next cycle or another instance |
 | `eddi.schedule.lease-timeout` | `10m` | How long a claimed schedule is considered owned before another instance may re-claim it. It must outlast `fire-timeout` plus a 30 s grace, or a schedule becomes reclaimable while its fire is still running and fires twice; a shorter value is raised at startup to `fire-timeout + 30s + 1m`, with a warning |
-| `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
+| `eddi.schedule.max-retries` | `5` | Failed attempts before a fire is `DEAD_LETTERED`: the fifth consecutive failure dead-letters instead of retrying |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |
-| `eddi.schedule.backoff-multiplier` | `4` | With the defaults: 15s, 60s, 4m, 16m, 64m |
+| `eddi.schedule.backoff-multiplier` | `4` | With the defaults the retries wait 15s, 60s, 4m and 16m; the next failure dead-letters |
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request. Guards against schedule bombing; a rejected create returns a message naming this property |
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |

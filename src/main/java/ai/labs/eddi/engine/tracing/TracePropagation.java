@@ -26,7 +26,7 @@ import java.util.function.Predicate;
  * Used by every outbound stack that is not instrumented by Quarkus on its own:
  * the httpcalls client ({@code HttpClientWrapper}), {@code OutboundHttp}
  * (built-in tools, A2A, ingestion) and the MCP transport (header and
- * {@code params._meta}, SEP-414). They are four different HTTP stacks, so the
+ * {@code params._meta}, SEP-414). They are three different HTTP stacks, so the
  * rules live here once:
  * </p>
  * <ul>

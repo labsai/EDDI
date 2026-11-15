@@ -171,7 +171,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there**. `label:<name>` is reserved for transports with labels (the Gmail API) and is refused for `imap`, which has none |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
 | `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)). Always `true` in conversation mode: `false` is refused |
-| `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains). Matched against the `From`, which without `requireAuthentication` anyone can forge |
+| `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains), at most 200 entries. Matched against the `From`, which without `requireAuthentication` anyone can forge |
 | `senderBlocklist` | *(empty)* | Same syntax; checked before the allowlist |
 | `identityMode` | `perSender` | `perSender`: `email:<integrationId>:<address>`. `integration`: one shared `email:<integrationId>` for every authenticated sender |
 | `correlateThreads` | `false` | Trigger mode only. Each mail is its own conversation by default. `true`: a mail continuing a thread (by `References`/`In-Reply-To`) **from the same authenticated sender** continues that sender's conversation; anyone else starts their own ([Threads](#threads)) |
@@ -332,7 +332,11 @@ cost); an unpriced model counts as zero.
   `email:<integrationId>:<address>` identity — current integrations and those the address's ledger rows name — and the
   ledger rows. See [gdpr-compliance.md](gdpr-compliance.md).
 - Every **refused** mail leaves an audit-ledger entry (`taskId: email.inbound`): integration, reason category, ledger
-  row, Message-ID, and the sender only as domain plus SHA-256 hash — the audit ledger is write-once.
+  row, Message-ID, and the sender only as `senderDomain` plus `senderPseudonym` — the audit ledger is write-once. The
+  pseudonym is the GDPR token [HITL notifications](hitl.md#email-notifications) use — keyed with the audit ledger's key,
+  or salted per deployment when the ledger has none — so it cannot be confirmed by hashing a list of candidate
+  addresses, as the plain SHA-256 written before could. Only a deployment with neither a key nor a place to keep the
+  salt falls back to an unsalted hash, and then that guarantee does not hold.
 - The mailbox host is a processor of the mail: [compliance-data-flow.md](compliance-data-flow.md#other-outbound-recipients).
 
 ## The message ledger
@@ -358,6 +362,11 @@ so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` 
 | `eddi.email.reply.sweep-interval` | `30s` | Conversation mode: how often due replies are retried |
 | `eddi.email.outbound.max-attempts`, `eddi.email.outbound.retry-backoff` | `6`, `1m` | Attempts per reply, and the first retry delay (doubling, at most an hour) |
 | `eddi.email.allowed-hosts` | *(any public host)* | Mail servers authors may name |
+| `eddi.email.ledger-retention` | `30d` | How long a message-ledger row is kept |
+| `eddi.email.dns.servers` | *(the system's resolvers)* | DNS servers for the DKIM and DMARC lookups (`host`, `host:port` or `[v6]:port`, comma-separated) — an air-gapped deployment names its own |
+| `eddi.email.dns.timeout`, `eddi.email.dns.max-lookups-per-message` | `5s`, `10` | Per lookup, and network lookups one mail may cause (cache hits are free) |
+| `eddi.email.dns.cache-max-entries`, `eddi.email.dns.cache-max-ttl` | `10000`, `1h` | The DNS answer cache; each record's TTL is honoured up to the cap |
+| `eddi.email.dkim.max-delivery-age` | `7d` | How far back the server's delivery time may date a DKIM check, so a short signature expiry still verifies for mail that waited |
 
 A failed poll (connection, login, folder) is logged at WARN with its category, recorded on the mailbox state, and
 backs off `pollSeconds × 2^(failures−1)`, up to an hour; the schedule itself is never dead-lettered by a mail server
@@ -431,7 +440,7 @@ Integrations row.
 |---|---|---|
 | `smtpHost` | — (required) | The SMTP submission server |
 | `smtpPort` | `587` | `587` (STARTTLS, required — never a plaintext login) or `465` (TLS) |
-| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address` |
+| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address`. At most 100 characters |
 | `replyTemplate` | `{output}` | Wraps the agent's answer: Qute, with `{output}` and the answered mail's `{mail.subject}`, `{mail.from}`, `{mail.fromName}`, `{mail.date}`. The answer and the subject are data — a `{…}` the model writes is printed, never evaluated. At most 4000 characters |
 | `aiDisclosure` | `This reply was written by an AI assistant.` | Appended after a blank line to every reply. **An empty value switches it off**, and the save warns (`email.ai-disclosure-disabled`): transparency rules such as Art. 50 of the EU AI Act ([eu-ai-act-compliance.md](eu-ai-act-compliance.md)) expect people to know they are talking to an AI. At most 500 characters |
 | `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
@@ -490,8 +499,9 @@ hear once a day (`thread_throttled`) — usually a mail loop the loop guard did 
 dropped by the loop guard like any automated mail.
 
 A group target's discussion **synthesis** is the reply. A group conversation keeps no copy of the mail it answered, so
-a group reply that fails is retried only by the node that ran the discussion; elsewhere, or after a restart, it ends
-`FAILED` (`CONTENT_UNAVAILABLE`).
+a group reply that fails is retried only by the node that ran the discussion, which holds at most 1,000 of them, each
+for as long as its row can still be retried; elsewhere, after a restart, or for the one dropped past that bound, it
+ends `FAILED` (`CONTENT_UNAVAILABLE`).
 
 ### Bounces and the suppression list
 
@@ -530,9 +540,11 @@ takeover feature ([planning/human-takeover-design.md](../planning/human-takeover
 ### Audit and personal data
 
 Every sent, failed or bounced reply leaves an audit-ledger entry (`taskId: email.reply`): integration, reply kind,
-outcome, Message-ID, ledger row, attempts and the recipient's domain plus SHA-256 hash — never the address or the
-body. A reply row holds the recipient's address (reached by erasure and export) and no content; the reply itself is
-rebuilt from the conversation, where the inbound mail already lives.
+outcome, Message-ID, ledger row, attempts and the recipient as `recipientDomain` plus `recipientPseudonym` (the keyed
+GDPR token HITL notifications and refused-mail entries use) — never the address or the body. The log line for an
+address suppressed after a bounce names it by that pseudonym too. A reply row holds the recipient's address (reached by
+erasure and export) and no content; the reply itself is rebuilt from the conversation, where the inbound mail already
+lives.
 
 ## Helpdesk recipe (webhook + httpcalls)
 

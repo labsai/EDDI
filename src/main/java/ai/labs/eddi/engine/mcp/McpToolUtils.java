@@ -152,7 +152,8 @@ final class McpToolUtils {
     }
 
     /**
-     * Parse a string to a boolean, defaulting to false.
+     * Parse a string to a boolean: {@code defaultValue} when null or blank, else
+     * whether it is {@code "true"} (case-insensitive).
      */
     static boolean parseBooleanOrDefault(String value, boolean defaultValue) {
         if (value == null || value.isBlank()) {

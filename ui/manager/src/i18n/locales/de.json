@@ -2758,30 +2758,25 @@
     "openEditor": "Im Editor öffnen",
     "editorComingSoon": "Integrierter Editor kommt bald",
     "noPipeline": "Keine Pipeline-Phasen",
-    "type": {
-      "parser": "Parser",
-      "rules": "Regeln",
-      "property": "Eigenschafts-Setter",
-      "apicalls": "API-Aufrufe",
-      "llm": "LLM",
-      "output": "Ausgabe",
-      "output.template": "Ausgabevorlage",
-      "mcpcalls": "MCP-Aufrufe",
-      "rag": "Wissensbasen",
-      "dictionary": "Wörterbuch"
-    },
     "landingDescription": "Wählen Sie einen Agenten, um den visuellen Pipeline-Editor, Debugger und Live-Chat zu öffnen",
     "noAgents": "Keine Agenten gefunden — erstellen Sie einen auf der Agenten-Seite",
     "chat": "Chat",
     "backToAgent": "Zurück zum Agenten",
     "selectStageHint": "Wählen Sie eine Erweiterung in der Pipeline, um deren Konfiguration direkt zu bearbeiten",
-    "noConfig": "Diese Pipeline-Stufe hat keine Konfigurations-URI",
-    "unsupportedType": "Für diesen Erweiterungstyp ist kein Editor verfügbar",
     "testReady": "Als v{{version}} gespeichert und bereitgestellt — der Chat ist bereit",
     "workflow": "Workflow",
     "unsavedTitle": "Ungespeicherte Änderungen in dieser Stufe",
     "unsavedMessage": "Beim Wechsel der Stufe wird der Editor ersetzt. Speichern Sie Ihre Änderungen zuerst, verwerfen Sie sie oder bleiben Sie auf dieser Stufe.",
-    "discardAndSwitch": "Verwerfen & wechseln"
+    "discardAndSwitch": "Verwerfen & wechseln",
+    "inlineConfig": "Eingebettete Konfiguration",
+    "stepInfo": {
+      "templating": "Rendert die {…}-Platzhalter in den Ausgabetexten und Quick Replies dieses Turns. Er hat keine eigene Konfiguration, daher gibt es hier nichts zu bearbeiten.",
+      "inlineConfig": "Die Konfiguration dieses Schritts ist im Workflow eingebettet und nicht als eigene Ressource gespeichert. Bearbeiten Sie sie auf der Workflow-Seite.",
+      "noConfig": "Dieser Schritt verweist auf keine Konfigurationsressource. Hängen Sie eine auf der Workflow-Seite an.",
+      "unknown": "Der Manager hat für diesen Schritttyp keinen Editor. Seine im Workflow gespeicherte Konfiguration wird unten angezeigt.",
+      "openWorkflow": "Workflow öffnen",
+      "configHeading": "Schrittkonfiguration (schreibgeschützt)"
+    }
   },
   "ragEditor": {
     "general": "Allgemein",

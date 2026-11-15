@@ -109,6 +109,9 @@
   --color-ochre-950: var(--color-amber-950);
 
   --radius: 0.5rem;
+  /* Every family stays named although only Noto Sans is loaded up front: the
+     script families arrive with their locale (src/i18n/locale-fonts.ts), and
+     until then text in those scripts falls through to system-ui. */
   --font-sans: 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
 }
 

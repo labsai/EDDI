@@ -4,6 +4,18 @@ EDDI can present its deployed agents as **OpenAI models**. Any client that speak
 
 The adapter lives at `/v1` and is **disabled by default**.
 
+> **Only want a chat front end for your agents? Use Open WebUI.** If your users need a generic, ChatGPT-style chat with EDDI agents behind it, Open WebUI over `/v1` does that well today, and EDDI does not try to out-build it on generic chat. What the OpenAI protocol cannot carry is EDDI's own interaction model, so over `/v1` your users go without:
+>
+> - **Approvals in the flow.** A paused turn arrives as a text notice; nobody can approve or reject in the chat, it happens out of band ([HITL](#hitl)).
+> - **Quick replies and `inputField`.** They are flattened to Markdown to read and retype, not buttons or a form ([§7.2](#72-structured-outputs)).
+> - **Secret input.** There is no masked field, so an agent asking for a password gets it in the clear in the client's history.
+> - **Ratings and review notices.** No thumbs or rating card, and no "replies are reviewed" notice from the agent's profile.
+> - **Group discussions.** Teams of agents are not models ([§10](#10-known-gaps)).
+> - **Memory transparency.** No view of what an agent remembers about the user, and no way to delete it there.
+> - **Branding.** Open WebUI shows its own brand, not the deployment's white-label name, logo and colours, and no per-agent appearance.
+>
+> Those are what EDDI's own surfaces exist for: the embeddable [Chat UI](chat-ui-embedding.md) at `/chat`, and the Manager and Workforce.
+
 ---
 
 ## Contents
@@ -595,8 +607,9 @@ Every failure uses the OpenAI envelope:
 | Ambiguous model name | 400 | `ambiguous_model` |
 | `stateless:true` while stateless requests are disabled | 400 | `invalid_request_field` |
 | No `user` message | 400 | `no_user_message` |
+| User message longer than `eddi.conversations.max-input-chars` (default `200000`) | 400 | `input_too_large` |
 | Agent not deployed | 503 | `agent_not_ready` |
-| Adapter concurrency cap (`max-concurrent-requests`) or a busy conversation | 429 | — |
+| Adapter concurrency cap (`max-concurrent-requests`) or a busy conversation | 429 | — (`type: rate_limit_exceeded`) |
 | Node at its in-flight turn limit, coordinator saturated, shutdown drain | 503 | `capacity_exceeded` (with `Retry-After`) |
 | Tenant quota store unavailable | 503 | `quota_accounting_unavailable` |
 | Authenticated caller without a permitted role | 403 | `insufficient_permissions` |

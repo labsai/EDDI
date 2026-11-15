@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import {
   ChatWidget,
   applyColorOverrides,
@@ -35,13 +35,11 @@ afterEach(() => {
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <ChatProvider>
-        <Routes>
-          <Route path="/chat/:environment/:agentId" element={<ChatWidget />} />
-        </Routes>
-      </ChatProvider>
-    </MemoryRouter>,
+    <ChatProvider>
+      <ChatLocationProvider initialPath={path}>
+        <ChatWidget />
+      </ChatLocationProvider>
+    </ChatProvider>,
   );
 }
 

@@ -88,7 +88,7 @@ public class TenantQuotaService {
     /**
      * Opt-in hard ceiling: hold a call's maximum cost against the monthly budget
      * before the call, instead of only charging it afterwards. Off by default. See
-     * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation}.
+     * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation-opt-in}.
      */
     @ConfigProperty(name = "eddi.tenant.quota.cost-reservation.enabled", defaultValue = "false")
     boolean costReservationEnabled;

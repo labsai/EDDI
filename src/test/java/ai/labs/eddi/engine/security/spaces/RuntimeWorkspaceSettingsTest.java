@@ -17,14 +17,29 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -38,17 +53,57 @@ import static org.mockito.Mockito.when;
 @DisplayName("runtime workspace settings")
 class RuntimeWorkspaceSettingsTest {
 
-    /** An in-memory store with a controllable failure. */
+    /**
+     * A store read held open: a database call that has reached the store and not
+     * answered yet.
+     */
+    private static final class HeldRead {
+        final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch gate = new CountDownLatch(1);
+
+        void release() {
+            gate.countDown();
+        }
+    }
+
+    /**
+     * An in-memory store with a controllable failure, a read counter, and reads
+     * that can be held open.
+     */
     private static final class Store implements IWorkspaceSettingsStore {
         final AtomicReference<StoredWorkspaceSettings> value = new AtomicReference<>();
+        final AtomicInteger reads = new AtomicInteger();
         volatile boolean failing;
+        private final Queue<HeldRead> held = new ConcurrentLinkedQueue<>();
+
+        /**
+         * The next read not yet held signals it has arrived, then waits for release.
+         */
+        HeldRead holdNextRead() {
+            HeldRead read = new HeldRead();
+            held.add(read);
+            return read;
+        }
 
         @Override
         public Optional<StoredWorkspaceSettings> read(String tenantId) {
-            if (failing) {
+            reads.incrementAndGet();
+            // A read answers with what was there when it ran, however late it answers.
+            StoredWorkspaceSettings seen = value.get();
+            boolean down = failing;
+            HeldRead hold = held.poll();
+            if (hold != null) {
+                hold.entered.countDown();
+                try {
+                    hold.gate.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (down) {
                 throw new IllegalStateException("store down");
             }
-            return Optional.ofNullable(value.get());
+            return Optional.ofNullable(seen);
         }
 
         @Override
@@ -72,6 +127,18 @@ class RuntimeWorkspaceSettingsTest {
 
     private static StoredWorkspaceSettings stored(String space, String legacy) {
         return new StoredWorkspaceSettings(space, legacy, Instant.EPOCH, "admin");
+    }
+
+    private void expireCache() {
+        clock.addAndGet(WorkspaceSettings.STORED_SETTINGS_TTL.toNanos() + 1);
+    }
+
+    /** A caller whose access check triggers the re-read, on its own thread. */
+    private static Thread refreshInBackground(WorkspaceSettings s) {
+        Thread refresher = new Thread(s::admitsLegacy, "settings-refresher");
+        refresher.setDaemon(true);
+        refresher.start();
+        return refresher;
     }
 
     @Nested
@@ -111,8 +178,57 @@ class RuntimeWorkspaceSettingsTest {
         @DisplayName("a corrupt stored legacy value falls back to the default rather than being guessed at")
         void corruptStoredLegacyIgnored() {
             store.write("default", stored(null, "everyone"));
+            var s = settings(null, null);
 
-            assertTrue(settings(null, null).admitsLegacy());
+            assertTrue(s.admitsLegacy());
+            assertEquals(WorkspaceSettings.LEGACY_SHARED, s.effectiveLegacyVisibility());
+            assertEquals(null, s.storedSettings().orElseThrow().legacyVisibility(),
+                    "ignored at load, so the settings page reports the default that actually applies");
+        }
+
+        @Test
+        @DisplayName("a corrupt stored legacy value is reported once per read of the store, not on every access check")
+        void corruptStoredLegacyWarnsOnce() {
+            // Every guarded request asks admitsLegacy(), so validating, and warning, on
+            // each call turned one bad row into a WARN per access check.
+            store.write("default", stored(null, "everyone"));
+            var s = settings(null, null);
+
+            List<LogRecord> warnings = captureWarnings(() -> {
+                for (int i = 0; i < 100; i++) {
+                    assertTrue(s.admitsLegacy());
+                }
+            });
+
+            assertEquals(1, warnings.size(), "one WARN for the one read of the store");
+        }
+
+        @Test
+        @DisplayName("the same corrupt value read again is not reported again, a different one is")
+        void corruptStoredLegacyWarnsOnChangeOnly() {
+            store.write("default", stored(null, "everyone"));
+            var s = settings(null, null);
+
+            List<LogRecord> warnings = captureWarnings(() -> {
+                s.admitsLegacy();
+                expireCache();
+                s.admitsLegacy();
+                store.write("default", stored(null, "nobody"));
+                expireCache();
+                s.admitsLegacy();
+            });
+
+            assertEquals(2, warnings.size(), "a WARN every five seconds for one row is still noise; a new bad value is news");
+        }
+
+        @Test
+        @DisplayName("a stored value is matched whatever its case and padding")
+        void storedLegacyNormalised() {
+            store.write("default", stored(null, " ADMIN-ONLY "));
+            var s = settings(null, null);
+
+            assertFalse(s.admitsLegacy());
+            assertEquals(WorkspaceSettings.LEGACY_ADMIN_ONLY, s.effectiveLegacyVisibility());
         }
 
         @Test
@@ -161,6 +277,144 @@ class RuntimeWorkspaceSettingsTest {
         }
 
         @Test
+        @DisplayName("an expired value is re-read by one caller while everyone else is served the last one")
+        void staleServedWhileOneCallerRereads() throws Exception {
+            // The store read has no timeout of its own. Re-reading under a lock queued
+            // every access check behind it, at every expiry and for the whole of an
+            // outage.
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            assertFalse(s.admitsLegacy());
+
+            store.write("default", stored("finance", "shared"));
+            HeldRead read = store.holdNextRead();
+            expireCache();
+            Thread refresher = refreshInBackground(s);
+            try {
+                assertTrue(read.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
+
+                assertTimeoutPreemptively(Duration.ofSeconds(1), () -> {
+                    assertEquals(WorkspaceSettings.LEGACY_ADMIN_ONLY, s.effectiveLegacyVisibility());
+                    assertEquals(Optional.of("engineering"), s.getDefaultSpaceTeam());
+                }, "a reader must not wait for another caller's store read");
+                assertEquals(2, store.reads.get(), "only the one caller went to the store");
+            } finally {
+                read.release();
+                refresher.join(5_000);
+            }
+
+            assertTrue(s.admitsLegacy(), "the value read is served once it arrives");
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam());
+        }
+
+        @Test
+        @DisplayName("a write adopted while a re-read is in flight is not overwritten by that read")
+        void adoptDuringRereadWins() throws Exception {
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            HeldRead read = store.holdNextRead();
+            expireCache();
+            Thread refresher = refreshInBackground(s);
+            try {
+                assertTrue(read.entered.await(5, TimeUnit.SECONDS), "the refresher reached the store");
+                // What this instance just wrote; the in-flight read began before it.
+                assertTimeoutPreemptively(Duration.ofSeconds(1), () -> s.adopt(stored("ops", "shared")));
+            } finally {
+                read.release();
+                refresher.join(5_000);
+            }
+
+            assertEquals(Optional.of("ops"), s.getDefaultSpaceTeam(), "the read that started first must not win");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
+        @DisplayName("a forced re-read is not undone by an older re-read that answers before it")
+        void olderRereadDoesNotUndoNewerOne() throws Exception {
+            // GET /workspaces/settings forces a re-read so that it shows another
+            // replica's write. An access check's re-read that began before that write
+            // must not be what is left in place, whichever of the two answers first.
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            HeldRead older = store.holdNextRead();
+            expireCache();
+            Thread accessCheck = refreshInBackground(s);
+            HeldRead newer = null;
+            Thread settingsPage = null;
+            try {
+                assertTrue(older.entered.await(5, TimeUnit.SECONDS), "the access check reached the store");
+                store.write("default", stored("finance", "shared")); // another replica's write
+                newer = store.holdNextRead();
+                settingsPage = new Thread(s::refresh, "settings-page");
+                settingsPage.setDaemon(true);
+                settingsPage.start();
+                assertTrue(newer.entered.await(5, TimeUnit.SECONDS), "the settings page reached the store");
+
+                older.release();
+                accessCheck.join(5_000);
+                newer.release();
+                settingsPage.join(5_000);
+            } finally {
+                older.release();
+                accessCheck.join(5_000);
+                if (newer != null) {
+                    newer.release();
+                }
+                if (settingsPage != null) {
+                    settingsPage.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "the read that started last holds the newest values");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
+        @DisplayName("a re-read that fails keeps what is served when it fails, not what was served when it began")
+        void failedRereadKeepsLatestValues() throws Exception {
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            store.write("default", stored("finance", "shared"));
+            HeldRead succeeding = store.holdNextRead();
+            expireCache();
+            Thread accessCheck = refreshInBackground(s);
+            HeldRead failing = null;
+            Thread settingsPage = null;
+            try {
+                assertTrue(succeeding.entered.await(5, TimeUnit.SECONDS), "the access check reached the store");
+                store.failing = true;
+                failing = store.holdNextRead();
+                settingsPage = new Thread(s::refresh, "settings-page");
+                settingsPage.setDaemon(true);
+                settingsPage.start();
+                assertTrue(failing.entered.await(5, TimeUnit.SECONDS), "the settings page reached the store");
+
+                succeeding.release();
+                accessCheck.join(5_000);
+                failing.release();
+                settingsPage.join(5_000);
+            } finally {
+                succeeding.release();
+                accessCheck.join(5_000);
+                if (failing != null) {
+                    failing.release();
+                }
+                if (settingsPage != null) {
+                    settingsPage.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "a failed read learns nothing and must not revert a good one");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
         @DisplayName("team names are normalised whichever way they are written")
         void normalisesTeam() {
             assertEquals("engineering", WorkspaceSettings.normalizeTeam(" /engineering/ "));
@@ -189,6 +443,9 @@ class RuntimeWorkspaceSettingsTest {
             assertEquals("engineering", store.value.get().defaultSpace());
             assertEquals("admin-only", store.value.get().legacyVisibility());
             assertEquals("admin", store.value.get().updatedBy());
+            Instant updatedAt = store.value.get().updatedAt();
+            assertEquals(updatedAt.truncatedTo(ChronoUnit.MILLIS), updatedAt,
+                    "written to the millisecond both stores keep, so a replica reads back what this one adopted");
             assertEquals(WorkspaceSettingsView.Source.STORED, view.defaultSpace().source());
             assertEquals("engineering", view.defaultSpace().value());
             assertFalse(s.admitsLegacy(), "the writing instance must not wait out its own cache");
@@ -254,5 +511,41 @@ class RuntimeWorkspaceSettingsTest {
             var conflict = assertThrows(ClientErrorException.class, () -> sut.updateSettings(new WorkspaceSettingsView.Update(null, null)));
             assertEquals(409, conflict.getResponse().getStatus());
         }
+    }
+
+    /**
+     * Collects the WARN records {@link WorkspaceSettings} logs while {@code action}
+     * runs. logging.properties turns the ai.labs.eddi namespace off for plain unit
+     * tests, so the logger is opened explicitly.
+     */
+    private static List<LogRecord> captureWarnings(Runnable action) {
+        List<LogRecord> captured = Collections.synchronizedList(new ArrayList<>());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord logRecord) {
+                if (logRecord.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    captured.add(logRecord);
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Logger logger = Logger.getLogger(WorkspaceSettings.class.getName());
+        Level previous = logger.getLevel();
+        logger.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        try {
+            action.run();
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previous);
+        }
+        return List.copyOf(captured);
     }
 }

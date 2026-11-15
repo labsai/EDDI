@@ -1068,6 +1068,11 @@ During TASK_FORCE (or any group) discussions, agents with the appropriate LLM to
 | `RecruitAgentTool` | Bring a discovered agent into the discussion as a member |
 | `TeardownAgentTool` | Clean up dynamically created agents |
 
+The model calls them by their method names (`createSubAgent`, `converseWithAgent`, `findAgentsByCapability`,
+`recruitAgent`, `teardownAgent`, plus `retainAgent` / `unretainAgent` on the teardown tool). They need the member's
+`enableBuiltInTools`, and a member whose `builtInToolsWhitelist` is non-empty receives each only if the list names its
+slug: `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent`.
+
 #### Recruitment
 
 Discovery and recruitment are two halves of one capability, and both are gated by
@@ -1135,7 +1140,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
 | `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused. The ceiling travels with the chain: each hop applies the stricter of its own limit and the one it was handed, so a delegate with a higher limit cannot extend a chain the originator capped |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
-| `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
+| `lifecyclePolicy` | `ephemeral` | `ephemeral`, `keep-deployed`, `undeploy-only`, or `agent-decides` (stored and returned in this form; upper-case `KEEP_DEPLOYED` is accepted on input too) |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
 | `allowedProviders` | `null` (any) | Whitelist of LLM providers |
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
@@ -1156,7 +1161,11 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   `dynamicOrigin` names this discussion, leaves agents marked for another one
   alone, and only **undeploys** — never deletes — an agent with no marker (one
   created before markers existed, or never created by `create_sub_agent`).
-- `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
+- An undeploy by either of them is a real undeploy, as over REST: the agent's
+  `production` deployment records are marked undeployed, so neither the
+  deployment sweep nor a restart brings it back, and in a cluster every node
+  undeploys it.
+- Retain flags set by the `retainAgent` tool persist across turns; `unretainAgent` removes them for good.
 - `converse_with_agent` continues only a conversation owned by the same user the
   calling conversation belongs to (a conversation of another user, or one that
   records no owner, is refused). Every delegation — a new conversation or a
@@ -1250,7 +1259,8 @@ summarizer's.
 | `GET` | `/groupstore/groups/descriptors` | List group configs (`filter`, `index`, `limit`) |
 | `GET` | `/groupstore/groups/{id}` | Read group config |
 | `PUT` | `/groupstore/groups/{id}` | Update group config |
-| `DELETE` | `/groupstore/groups/{id}` | Delete group config |
+| `POST` | `/groupstore/groups/{id}?version=` | Duplicate a group config (new id) |
+| `DELETE` | `/groupstore/groups/{id}` | Delete group config (`?permanent=true` also deletes the standing-team workspace) |
 | `GET` | `/groupstore/groups/styles` | List discussion styles |
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
@@ -1265,7 +1275,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{"state": …}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{groupConversationId, accepted, state}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |
@@ -1277,6 +1287,8 @@ summarizer's.
 | `POST` | `/groupstore/groups/{id}/workspace/backlog` | File a backlog task |
 | `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence (409 if the workspace keeps changing under three revision-checked attempts; the schedule it created is deleted again) |
 | `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence, then its schedule (409 as above; cadence and schedule then both stay) |
+
+The bet-review endpoints (`/workspace/backlog/due-reviews`, `/workspace/backlog/{taskId}/bet/review`), team outcomes (`/groupstore/groups/{groupId}/outcomes`) and lessons (`/groupstore/groups/{groupId}/lessons`) are listed in [Team Learning Loop](team-learning-loop.md); team budgets in [Team Budgets](team-budgets.md).
 
 ## SSE Events
 
@@ -1389,6 +1401,20 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 ### Follow-up Conversations
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
+## Restarts
+
+A discussion's leg runs in the JVM that started or resumed it, and nothing
+picks it up after that process dies. On a single node (`eddi.messaging.type=in-memory`)
+the startup HITL crash recovery therefore **cancels** every discussion still
+`IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
+started, so it does not sit in a running state that `continue` and `followup`
+refuse. Paused discussions are not affected: their timeout schedules are
+re-armed instead. Details, and when to turn it off
+(`eddi.hitl.crash-recovery.recover-in-progress`), are in
+[HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
+interrupted discussion still needs a manual cancel — or, for a standing team,
+the claim TTL (see [Standing Teams](#standing-teams-i13)).
 
 ## Not yet supported
 

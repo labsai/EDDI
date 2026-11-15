@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.a2a.A2AModels.A2ATaskRecord;
 import ai.labs.eddi.engine.a2a.A2AModels.TaskState;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import ai.labs.eddi.engine.cluster.ClusterValueRefusedException;
 import ai.labs.eddi.engine.cluster.DownSharedKv;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.InMemorySharedKv;
@@ -30,12 +31,15 @@ import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("Cluster-shared and cluster-invalidated caches")
@@ -171,7 +175,7 @@ class SharedKvCacheTest {
         ISharedKv refusing = mock(ISharedKv.class);
         when(refusing.bucket()).thenReturn("TOOL_PAGES");
         when(refusing.get(any())).thenReturn(Optional.empty());
-        when(refusing.put(any(), any())).thenThrow(new ClusterUnavailableException("payload exceeds the server limit (test)"));
+        when(refusing.put(any(), any())).thenThrow(new ClusterValueRefusedException("payload exceeds the server limit (test)", null));
         ICache<String, String> node = new SharedKvCache<>(local("big"), refusing, false);
 
         node.put("response-1", "x".repeat(10));
@@ -256,6 +260,120 @@ class SharedKvCacheTest {
     }
 
     @Test
+    @DisplayName("a value written while NATS was down wins over the older shared value after recovery, and is republished")
+    void degradedWriteIsNotShadowedByOlderSharedValueAfterRecovery() {
+        var kv = new InMemorySharedKv("RAG_INGESTION", Duration.ofMinutes(5));
+        AtomicBoolean down = new AtomicBoolean();
+        ISharedKv flaky = spy(kv);
+        doAnswer(inv -> {
+            if (down.get()) {
+                throw new ClusterUnavailableException("down (test)");
+            }
+            return inv.callRealMethod();
+        }).when(flaky).put(any(), any());
+        ICache<String, String> node = new SharedKvCache<>(local("recover"), flaky, false);
+        ICache<String, String> other = new SharedKvCache<>(local("recover-other"), kv, false);
+
+        node.put("status:1", "processing");
+        down.set(true);
+        node.put("status:1", "completed"); // node-local only
+        down.set(false);
+
+        assertEquals("completed", node.get("status:1"), "the writing node must not read back the older shared value");
+        assertEquals("completed", other.get("status:1"), "the newer value was republished for the other nodes");
+    }
+
+    /** A bucket that can be switched off for writes, as during a NATS outage. */
+    private static ISharedKv flaky(InMemorySharedKv kv, AtomicBoolean down) {
+        // delegating, not spy(): a spy copies the revision counter, so its revisions
+        // would collide with kv's
+        ISharedKv flaky = mock(ISharedKv.class, delegatesTo(kv));
+        doAnswer(inv -> {
+            if (down.get()) {
+                throw new ClusterUnavailableException("down (test)");
+            }
+            return kv.put(inv.getArgument(0), inv.getArgument(1));
+        }).when(flaky).put(any(), any());
+        return flaky;
+    }
+
+    @Test
+    @DisplayName("after recovery another node's newer value is read, not overwritten by this node's older degraded write")
+    void degradedWriteDoesNotOverwriteANewerValueFromAnotherNode() {
+        var kv = new InMemorySharedKv("RAG_INGESTION", Duration.ofMinutes(5));
+        AtomicBoolean down = new AtomicBoolean();
+        ICache<String, String> node = new SharedKvCache<>(local("newer"), flaky(kv, down), false);
+        ICache<String, String> other = new SharedKvCache<>(local("newer-other"), kv, false);
+
+        node.put("status:1", "processing");
+        down.set(true);
+        node.put("status:1", "completed"); // node-local only
+        down.set(false);
+        other.put("status:1", "failed: newer"); // another node wrote after this one
+
+        assertEquals("failed: newer", node.get("status:1"), "the newer shared value wins over the stale local copy");
+        assertEquals("failed: newer", other.get("status:1"), "the bucket was not overwritten");
+        assertEquals("failed: newer", node.get("status:1"), "and it stays so on later reads");
+    }
+
+    @Test
+    @DisplayName("after recovery a key another node deleted is not resurrected from this node's degraded write")
+    void degradedWriteDoesNotResurrectADeletedKey() {
+        var kv = new InMemorySharedKv("RAG_INGESTION", Duration.ofMinutes(5));
+        AtomicBoolean down = new AtomicBoolean();
+        ICache<String, String> node = new SharedKvCache<>(local("deleted"), flaky(kv, down), false);
+        ICache<String, String> other = new SharedKvCache<>(local("deleted-other"), kv, false);
+
+        node.put("k", "processing");
+        down.set(true);
+        node.put("k", "completed");
+        down.set(false);
+        other.remove("k");
+
+        assertNull(node.get("k"), "deleted elsewhere after this write: not answered from the local copy");
+        assertNull(other.get("k"), "and not republished to the bucket");
+        assertTrue(kv.keys().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a degraded write whose earlier revision is unknown yields to the bucket's value, and creates when the key is absent")
+    void unknownRevisionIsConservative() {
+        var kv = new InMemorySharedKv("RAG_INGESTION", Duration.ofMinutes(5));
+        AtomicBoolean down = new AtomicBoolean(true);
+        ISharedKv flaky = flaky(kv, down);
+        ICache<String, String> node = new SharedKvCache<>(local("unknown"), flaky, false);
+        node.put("a", "mine"); // nothing was ever seen for "a"
+        node.put("b", "mine");
+        down.set(false);
+        new SharedKvCache<String, String>(local("unknown-other"), kv, false).put("a", "theirs");
+
+        assertEquals("theirs", node.get("a"), "unknown baseline: the bucket's value wins");
+        assertEquals("mine", node.get("b"), "unknown baseline and absent key: published");
+        assertEquals("mine", new SharedKvCache<String, String>(local("unknown-third"), kv, false).get("b"));
+    }
+
+    @Test
+    @DisplayName("a value the bucket refused as too large is never retried on later reads")
+    void oversizedValueIsNotRetriedOnEveryRead() {
+        var kv = new InMemorySharedKv("TOOL_PAGES", Duration.ofMinutes(5));
+        ISharedKv refusing = mock(ISharedKv.class, delegatesTo(kv));
+        doThrow(new ClusterValueRefusedException("too large (test)", null)).when(refusing).put(any(), any());
+        doThrow(new ClusterValueRefusedException("too large (test)", null)).when(refusing).create(any(), any());
+        doThrow(new ClusterValueRefusedException("too large (test)", null)).when(refusing).update(any(), any(), anyLong());
+        ICache<String, String> node = new SharedKvCache<>(local("oversize"), refusing, false);
+
+        node.put("page-1", "big");
+        for (int i = 0; i < 5; i++) {
+            assertEquals("big", node.get("page-1"), "answered from the node-local copy");
+        }
+        verify(refusing, times(1)).put(any(), any()); // the write itself, nothing on reads
+        verify(refusing, times(0)).create(any(), any());
+        verify(refusing, times(0)).update(any(), any(), anyLong());
+        new SharedKvCache<String, String>(local("oversize-other"), kv, false).put("page-1", "small");
+        assertEquals("small", node.get("page-1"), "a shared value wins over an oversized local one, as before");
+    }
+
+    @Test
     @DisplayName("a putIfAbsent that loses the race reports the key as present even when the stored value cannot be read (fail-closed for nonces)")
     void lostRaceWithUnreadableValueIsStillPresent() {
         ISharedKv kv = mock(ISharedKv.class);
@@ -275,7 +393,7 @@ class SharedKvCacheTest {
         ISharedKv refusing = mock(ISharedKv.class);
         when(refusing.bucket()).thenReturn("TOOL_PAGES");
         when(refusing.get(any())).thenReturn(Optional.empty());
-        when(refusing.put(any(), any())).thenThrow(new ClusterUnavailableException("payload exceeds the server limit (test)"));
+        when(refusing.put(any(), any())).thenThrow(new ClusterValueRefusedException("payload exceeds the server limit (test)", null));
         var factory = clusteredFactory(new RecordingEventBus(), refusing);
 
         ICache<String, String> writer = factory.getCache("paginated-tool-responses", Duration.ofMinutes(15));

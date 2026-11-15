@@ -287,6 +287,49 @@ class RuleDeserializationTest {
     }
 
     @Test
+    void deserialize_deploymentContextWithTagMatches_isRefusedNamingTheRule() {
+        String json = singleConditionRuleSet("Cautious In Production", """
+                { "type": "deploymentContext", "configs": { "when": "production", "tagMatches": "high-risk" } }
+                """);
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleDeserialization.deserialize(json));
+
+        assertTrue(thrown.getMessage().contains("Cautious In Production"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("tagMatches"), thrown.getMessage());
+    }
+
+    @Test
+    void deserialize_deploymentContextWithWhenOnly_isAccepted() throws DeserializationException {
+        String json = singleConditionRuleSet("Production Only", """
+                { "type": "deploymentContext", "configs": { "when": "production" } }
+                """);
+
+        var conditions = ruleDeserialization.deserialize(json).getRuleGroups().get(0).getRules().get(0).getConditions();
+
+        assertEquals(1, conditions.size());
+    }
+
+    @Test
+    void deserialize_dependencyWithoutReference_isRefusedNamingTheRule() {
+        String json = singleConditionRuleSet("Follow Up", """
+                { "type": "dependency", "configs": {} }
+                """);
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleDeserialization.deserialize(json));
+
+        assertTrue(thrown.getMessage().contains("Follow Up"), thrown.getMessage());
+        assertTrue(thrown.getMessage().contains("reference"), thrown.getMessage());
+    }
+
+    private static String singleConditionRuleSet(String ruleName, String condition) {
+        return """
+                { "behaviorGroups": [ { "name": "group1", "rules": [
+                  { "name": "%s", "actions": ["an-action"], "conditions": [ %s ] }
+                ] } ] }
+                """.formatted(ruleName, condition);
+    }
+
+    @Test
     void deserialize_contentTypeMatcherCondition() throws DeserializationException {
         String json = """
                 {
