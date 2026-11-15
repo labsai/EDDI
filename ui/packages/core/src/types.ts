@@ -129,7 +129,12 @@ export interface ConversationOutput {
    */
   input?: string;
   actions?: string[];
-  output?: OutputItem[];
+  /**
+   * Not uniformly objects: HITL writes its pending-approval placeholder and its
+   * rejection message as bare strings. The extractors here take `unknown` and
+   * handle both.
+   */
+  output?: (OutputItem | string)[];
   quickReplies?: QuickReply[];
 }
 
