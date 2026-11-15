@@ -1,0 +1,62 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "organisation",
+    "role": "owner",
+    "name": "EDDI Solutions",
+    "email": "eddi@labs.ai",
+    "description": "EDDI Solutions builds and maintains EDDI, an open-source, config-driven middleware for orchestrating conversational AI agents. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
+    "webpageUrl": {
+      "url": "https://eddi.technology"
+    }
+  },
+  "projects": [
+    {
+      "guid": "eddi",
+      "name": "EDDI",
+      "description": "EDDI (Enhanced Dialog Driven Interface) is an open-source multi-agent orchestration middleware for conversational AI. Agent behaviour is defined in versioned JSON configurations and executed by a Java/Quarkus engine: a lifecycle pipeline of rules, API calls and LLM tasks across 19 model providers, with persistent memory, RAG, group conversations, human-in-the-loop approvals, an MCP server and client, a secrets vault, an audit ledger and GDPR tooling. It runs on MongoDB or PostgreSQL and ships with a web Manager and Chat UI.",
+      "webpageUrl": {
+        "url": "https://eddi.technology"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/labsai/EDDI"
+      },
+      "licenses": ["spdx:Apache-2.0"],
+      "tags": ["ai", "llm", "chatbot", "conversational-ai", "agents", "middleware", "orchestration", "java", "mcp", "rag"]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "bank-transfer",
+        "type": "bank",
+        "address": "",
+        "description": "Bank transfer (SEPA or international). Write to eddi@labs.ai for account details."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "one-time",
+        "status": "active",
+        "name": "One-time donation",
+        "description": "A one-time contribution of any amount towards EDDI's development and maintenance.",
+        "amount": 0,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": ["bank-transfer"]
+      },
+      {
+        "guid": "monthly-sponsor",
+        "status": "active",
+        "name": "Monthly sponsorship",
+        "description": "Recurring support of any amount for ongoing maintenance, security fixes and releases.",
+        "amount": 0,
+        "currency": "EUR",
+        "frequency": "monthly",
+        "channels": ["bank-transfer"]
+      }
+    ],
+    "history": []
+  }
+}
