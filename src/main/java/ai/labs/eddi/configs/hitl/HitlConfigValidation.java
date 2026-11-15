@@ -330,6 +330,8 @@ public final class HitlConfigValidation {
         HitlReviewConfigValidation.validate(hitlConfig.getReview(), "hitlConfig.review");
         ApprovalContextValidation.validate(hitlConfig.getApprovalContext(), "hitlConfig.approvalContext",
                 ApprovalContextValidation.Scope.GROUP);
+        validateRange(hitlConfig.getMaxPausedCadenceRuns(), 0, AgentGroupConfiguration.HitlConfig.MAX_PAUSED_CADENCE_RUNS,
+                "hitlConfig.maxPausedCadenceRuns");
     }
 
     private static void validateApprovalTimeout(String approvalTimeout, boolean finitePolicy) {

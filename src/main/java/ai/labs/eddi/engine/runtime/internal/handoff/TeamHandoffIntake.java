@@ -246,8 +246,8 @@ public class TeamHandoffIntake {
                 if (task == null) {
                     return new Result(Status.NOT_FOUND, "No backlog task with that id.", null, null);
                 }
-                if (!GroupWorkspace.NO_RUNNING_DISCUSSION.equals(workspace.getRunningDiscussionId())
-                        && workspace.getPulledTaskIds().contains(taskId)) {
+                // A parked (paused) run holds its tasks too — hitlConfig.maxPausedCadenceRuns.
+                if (workspace.isHeldByRun(taskId)) {
                     return new Result(Status.CONFLICT,
                             "A cadence discussion is working this task right now — delete it after the discussion finishes.", null,
                             null);
