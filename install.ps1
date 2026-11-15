@@ -1113,9 +1113,15 @@ function Get-ComposeFiles {
                 catch {
                     # A provisioning file of a directory mount that this ref does not carry
                     # is skipped with a note; a checksum mismatch is never skipped.
-                    if ($mfOptional -and $_.Exception.Message -notmatch 'Checksum mismatch') {
-                        Remove-Item -Path $mfTarget -Force -ErrorAction SilentlyContinue
-                        Write-Information -MessageData "  not in $EddiBranch, skipped"
+                    # Only a confirmed HTTP 404 counts as "not in this ref": the status comes from
+                    # the response of the failed request (PowerShell 7 and Windows PowerShell 5.1
+                    # both expose it there); a network error, a timeout or a 5xx has none or
+                    # another code and fails like a required file. An existing file is never
+                    # removed.
+                    $mfStatus = $null
+                    if ($_.Exception.Response) { $mfStatus = [int]$_.Exception.Response.StatusCode }
+                    if ($mfOptional -and $mfStatus -eq 404) {
+                        Write-Information -MessageData "  not in $EddiBranch (HTTP 404), skipped"
                         continue
                     }
                     # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
@@ -2253,11 +2259,16 @@ try {
         }
         $temporary = "$target.download"
         $downloaded = $false
+        $status = $null
         try {
             Invoke-WebRequest -Uri "$BaseUrl/$rel" -OutFile $temporary -UseBasicParsing -ErrorAction Stop
             $downloaded = (Test-Path -LiteralPath $temporary) -and ((Get-Item -LiteralPath $temporary).Length -gt 0)
         }
-        catch { $downloaded = $false }
+        catch {
+            $downloaded = $false
+            # The HTTP status of the failed request, if there was a response at all.
+            if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        }
         if ($downloaded) {
             Confirm-DownloadChecksum -RelativePath $rel -Path $temporary
             $staged += , @($temporary, $target, $rel, $Assets)
@@ -2273,10 +2284,11 @@ try {
             }
             # Every other item is REQUIRED: keeping an old file while the new ref is recorded
             # would run the new image with old files. Nothing is replaced or recorded.
-            if ($entryOptional) {
-                # Provisioning file of a directory mount: a ref that predates it has none; the
-                # installed copy (if any) stays.
-                Write-Host "  $rel : not in this ref, skipped"
+            if ($entryOptional -and $status -eq 404) {
+                # Provisioning file of a directory mount: a ref that predates it has none (a
+                # confirmed HTTP 404); the installed copy (if any) stays. Any other failure
+                # (network error, timeout, 5xx) is a failure like a required file's.
+                Write-Host "  $rel : not in this ref (HTTP 404), skipped"
                 continue
             }
             Write-Host "  $rel : FAILED, could not be downloaded"

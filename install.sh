@@ -1220,42 +1220,48 @@ resolve_compose_files() {
       if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/$mf" ]]; then
         cp "$SCRIPT_DIR/$mf" "$mf_target"
       else
-        local mf_url="${COMPOSE_BASE_URL}/${mf}"
+        local mf_url="${COMPOSE_BASE_URL}/${mf}" mf_tmp="${mf_target}.tmp" mf_code
         echo -ne "  Downloading ${mf}... "
-        if curl -fsSL "${mf_url}" -o "$mf_target"; then
-          verify_download "$mf" "$mf_target"
+        # Into a temp file, with the HTTP status: the target is replaced only after the
+        # download succeeded AND verify_download passed, so a failure of any kind can never
+        # delete or truncate a file that is already there. An OPTIONAL file (a provisioning
+        # file of a directory mount) is skipped only on a confirmed 404; a network error, a
+        # timeout or a 5xx aborts like a required file, or Grafana would come up without
+        # its dashboards for a reason nobody sees.
+        mf_code=$(curl -sSL -w '%{http_code}' -o "$mf_tmp" "${mf_url}" 2>/dev/null) || mf_code=000
+        if [[ "$mf_code" == "200" && -s "$mf_tmp" ]]; then
+          verify_download "$mf" "$mf_tmp"
+          if [[ -d "$mf_target" ]]; then
+            # What Docker leaves behind after a failed bind mount: only an EMPTY one goes.
+            rmdir "$mf_target" 2>/dev/null || { rm -f "$mf_tmp"; fail "${mf_target} is a directory with content; remove it by hand and re-run."; }
+          fi
+          mv -f "$mf_tmp" "$mf_target"
           echo -e "${GREEN}✅${RESET}"
-        elif [[ "$mf_optional" == "true" ]]; then
-          # Provisioning file of a directory mount: a release that predates it has none.
-          rm -f "$mf_target"
-          echo -e "${YELLOW}not in ${EDDI_BRANCH}, skipped${RESET}"
+        elif [[ "$mf_optional" == "true" && "$mf_code" == "404" ]]; then
+          # Provisioning file of a directory mount that this ref does not carry. Any file
+          # that is already installed stays.
+          rm -f "$mf_tmp"
+          echo -e "${YELLOW}not in ${EDDI_BRANCH} (HTTP 404), skipped${RESET}"
         else
-          # Every one of these is bind-mounted as a FILE by
-          # docker-compose.monitoring.yml, so a missing one is worse than it
-          # sounds: Docker creates a *directory* at the mount path. What happens
-          # next depends on the grafana-data volume, and neither outcome is
-          # acceptable — on a fresh volume the container starts and the dashboard
-          # is silently absent with nothing logged, and on a volume that already
-          # holds a file there runc fails the mount ("Are you trying to mount a
-          # directory onto a file") and the container never leaves state Created.
-          # The first case also poisons the volume: it creates a directory inside
-          # it, after which restoring the host file fails the mount in the
-          # opposite direction until that stale directory is deleted. Same
-          # reasoning as the Keycloak realm below; a half-built monitoring stack
-          # is not better than a refusal to build one.
+          rm -f "$mf_tmp"
+          # Required (or an optional file that failed for any reason but a 404): every
+          # file here is bind-mounted by docker-compose.monitoring.yml, so a missing one
+          # is worse than it sounds: Docker creates a *directory* at the mount path. What
+          # happens next depends on the grafana-data volume, and neither outcome is
+          # acceptable: on a fresh volume the container starts and the dashboard is
+          # silently absent with nothing logged, and on a volume that already holds a file
+          # there runc fails the mount and the container never leaves state Created.
+          # Same reasoning as the Keycloak realm below; a half-built monitoring stack is
+          # not better than a refusal to build one.
           #
           # The list is read from the selected ref's docker-compose.monitoring.yml, so
           # it is by construction every FILE bind mount of that release. The files
           # inside its DIRECTORY mounts (the Grafana provisioning config) are not named
           # there: they come from the fixed table in monitoring_assets and are optional.
-          # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
-          # previous run's failed mount left behind, and `rm -f` cannot remove
-          # one. Under `set -e` that turns this cleanup into the script's exit
-          # point, so the user sees "rm: cannot remove ...: Is a directory"
-          # instead of the message below, and the stale path survives to break
-          # the next run too.
-          rm -rf "$mf_target"
-          fail "Failed to download ${mf} (required for --with-monitoring).\n     URL: ${mf_url}"
+          # Only an EMPTY directory left by an earlier failed mount is removed; an
+          # existing file is never touched by a failed download.
+          if [[ -d "$mf_target" ]]; then rmdir "$mf_target" 2>/dev/null || true; fi
+          fail "Failed to download ${mf} (HTTP ${mf_code}; required for --with-monitoring).\n     URL: ${mf_url}"
         fi
       fi
     done
@@ -3015,7 +3021,11 @@ case "${1:-help}" in
         mkdir -p "$(dirname "$target")"
         tmp_asset="${target}.tmp"
         echo -n "  Fetching ${asset}... "
-        if curl -fsSL "${COMPOSE_BASE_URL}/${asset}" -o "$tmp_asset" 2>/dev/null && [[ -s "$tmp_asset" ]]; then
+        # Status code, not the curl exit code: a provisioning file (optional) is skipped only on
+        # a confirmed 404. Everything lands in a .tmp file; the target is only replaced later,
+        # after every group was verified.
+        asset_code=$(curl -sSL -w '%{http_code}' -o "$tmp_asset" "${COMPOSE_BASE_URL}/${asset}" 2>/dev/null) || asset_code=000
+        if [[ "$asset_code" == "200" && -s "$tmp_asset" ]]; then
           asset_targets+=("$target")
           if ! _verify_download "$asset" "$tmp_asset"; then
             echo "❌"
@@ -3024,16 +3034,18 @@ case "${1:-help}" in
             exit 1
           fi
           echo "✅"
-        elif [[ "$asset_optional" == "true" ]]; then
+        elif [[ "$asset_optional" == "true" && "$asset_code" == "404" ]]; then
           # Provisioning file of a directory mount: a release that predates it has none;
           # the installed copy (if any) stays.
           rm -f "$tmp_asset"
-          echo "not in ${EDDI_BRANCH}, skipped"
+          echo "not in ${EDDI_BRANCH} (HTTP 404), skipped"
         else
           # Required too, even when an older copy is on disk: the new compose file
           # may mount a changed asset, and the recorded version must match the files.
+          # An optional file that failed for any reason but a 404 (network error, timeout,
+          # 5xx) lands here too and refuses the update; the installed file is untouched.
           rm -f "$tmp_asset"
-          echo "❌"
+          echo "❌ (HTTP ${asset_code})"
           missing_assets="${missing_assets} ${asset}"
         fi
       done < <(_monitoring_assets "$asset_source")

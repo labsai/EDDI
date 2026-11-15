@@ -294,7 +294,19 @@ class InstallerReleaseRefTest {
             assertEquals(shellDownloads.group(2), shellDownloads.group(4), "verify_download must check the file just written");
             verified++;
         }
-        assertEquals(resolve.split("curl -fsSL", -1).length - 1, verified,
+        // The monitoring files are fetched with the HTTP status (an optional
+        // provisioning file is
+        // skipped only on a 404) into a temp file, and verified before they replace the
+        // target.
+        var statusDownloads = Pattern
+                .compile(
+                        "curl -sSL -w '%\\{http_code\\}' -o \"\\$(\\w+)\" \"\\$\\{\\w+\\}\"[^\\n]*\\n\\s+if \\[\\[[^\\n]*\\]\\]; then\\n\\s+verify_download \"\\$\\w+\" \"\\$(\\w+)\"")
+                .matcher(resolve);
+        while (statusDownloads.find()) {
+            assertEquals(statusDownloads.group(1), statusDownloads.group(2), "verify_download must check the file just written");
+            verified++;
+        }
+        assertEquals(resolve.split("curl -fsSL", -1).length - 1 + resolve.split("curl -sSL -w", -1).length - 1, verified,
                 "install.sh: every curl download in resolve_compose_files must be followed by verify_download");
         assertTrue(verified >= 3, "expected the compose, monitoring and Keycloak downloads, found " + verified);
 

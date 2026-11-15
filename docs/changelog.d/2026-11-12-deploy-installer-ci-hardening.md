@@ -127,7 +127,9 @@ without dashboards or a datasource. Each reader (install.sh installer, the gener
 update`, `Get-MonitoringAssets` / `eddi-fetch.ps1`) now adds a small fixed table of the files
 per known provisioning directory (no directory listing exists on raw.githubusercontent.com and
 the GitHub API would be one more rate-limited dependency); they are optional, so a release that
-predates one skips it with a note. `DeploymentHardeningTest` fails when a file under a mounted
+predates one skips it with a note, but only on a confirmed HTTP 404: a network error, a timeout or
+a 5xx aborts like a required file, and every download goes to a temp file that replaces the target
+only after verification, so a failure never deletes or truncates an installed file. `DeploymentHardeningTest` fails when a file under a mounted
 provisioning directory is missing from the tables, and its ordering checks now fail when a
 marker is missing instead of passing on `indexOf` = -1.
 

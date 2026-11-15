@@ -431,6 +431,35 @@ class DeploymentHardeningTest {
         }
 
         @Test
+        @DisplayName("an optional provisioning file is skipped only on a confirmed HTTP 404, and a failed download never touches an existing file")
+        void optionalFilesAreSkippedOnlyOnA404() throws IOException {
+            String sh = read("install.sh");
+            // Installer loop and the generated update loop each key off the status code.
+            assertEquals(1, sh.split(Pattern.quote("elif [[ \"$mf_optional\" == \"true\" && \"$mf_code\" == \"404\" ]]; then"), -1).length - 1);
+            assertEquals(1, sh.split(Pattern.quote("elif [[ \"$asset_optional\" == \"true\" && \"$asset_code\" == \"404\" ]]; then"), -1).length - 1);
+            assertEquals(2, sh.split(Pattern.quote("curl -sSL -w '%{http_code}' -o"), -1).length - 1, "both loops must read the HTTP status");
+            // Never "optional" alone: a network error, a timeout or a 5xx would skip the
+            // file as well.
+            assertFalse(sh.contains("elif [[ \"$mf_optional\" == \"true\" ]]; then"), "optional must also require the 404");
+            assertFalse(sh.contains("elif [[ \"$asset_optional\" == \"true\" ]]; then"), "optional must also require the 404");
+            // The installer downloads into a temp file and replaces the target only after
+            // verification;
+            // a failure must not delete what is installed.
+            assertBefore(sh, "verify_download \"$mf\" \"$mf_tmp\"", "mv -f \"$mf_tmp\" \"$mf_target\"",
+                    "the target is replaced only after the download was verified");
+            assertFalse(sh.contains("rm -rf \"$mf_target\""), "a failed download must never delete an existing file or directory with content");
+
+            String ps = read("install.ps1");
+            assertTrue(ps.contains("if ($mfOptional -and $mfStatus -eq 404) {"), "install.ps1 must key off the 404 status");
+            assertTrue(ps.contains("$mfStatus = [int]$_.Exception.Response.StatusCode"));
+            assertFalse(ps.contains("$mfOptional -and $_.Exception.Message"), "an exception message is not a status");
+            String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
+            assertTrue(helper.contains("if ($entryOptional -and $status -eq 404) {"), "eddi-fetch.ps1 must key off the 404 status");
+            assertTrue(helper.contains("$status = [int]$_.Exception.Response.StatusCode"));
+            assertFalse(helper.contains("if ($entryOptional) {"), "optional alone would skip a 5xx or a network error");
+        }
+
+        @Test
         @DisplayName("the --local overlay may stay as the checkout copy; no other compose file may")
         void localOverlayIsTheOnlyOptionalComposeFile() throws IOException {
             String sh = read("install.sh");
