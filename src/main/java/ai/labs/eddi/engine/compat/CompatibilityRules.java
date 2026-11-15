@@ -131,9 +131,7 @@ public final class CompatibilityRules {
         }
 
         if (taskConvertsToObject && !"on".equalsIgnoreCase(task.getJsonResponseFormat())) {
-            boolean toolsOn = task.isAgentMode() || (hasApiCalls && !Boolean.FALSE.equals(task.getEnableHttpCallTools()))
-                    || (hasMcpCalls && !Boolean.FALSE.equals(task.getEnableMcpCallTools()));
-            if (toolsOn) {
+            if (task.usesTools(hasApiCalls, hasMcpCalls)) {
                 Set<String> providers = new LinkedHashSet<>();
                 if (task.getType() != null) {
                     providers.add(task.getType());
@@ -166,38 +164,57 @@ public final class CompatibilityRules {
      *            does not
      */
     public static void scanTemplates(String location, Object node, Function<String, String> validator, List<Finding> findings) {
-        scan(location, node, validator, findings, 0);
+        scan(location, node, validator, findings, 0, null);
     }
 
-    private static void scan(String path, Object node, Function<String, String> validator, List<Finding> findings, int depth) {
+    /**
+     * {@link #scanTemplates} for an LLM task. The runtime wraps configuration
+     * reference mentions ({@code ${vault:name}}, {@code ${vars:name}}, ...) in Qute
+     * raw sections before it renders the task's own {@code parameters} (see
+     * {@link LlmTask#escapeConfigReferenceMentions}), so a prompt that merely
+     * documents such a reference renders fine. The same wrapping is applied here to
+     * those parameters, and to those only: cascade step parameters and every other
+     * string are rendered without it, and keep failing when they carry a mention.
+     *
+     * @param location
+     *            how the task is named in a finding; the task's own parameters are
+     *            the paths below {@code location + ".parameters."}
+     */
+    public static void scanLlmTaskTemplates(String location, Object node, Function<String, String> validator, List<Finding> findings) {
+        scan(location, node, validator, findings, 0, location + ".parameters.");
+    }
+
+    private static void scan(String path, Object node, Function<String, String> validator, List<Finding> findings, int depth,
+                             String mentionEscapedPrefix) {
         if (node == null || depth > MAX_DEPTH) {
             return;
         }
         if (node instanceof String text) {
-            checkString(path, text, validator, findings);
+            checkString(path, text, validator, findings, mentionEscapedPrefix != null && path.startsWith(mentionEscapedPrefix));
         } else if (node instanceof Map<?, ?> map) {
             for (var entry : map.entrySet()) {
                 String key = String.valueOf(entry.getKey());
                 if (LlmTask.TEMPLATE_SKIP_PARAMS.contains(key)) {
                     continue;
                 }
-                scan(path + "." + key, entry.getValue(), validator, findings, depth + 1);
+                scan(path + "." + key, entry.getValue(), validator, findings, depth + 1, mentionEscapedPrefix);
             }
         } else if (node instanceof Iterable<?> items) {
             int index = 0;
             for (Object item : items) {
-                scan(path + "[" + index++ + "]", item, validator, findings, depth + 1);
+                scan(path + "[" + index++ + "]", item, validator, findings, depth + 1, mentionEscapedPrefix);
             }
         }
     }
 
-    private static void checkString(String path, String text, Function<String, String> validator, List<Finding> findings) {
+    private static void checkString(String path, String text, Function<String, String> validator, List<Finding> findings,
+                                    boolean escapeMentions) {
         if (text.contains("[[${") || text.contains("[(${")) {
             findings.add(new Finding(THYMELEAF_NOT_CONVERTED, path,
                     "contains 5.x Thymeleaf syntax, which 6.x renders literally. Rewrite it as Qute ({...}, {#if}...{/if})."));
             return;
         }
-        String problem = validator.apply(text);
+        String problem = validator.apply(escapeMentions ? LlmTask.escapeConfigReferenceMentions(text) : text);
         if (problem != null) {
             findings.add(new Finding(TEMPLATE_DOES_NOT_PARSE, path,
                     "the template does not parse (" + problem + "), so every render of it fails."));
@@ -210,8 +227,55 @@ public final class CompatibilityRules {
      * reference forms are resolved for credentials and are not templates.
      */
     static boolean containsTemplate(String value) {
-        String withoutReferences = LlmTask.CONFIG_REF_MENTION.matcher(value).replaceAll("");
+        String withoutReferences = withoutConfigReferences(value);
         return QUTE_MARKER.matcher(withoutReferences).find() || withoutReferences.contains("[[${") || withoutReferences.contains("[(${");
+    }
+
+    /**
+     * The namespaces of {@link LlmTask#CONFIG_REF_MENTION}, each with its colon.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
+     * {@code value} without its configuration-reference mentions: the same matches
+     * as {@code LlmTask.CONFIG_REF_MENTION.replaceAll("")}, by a forward scan. The
+     * regex retried {@code [^}]*} to the end of the value from every opener without
+     * a closing brace, which is quadratic on a value of unclosed {@code {vault:}
+     * openers; here an opener without a later closing brace ends the scan, as no
+     * later opener can close either.
+     */
+    static String withoutConfigReferences(String value) {
+        StringBuilder kept = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = -1;
+            for (String opener : CONFIG_REF_OPENERS) {
+                if (value.startsWith(opener, open + 1)) {
+                    bodyStart = open + 1 + opener.length();
+                    break;
+                }
+            }
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (kept == null) {
+                kept = new StringBuilder(value.length());
+            }
+            kept.append(value, copied, open);
+            copied = close + 1;
+            from = close + 1;
+        }
+        return kept == null ? value : kept.append(value, copied, value.length()).toString();
     }
 
     private static String taskParameter(LlmConfiguration.Task task, String key) {

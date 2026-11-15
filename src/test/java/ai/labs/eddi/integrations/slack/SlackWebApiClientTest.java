@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -38,6 +40,21 @@ class SlackWebApiClientTest {
     /** The JSON body of the request Slack received. */
     private JsonNode sentBody() throws Exception {
         return objectMapper.readTree(slack.lastHop().body());
+    }
+
+    @Test
+    void postBlocksMessage_defaultLeavesUnfurlingToSlack() throws Exception {
+        client.postBlocksMessage("Bearer xoxb-invalid", "C0123", null, List.of(), "fallback");
+        assertFalse(sentBody().has("unfurl_links"));
+        assertFalse(sentBody().has("unfurl_media"));
+    }
+
+    @Test
+    void postBlocksMessage_unfurlOff_setsBothFlags() throws Exception {
+        client.postBlocksMessage("Bearer xoxb-invalid", "C0123", null, List.of(), "fallback", false);
+        assertFalse(sentBody().path("unfurl_links").asBoolean(true));
+        assertFalse(sentBody().path("unfurl_media").asBoolean(true));
+        assertTrue(sentBody().has("unfurl_links"), "present and false, not merely absent");
     }
 
     @Test

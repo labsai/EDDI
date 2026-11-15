@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -310,10 +311,14 @@ class GdprComplianceServiceTest {
         // When — should not throw
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
-        // Then — cascade continued past the journal failure
+        // Then — cascade continued past the journal failure, but kept the snapshots:
+        // they are how a retry finds the journal entries still left
         assertNotNull(result);
-        assertEquals(1, result.conversationsDeleted());
-        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+        assertEquals(0, result.conversationsDeleted());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        verify(userConversationStore).deleteAllForUser(USER_ID);
+        assertTrue(result.failedSteps().contains("hitlToolJournal"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
     }
 
     @Test
@@ -433,6 +438,21 @@ class GdprComplianceServiceTest {
     }
 
     @Test
+    void deleteUserData_checkpointDeleteFails_keepsSnapshotsForTheRetry() throws Exception {
+        // A checkpoint carries a copy of the properties and is found by conversation
+        // id, which only the snapshot still lists once this run is over.
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(checkpointStore.deleteByConversationId("conv-1")).thenThrow(new RuntimeException("store down"));
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        assertTrue(result.failedSteps().contains("conversationCheckpoints"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+        assertFalse(result.complete());
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void deleteUserData_attachmentDeleteFails_keepsSnapshotsForTheRetry() throws Exception {
         // The snapshot is what lists the conversation under the user: deleting it
@@ -501,6 +521,49 @@ class GdprComplianceServiceTest {
         assertEquals("conv-1", convExport.conversationId());
         assertEquals("agent-1", convExport.agentId());
         assertEquals(ConversationState.ENDED, convExport.state());
+    }
+
+    @Test
+    void exportUserData_includesConversationTitleAndPin() throws Exception {
+        // A title is derived conversation content (§2.5 of the frontend plan): it is
+        // exported with the conversation it names — read live, else from the archived
+        // copy a soft delete leaves.
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1", "conv-2"));
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+        var titled = new ConversationDescriptor();
+        titled.setTitle("Trip to Rome");
+        titled.setTitleSource(ConversationDescriptor.TitleSource.USER);
+        titled.setPinned(true);
+        when(conversationDescriptorStore.readDescriptorWithHistory("conv-1", 0)).thenReturn(titled);
+        when(conversationDescriptorStore.readDescriptorWithHistory("conv-2", 0))
+                .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        assertEquals(2, export.conversations().size(), "a missing descriptor drops only the title, not the conversation");
+        var first = export.conversations().getFirst();
+        assertEquals("Trip to Rome", first.title());
+        assertTrue(first.pinned());
+        assertNull(export.conversations().get(1).title());
+        assertFalse(export.conversations().get(1).pinned());
+    }
+
+    @Test
+    void deleteUserData_erasesConversationTitlesWithTheirDescriptors() throws Exception {
+        // The title, its source and the pin live on the conversation descriptor only;
+        // erasure removes every version of it (live and archived) per conversation.
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(1L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        service.deleteUserData(USER_ID);
+
+        verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
     }
 
     @Test
@@ -1511,7 +1574,9 @@ class GdprComplianceServiceTest {
 
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
-        assertEquals(1, result.conversationsDeleted());
+        // The failed checkpoint delete keeps the snapshots for the retry; every
+        // later, independent store is still swept.
+        assertEquals(0, result.conversationsDeleted());
         verify(scheduleStore).deleteSchedulesByUserId(USER_ID);
     }
 

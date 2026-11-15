@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -79,8 +80,6 @@ public class SlackEventHandler {
      * its own — see {@code mentionsThisBot}.
      */
     private static final Pattern ANY_MENTION_PATTERN = Pattern.compile("<@[A-Z0-9]+(\\|[^>]*)?>");
-
-    /** Maximum Slack message length (safe limit under 4000). */
 
     /** Retry budget for reading the HITL bookmark after a pause (see H10). */
     private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
@@ -211,8 +210,6 @@ public class SlackEventHandler {
      *            the unique event ID (for dedup)
      * @param event
      *            the parsed event JSON as a Map
-     */
-    /**
      * @param botUserId
      *            this app's own Slack user id, from the event envelope, or
      *            {@code null} when it did not carry one. Used only to tell a
@@ -313,11 +310,6 @@ public class SlackEventHandler {
     }
 
     /**
-     * Whether {@code type} appears anywhere in the throwable's cause chain.
-     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
-     * between it and the handler, so a top-level {@code instanceof} would miss it.
-     */
-    /**
      * Whether {@code route} belongs to the app whose signing secret verified the
      * event: its integration's (or legacy connector's) secret equals the verified
      * one. Fails closed when nothing was verified.
@@ -327,6 +319,11 @@ public class SlackEventHandler {
                 && ChannelTargetRouter.secretsEqual(route.signingSecret(), origin.verifiedSigningSecret());
     }
 
+    /**
+     * Whether {@code type} appears anywhere in the throwable's cause chain.
+     * {@code sendAndWait}'s {@link TimeoutException} is wrapped by the layers
+     * between it and the handler, so a top-level {@code instanceof} would miss it.
+     */
     private static boolean hasCause(Throwable t, Class<? extends Throwable> type) {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             if (type.isInstance(c)) {
@@ -919,10 +916,12 @@ public class SlackEventHandler {
      * Build the in-thread pause notice, appending the pause reason from the HITL
      * bookmark when available.
      */
-    private String buildPauseNotice(ConversationMemorySnapshot bookmark) {
+    static String buildPauseNotice(ConversationMemorySnapshot bookmark) {
         String reason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         if (reason != null && !reason.isBlank()) {
-            return SlackHitlSupport.PAUSE_NOTICE + "\n> " + reason;
+            // Escaped like the approval card's reason: it is posted under EDDI's own
+            // notice, so a <!channel> or <url|label> in it must stay literal text.
+            return SlackHitlSupport.PAUSE_NOTICE + "\n> " + SlackMrkdwn.escape(reason);
         }
         return SlackHitlSupport.PAUSE_NOTICE;
     }
@@ -958,9 +957,11 @@ public class SlackEventHandler {
         // conversationId alone — so a second distinct pause in the same conversation
         // (pause → resume → pause) is NOT suppressed, and a card can only ever
         // resolve the pause it was posted for. When the best-effort bookmark load
-        // returns a non-AWAITING snapshot (hitlPausedAt null) the record carries
-        // UNKNOWN_PAUSE rather than blocking the card; such a record matches only a
-        // pause that began before it was written. A normal-turn pause and an
+        // returns a non-AWAITING snapshot (hitlPausedAt null) the card is posted as a
+        // notification without buttons and nothing is recorded: a card that does not
+        // know its pause could otherwise approve a later one. The conversation's own
+        // user writing in the thread again posts a card for the real pause. A
+        // normal-turn pause and an
         // init-turn pause detected on the next say both route here — the first wins
         // the record; re-message-while-paused is a no-op. The record is removed
         // below if delivery fails. The record also carries a fresh card id that goes
@@ -971,12 +972,20 @@ public class SlackEventHandler {
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
+        String noButtonsNote = null;
         if (!SlackHitlSupport.isBindableIntegrationName(integrationName)) {
             // Unbindable — a decision on it would be refused. A name containing '|'
             // (stored before the save-time rule) would split the button value.
             if (integrationName != null && !integrationName.isBlank()) {
                 LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot carry "
                         + "— posting the approval card without buttons; rename the integration", sanitize(integrationName));
+            }
+            includeButtons = false;
+        } else if (ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
+            LOGGER.warnf("The pause of %s could not be read yet — posting its approval card without buttons",
+                    sanitize(conversationId));
+            if (includeButtons) {
+                noButtonsNote = SlackHitlSupport.UNKNOWN_PAUSE_NOTE;
             }
             includeButtons = false;
         } else {
@@ -1003,13 +1012,19 @@ public class SlackEventHandler {
 
         // The button value carries the owning integration name and this card's id,
         // so the decision is bound to THIS integration and THIS card.
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId);
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName, conversationId, cardId,
+                bookmark != null ? HitlPlanHash.presentable(bookmark.getHitlPlanHash()) : null);
         String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
         var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
                 agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
-                pauseType, pendingToolCalls);
+                pauseType, pendingToolCalls, SlackHitlEditModal.forCard(pauseType, pendingToolCalls, bookmark, platformConfig),
+                noButtonsNote);
+        // The agent's approvalContext (rendered at pause commit), between the facts and
+        // the buttons.
+        boolean contextShown = SlackApprovalContextBlocks.insertBeforeActions(blocks,
+                bookmark != null ? bookmark.getHitlApprovalContext() : null, SlackApprovalContextBlocks.enabled(platformConfig));
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". Only the originating integration's own token
@@ -1029,7 +1044,13 @@ public class SlackEventHandler {
         }
         String auth = "Bearer " + botToken;
         try {
-            slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            if (contextShown) {
+                // Conversation text on the card: no link or media preview of anything a model
+                // wrote.
+                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback, false);
+            } else {
+                slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+            }
         } catch (SlackDeliveryException e) {
             // F12: delivery failed — drop the record so a later retry can re-attempt
             // instead of being suppressed until the record expires.
@@ -1098,6 +1119,7 @@ public class SlackEventHandler {
         // binds to THIS integration at the interactivity endpoint (IDOR-safe).
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs,
                 hitlApprovalChannel, hitlApproverUserIds, integrationName, approvalRecords);
+        listener.setShowApprovalContext(SlackApprovalContextBlocks.enabled(integration != null ? integration.getPlatformConfig() : null));
 
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {

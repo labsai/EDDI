@@ -62,15 +62,7 @@ public class SpaceReferenceGuard {
             LOGGER.warnf("Deployment of agent '%s' v%s refused: %s", sanitize(agentId), agentVersion, sanitize(e.getMessage()));
             throw new ForbiddenException(e.getMessage() + ". Try again once it can be read, or ask an administrator to deploy it.");
         }
-        if (referenced.isEmpty()) {
-            return;
-        }
-        Set<String> own = new HashSet<>();
-        for (String space : accessGuard.callerSpaces().spaces()) {
-            own.add(SpaceTenants.tenantFor(space));
-        }
-        List<String> foreign = referenced.stream().filter(SpaceTenants::isSpaceTenant).filter(tenant -> !own.contains(tenant)).sorted()
-                .toList();
+        List<String> foreign = foreignTenants(referenced);
         if (foreign.isEmpty()) {
             return;
         }
@@ -78,5 +70,54 @@ public class SpaceReferenceGuard {
                 agentVersion, sanitize(String.valueOf(foreign)), sanitize(accessGuard.currentPrincipal()));
         throw new ForbiddenException("This agent uses secrets or variables of a space you are not a member of (" + String.join(", ", foreign)
                 + "). Only a member of that space may deploy it — ask one to, or remove the references.");
+    }
+
+    /**
+     * {@link #requireMayDeploy}'s rule for one configuration run on its own,
+     * outside any agent and so outside any deployment: a knowledge base searched or
+     * ingested into through its standalone endpoints builds its embedding model and
+     * store from the configuration on the spot, resolving every
+     * {@code ${vars:<tenant>/…}} and {@code ${vault:<tenant>/…}} it names with the
+     * server's authority. The caller must belong to each space tenant it names.
+     *
+     * @param what
+     *            what the configuration is, for the message
+     * @throws ForbiddenException
+     *             naming the space tenants the caller does not belong to
+     */
+    public void requireMayUse(Object configuration, String what) {
+        if (configuration == null || !accessGuard.settings().isEnforcing() || accessGuard.isAdmin()) {
+            return;
+        }
+        Set<String> referenced;
+        try {
+            referenced = checker.referencedTenantsOf(configuration);
+        } catch (VaultGrantChecker.UnverifiableReferencesException e) {
+            LOGGER.warnf("Use of a %s refused: %s", sanitize(what), sanitize(e.getMessage()));
+            throw new ForbiddenException(e.getMessage() + ". Try again once it can be read, or ask an administrator.");
+        }
+        List<String> foreign = foreignTenants(referenced);
+        if (foreign.isEmpty()) {
+            return;
+        }
+        LOGGER.warnf("Use of a %s refused: it references space tenant(s) %s that '%s' is not a member of", sanitize(what),
+                sanitize(String.valueOf(foreign)), sanitize(accessGuard.currentPrincipal()));
+        throw new ForbiddenException("This " + what + " uses secrets or variables of a space you are not a member of ("
+                + String.join(", ", foreign) + "). Only a member of that space may run it — ask one to, or remove the references.");
+    }
+
+    /**
+     * The space tenants in {@code referenced} the caller is not a member of,
+     * sorted.
+     */
+    private List<String> foreignTenants(Set<String> referenced) {
+        if (referenced.isEmpty()) {
+            return List.of();
+        }
+        Set<String> own = new HashSet<>();
+        for (String space : accessGuard.callerSpaces().spaces()) {
+            own.add(SpaceTenants.tenantFor(space));
+        }
+        return referenced.stream().filter(SpaceTenants::isSpaceTenant).filter(tenant -> !own.contains(tenant)).sorted().toList();
     }
 }

@@ -54,9 +54,7 @@ One of the coolest features of **EDDI** is it will allow you dynamically templat
 
 ## Enabling the feature:
 
-While creating the agent you must include `eddi://ai.labs.output` to one of the `workflows` that will be part of the agent.
-
-> **Important:** The templating feature will not work if it is included before `eddi://ai.labs.output` extension, **it must be included after**.
+Add `eddi://ai.labs.templating` to the workflow's steps, **after** `eddi://ai.labs.output` and every other step that produces output. Placed before them it has nothing to render yet. It renders output texts and quick replies only; prompts, HTTP call bodies and property values are rendered by their own tasks.
 
 ## Example
 
@@ -64,7 +62,7 @@ Here is how the output templating should be specified **inside of a workflow.**&
 
 ```javascript
 {
-  "workflowExtensions": [
+  "workflowSteps": [
     {
       "type": "eddi://ai.labs.output",
       "config": {
@@ -121,7 +119,7 @@ Make sure the templating is defined after the output, not before.
 
 ### String Methods
 
-All standard String methods are available as natural method calls on string variables:
+The following String methods are available as natural method calls on string variables. They are registered as template extensions (`StringTemplateExtensions`); a String method not listed here is not available, because the runtime engine invokes no arbitrary methods:
 
 | Expression | Description |
 | --- | --- |
@@ -131,10 +129,14 @@ All standard String methods are available as natural method calls on string vari
 | `{str.substring(5)}` | Substring from index |
 | `{str.substring(0, 5)}` | Substring range |
 | `{str.indexOf('x')}` | Find character index |
+| `{str.lastIndexOf('x')}` | Find last index |
 | `{str.contains('sub')}` | Check if contains |
 | `{str.startsWith('pre')}` | Check prefix |
 | `{str.endsWith('suf')}` | Check suffix |
 | `{str.trim()}` | Trim whitespace |
+| `{str.strip()}` | Trim Unicode whitespace |
+| `{str.charAt(0)}` | Character at index |
+| `{str.concat('x')}` | Append |
 | `{str.length()}` | String length |
 | `{str.isEmpty()}` | Empty check |
 
@@ -166,12 +168,13 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 
 | Namespace | Expression | Purpose |
 | --- | --- | --- |
-| `json` | `{json:serialize(obj)}` | JSON manipulation utilities |
-| `encoder` | `{encoder:base64(data)}` | Text encoding utilities |
+| `json` | `{json:serialize(obj)}` | Serialise a value to JSON text |
+| `json` | `{json:deserialize(text)}` | Parse JSON text into a map or list |
+| `encoder` | `{encoder:base64(data)}` | Base64 encode (also `base64Url`, `base64Mime`; `mimeHeader` writes a mail header value as folded RFC 2047 encoded words) |
 
 ### What a template can reach
 
-Templates run in a restricted engine. Beyond the namespaces above, the pass-through references (`${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}`) and Qute's `str:`/`time:` helpers, no namespace is available — in particular `config:`, `inject:` and `cdi:` render as empty. The sections are `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}` and `{#when}`/`{#switch}`; there is no `{#include}` or `{#eval}`. On objects other than maps, lists and strings, only properties (getters, record components, public fields) can be read — no method with arguments is invoked. A render is capped at `eddi.templating.max-output-chars` characters and `eddi.templating.max-iterations` loop iterations. See [security.md](security.md#runtime-template-engine).
+Templates run in a restricted engine. Beyond the namespaces above, the pass-through references (`${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}`) and Qute's `str:`/`time:` helpers, no namespace is available — in particular `config:`, `inject:` and `cdi:` render as empty. The sections are `{#if}`, `{#for}`/`{#each}`, `{#let}`/`{#set}`, `{#with}` and `{#when}`/`{#switch}`; there is no `{#include}` or `{#eval}`. On objects other than maps, lists and strings, only properties (getters, record components, public fields) can be read — no method with arguments is invoked. A render is capped at `eddi.templating.max-output-chars` characters, `eddi.templating.max-iterations` loop iterations and a wall-clock deadline (`quarkus.qute.timeout`, 10 seconds by default). See [security.md](security.md#runtime-template-engine).
 
 **Values are never re-evaluated.** Whatever an expression resolves to — the user's message, a property, an API response — is written out literally, even if it contains `{…}`. Output that an httpcall/LLM/MCP `postResponse` builds from a response is rendered once and is not templated again by this task.
 

@@ -134,4 +134,17 @@ class RestParserStoreTest {
 
         verify(guard, never()).requireAccess(eq("ffeeddccbbaa998877665544"), any(), anyString());
     }
+
+    @Test
+    @DisplayName("a parser whose config.uri names another space's private parser is refused: the standalone parse loads it")
+    void foreignParserInConfigUriIsRefused() throws Exception {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("denied")).when(guard).requireAccess(eq("ffeeddccbbaa998877665544"), eq(AccessLevel.VIEW), anyString());
+        var sut = new RestParserStore(parserStore, mock(IDocumentDescriptorStore.class), guard);
+        var config = new ParserConfiguration();
+        config.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.parser/parserstore/parsers/ffeeddccbbaa998877665544?version=1")));
+
+        assertThrows(ForbiddenException.class, () -> sut.createParser(config));
+        verify(parserStore, never()).create(any());
+    }
 }

@@ -220,6 +220,40 @@ class CascadingModelExecutorToolReplayTest {
     }
 
     @Test
+    @DisplayName("the judge grades each step's answer against the user's request and the acceptance criterion")
+    void judgeSeesRequestAndCriterion() throws Exception {
+        var cascade = twoStepCascade();
+        cascade.setEvaluationStrategy("judge_model");
+        var judge = new JudgeModelConfig();
+        judge.setType("openai");
+        judge.setParameters(Map.of("modelName", "judge"));
+        cascade.setJudgeModel(judge);
+        cascade.setAcceptanceCriterion("The answer confirms the order");
+        var legacyTask = agentTask();
+        legacyTask.setEnableBuiltInTools(false);
+        legacyTask.setModelCascade(cascade);
+
+        List<List<ChatMessage>> judgeCalls = new ArrayList<>();
+        when(model.chat(anyList())).thenAnswer(inv -> {
+            List<ChatMessage> sent = inv.getArgument(0);
+            if (sent.getFirst() instanceof SystemMessage sm && sm.text().contains("response quality evaluator")) {
+                judgeCalls.add(sent);
+                return ChatResponse.builder().aiMessage(AiMessage.from("{\"confidence\": 0.95}")).build();
+            }
+            return ChatResponse.builder().aiMessage(AiMessage.from("an answer")).build();
+        });
+
+        executor().execute(cascade, messages(), "sys", Map.of(), legacyTask, memory, orchestrator, Map.of(), false, false, false);
+
+        assertFalse(judgeCalls.isEmpty(), "the judge must have been asked");
+        String system = ((SystemMessage) judgeCalls.getFirst().get(0)).text();
+        String input = ((UserMessage) judgeCalls.getFirst().get(1)).singleText();
+        assertTrue(system.contains("The answer confirms the order"), system);
+        assertTrue(input.contains("\"request\":\"order a pizza\""), input);
+        assertTrue(input.contains("\"candidateAnswer\":\"an answer\""), input);
+    }
+
+    @Test
     @DisplayName("a tool pause inside a cascade step records the step index on the batch (M-L1)")
     void pauseRecordsStepIndex() throws Exception {
         var batch = new PendingToolCallBatch();

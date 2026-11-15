@@ -24,8 +24,8 @@ import java.util.Map;
  * verify; an erasure re-signs only the rows that verified before it.
  * <p>
  * This record implements Tier 3 ("Telemetry Ledger") of the EDDI 3-Tier CQRS
- * architecture and satisfies EU AI Act Articles 17/19 requirements for
- * immutable decision traceability.
+ * architecture and supports the EU AI Act record-keeping requirements (Articles
+ * 12/19) with an append-only decision trail.
  *
  * @param id
  *            Auto-generated UUID

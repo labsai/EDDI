@@ -183,11 +183,36 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
 
             {/* Evaluation-strategy-specific config */}
             {evalStrategy === "judge_model" && (
-              <CascadeJudgeModelEditor
-                value={cascade.judgeModel}
-                onChange={(v) => updateCascade({ judgeModel: v })}
-                readOnly={readOnly}
-              />
+              <>
+                <CascadeJudgeModelEditor
+                  value={cascade.judgeModel}
+                  onChange={(v) => updateCascade({ judgeModel: v })}
+                  readOnly={readOnly}
+                />
+                <div>
+                  <label
+                    htmlFor="cascade-acceptance-criterion"
+                    className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  >
+                    {t("llmEditor.cascadeAcceptanceCriterion", "Acceptance criterion (optional)")}
+                  </label>
+                  <input
+                    id="cascade-acceptance-criterion"
+                    data-testid="cascade-acceptance-criterion"
+                    type="text"
+                    value={cascade.acceptanceCriterion ?? ""}
+                    onChange={(e) => updateCascade({ acceptanceCriterion: e.target.value || undefined })}
+                    disabled={readOnly}
+                    className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                  />
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {t(
+                      "llmEditor.cascadeAcceptanceCriterionHint",
+                      "One sentence the judge checks besides the user's request, e.g. \"Gives concrete steps\"",
+                    )}
+                  </p>
+                </div>
+              </>
             )}
             {evalStrategy === "heuristic" && (
               <CascadeHeuristicEditor

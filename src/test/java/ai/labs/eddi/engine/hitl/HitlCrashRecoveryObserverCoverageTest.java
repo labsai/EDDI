@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -542,10 +543,11 @@ class HitlCrashRecoveryObserverCoverageTest {
             gc.setPausedAt(Instant.now().minus(40, ChronoUnit.DAYS));
             when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
                     .thenReturn(List.of(gc));
-            when(groupConversationService.cancelDiscussion(eq("gc-old"), any())).thenReturn(true);
+            when(groupConversationService.cancelPausedDiscussion(eq("gc-old"), any(), any())).thenReturn(true);
 
             assertDoesNotThrow(() -> observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals());
-            verify(groupConversationService).cancelDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL,
+                    HitlDecision.pauseIdOf(gc.getPausedAt()));
         }
 
         @Test
@@ -564,6 +566,7 @@ class HitlCrashRecoveryObserverCoverageTest {
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
+            verify(groupConversationService, never()).cancelPausedDiscussion(any(), any(), any());
             verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
 
@@ -576,11 +579,12 @@ class HitlCrashRecoveryObserverCoverageTest {
             gc.setPausedAt(Instant.now().minus(40, ChronoUnit.DAYS));
             when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
                     .thenReturn(List.of(gc));
-            when(groupConversationService.cancelDiscussion(eq("gc-old"), any())).thenReturn(false);
+            when(groupConversationService.cancelPausedDiscussion(eq("gc-old"), any(), any())).thenReturn(false);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(groupConversationService).cancelDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL,
+                    HitlDecision.pauseIdOf(gc.getPausedAt()));
         }
 
         @Test
@@ -592,11 +596,12 @@ class HitlCrashRecoveryObserverCoverageTest {
             gc.setPausedAt(Instant.now().minus(40, ChronoUnit.DAYS));
             when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
                     .thenReturn(List.of(gc));
-            when(groupConversationService.cancelDiscussion(eq("gc-boom"), any()))
+            when(groupConversationService.cancelPausedDiscussion(eq("gc-boom"), any(), any()))
                     .thenThrow(new RuntimeException("cancel failed"));
 
             assertDoesNotThrow(() -> observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals());
-            verify(groupConversationService).cancelDiscussion("gc-boom", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-boom", ControlSignal.CANCEL_GRACEFUL,
+                    HitlDecision.pauseIdOf(gc.getPausedAt()));
         }
 
         @Test
@@ -606,6 +611,7 @@ class HitlCrashRecoveryObserverCoverageTest {
                     .thenThrow(new RuntimeException("mongo down"));
 
             assertDoesNotThrow(() -> observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals());
+            verify(groupConversationService, never()).cancelPausedDiscussion(any(), any(), any());
             verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
     }

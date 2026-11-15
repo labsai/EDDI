@@ -43,8 +43,9 @@ import java.util.regex.Pattern;
  * {@code model}, {@code customParameters}, ... pass through to the provider
  * builder unchanged). A classifier endpoint is the same trust class as an
  * author-configured LLM {@code baseUrl} and is typically in-cluster, which is
- * why this is not {@code SafeHttpClient}. Vault and global-variable references
- * in the parameters are resolved by the registry, as for a task.
+ * why the call is not sent through {@code OutboundHttp}'s SSRF policy. Vault
+ * and global-variable references in the parameters are resolved by the
+ * registry, as for a task.
  * <h3>Prompt</h3> Without {@code promptTemplate} the text is sent as the
  * model's native conversation — input: one user message; output: the user's
  * question and the answer as an assistant message — and the model's own chat
@@ -155,13 +156,18 @@ public class ClassifierGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     /** A model call per earlier message on every turn is too expensive. */
     @Override
     public boolean screensHistory() {
         return false;
+    }
+
+    @Override
+    public boolean callsModel() {
+        return true;
     }
 
     /**
@@ -214,7 +220,8 @@ public class ClassifierGuardrail implements ContentGuardrail {
      */
     List<ChatMessage> buildMessages(String text, GuardrailContext context) {
         String screened = text != null ? text : "";
-        boolean output = context.phase() == GuardrailPhase.OUTPUT;
+        // Model-produced text — an answer or tool-call arguments — as templateData does
+        boolean output = context.phase() != GuardrailPhase.INPUT;
         String question = output ? lastUserText(context.messages()) : screened;
         String template = context.parameter(PARAM_PROMPT_TEMPLATE, null);
         if (template == null) {

@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
 import ai.labs.eddi.engine.lifecycle.IAnswerRevisingTask;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -20,6 +21,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
+import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -57,8 +59,10 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_GUARDRAIL_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_NAME;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_PRICING;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.HITL_PLAN_HASH;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -126,7 +130,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  * @see ILifecycleTask
  * @see IConversationMemory
- * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
+ * @see ai.labs.eddi.engine.runtime.IConversationCoordinator
  */
 public class LifecycleManager implements ILifecycleManager {
 
@@ -168,7 +172,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
-     * initialization based on package configuration.
+     * initialization based on workflow configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -341,6 +345,27 @@ public class LifecycleManager implements ILifecycleManager {
             auditCollector.collect(buildAuditEntry(conversationMemory, task, absoluteIndex, durationMs, summary));
         }
         return true;
+    }
+
+    /**
+     * Has the task at {@code absoluteIndex} replace its answer with an approver's
+     * edit ({@code hitlConfig.review.allowAnswerEdits}). Not a pipeline run:
+     * nothing executes again.
+     */
+    @Override
+    public ReviewerEditRequest.Outcome replaceAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, ReviewerEditRequest request)
+            throws LifecycleException {
+        checkNotNull(conversationMemory, "conversationMemory");
+        if (request == null || absoluteIndex < 0 || absoluteIndex >= this.lifecycleTasks.size()) {
+            return ReviewerEditRequest.Outcome.refused("CONFIG_DRIFT", null);
+        }
+        ILifecycleTask task = this.lifecycleTasks.get(absoluteIndex);
+        if (!(task instanceof IAnswerEditingTask editor) || task.getId() == null) {
+            return ReviewerEditRequest.Outcome.refused("CONFIG_DRIFT", null);
+        }
+        var components = componentCache.getComponentMap(task.getId().name());
+        var component = components.getOrDefault(createComponentKey(workflowId.getId(), workflowId.getVersion(), absoluteIndex), null);
+        return editor.replaceAnswer(conversationMemory, component, request);
     }
 
     /**
@@ -785,6 +810,14 @@ public class LifecycleManager implements ILifecycleManager {
         if (inputData != null && inputData.getResult() != null) {
             input.put("userInput", inputData.getResult());
         }
+        // A task that runs because a human approved a plan records which plan: the
+        // hash the resume was admitted against (HitlPlanHash), written to the step by
+        // Conversation#resume. Every task the resume runs carries it, since all of
+        // them run under that approval.
+        IData<String> planHashData = currentStep.getLatestData(HITL_PLAN_HASH);
+        if (planHashData != null && planHashData.getResult() != null) {
+            input.put("hitlPlanHash", planHashData.getResult());
+        }
 
         // Collect output data (what the task wrote)
         Map<String, Object> output = new LinkedHashMap<>();
@@ -831,6 +864,9 @@ public class LifecycleManager implements ILifecycleManager {
             IData<Map<String, Object>> tokenData = currentStep.getLatestData(AUDIT_TOKEN_USAGE);
             if (tokenData != null && tokenData.getResult() != null)
                 llmDetail.put("tokenUsage", tokenData.getResult());
+            IData<Map<String, Object>> pricingData = currentStep.getLatestData(AUDIT_PRICING);
+            if (pricingData != null && pricingData.getResult() != null)
+                llmDetail.put("pricing", pricingData.getResult());
             IData<String> cascadeModelData = currentStep.getLatestData(AUDIT_CASCADE_MODEL);
             if (cascadeModelData != null && cascadeModelData.getResult() != null)
                 llmDetail.put("cascadeModel", cascadeModelData.getResult());
@@ -869,19 +905,6 @@ public class LifecycleManager implements ILifecycleManager {
                 , null);
     }
 
-    /**
-     * Filters lifecycle tasks to execute only those starting from specified types.
-     *
-     * <p>
-     * This enables partial workflow execution. For example, if you specify
-     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
-     * but skip earlier tasks like parsing.
-     * </p>
-     *
-     * @param lifecycleTaskTypes
-     *            list of task type prefixes to match
-     * @return filtered list of tasks to execute
-     */
     /**
      * Returns the ABSOLUTE index of the first task whose type matches any of the
      * requested types (prefix match); selective execution runs that task and all
@@ -962,8 +985,8 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
-     * called during Agent initialization, when the agent's package configuration is
-     * being loaded.
+     * called during Agent initialization, when the agent's workflow configuration
+     * is being loaded.
      * </p>
      *
      * <p>

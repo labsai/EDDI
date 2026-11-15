@@ -40,6 +40,9 @@ import {
   followupGroupMember,
   closeGroupConversation,
   getGroupConversation,
+  pendingTurnTimeout,
+  tieBreakOptions,
+  pendingHumanTask,
   type GroupAttachmentRef,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -693,10 +696,10 @@ function WorkforceBoard() {
   // form belongs here rather than behind a link to another surface.
   const submitHumanInputMutation = useSubmitHumanInput();
   const handleSubmitHumanInput = useCallback(
-    (memberId: string, content: string) => {
+    (memberId: string, content: string, choice?: string) => {
       if (!boardId || !selectedConvId) return;
       submitHumanInputMutation.mutate(
-        { groupId: boardId, gcId: selectedConvId, memberId, content },
+        { groupId: boardId, gcId: selectedConvId, memberId, content, choice },
         {
           onSuccess: () => toast.success(t("groups.humanTurnSubmitted", "Your response was recorded")),
           onError: (err) => toast.error(getErrorMessage(err)),
@@ -1130,11 +1133,18 @@ function WorkforceBoard() {
               displayName={selectedConversation.pendingHumanInput.displayName}
               renderedPrompt={selectedConversation.pendingHumanInput.renderedPrompt}
               pausedPhaseName={selectedConversation.pausedPhaseName}
+              pauseKey={`${selectedConversation.id}:${selectedConversation.pendingHumanInput.requestedAt ?? ""}:${selectedConversation.pendingHumanInput.memberId}`}
               requestedAt={selectedConversation.pendingHumanInput.requestedAt}
-              turnTimeout={groupConfig?.humanMemberConfig?.turnTimeout}
+              turnTimeout={pendingTurnTimeout(
+                selectedConversation.pendingHumanInput,
+                selectedConversation.hitlApprovalTimeout,
+                groupConfig?.humanMemberConfig?.turnTimeout,
+              )}
               isSubmitting={submitHumanInputMutation.isPending}
-              onSubmit={(content) =>
-                handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content)
+              options={tieBreakOptions(selectedConversation.pendingHumanInput)}
+              task={pendingHumanTask(selectedConversation)}
+              onSubmit={(content, choice) =>
+                handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content, choice)
               }
             />
           </div>

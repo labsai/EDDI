@@ -50,7 +50,8 @@ public class RestUserConversationStore implements IRestUserConversationStore {
             if (userConversation == null) {
                 userConversation = userConversationStore.readUserConversation(intent, userId);
                 if (userConversation != null) {
-                    userConversationCache.put(cacheKey, userConversation);
+                    // Read from the store: a fill, which other nodes need not evict for.
+                    userConversationCache.fill(cacheKey, userConversation);
                 }
             }
 

@@ -182,15 +182,58 @@ describe("GroupPhaseEditor", () => {
     expect(savedConfig().phases![0]!.convergence).toBeNull();
   });
 
-  it("warns that the SERVICE judge is not wired yet", () => {
+  it("edits the SERVICE judge's model and saves it with the convergence block", () => {
     renderWithProviders(
       <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
     );
     fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
-    expect(screen.queryByTestId("phase-convergence-service-note-0")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("phase-convergence-service-0")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("phase-convergence-judge-0"), { target: { value: "SERVICE" } });
-    expect(screen.getByTestId("phase-convergence-service-note-0")).toBeInTheDocument();
+    // Without a model it says the moderator judges instead.
+    expect(screen.getByTestId("phase-convergence-service-note-0")).toHaveTextContent(/moderator agent judges instead/);
+
+    fireEvent.change(screen.getByTestId("phase-service-provider-0"), { target: { value: "openai" } });
+    fireEvent.change(screen.getByTestId("phase-service-model-0"), { target: { value: "gpt-4o-mini" } });
+    fireEvent.change(screen.getByTestId("phase-service-apikey-0"), { target: { value: "${vault:judge-key}" } });
+    fireEvent.change(screen.getByTestId("phase-service-input-price-0"), { target: { value: "0.15" } });
+    fireEvent.change(screen.getByTestId("phase-service-timeout-0"), { target: { value: "90000" } });
+    expect(screen.getByTestId("phase-convergence-service-note-0")).toHaveTextContent(/no moderator needed/);
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence).toMatchObject({
+      judge: "SERVICE",
+      service: {
+        llmProvider: "openai",
+        llmModel: "gpt-4o-mini",
+        parameters: { apiKey: "${vault:judge-key}" },
+        inputPricePer1M: 0.15,
+        timeoutMs: 60000,
+      },
+    });
+  });
+
+  it("keeps a SERVICE judge's other parameters when the key is edited", () => {
+    const config = makeConfig({
+      phases: [
+        phase("Discussion", {
+          repeats: 4,
+          convergence: {
+            enabled: true,
+            minRepeats: 2,
+            threshold: 0.8,
+            judge: "SERVICE",
+            service: { llmProvider: "openai", llmModel: "m", parameters: { baseUrl: "https://llm.example", apiKey: "${vault:a}" } },
+          },
+        }),
+      ],
+    });
+    renderWithProviders(<GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
+
+    fireEvent.change(screen.getByTestId("phase-service-apikey-0"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("group-phase-save"));
+
+    expect(savedConfig().phases![0]!.convergence!.service!.parameters).toEqual({ baseUrl: "https://llm.example" });
   });
 
   /**
@@ -326,13 +369,40 @@ describe("GroupPhaseEditor", () => {
       expect(savedConfig().phases![0]!.voteConfig!.quorum).toBeCloseTo(0.75);
     });
 
-    it("never offers HUMAN_DECIDES as a selectable tie policy — still save-time rejected by the backend", () => {
-      renderWithProviders(
-        <GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
-      );
+    it("offers HUMAN_DECIDES and saves who decides, how long they have and what a timeout does", () => {
+      const config = voteConfig();
+      config.members = [
+        { agentId: "a1", displayName: "Alice", speakingOrder: 1 },
+        { agentId: "founder@acme.com", displayName: "Founder", speakingOrder: 2, memberType: "HUMAN" },
+      ] as AgentGroupConfiguration["members"];
+      renderWithProviders(<GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
       const select = screen.getByTestId("phase-vote-tie-0") as HTMLSelectElement;
       const humanOption = Array.from(select.options).find((o) => o.value === "HUMAN_DECIDES")!;
-      expect(humanOption.disabled).toBe(true);
+      expect(humanOption.disabled).toBe(false);
+
+      fireEvent.change(select, { target: { value: "HUMAN_DECIDES" } });
+      // The single HUMAN member is the default decider, so nothing is missing yet.
+      expect(screen.getByTestId("phase-tiebreak-note-0")).not.toHaveAttribute("role", "alert");
+      // No moderator: the moderator fallback cannot be chosen.
+      const onTimeout = screen.getByTestId("phase-tiebreak-ontimeout-0") as HTMLSelectElement;
+      expect(Array.from(onTimeout.options).find((o) => o.value === "MODERATOR_DECIDES")!.disabled).toBe(true);
+      fireEvent.change(screen.getByTestId("phase-tiebreak-timeout-0"), { target: { value: "PT24H" } });
+      fireEvent.change(onTimeout, { target: { value: "ABORT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.voteConfig).toMatchObject({
+        tiePolicy: "HUMAN_DECIDES",
+        humanTieBreak: { timeout: "PT24H", onTimeout: "ABORT" },
+      });
+    });
+
+    it("asks for a decider when the group has no single HUMAN member", () => {
+      renderWithProviders(<GroupPhaseEditor config={voteConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />);
+      fireEvent.change(screen.getByTestId("phase-vote-tie-0"), { target: { value: "HUMAN_DECIDES" } });
+
+      expect(screen.getByTestId("phase-tiebreak-note-0")).toHaveAttribute("role", "alert");
+      fireEvent.change(screen.getByTestId("phase-tiebreak-decider-0"), { target: { value: "ceo@acme.com" } });
+      expect(screen.getByTestId("phase-tiebreak-note-0")).not.toHaveAttribute("role", "alert");
     });
   });
 

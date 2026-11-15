@@ -1470,11 +1470,6 @@ public class AuditLedgerService implements UserErasureParticipant {
     }
 
     /**
-     * Apply the agent's Ed25519 signature to the entry. Signs the HMAC if available
-     * (covers full entry integrity), otherwise signs the entry ID. Gracefully
-     * returns the original entry if no signing key exists.
-     */
-    /**
      * How long after an erasure this node keeps rewriting the erased user's id in
      * new audit entries. It covers entries still produced by work the erasure
      * cancelled (a turn blocked in an LLM or HTTP call flushes its audit buffer
@@ -1580,7 +1575,21 @@ public class AuditLedgerService implements UserErasureParticipant {
     @Override
     public int stopInFlightWorkByHash(String userIdHash) {
         markUserErasedHash(userIdHash);
+        // A batch drained before the mark above went up is already past the
+        // pseudonymisation check and may still be committing; the erasing node sweeps
+        // the stored rows as soon as every node replied, so replying before that batch
+        // is in the store would let it land raw after the sweep.
+        awaitInFlightFlush();
         return 0;
+    }
+
+    /**
+     * Returns once a flush that is running has finished. {@link #flush} is
+     * synchronized, and every flush that starts after the user was marked
+     * pseudonymises their entries itself.
+     */
+    synchronized void awaitInFlightFlush() {
+        // intentionally empty: acquiring the monitor is the wait
     }
 
     /** An erasure started on another node; see {@link #markUserErased}. */
@@ -1961,6 +1970,11 @@ public class AuditLedgerService implements UserErasureParticipant {
         return COMPLIANCE_TASK_ID.equals(entry.taskId()) || ADMIN_ACTION_TASK_ID.equals(entry.taskId());
     }
 
+    /**
+     * Apply the agent's Ed25519 signature to the entry. Signs the HMAC if available
+     * (covers full entry integrity), otherwise signs the entry ID. Gracefully
+     * returns the original entry if no signing key exists.
+     */
     private AuditEntry applyAgentSignature(AuditEntry entry) {
         try {
             String payload = entry.hmac() != null ? entry.hmac() : entry.id();

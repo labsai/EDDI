@@ -103,6 +103,13 @@ class ToolCacheServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("the team source (handoff_to_team) is side-effecting: a cached answer must never stand in for a write")
+    void teamSourceIsNeverCachedUnlessOptedIn() {
+        assertTrue(ToolCacheService.SIDE_EFFECTING_SOURCES.contains("team"));
+        assertFalse(ToolCacheService.mayCache("team", "handoff_to_team", "handoff_to_team", Map.of()));
+    }
+
     /** A tool object that is not a CDI bean — constructed per call. */
     static class UnscopedTool {
         @Tool("noop")

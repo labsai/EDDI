@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -69,7 +70,7 @@ class RestRagIngestionSourcesTest {
         accessGuard = mock(ResourceAccessGuard.class);
         ingestedFileService = mock(IngestedFileService.class);
         rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class), sourceIngestionService,
-                ingestedFileService, mock(KnowledgeBaseInspector.class), accessGuard);
+                ingestedFileService, mock(KnowledgeBaseInspector.class), accessGuard, mock(SpaceReferenceGuard.class));
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBaseWithSource());
         when(sourceIngestionService.runAsync(anyString(), any(), any())).thenReturn(Optional.of("run-key"));

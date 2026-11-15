@@ -82,3 +82,27 @@ describe("jsonKeyOrder", () => {
     ]);
   });
 });
+
+describe("reindentJsonText — hostile nesting", () => {
+  it("caps printed indentation so a run of openers does not square the output", () => {
+    const hostile = "[".repeat(20_000);
+    const start = performance.now();
+    const out = reindentJsonText(hostile);
+    expect(performance.now() - start).toBeLessThan(2000);
+    // Uncapped this is ~200M characters; capped, ~130 per line.
+    expect(out.length).toBeLessThan(10_000_000);
+  });
+
+  it("still indents ordinary documents exactly as JSON.stringify does", () => {
+    const value = { a: [1, { b: [] }], c: "x" };
+    expect(reindentJsonText(JSON.stringify(value))).toBe(JSON.stringify(value, null, 2));
+  });
+
+  it("handles a trailing comma before a closer, in linear time", () => {
+    expect(reindentJsonText('{"a":1,}')).toBe('{\n  "a": 1,\n}');
+    const many = '{"a":1,}'.repeat(30_000);
+    const start = performance.now();
+    reindentJsonText(many);
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+});

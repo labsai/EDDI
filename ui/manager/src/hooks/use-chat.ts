@@ -54,6 +54,7 @@ import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { chatKeys } from "@/lib/query-keys";
+import { parseToolCallEvent, toolCallActivity } from "@/lib/tool-labels";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -1239,14 +1240,18 @@ function handleSSEEvent(
       // Live "Using {tool}…" signal — the backend emits the NAME right before
       // each tool executes (arguments arrive later, redacted, in the
       // task_complete toolTrace). Feeds the status line only, not the turns.
-      try {
-        const parsed = JSON.parse(event.data);
-        if (typeof parsed.tool === "string" && parsed.tool) {
-          debug.addToolCall(parsed.tool);
-        }
-      } catch {
-        // Malformed payload — the status line just keeps saying "Thinking…".
-      }
+      // Since 6.7 the event may carry the designer's `toolDisplay` label and a few
+      // allow-listed values; the status line shows those, else the humanised name.
+      const call = parseToolCallEvent(event.data);
+      // Malformed payload — the status line just keeps saying "Thinking…".
+      if (call) debug.addToolCall(toolCallActivity(call));
+      return false;
+    }
+    case "tool_result": {
+      // 6.7: `{tool, callId, status, durationMs}` once per call, right after it
+      // ran. Calls run one after another, so a result settles the newest call:
+      // its spinner stops instead of turning only when the model writes again.
+      debug.markToolsSettled();
       return false;
     }
     case "task_start": {
@@ -1497,11 +1502,21 @@ export function undoRedoFlags(
   ];
 }
 
-/** Fetch conversation history for the selected agent. */
+/**
+ * The caller's own conversations with an agent — what the chat panel lists and
+ * resumes from. Own only (`mine`), for an admin too: an admin's listing holds
+ * every user's, and the resume below continues the newest one it is handed.
+ * Browsing everybody's conversations is the Conversations page's job.
+ */
+function getOwnConversationHistory(agentId: string) {
+  return getConversationDescriptors(50, 0, "", agentId, undefined, undefined, undefined, { mine: true });
+}
+
+/** Fetch the caller's conversation history with the selected agent. */
 export function useConversationHistory(agentId: string | null) {
   return useQuery({
     queryKey: chatKeys.history(agentId),
-    queryFn: () => getConversationDescriptors(50, 0, "", agentId ?? ""),
+    queryFn: () => getOwnConversationHistory(agentId ?? ""),
     enabled: !!agentId,
     staleTime: 30_000,
   });
@@ -1730,8 +1745,10 @@ export function useResumeOrStartConversation() {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
+          // The same query as useConversationHistory, which shares this cache
+          // entry: the caller's own conversations, never another user's.
           queryKey: chatKeys.history(agentId),
-          queryFn: () => getConversationDescriptors(50, 0, "", agentId),
+          queryFn: () => getOwnConversationHistory(agentId),
           staleTime: 30_000,
         });
         resumable = pickResumableConversation(descriptors, environment);

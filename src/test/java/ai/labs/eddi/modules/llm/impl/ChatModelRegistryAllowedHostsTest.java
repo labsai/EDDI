@@ -136,6 +136,17 @@ class ChatModelRegistryAllowedHostsTest {
     }
 
     @Test
+    @DisplayName("an endpoint key outside the old fixed list (apiBase, hostname, proxyUrl) is checked too")
+    void endpointKeysBeyondTheOldListAreChecked() throws Exception {
+        registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "apiBase", "https://a.example/v1", "hostname", "b.example",
+                "proxyUrl", "https://c.example"));
+
+        verify(allowlist).requireAllowed(anyMap(), eq("https://a.example/v1"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(anyMap(), eq("b.example"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(anyMap(), eq("https://c.example"), eq("LLM provider 'openai'"));
+    }
+
+    @Test
     @DisplayName("a builder whose default an editor can steer (a region) is checked against that default")
     void steerableDefaultEndpointIsChecked() throws Exception {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
@@ -165,6 +176,41 @@ class ChatModelRegistryAllowedHostsTest {
 
         assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
                 () -> regional.getOrCreate("regional", Map.of("apiKey", "${vault:k}", "region", "eu")));
+        verify(secretResolver, never()).resolveSecrets(any());
+    }
+
+    @Test
+    @DisplayName("an endpoint key the builder does not read does not stand in for the default it does use")
+    void unusedEndpointKeyDoesNotSkipTheDefault() throws Exception {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        builders.put("regional", () -> new ILanguageModelBuilder() {
+            @Override
+            public ChatModel build(Map<String, String> parameters) {
+                return new ChatModel() {
+                    @Override
+                    public ChatResponse doChat(ChatRequest chatRequest) {
+                        return ChatResponse.builder().aiMessage(AiMessage.from("ok")).build();
+                    }
+                };
+            }
+
+            @Override
+            public String defaultEndpoint(Map<String, String> parameters) {
+                // Like an OpenAI-compatible preset: reads baseUrl only, ignores "endpoint".
+                return parameters.containsKey("baseUrl") ? null : "https://" + parameters.getOrDefault("region", "us") + ".vendor.example/v1";
+            }
+        });
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var regional = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, allowlist);
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist).requireAllowed(anyMap(),
+                eq("https://eu.vendor.example/v1"), anyString());
+
+        assertThrows(VaultHostAllowlist.HostNotAllowedException.class, () -> regional.getOrCreate("regional",
+                Map.of("apiKey", "${vault:k}", "endpoint", "https://us.vendor.example/v1", "region", "eu")));
+        verify(allowlist).requireAllowed(anyMap(), eq("https://us.vendor.example/v1"), anyString());
         verify(secretResolver, never()).resolveSecrets(any());
     }
 }

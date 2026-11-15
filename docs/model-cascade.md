@@ -64,11 +64,12 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `enabled` | boolean | `false` | Master toggle for cascading |
 | `strategy` | string | `"cascade"` | Execution strategy. Only `cascade` (sequential) is implemented; `parallel` and any unknown value warn at deploy time and run sequentially. |
 | `evaluationStrategy` | string | `"structured_output"` | How confidence is evaluated (see below) |
-| `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
+| `enableInAgentMode` | boolean | `true` | Whether the cascade runs when the task has tools — its own or its workflow's `httpcalls` / `mcpcalls` tools (see [Agent Mode](#agent-mode)) |
 | `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...}, "inputPricePer1M": 0.15, "outputPricePer1M": 0.6 }` (prices optional; they make the judge's spend count toward `maxCostPerRun` and the reported cost; negative values fail deployment). Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
+| `acceptanceCriterion` | string | — | One sentence telling the judge what an acceptable answer must do, e.g. `"The answer gives concrete steps and does not tell the user to contact support"`. Only the judge reads it: without a `judgeModel` it has no effect, and deployment logs a warning. See [`judge_model`](#judge_model). |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
 | `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each **buffered** step's timeout by the remaining budget — a step streamed live is exempt (see [Streaming the Final Step](#streaming-the-final-step)). |
-| `maxCostPerRun` | double | — | Dollar ceiling for a single run: the steps' token cost (per-step pricing) **plus** the judge model's token cost (`judgeModel` pricing) **plus** the tracked cost of the tools agent-mode steps ran. When reached, escalation stops and the best response so far is returned. |
+| `maxCostPerRun` | double | — | Dollar ceiling for a single run: the steps' token cost (per-step pricing, completed by the [price catalog](model-pricing.md); a step may also carry a `pricing` object for cache and long-context prices) **plus** the judge model's token cost (`judgeModel` pricing) **plus** the tracked cost of the tools agent-mode steps ran. When reached, escalation stops and the best response so far is returned. |
 | `carryToolResultsOnEscalation` | boolean | `true` | Agent mode: when a step that already executed tools escalates, the next step starts from that step's tool calls and results instead of re-running the tool loop from the conversation alone (which executed every side-effecting tool again). Set `false` if a cross-provider escalation rejects the earlier provider's tool-call transcript. |
 | `inputPricePer1M` / `outputPricePer1M` | double | — | Cascade-level default token pricing (steps may override). Used for cost reporting and the cost ceiling. |
 | `returnBestAcrossSteps` | boolean | `false` | When true, if an earlier (escalated) step scored strictly higher than the finally-accepted step, the earlier step's response is returned. |
@@ -83,6 +84,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
+| `pricing` | object | from the catalog | Cache and long-context prices for this step's model — the same object as the task's [`pricing`](model-pricing.md#the-pricing-object-on-a-task-or-cascade-step). |
 | `maxFormatRetries` | int | task `responseValidation.maxRetries` | Same-model corrective re-asks this step gets before the cascade escalates (`0..3`). `0` for an expensive last-resort model. See [Format recovery and escalation](#format-recovery-and-escalation). |
 
 > **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
@@ -121,11 +123,16 @@ Analyzes the response text for uncertainty signals. Phrases and thresholds are *
 
 ### `judge_model`
 
-A separate (typically cheap) model rates the response's confidence. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
+A separate (typically cheap) model rates the probability that the step's answer **fully and correctly addresses the user's request**. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
+
+The judge sees the request as well as the answer: the text of the latest user message the step's model was sent (8,000 characters at most: a long single text keeps its end, and when attachments follow the typed question the question is kept whole and the head of the attached text fills the rest), so a fluent answer to the wrong question is not graded as a good one. An image-only message has no text, and the judge then rates the answer on its own. `acceptanceCriterion` adds a condition of your own to the grade:
 
 ```json
-"judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } }
+"judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } },
+"acceptanceCriterion": "The answer gives concrete steps and does not tell the user to contact support"
 ```
+
+The request and the answer are sent to the judge as JSON data, and it is told never to follow instructions inside them; the criterion goes into its instructions. That keeps the text being graded from posing as grading instructions, but it does not make the grade tamper-proof: a crafted request or answer can still sway a model. Treat the cascade as a cost and quality trade-off, not as a security or review boundary. The grade also judges relevance and completeness, not facts. Tune `confidenceThreshold` for the judge model you use, and tune it again when you change that model: different models score on different scales.
 
 ### `none`
 
@@ -178,8 +185,9 @@ Three SSE event types provide real-time visibility, emitted through `Conversatio
 |---|---|
 | `cascade_step_start` | `stepIndex`, `modelType`, `modelName`, `totalSteps` |
 | `cascade_escalation` | `fromStep`, `toStep`, `confidence`, `threshold`, `reason`, `durationMs` |
+| `llm_retry` | `reason`, `attempt` (sent before a same-model re-ask, see [Format recovery and escalation](#format-recovery-and-escalation)) |
 
-`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`. A third event, `llm_retry` (`reason`, `attempt`), is sent before a same-model re-ask (see [Format recovery and escalation](#format-recovery-and-escalation)).
+`reason` on `cascade_escalation` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`, `circuit_open`.
 
 ## Streaming the Final Step
 
@@ -191,7 +199,7 @@ When streaming (SSE), a **guaranteed-accept step** is streamed **live** token-by
 
 ### Trace
 
-The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
+The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`, or `circuit_open` for a step skipped by the circuit breaker). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
 
 ### Response metadata
 
@@ -215,7 +223,7 @@ trace of a clamped step carries `modelTimeoutClampedMs`.
 
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`, `cost` or `spend`; `spend` means the conversation or tenant budget refused an escalation), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 
@@ -231,9 +239,16 @@ When the audit collector is active, the cascade writes:
 
 ## Agent Mode
 
-When `enableInAgentMode` is `true` (default), the cascade also works when tools (built-in, MCP, HTTP calls, A2A) are configured — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
+When `enableInAgentMode` is `true` (default), the cascade also works when the task has tools — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
 
-**Escalation does not replay tools.** When a step that ran tools escalates, the next step receives those tool calls and their results (`carryToolResultsOnEscalation`, default `true`) and continues from them, so a tool that already ran is not executed again just because a stronger model took over. The returned tool trace covers the calls of every step that *returned*, not only the winning step's, and a tool-approval pause raised by a later step carries those earlier steps' calls in its trace too. **The same holds for a step that times out or fails.** Its answer is lost, but the tools it had already completed are not: the tool loop records each call together with its result as the result arrives, and when the step times out or throws, the next step receives those completed calls (after anything that step was itself handed) and does not run them again. The step's trace entry records how many messages it contributed as `completedToolMessages`; its tool **cost** is counted toward `maxCostPerRun` as before. Its tool **trace** entries are not kept: the returned trace does not list the calls of a timed-out or failed step, even though the next step received them. For an audit of what ran, read `completedToolMessages` on that step's cascade trace entry alongside the returned tool trace. Only complete pairs are carried — if a model asked for two tools and the step died after the first, the next step sees the first call and its result, never an unanswered call. What is still *not* carried: a tool that was still **executing** when the step was cancelled. Its outcome is unknown, so the next step may run it again. A step that failed before any tool ran carries nothing, and a tool-approval pause is not a failure — it pauses the turn as described in [HITL](hitl.md).
+"Has tools" means the same tools the task gets without a cascade, decided once per turn from the tool assembly the loop runs on: the task's own `tools`, built-ins (`enableBuiltInTools`) and `a2aAgents`, **and** the tools the workflow contributes — its `httpcalls` and `mcpcalls` steps (unless `enableHttpCallTools` / `enableMcpCallTools` is `false`) — and the attachment-reading tool on a turn that offers it. An agent whose only tools are its workflow's (for example one built by `setup_agent` with `mcpServerUrls` and built-in tooling off) therefore runs the tool loop in every cascade step, answers in one chunk when streaming, and uses `judge_model` / `heuristic` instead of `structured_output`. The reply tool of `answerMode: "tool"` is not counted: such a task always runs the tool loop, whatever `enableInAgentMode` says.
+
+**Escalation does not replay tools.**
+
+- **Carried:** when a step that ran tools escalates, the next step receives those tool calls and their results (`carryToolResultsOnEscalation`, default `true`) and continues from them, so a tool that already ran is not executed again just because a stronger model took over. The returned tool trace covers the calls of every step that *returned*, not only the winning step's, and a tool-approval pause raised by a later step carries those earlier steps' calls in its trace too.
+- **Timed-out or failed steps:** the same holds. Its answer is lost, but the tools it had already completed are not: the tool loop records each call together with its result as the result arrives, and when the step times out or throws, the next step receives those completed calls (after anything that step was itself handed) and does not run them again. The step's trace entry records how many messages it contributed as `completedToolMessages`; its tool **cost** is counted toward `maxCostPerRun` as before. Its tool **trace** entries are not kept: the returned trace does not list the calls of a timed-out or failed step, even though the next step received them. For an audit of what ran, read `completedToolMessages` on that step's cascade trace entry alongside the returned tool trace.
+- **Complete pairs only:** if a model asked for two tools and the step died after the first, the next step sees the first call and its result, never an unanswered call.
+- **Not carried:** a tool that was still **executing** when the step was cancelled. Its outcome is unknown, so the next step may run it again. A step that failed before any tool ran carries nothing, and a tool-approval pause is not a failure — it pauses the turn as described in [HITL](hitl.md).
 
 **Across providers.** A carried call always has an id — calls from bindings that pass a null id through (Ollama, Gemini) get a synthetic one, paired with its result, because OpenAI and Anthropic reject a tool call without an id. A provider can still refuse another provider's transcript (a Gemini 3 model expects thought signatures other providers never produce, and gateways have their own rules). When a step that was handed a carried exchange has its **first** model request rejected as a bad request (HTTP 400/422, langchain4j `InvalidRequestException`), the cascade retries that step **once from the conversation alone** — the pre-carry behaviour, so its tools may run again — logs a WARN, records `carriedToolExchangeRejected` on the step's trace entry and counts `eddi.llm.cascade.step.errors{type="carried_exchange_rejected"}`. Nothing else triggers that retry: not a failure after the step's first request was answered (its tools may already have run, and a retry could repeat their side effects), not an authentication failure, an unknown model or a content filter (a retry cannot fix those and would hide them), and not a timeout or a transient (429/5xx) failure.
 
@@ -243,21 +258,16 @@ When `enableInAgentMode` is `true` (default), the cascade also works when tools 
 
 **Cancellation:** when a step times out, the orchestrator checks for interruption between tool-loop iterations and before each tool, so it stops launching further side-effectful tools. A tool already in flight when the timeout fires may still complete — keep cascade-in-agent-mode tools idempotent where possible.
 
-When `enableInAgentMode` is `false`, cascading is skipped in agent mode and the standard single-model path is used.
+When `enableInAgentMode` is `false`, cascading is skipped for a task that has tools in the sense above — workflow `httpcalls` / `mcpcalls` tools included — and the standard single-model path (with its tool loop) is used.
 
 ## Configure-time Validation
 
 Cascade configs are validated at deploy (`LlmTask.configure`), in two tiers so an upgrade never stops a previously-loading agent from deploying:
 
-- **Hard error (deployment fails)** — only the **new** numeric fields, since no stored config predating this release can contain them: non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative per-step / cascade `inputPricePer1M` / `outputPricePer1M`.
-- **Warning (logged, deployment proceeds)** — conditions older releases tolerated at load and that still fail/degrade at runtime exactly as before: empty steps, unknown `strategy`, unknown `evaluationStrategy`, `judge_model` without a `judgeModel`, `confidenceThreshold` outside `[0.0, 1.0]`, a non-last step with a null threshold (dead-step trap), non-positive `timeoutMs`, a cross-provider step/judge missing its own `apiKey`, and `convertToObject: true` with `structured_output` (auto-downgraded at runtime).
+- **Hard error (deployment fails)** — only the numeric budget and pricing fields: non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative per-step / cascade `inputPricePer1M` / `outputPricePer1M`.
+- **Warning (logged, deployment proceeds)** — everything else; these conditions still fail or degrade at runtime: empty steps, unknown `strategy`, unknown `evaluationStrategy`, `judge_model` without a `judgeModel`, `confidenceThreshold` outside `[0.0, 1.0]`, a non-last step with a null threshold (dead-step trap), non-positive `timeoutMs`, a cross-provider step/judge missing its own `apiKey`, and `convertToObject: true` with `structured_output` (auto-downgraded at runtime). `maxFormatRetries` is not validated; it is clamped to `0..3`.
 
-## Backward Compatibility
-
-- Configs without `modelCascade` work exactly as before.
-- `enabled: false` (default) keeps standard execution.
-- All new config fields are optional with today's behavior as defaults.
-- The cascade lives entirely within `LlmTask`; `StreamingResponseHandler`'s cascade methods are `default`, so other implementers are unaffected.
+Configs without `modelCascade`, or with `enabled: false` (the default), use standard single-model execution. Every cascade field is optional.
 
 ## Example: Cost Optimization
 
@@ -286,7 +296,7 @@ A 3-tier cascade for a customer support agent, with pricing so savings are measu
       },
       {
         "type": "anthropic",
-        "parameters": { "modelName": "claude-sonnet-4-20250514" },
+        "parameters": { "modelName": "claude-sonnet-4-6", "apiKey": "${vault:anthropic-key}" },
         "confidenceThreshold": null,
         "timeoutMs": 30000,
         "inputPricePer1M": 3.00,

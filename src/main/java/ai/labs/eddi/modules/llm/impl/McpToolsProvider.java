@@ -13,12 +13,14 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.spi.ProviderFailure;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
+import ai.labs.eddi.modules.llm.tools.spi.ToolGroup;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -78,9 +80,30 @@ class McpToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         var resolvers = new HashMap<String, ToolRequestResolver>();
-        var result = discover(ctx.memory(), resolvers);
+        var groups = new HashMap<String, ToolGroup>();
+        var result = discover(ctx.memory(), resolvers, groups);
         return new ToolContribution(result.toolSpecs(), result.executors(), Map.of(), Map.of(),
-                asProviderFailures(result.failures()), Map.of(), resolvers);
+                asProviderFailures(result.failures()), Map.of(), resolvers, groups);
+    }
+
+    /**
+     * The group id of one MCP server, for LAZY {@code discover_tools}: its
+     * configured {@code name}, else the host of its URL — never the whole URL,
+     * which the model would be shown and which may carry credentials.
+     */
+    static String groupId(McpCallsConfiguration config) {
+        if (config.getName() != null && !config.getName().isBlank()) {
+            return config.getName();
+        }
+        try {
+            String host = URI.create(String.valueOf(config.getMcpServerUrl())).getHost();
+            if (host != null) {
+                return host;
+            }
+        } catch (IllegalArgumentException e) {
+            LOGGER.debugf("mcpServerUrl is not a URI, grouping its tools as 'mcp': %s", e.getMessage());
+        }
+        return "mcp";
     }
 
     /**
@@ -128,6 +151,16 @@ class McpToolsProvider implements ToolSourceProvider {
      * has any use for a resolver.
      */
     McpToolProviderManager.McpToolsResult discover(IConversationMemory memory, Map<String, ToolRequestResolver> resolversOut) {
+        return discover(memory, resolversOut, new HashMap<>());
+    }
+
+    /**
+     * As {@link #discover(IConversationMemory, Map)}, additionally recording in
+     * {@code groupsOut} the server each surviving tool comes from — its group for
+     * LAZY {@code discover_tools}.
+     */
+    McpToolProviderManager.McpToolsResult discover(IConversationMemory memory, Map<String, ToolRequestResolver> resolversOut,
+                                                   Map<String, ToolGroup> groupsOut) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         // Accumulated across servers so a misconfigured or unreachable one has a
@@ -150,6 +183,7 @@ class McpToolsProvider implements ToolSourceProvider {
                 serverConfig.setTransport(mcpCallsConfig.getTransport());
                 serverConfig.setApiKey(mcpCallsConfig.getApiKey());
                 serverConfig.setTimeoutMs(mcpCallsConfig.getTimeoutMs());
+                var group = new ToolGroup(groupId(mcpCallsConfig), null);
 
                 // Discover tools from this MCP server
                 McpToolProviderManager.McpToolsResult result = mcpToolProviderManager.discoverTools(List.of(serverConfig));
@@ -191,6 +225,7 @@ class McpToolsProvider implements ToolSourceProvider {
                     // compare against.
                     resolversOut.put(name, RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), name,
                             mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
+                    groupsOut.put(name, group);
                 }
 
                 // Resource bridge — explicit opt-in per config, and deliberately NOT
@@ -212,6 +247,7 @@ class McpToolsProvider implements ToolSourceProvider {
                             executors.put(spec.name(), executor);
                             resolversOut.put(spec.name(), RemoteToolRequestResolvers.forMcp(mcpCallsConfig.getMcpServerUrl(), spec.name(),
                                     mcpCallsConfig.getApiKey() != null && !mcpCallsConfig.getApiKey().isBlank()));
+                            groupsOut.put(spec.name(), group);
                         }
                     } catch (IllegalArgumentException e) {
                         // Same static-configuration rejection discoverTools reports for

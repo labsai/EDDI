@@ -17,6 +17,26 @@
   --editor-template-variable-light: #9c6b10;
 }
 
+/* Which CJK family wins a Han glyph both families cover is decided by their
+   order in --font-sans, and every family a session has loaded stays installed.
+   Put the one for the language on screen first (config.ts sets <html lang> to
+   the resolved language), so ja -> zh does not keep Japanese forms. Traditional
+   Chinese is "zh" with a Hant/TW/HK/MO tag, as scriptFamilyFor reads it. */
+:root:lang(ja) {
+  --font-sans: 'Noto Sans JP Variable', 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
+}
+:root:lang(ko) {
+  --font-sans: 'Noto Sans KR Variable', 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
+}
+:root:lang(zh) {
+  --font-sans: 'Noto Sans SC Variable', 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
+}
+:root:lang(zh-Hant),
+:root:lang(zh-TW),
+:root:lang(zh-HK),
+:root:lang(zh-MO) {
+  --font-sans: 'Noto Sans TC Variable', 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', ui-sans-serif, system-ui, sans-serif;
+}
 /* Base styles */
 @layer base {
   * {

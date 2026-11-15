@@ -189,6 +189,19 @@ class MongoSecretPersistenceTest {
     }
 
     @Test
+    @DisplayName("updateSecretIfPresent — a matched row that nothing changed is still present (a same-value write)")
+    void updateSecretIfPresentMatchedButUnmodified() {
+        // store() reads false as "deleted while rotating" and refuses the rotation, so
+        // a modified count of zero must never be mistaken for a missing row.
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(result.getModifiedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.updateSecretIfPresent(createTestSecret()));
+    }
+
+    @Test
     @DisplayName("updateSecretIfPresent — throws PersistenceException on MongoException")
     void updateSecretIfPresentError() {
         when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));

@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,14 +43,19 @@ import static org.junit.jupiter.api.Assertions.*;
 class KvLeaseManagerTest {
 
     /**
-     * Delivers release notifications to every manager sharing it, like core NATS.
+     * Core NATS between the managers sharing it: broadcasts reach every manager,
+     * addressed notifications only the manager of the node they name.
      */
     static final class Bus implements KvLeaseManager.LeaseNotifier {
         final List<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
+        final Map<String, KvLeaseManager.AddressedListener> nodes = new ConcurrentHashMap<>();
+        final AtomicInteger broadcasts = new AtomicInteger();
+        final Map<String, AtomicInteger> releasesTo = new ConcurrentHashMap<>();
         volatile boolean deliver = true;
 
         @Override
         public void publishReleased(String key) {
+            broadcasts.incrementAndGet();
             if (deliver) {
                 listeners.forEach(l -> l.accept(key));
             }
@@ -59,12 +65,40 @@ class KvLeaseManagerTest {
         public void onReleased(Consumer<String> listener) {
             listeners.add(listener);
         }
+
+        @Override
+        public void publishReleasedTo(String toNode, String key, long deleteRevision) {
+            releasesTo.computeIfAbsent(toNode, n -> new AtomicInteger()).incrementAndGet();
+            KvLeaseManager.AddressedListener listener = nodes.get(toNode);
+            if (deliver && listener != null) {
+                listener.released(key, deleteRevision);
+            }
+        }
+
+        @Override
+        public void publishWaiting(String toNode, String key, String fromNode) {
+            KvLeaseManager.AddressedListener listener = nodes.get(toNode);
+            if (deliver && listener != null) {
+                listener.waiting(key, fromNode);
+            }
+        }
+
+        @Override
+        public void onAddressed(String nodeId, KvLeaseManager.AddressedListener listener) {
+            nodes.put(nodeId, listener);
+        }
+
+        int releasesTo(String node) {
+            AtomicInteger n = releasesTo.get(node);
+            return n == null ? 0 : n.get();
+        }
     }
 
     static final class View implements KvLeaseManager.ClusterView {
         volatile boolean connected = true;
         volatile boolean degraded;
         volatile boolean presenceDown;
+        volatile boolean duplicate;
         final Map<String, String> live = new ConcurrentHashMap<>();
 
         @Override
@@ -83,6 +117,19 @@ class KvLeaseManagerTest {
                 throw new ClusterUnavailableException("presence bucket unreachable");
             }
             return Optional.ofNullable(live.get(nodeId));
+        }
+
+        @Override
+        public boolean isDuplicateNode() {
+            return duplicate;
+        }
+
+        /** Presence has settled this node's id; true unless a test says otherwise. */
+        volatile boolean identityConfirmed = true;
+
+        @Override
+        public boolean isNodeIdentityConfirmed() {
+            return identityConfirmed && !duplicate;
         }
     }
 
@@ -227,17 +274,67 @@ class KvLeaseManagerTest {
     }
 
     @Test
-    @DisplayName("a heartbeat that cannot reach NATS keeps the lease (the DB fence decides)")
-    void heartbeatIoFailureKeepsLease() throws Exception {
+    @DisplayName("a heartbeat that cannot reach NATS keeps the lease only until its validity (ttl - 2 x heartbeat) runs out")
+    void heartbeatIoFailureKeepsLeaseOnlyUntilItsValidityRunsOut() throws Exception {
+        // Rewritten: this test used to assert that an unreachable NATS never cost the
+        // lease ("the DB fence decides"). That let a holder cut off from NATS run on
+        // past the TTL while another node had taken the conversation over (review A1).
         InMemorySharedKv backing = new InMemorySharedKv("LEASES", Duration.ofSeconds(20));
         AtomicBoolean down = new AtomicBoolean();
         ISharedKv flaky = new FlakyKv(backing, down);
         KvLeaseManager a = manager(flaky, "a", "a1");
         LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        AtomicBoolean lostFired = new AtomicBoolean();
+        lease.onLost(() -> lostFired.set(true));
         down.set(true);
         a.heartbeatAll();
-        assertFalse(lease.isLost());
+        assertFalse(lease.isLost(), "one missed renewal is within the margin");
         assertEquals(1, a.heldCount());
+        // test config: ttl 400 ms, heartbeat 100 ms -> validity 200 ms
+        Thread.sleep(250);
+        assertTrue(lease.isLost(), "no renewal acknowledged for ttl - 2 x heartbeat: the lease cannot be trusted any more");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!lostFired.get() && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertTrue(lostFired.get(), "the lost callbacks fire, so the turn is cancelled");
+        assertEquals(0, a.heldCount());
+    }
+
+    @Test
+    @DisplayName("a lease this process is still writing is not deleted as an orphan by another acquire of it")
+    void inFlightWriteIsNotAnOrphan() throws Exception {
+        CountDownLatch written = new CountDownLatch(1);
+        CountDownLatch proceed = new CountDownLatch(1);
+        AtomicBoolean armed = new AtomicBoolean(true);
+        InMemorySharedKv store = new InMemorySharedKv("LEASES", Duration.ofSeconds(20)) {
+            @Override
+            public OptionalLong create(String key, byte[] value) {
+                OptionalLong revision = super.create(key, value);
+                if (armed.compareAndSet(true, false)) {
+                    // the write is in the bucket; its caller has not recorded it yet
+                    written.countDown();
+                    try {
+                        proceed.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return revision;
+            }
+        };
+        KvLeaseManager a = manager(store, "a", "a1");
+        CompletableFuture<Optional<LeaseHandle>> first = CompletableFuture.supplyAsync(() -> a.tryAcquireKey("c.conv1"));
+        assertTrue(written.await(5, TimeUnit.SECONDS));
+        var second = a.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
+        Thread.sleep(300); // the second acquire reads the in-flight lease meanwhile
+        proceed.countDown();
+        LeaseHandle h = first.get(5, TimeUnit.SECONDS).orElseThrow();
+        assertEquals(h.fence(), store.get("c.conv1").map(ISharedKv.Versioned::revision).orElse(-1L),
+                "the first acquire's lease is still the one in the bucket");
+        assertFalse(second.isDone(), "the second acquire waits for it instead of taking the conversation");
+        a.release(h);
+        assertNotNull(second.get(5, TimeUnit.SECONDS));
     }
 
     @Test
@@ -254,6 +351,32 @@ class KvLeaseManagerTest {
     }
 
     @Test
+    @DisplayName("a node flagged as a duplicate id does not sweep its twin's leases, and sweeps once it no longer is")
+    void duplicateNodeSkipsBootSweep() {
+        kv.create("c.twin", "{\"node\":\"a\",\"boot\":\"twin\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        KvLeaseManager a = manager("a", "new");
+        view.duplicate = true;
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isPresent(), "a live twin's lease is not an earlier boot's");
+        view.duplicate = false;
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isEmpty(), "the skipped sweep runs on a later connect");
+    }
+
+    @Test
+    @DisplayName("on a twin's first connect, before presence has settled the id, the sweep leaves the live twin's leases alone")
+    void unconfirmedIdentityDefersBootSweep() {
+        kv.create("c.twin", "{\"node\":\"a\",\"boot\":\"twin\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        KvLeaseManager a = manager("a", "new");
+        view.identityConfirmed = false; // first connect: not yet flagged a duplicate, not yet confirmed
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isPresent(), "an unconfirmed id must not sweep a lease that may be a live twin's");
+        view.identityConfirmed = true; // presence took the id over from a dead predecessor
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isEmpty(), "the deferred sweep runs once presence confirms the id");
+    }
+
+    @Test
     @DisplayName("after releasing to another node's waiter, the holder yields its next acquire for the handoff grace")
     void handoffGraceYieldsToOtherNode() throws Exception {
         config = ClusterConfig.defaults().withMessagingType("nats")
@@ -261,7 +384,7 @@ class KvLeaseManagerTest {
         KvLeaseManager a = manager("a", "a1");
         KvLeaseManager b = manager("b", "b1");
         LeaseHandle first = get(a.acquire("conv1", Duration.ofSeconds(1)));
-        var bWaiting = b.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
+        var bWaiting = b.acquire("conv1", Duration.ofSeconds(15)).toCompletableFuture();
         // wait until b has registered its waiter marker
         long deadline = System.currentTimeMillis() + 2000;
         while (kv.get("w.c.conv1").isEmpty() && System.currentTimeMillis() < deadline) {
@@ -273,7 +396,9 @@ class KvLeaseManagerTest {
         var aAgain = a.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
         bus.deliver = true;
         bus.publishReleased("c.conv1");
-        LeaseHandle bLease = bWaiting.get(3, TimeUnit.SECONDS);
+        // generous: b's poll fallback is the only timing here, and a loaded CI runner
+        // can stall it
+        LeaseHandle bLease = bWaiting.get(10, TimeUnit.SECONDS);
         assertNotNull(bLease);
         assertFalse(aAgain.isDone(), "a must not re-acquire ahead of the waiting node");
         b.release(bLease);
@@ -490,6 +615,12 @@ class KvLeaseManagerTest {
                 pause(millis);
                 return super.delete(key, expectedRevision);
             }
+
+            @Override
+            public OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+                pause(millis);
+                return super.deleteReturningRevision(key, expectedRevision);
+            }
         };
     }
 
@@ -622,6 +753,7 @@ class KvLeaseManagerTest {
         };
         KvLeaseManager a = manager(stalled, "a", "a1");
         get(a.acquire("conv1", Duration.ofSeconds(1)));
+        Thread.sleep(90); // the tick renews leases whose last renewal is 3/4 heartbeat (75 ms) old
         try {
             long start = System.nanoTime();
             a.dispatchHeartbeat();
@@ -729,6 +861,24 @@ class KvLeaseManagerTest {
         }
 
         @Override
+        public OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+            check();
+            return delegate.deleteReturningRevision(key, expectedRevision);
+        }
+
+        @Override
+        public Latest latest(String key) {
+            check();
+            return delegate.latest(key);
+        }
+
+        @Override
+        public Optional<Versioned> getConsistent(String key) {
+            check();
+            return delegate.getConsistent(key);
+        }
+
+        @Override
         public void delete(String key) {
             check();
             delegate.delete(key);
@@ -738,6 +888,12 @@ class KvLeaseManagerTest {
         public List<String> keys() {
             check();
             return delegate.keys();
+        }
+
+        @Override
+        public List<Entry> entries(String prefix, int max) {
+            check();
+            return delegate.entries(prefix, max);
         }
     }
 }

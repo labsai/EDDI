@@ -769,6 +769,8 @@ function coversEveryCallOf(pattern: string, method: string): boolean {
  * of `deployAgent`, `deploy*`) also exempts a write, and cannot be recognised
  * from the config alone — `ToolApprovalGate.addressesOf` matches bare names
  * too, but the name-to-method mapping lives in the fetched spec, not here.
+ * `gateLooksInstalled` therefore refuses any exempt / AUTO_APPROVE entry that is
+ * provably clear of the HTTP write tools (`isProvablyNotAnHttpWrite`), rather than trusting this test.
  *
  * Also out of scope here: a per-LLM-task `toolApprovals` override lives in the
  * llmstore document, not on the agent. The backend default (`strict`,
@@ -782,6 +784,22 @@ function canMatchAWrite(pattern: string): boolean {
     const literal = pattern.slice(0, star);
     return prefix.startsWith(literal) || literal.startsWith(prefix);
   });
+}
+
+/**
+ * Whether `pattern` provably cannot reach one of the operator's HTTP write tools
+ * through a form `canMatchAWrite` does not see. `ToolApprovalGate.addressesOf`
+ * tries three addresses per call: `http.<method>:<path>`, `<source>:<name>` and
+ * the BARE dispatch name — and an HTTP write tool answers to the last two as
+ * well (`http:deployAgent`, `deployAgent`), with a name-to-method mapping that
+ * lives in the fetched spec, not here. So a pattern is accepted only when it
+ * either fixes a read method (`http.get:`, `http.head:`, `http.options:`) or
+ * fixes a non-`http` source literally (`builtin:`, `mcp:`), neither of which an
+ * HTTP tool's addresses can match. A bare name, `http:*` or any unprefixed
+ * wildcard cannot be shown safe and is refused.
+ */
+function isProvablyNotAnHttpWrite(pattern: string): boolean {
+  return /^http\.(?:get|head|options):/.test(pattern) || /^(?!http[.:*])[a-z][a-z0-9_-]*:/i.test(pattern);
 }
 
 export interface GateVerificationResult {
@@ -840,7 +858,10 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   // `http.post:/agentstore/agents` is narrower than `http.post:*` and every bit
   // as effective at un-gating that write.
   const exempt = toolApprovals.exempt ?? [];
-  const overbroadExempt = exempt.find(canMatchAWrite);
+  // Not only "can match a write address": an entry that names a tool by its bare dispatch name matches
+  // at run time too, and the config alone cannot say what that tool does. Only a provably read-only
+  // entry is accepted; anything unprovable is refused, as the safe direction.
+  const overbroadExempt = exempt.find((pattern) => canMatchAWrite(pattern) || !isProvablyNotAnHttpWrite(pattern));
   if (overbroadExempt) {
     return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
   }
@@ -853,7 +874,7 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   // pass verification while that one endpoint auto-executes unreviewed.
   const autoApproveWriteRule = (toolApprovals.rules ?? []).find(
     (rule) =>
-      rule.timeoutPolicy === "AUTO_APPROVE" && canMatchAWrite(rule.match),
+      rule.timeoutPolicy === "AUTO_APPROVE" && (canMatchAWrite(rule.match) || !isProvablyNotAnHttpWrite(rule.match)),
   );
   if (autoApproveWriteRule) {
     return {

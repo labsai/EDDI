@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
@@ -210,7 +211,9 @@ public final class GroupCostLedger {
      * missing/malformed cost data rather than throwing.
      */
     public static boolean enforceCeiling(GroupConversation gc, ProtocolConfig protocol, int phaseIdx, DiscussionPhase phase) {
-        Double ceiling = protocol.maxCostPerDiscussion();
+        // F6: the tighter of the group's own ceiling and its team's budget ceiling.
+        TeamBudgetCeilings.Effective effective = TeamBudgetCeilings.effective(gc, protocol);
+        Double ceiling = effective.ceiling();
         // `<=`, so the ceiling is a budget to spend rather than a value to stop
         // short of — EXCEPT at exactly 0, which a nested child inherits when its
         // parent has already spent its whole budget. Treating that as "one free
@@ -225,16 +228,19 @@ public final class GroupCostLedger {
         // degenerates into "stop everything", i.e. exactly ABORT minus the FAILED
         // state. The overshoot is bounded (one synthesis phase) and deliberate.
         // ABORT gets no exemption: it fails the discussion outright.
-        if (protocol.onCostExceeded() == ProtocolConfig.CostPolicy.SYNTHESIZE_NOW && phase.type() == PhaseType.SYNTHESIS) {
+        if (effective.policy() == ProtocolConfig.CostPolicy.SYNTHESIZE_NOW && phase.type() == PhaseType.SYNTHESIS) {
             return false;
         }
-        gc.setCostCeilingOutcome(protocol.onCostExceeded());
+        gc.setCostCeilingOutcome(effective.policy());
         // Locale.ROOT, not the default: this string goes into an audit transcript and
         // (via the operator-facing log) into incident triage. A default-locale format
         // renders "$1,50" on a German JVM and "$1.50" on a US one for the same spend,
         // which makes the same message unparseable and un-greppable across a fleet.
-        String message = String.format(Locale.ROOT, "Cost ceiling reached: $%.2f of $%.2f — %s",
-                gc.getTotalCost(), ceiling, protocol.onCostExceeded());
+        String message = effective.teamBound()
+                ? String.format(Locale.ROOT, "%s budget reached (%s): this run has used $%.2f of the $%.2f its team could absorb — %s",
+                        "TENANT".equals(effective.limitedBy()) ? "Tenant" : "Team", effective.month(), gc.getTotalCost(), ceiling, effective.policy())
+                : String.format(Locale.ROOT, "Cost ceiling reached: $%.2f of $%.2f — %s",
+                        gc.getTotalCost(), ceiling, effective.policy());
         gc.getTranscript().add(new TranscriptEntry(
                 null, "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.SKIPPED, Instant.now(), message, null));
@@ -253,7 +259,7 @@ public final class GroupCostLedger {
      * is not the same event as a phase running out of budget.
      */
     public static boolean wouldExceedCeiling(GroupConversation gc, ProtocolConfig protocol) {
-        return exceedsCeiling(gc, protocol != null ? protocol.maxCostPerDiscussion() : null);
+        return exceedsCeiling(gc, TeamBudgetCeilings.effective(gc, protocol).ceiling());
     }
 
     /**

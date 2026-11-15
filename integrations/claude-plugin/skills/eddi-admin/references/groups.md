@@ -41,6 +41,19 @@ A team keeps a backlog that outlives any one discussion; scheduled cadences pull
 into task-force runs. `add_team_task` (higher priority runs earlier), `list_team_backlog`
 for status, assignee and verification outcome.
 
+Other teams and agents can hand work over. `list_team_handoffs` shows the intake inbox
+(handoffs under a REVIEW rule wait there) and where each handed-off task came from — the
+place to look when a team "never got" a piece of work. `accept_team_handoff` (optionally
+editing subject, description or priority) and `decline_team_handoff` are decisions
+recorded under the user's name: make them only when the user asks, after they read the
+item. `read_docs("team-handoff")`.
+
+A team can have a monthly budget. `read_team_budget` (cap, spent, remaining, reset,
+whether the team or the tenant limit binds; `historyMonths` for past months) and
+`list_team_budgets` answer "why did the cadence skip" and "why was this discussion
+refused". Only an admin changes a cap: `adjust_team_budget` or `transfer_team_budget`,
+each with a reason. `read_docs("team-budgets")`.
+
 ## Clean up
 
 `close_group_conversation` ends a discussion and removes agents created only for it;

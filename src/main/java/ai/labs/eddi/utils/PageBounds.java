@@ -15,14 +15,13 @@ import java.util.Map;
  * The one bound every paginated listing applies to its {@code index} and
  * {@code limit} query parameters.
  * <p>
- * Each list endpoint used to pass {@code limit} to its store as it came, so
- * {@code ?limit=2147483647} returned every descriptor in the deployment in one
- * response (L10 of the 2026-10-15 security review, verified live against
- * {@code /agentstore/agents/descriptors}). A page is a page: a caller that
- * wants more walks {@code index}. The ceiling is {@value #MAX_LIMIT_PROPERTY}
- * (default {@value #DEFAULT_MAX_LIMIT}) and a request above it — or with a
- * negative {@code index} — is refused with 400 rather than silently clamped, so
- * a client that asked for more than it can get learns so instead of mistaking a
+ * A limit is never passed to a store as it came: otherwise
+ * {@code ?limit=2147483647} would return every descriptor in the deployment in
+ * one response. A page is a page: a caller that wants more walks {@code index}.
+ * The ceiling is {@value #MAX_LIMIT_PROPERTY} (default
+ * {@value #DEFAULT_MAX_LIMIT}) and a request above it — or with a negative
+ * {@code index} — is refused with 400 rather than silently clamped, so a client
+ * that asked for more than it can get learns so instead of mistaking a
  * truncated page for the whole.
  * <p>
  * Static on purpose: {@code RestVersionInfo} is built with {@code new} by

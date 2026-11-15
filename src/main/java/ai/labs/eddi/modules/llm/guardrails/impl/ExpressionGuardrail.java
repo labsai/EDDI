@@ -23,8 +23,11 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -105,8 +108,8 @@ public class ExpressionGuardrail implements ContentGuardrail {
     private final ModelOutputParser parser = new ModelOutputParser(new ExactJson(true));
 
     /**
-     * The same reading without duplicate-key detection — what the rest of the task
-     * reads the answer with. See {@link #parseAnswer}.
+     * The reading the rest of the task uses — the default mapper: the last of two
+     * repeated keys wins, numbers are {@code double}s. See {@link #parseAnswer}.
      */
     private final ModelOutputParser lenientParser = new ModelOutputParser(new ExactJson(false));
     /**
@@ -122,7 +125,7 @@ public class ExpressionGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     /** Output only; there is no history to screen. */
@@ -220,12 +223,62 @@ public class ExpressionGuardrail implements ContentGuardrail {
         // and approves the later one — while the task's own conversion, which keeps
         // the last of two repeated keys, takes the earlier object and stores 999.
         // Read the answer the tolerant way too: two readings that disagree are an
-        // ambiguous answer, undecided, never an approval.
+        // ambiguous answer, undecided, never an approval. The tolerant reading is the
+        // downstream one in its number handling as well: with exact numbers on both
+        // sides, a value only exact parsing refuses (1e2147483648, Infinity to a
+        // double) made both readings skip the same earlier object and agree on a
+        // later one, while the task's conversion took the earlier.
         ModelOutputParser.JsonOutcome lenient = lenientParser.parse(text, true);
-        if (lenient.kind() != ModelOutputParser.Kind.VALID || !outcome.value().equals(lenient.value())) {
+        if (lenient.kind() != ModelOutputParser.Kind.VALID || !sameJson(outcome.value(), lenient.value())) {
             throw new GuardrailUndecidedException(REASON_UNPARSEABLE, 0.0);
         }
         return outcome.value();
+    }
+
+    /**
+     * Whether an exact reading and a {@code double} reading of an answer are the
+     * same JSON value: same structure and keys, integers equal exactly, and each
+     * decimal exactly the value of the {@code double} the downstream reading holds
+     * — which must be finite. A decimal that underflows or loses digits on the way
+     * to a double is not the value the task uses, so the answer is ambiguous.
+     */
+    static boolean sameJson(Object exact, Object downstream) {
+        if (exact instanceof Map<?, ?> a && downstream instanceof Map<?, ?> b) {
+            if (!a.keySet().equals(b.keySet())) {
+                return false;
+            }
+            for (Map.Entry<?, ?> entry : a.entrySet()) {
+                if (!sameJson(entry.getValue(), b.get(entry.getKey()))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (exact instanceof List<?> a && downstream instanceof List<?> b) {
+            if (a.size() != b.size()) {
+                return false;
+            }
+            for (int i = 0; i < a.size(); i++) {
+                if (!sameJson(a.get(i), b.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (exact instanceof BigInteger a && downstream instanceof Number b && !(b instanceof Double || b instanceof Float)) {
+            return a.equals(new BigInteger(b.toString()));
+        }
+        if (exact instanceof BigDecimal a && (downstream instanceof Double || downstream instanceof Float)) {
+            double d = ((Number) downstream).doubleValue();
+            // Against the double's own decimal value, not a.doubleValue(): 1e-400 and 0.0
+            // are the same double, but the guardrail would judge a positive number the
+            // task then reads as zero.
+            return Double.isFinite(d) && a.compareTo(BigDecimal.valueOf(d)) == 0;
+        }
+        if (exact instanceof Number || downstream instanceof Number) {
+            return false;
+        }
+        return Objects.equals(exact, downstream);
     }
 
     /**
@@ -238,15 +291,15 @@ public class ExpressionGuardrail implements ContentGuardrail {
         private static final ObjectMapper STRICT = JsonMapper.builder()
                 .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
                 .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).build();
-        private static final ObjectMapper LENIENT = JsonMapper.builder()
-                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, DeserializationFeature.USE_BIG_INTEGER_FOR_INTS).build();
+        private static final ObjectMapper LENIENT = JsonMapper.builder().build();
 
         private final ObjectMapper mapper;
 
         /**
          * @param strictDuplicates
-         *            whether a repeated key is an error (the guardrail's own reading)
-         *            or the last one wins (the reading the rest of the task uses)
+         *            whether this is the guardrail's own reading (exact numbers, a
+         *            repeated key is an error) or the reading the rest of the task uses
+         *            (the default mapper: doubles, the last repeated key wins)
          */
         ExactJson(boolean strictDuplicates) {
             this.mapper = strictDuplicates ? STRICT : LENIENT;

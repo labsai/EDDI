@@ -474,7 +474,7 @@ void redoLastStep();
 void executeLifecycle(
     IConversationMemory conversationMemory,
     List<String> lifecycleTaskTypes
-) throws LifecycleException
+) throws LifecycleException, ConversationStopException, ConversationPauseException
 ```
 
 **How It Works**:
@@ -539,7 +539,7 @@ Two services modify the system prompt before it is sent to the LLM. Both are con
 
 **Execution order**: Identity masking → Counterweight → LLM call.
 
-Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight-cautious`, `counterweight-strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
+Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight_cautious`, `counterweight_strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
 
 See [LLM Integration — Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking) for configuration details.
 
@@ -729,6 +729,16 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
 6. **Editing, not echoing**: a stored configuration holds credential *references* (`${vault:…}`), and an API call resolves those before it sends — so an edit that echoed a document back would write the plaintext secret, and is refused. The operator edits LLM, HTTP-call and MCP-call configurations with `PATCH` (RFC 6902) and sends only what changes; see [Editing a configuration that holds a reference](secrets-vault.md#editing-a-configuration-that-holds-a-reference-patch-not-echo). The Manager refuses any LLM-config patch that touches a task's `toolApprovals`, the same way it refuses a `PUT` that carries one.
 
+### Building an operator agent for your own API
+
+An application can build an operator for *its* API the same way, with EDDI's converter rather than a script of its own:
+
+- **Per-user token.** With EDDI's OIDC off, pass `"apiAuth": "Bearer ${context:userToken}"`; each turn sends the user's token as secret context and it is resolved only into that header, only towards the generated calls' own host, failing closed when absent (see [Per-turn credentials from secret context](httpcalls.md#per-turn-credentials-from-secret-context)).
+- **Generate only.** `"dryRun": true` on `setup-api` returns the apicalls configurations, the LLM configuration with its tool list, the workflow, the agent with its gate, `unusableEndpoints` and `unmatchedEndpoints`, and writes nothing (`200`, action `api_agent_dry_run`; a plaintext `apiKey`/`apiAuth` is shown as a placeholder, never echoed). It cannot read the vault: whether a `vaultKeyName` exists or holds the same value is decided when the agent is created, and when that name comes with a plaintext `apiKey` the destination rule is listed under `resources.warnings` rather than enforced, because an existing key would be reused as stored.
+- **Re-sync.** `POST /administration/agents/{agentId}/setup-api/sync` with the regenerated spec regenerates only the apicalls configurations setup stamped with `openApiOrigin`, rewrites the LLM task's `tools` list and the generated API summary at the end of its prompt, keeps everything else (prompt, model, `hitlConfig`, `toolQuotas`, `responseSchema`, hand-written tools), and saves the agent as a **compatible** version, so running conversations move to it once deployed. It reports added, changed and removed tools; a removed tool still named by `toolQuotas`, a `toolApprovals` exemption or a tool-result guardrail exemption is refused with `400`, each reference listed, nothing written. The request's `requireApproval` patterns are added to the gate, never removed, and its exemptions are ignored. An agent created before the marker existed is refused with how to add `"openApiOrigin": {"group": "<tag>", "authHeader": "Authorization"}` to its generated configurations. `"dryRun": true` reports the diff without writing.
+
+Neither is part of the Platform Operator's own toolset: `dryRun` is hidden from the OpenAPI schema its tools are generated from, and the sync endpoint is in no operator scope (asserted in `tool-scopes.test.ts`).
+
 ### Keeping It Up to Date
 
 Everything provisioning bakes into the operator — its instructions, its endpoint allow-list and its approval gate — is a snapshot. Upgrading EDDI upgrades the Manager, not an operator that is already running, so an operator activated on an older release keeps its older instructions and tools until it is upgraded.
@@ -796,7 +806,7 @@ graph TD
 
 | Level          | Purpose                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Agent**      | List of workflow URIs + channels. The top-level container.                                                                      |
+| **Agent**      | List of workflow URIs (plus channel integrations, configured separately). The top-level container.                                                                      |
 | **Workflow**   | Ordered list of workflow extensions — each extension = one lifecycle task type. **Order matters**: tasks execute sequentially. |
 | **Extension**  | The actual configuration that drives each `ILifecycleTask`. Referenced by URI from the workflow.                                |
 | **Descriptor** | Metadata (name, description, timestamps) for any resource. Not functional, purely for UI/management.                           |
@@ -973,7 +983,7 @@ Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent
 | Layer | Component | What It Blocks |
 |-------|-----------|----------------|
 | **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
-| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and strips credentials (fixed names and any `${caller:...}`-derived header) on a cross-origin hop. Maximum 5 hops |
+| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and on a cross-origin hop keeps only an allow-list of headers (`Accept`, `Accept-Encoding`, `Accept-Language`, `User-Agent`, `Content-Type`, `Content-Language`, `Cache-Control`, `Pragma`) and strips every other one, including the trace context. Maximum 5 hops |
 | **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
 
 **Usage pattern:**
@@ -1017,12 +1027,13 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 
 **Key lifecycle:**
 
-1. **Key generation**: `AgentSigningService.generateKeyPair(tenantId, agentId)` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault. **This is a service-level API with no REST endpoint** — keys are provisioned as part of agent creation, not by an operator call
-2. **Key rotation**: `AgentPublicKey` records support versioned keys with `validFromMs`/`validUntilMs` windows. Old and new keys overlap during rotation. Private keys use versioned vault paths (`agent-signing-key:{agentId}:v{version}`)
-3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
-4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
-5. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (5min default) and clock-skew (30s default) checks. Duplicate nonces are rejected
-6. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key. This is **detect-and-log, not a gate**: a failed or unsigned prior entry is recorded at ERROR (for security monitoring) but is **not currently dropped or blocked** — the transcript is still passed to the receiving agent. Hard enforcement (excluding unverified entries from the context the receiver sees) is a planned follow-up; do not rely on this flag to keep tampered peer content out of an agent's context today
+1. **Key material**: an agent's Ed25519 private key is read from the Secrets Vault under `agent-signing-key:{agentId}` (Base64 PKCS#8), and the matching public key (Base64 X.509) sits in `AgentConfiguration.identity.publicKey`. Agent create and update refuse `signInterAgentMessages` or `requirePeerVerification` on an agent with no public key. **Nothing in EDDI provisions or rotates these keys today**: no REST endpoint, MCP tool or agent-creation step generates one, and the secrets API (`/secretstore/secrets/{tenantId}/{keyName}`) accepts only `[a-zA-Z0-9._-]` key names, so it cannot write an `agent-signing-key:` entry either. An agent whose key is not in the vault sends its messages unsigned (a WARN per message) and writes its audit entries without an agent signature
+2. **Key rotation**: `AgentPublicKey` records (`identity.keys[]`) support versioned keys with `validFromMs`/`validUntilMs` windows, so old and new keys can overlap. Inter-agent signing uses the highest declared version and reads its private key from `agent-signing-key:{agentId}:v{version}`; audit-entry signing always uses the unversioned key
+3. **Caching**: each node keeps the vault's answer for an agent's key for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute. Permanently deleting an agent deletes its keys from the vault and drops them from that node's cache at once
+4. **Signing**: When `security.signInterAgentMessages=true`, the group engine (`GroupSigningGuard`, called by `GroupConversationService`) creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
+5. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
+6. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (`eddi.a2a.signing.nonce.max-age-ms`, 5 min default) and clock-skew (`eddi.a2a.signing.nonce.clock-skew-ms`, 30 s default) checks. A duplicate, stale or skewed nonce is rejected, and the entry is then stored unsigned
+7. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key. This is **detect-and-log, not a gate**: a failed or unsigned prior entry is recorded at ERROR (for security monitoring) but is **not currently dropped or blocked** — the transcript is still passed to the receiving agent. Hard enforcement (excluding unverified entries from the context the receiver sees) is a planned follow-up; do not rely on this flag to keep tampered peer content out of an agent's context today
 
 **What is NOT covered:** MCP invocation signing is not yet implemented — the `signMcpInvocations` config field has been removed until the feature is built.
 
@@ -1032,17 +1043,18 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Dev mode** | No | Allowed — info log on startup |
 | **Dev mode** | Yes | Full auth with configured Keycloak |
 | **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
-| **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
+| **Production** | No + explicit opt-out | Starts, but always logs an ERROR at startup; a periodic WARN reminder only when `eddi.security.unauthenticated-reminder-interval` is set (off by default) |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
-The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The hourly WARN reminder ensures operators remain aware.
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The startup ERROR keeps operators aware; a periodic WARN reminder is opt-in via `eddi.security.unauthenticated-reminder-interval`.
 
 ### CI Security Scanning
 
 | Tool | Trigger | What It Checks |
 |------|---------|----------------|
-| **CodeQL** | Every PR + weekly schedule | Java semantic analysis (injection, SSRF, crypto misuse) |
-| **Trivy** | Docker image build | CVEs in OS packages and Java dependencies |
+| **CodeQL** | Every PR + weekly schedule | Semantic analysis of the Java backend and, in a separate job, the UIs (injection, SSRF, crypto misuse) |
+| **Trivy** | Every code PR (filesystem scan) + Docker image build (image scan) | CVEs in OS packages and Java dependencies; both scans block on fixable CRITICAL/HIGH |
+| **Gitleaks** (`Secret Scanning`) | Every PR | Committed credentials |
 | **Dependency Review** | Every PR | License compliance and known vulnerabilities in new dependencies |
 | **Jackson 3 Ban** | Every build (Maven Enforcer) | Prevents accidental Jackson 3.x introduction (incompatible with Quarkus) |
 

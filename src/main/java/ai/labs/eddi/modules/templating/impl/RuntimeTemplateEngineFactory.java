@@ -74,8 +74,8 @@ public final class RuntimeTemplateEngineFactory {
      * Namespaces an agent author may use in a runtime template.
      * <ul>
      * <li>{@code vault}, {@code eddivault}, {@code connection}, {@code vars},
-     * {@code caller} — EDDI's pass-through references (they render themselves
-     * verbatim, see {@link ReferencePassThroughNamespaceResolver});</li>
+     * {@code caller}, {@code context} — EDDI's pass-through references (they render
+     * themselves verbatim, see {@link ReferencePassThroughNamespaceResolver});</li>
      * <li>{@code uuidUtils}, {@code json}, {@code encoder} — EDDI's own template
      * extensions;</li>
      * <li>{@code str}, {@code time} — Qute's string and date formatting helpers
@@ -86,7 +86,7 @@ public final class RuntimeTemplateEngineFactory {
      * like any other unresolvable expression.
      */
     public static final Set<String> ALLOWED_NAMESPACES = Set.of(
-            "vault", "eddivault", "connection", "vars", CallerNamespaceResolver.NAMESPACE,
+            "vault", "eddivault", "connection", "vars", CallerNamespaceResolver.NAMESPACE, "context",
             "uuidUtils", "json", "encoder",
             "str", "time");
 

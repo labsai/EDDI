@@ -132,7 +132,7 @@ describe("useVaultHealth", () => {
 });
 
 describe("useRotateSecret", () => {
-  it("rotates an existing secret, re-reading its grant first", async () => {
+  it("rotates an existing secret, sending the value only so the stored grant is kept", async () => {
     let body: Record<string, unknown> | null = null;
     server.use(
       http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request, params }) => {
@@ -151,12 +151,8 @@ describe("useRotateSecret", () => {
       });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // From the fresh listing, not from anything the caller passed.
-    expect(body).toEqual({
-      value: "newSecret789",
-      allowedAgents: ["agent1", "agent4"],
-      description: "SendGrid transactional email service key",
-    });
+    // No grant: restating one read earlier would undo a concurrent revocation.
+    expect(body).toEqual({ value: "newSecret789" });
   });
 
   it("refuses to rotate a key that no longer exists rather than re-creating it", async () => {

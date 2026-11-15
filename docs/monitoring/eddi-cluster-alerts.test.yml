@@ -1,0 +1,111 @@
+# Unit tests for eddi-cluster-alerts.yml:
+#   promtool test rules docs/monitoring/eddi-cluster-alerts.test.yml
+# (CI runs it in the "Deployment Manifests" job.) Each case states which alerts
+# must fire and which must stay quiet on a healthy cluster.
+rule_files:
+  - eddi-cluster-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a NATS misconfiguration pages after a minute, a healthy node does not
+    interval: 1m
+    input_series:
+      - series: 'eddi_cluster_nats_misconfigured{job="eddi", instance="a"}'
+        values: '0 1 1 1'
+      - series: 'eddi_cluster_nats_misconfigured{job="eddi", instance="b"}'
+        values: '0 0 0 0'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EddiClusterNatsMisconfigured
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: EddiClusterNatsMisconfigured
+        exp_alerts:
+          - exp_labels: { severity: critical, instance: a }
+            exp_annotations:
+              summary: "EDDI node a cannot authenticate to NATS or complete TLS"
+              description: "The NATS connection fails for a reason retrying cannot heal: rejected credentials, an authorization violation, an untrusted or mismatched server certificate, or client options that could not be built. The node reports not-ready. Its log names the cause at ERROR; check rotated credentials and the CA and host names of the NATS certificate."
+
+  - name: auth errors are reported by cause; ordinary I/O errors are not
+    interval: 1m
+    input_series:
+      - series: 'eddi_cluster_nats_errors_total{job="eddi", instance="a", cause="auth"}'
+        values: '0 0 3 3 3'
+      - series: 'eddi_cluster_nats_errors_total{job="eddi", instance="a", cause="io"}'
+        values: '0 5 10 20 40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: EddiClusterNatsErrors
+        exp_alerts:
+          - exp_labels: { severity: warning, instance: a, cause: auth }
+            exp_annotations:
+              summary: "NATS auth errors on a"
+              description: "The node's NATS client reported auth errors in the last 10 minutes. A permission error means a subject the node needs is not allowed for its NATS user; a slow consumer means NATS dropped messages to this node (events or lease notifications), which it then recovers by resync or polling."
+
+  - name: losing a member warns; a steady cluster does not
+    interval: 1m
+    input_series:
+      - series: 'eddi_cluster_members{job="eddi", instance="a"}'
+        values: '3 3 2 2 2 2 2 2 2'
+      - series: 'eddi_cluster_members{job="eddi", instance="b"}'
+        values: '3 3 2 2 2 2 2 2 2'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EddiClusterMemberLost
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: EddiClusterMemberLost
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "The EDDI cluster has fewer members than 15 minutes ago"
+              description: "A node stopped writing its presence record (crash, eviction, network partition, or a scale-in). Its conversation leases were taken over after their TTL; check EddiClusterLeaseTakeovers and the lost node's last log lines. Expected for a while after an intended scale-in."
+
+  - name: the surge pod of a rolling update is not a lost member
+    interval: 1m
+    input_series:
+      - series: 'eddi_cluster_members{job="eddi", instance="a"}'
+        values: '3 3 3 4 4 4 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EddiClusterMemberLost
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: EddiClusterMemberLost
+        exp_alerts: []
+
+  - name: a full JetStream store and a nearly full dead-letter stream warn
+    interval: 1m
+    input_series:
+      - series: 'gnatsd_varz_jetstream_stats_storage{server_id="s1"}'
+        values: '900x15'
+      - series: 'gnatsd_varz_jetstream_config_max_storage{server_id="s1"}'
+        values: '1000x15'
+      - series: 'gnatsd_varz_jetstream_stats_storage{server_id="s2"}'
+        values: '100x15'
+      - series: 'gnatsd_varz_jetstream_config_max_storage{server_id="s2"}'
+        values: '1000x15'
+      - series: 'jetstream_stream_total_bytes{server_id="s1", account="$G", stream_name="EDDI_DEAD_LETTERS"}'
+        values: '950x15'
+      - series: 'jetstream_stream_limit_bytes{server_id="s1", account="$G", stream_name="EDDI_DEAD_LETTERS"}'
+        values: '1000x15'
+      - series: 'jetstream_stream_total_bytes{server_id="s1", account="$G", stream_name="EDDI_EVENTS"}'
+        values: '990x15'
+      - series: 'jetstream_stream_limit_bytes{server_id="s1", account="$G", stream_name="EDDI_EVENTS"}'
+        values: '1000x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EddiNatsJetStreamStorageHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, server_id: s1 }
+            exp_annotations:
+              summary: "NATS server s1 has used over 80% of its JetStream storage"
+              description: "When JetStream storage is full, lease creates fail and every node runs degraded. Agent exports in the ARCHIVES object store are the usual growth; raise nats.storage.size or lower eddi.cluster.archives.max-bytes."
+      - eval_time: 12m
+        alertname: EddiDeadLetterStreamFull
+        exp_alerts:
+          - exp_labels: { severity: warning, stream_name: EDDI_DEAD_LETTERS }
+            exp_annotations:
+              summary: "Dead-letter stream EDDI_DEAD_LETTERS is over 80% full"
+              description: "When it is full, new dead letters are refused by the stream and fall back to the node-local ring (lost on restart), and audit entries to the JSONL file. Replay or discard dead letters, or raise eddi.coordinator.dead-letter.max-bytes."

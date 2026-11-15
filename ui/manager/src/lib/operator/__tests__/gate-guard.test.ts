@@ -338,3 +338,64 @@ describe("findGateCarryingCalls — PATCH (RFC 6902)", () => {
     ]);
   });
 });
+
+describe("findGateCarryingCalls — toolCallGuardrails (the argument screen before the gate)", () => {
+  const patchCall = (ops: unknown) =>
+    call("g1", {
+      method: "PATCH",
+      uri: "https://eddi.example/llmstore/llms/abc123?version=3",
+      body: JSON.stringify(ops),
+    });
+
+  it("refuses a PUT whose task sets toolCallGuardrails, even to an empty list", () => {
+    // An empty list REPLACES a stored screen: removing it reads like a tidy-up.
+    for (const guardrails of [[], [{ type: "regex-filter", action: "block", tools: ["mcp:*"] }]]) {
+      expect(findGateCarryingCalls([call("c1", { body: llmBody({ toolCallGuardrails: guardrails }) })])).toEqual([
+        { callId: "c1", reason: "carries-guardrails" },
+      ]);
+    }
+  });
+
+  it("refuses a patch naming it in path, from or value — remove included", () => {
+    for (const ops of [
+      [{ op: "remove", path: "/tasks/0/toolCallGuardrails" }],
+      [{ op: "replace", path: "/tasks/0/toolCallGuardrails/0/action", value: "redact" }],
+      [{ op: "replace", path: "/tasks/0", value: { type: "openai", toolCallGuardrails: [] } }],
+      [{ op: "add", path: "/tasks/0/TOOLCALLGUARDRAILS", value: [] }],
+    ]) {
+      expect(findGateCarryingCalls([patchCall(ops)])).toEqual([{ callId: "g1", reason: "carries-guardrails" }]);
+    }
+  });
+
+  it("names the gate first when a write touches both — the more serious finding", () => {
+    expect(
+      findGateCarryingCalls([call("c1", { body: llmBody({ toolApprovals: {}, toolCallGuardrails: [] }) })]),
+    ).toEqual([{ callId: "c1", reason: "carries-gate" }]);
+    expect(
+      findGateCarryingCalls([
+        patchCall([
+          { op: "remove", path: "/tasks/0/toolCallGuardrails" },
+          { op: "remove", path: "/tasks/0/toolApprovals" },
+        ]),
+      ]),
+    ).toEqual([{ callId: "g1", reason: "carries-gate" }]);
+  });
+
+  it("names the guardrails ahead of an unsupported operation in the same patch", () => {
+    expect(
+      findGateCarryingCalls([
+        patchCall([
+          { op: "copy", from: "/tasks/0/parameters", path: "/tasks/1/parameters" },
+          { op: "remove", path: "/tasks/0/toolCallGuardrails" },
+        ]),
+      ]),
+    ).toEqual([{ callId: "g1", reason: "carries-guardrails" }]);
+  });
+
+  it("still allows an LLM edit that does not touch either field", () => {
+    expect(findGateCarryingCalls([call("c1", { body: llmBody({ toolResultGuardrails: [] }) })])).toEqual([]);
+    expect(
+      findGateCarryingCalls([patchCall([{ op: "replace", path: "/tasks/0/parameters/temperature", value: 0.2 }])]),
+    ).toEqual([]);
+  });
+});

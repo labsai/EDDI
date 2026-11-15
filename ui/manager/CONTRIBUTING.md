@@ -43,7 +43,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 | Tool         | Version | Notes                                    |
 | ------------ | ------- | ---------------------------------------- |
-| **Node.js**  | 20+     | LTS recommended                          |
+| **Node.js**  | 22.22.2+, 24.15.0+ or 26.0.0+ | The Maven build pins the exact version (`node.version` in `pom.xml`) |
 | **npm**      | 10+     | Bundled with Node.js                     |
 | **Docker**   | Latest  | For backend services (optional)          |
 
@@ -74,7 +74,7 @@ If the EDDI backend is not available, the Manager automatically starts in **stan
 
 **VS Code** (recommended):
 
-- Install the ESLint and Prettier extensions
+- Install the ESLint extension (Prettier config files exist, but Prettier is not enforced by a script or CI job)
 - The project includes `.editorconfig` for consistent formatting
 
 **WebStorm / IntelliJ IDEA**:
@@ -153,7 +153,7 @@ Two things are deliberately **not** measured, each argued in
 - **static mutants** — module-level constants. Stryker cannot swap one in
   without reloading the module, so each costs a full suite restart; measured,
   they were 14% of the mutants and 98% of the runtime.
-- **`api-client.ts`** — 75 importers, so virtually every component test
+- **`api-client.ts`** — 75 importers when measured (about 150 now), so virtually every component test
   executes it and each of its mutants replays most of the suite.
 
 (Tests themselves — `src/**/__tests__/**` — are excluded for the obvious
@@ -252,7 +252,7 @@ want the real backend.
 ### What to Avoid
 
 - MUI, Redux, or legacy React patterns
-- `moment.js` — use native `Intl` or `date-fns`
+- `moment.js` — use native `Intl` (`date-fns` is not a dependency either)
 - Mixing component exports with utility function exports in the same file
 
 ## Commit Convention
@@ -329,12 +329,13 @@ The Manager's checks run in the EDDI repository's root workflow,
 
 | Job                   | What It Does                                                                 | When |
 | --------------------- | ---------------------------------------------------------------------------- | ---- |
-| **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs and `e2e/`), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
+| **UI Manager Checks** | `npm run audit:prod`, lint (`src/` + `e2e/`, `--max-warnings 0`), `npm run i18n:check`, `tsc -b` (app, node configs, `e2e/` and the `.design-sync/` previews), Vitest with coverage thresholds | Every PR and push that touches `ui/` or `ci.yml` |
 | **UI Manager E2E (MSW)** | The Playwright UI tier against MSW mocks | Same |
 | **Build Image**       | The production build of both UIs through Maven, and a check of what it emitted and packaged | Every change that affects the image |
 | **OpenAPI Snapshot**  | Compares `src/test/mocks/openapi-operations.json` with the OpenAPI document the Maven build stores — no running backend, a minute after the image build | Every change that affects the image |
 | **Backend E2E**       | Builds EDDI **from the same commit**, boots it, checks the shipped shells, then runs the Playwright API-integration and full-stack tiers against the bundle that backend serves (not a Vite dev server), and re-checks the OpenAPI snapshot against the running API | MongoDB on every PR that changes code; MongoDB and PostgreSQL on push to main |
 | **Auth E2E (Keycloak)** | Boots that same image with `QUARKUS_OIDC_TENANT_ENABLED=true` beside a Keycloak importing the realm the Helm chart ships, and runs the `auth` tier: anonymous and malformed tokens are refused, the `eddi` administrator is let through, and `user`/`viewer` are authenticated but denied. Locally: `npm run infra:up:keycloak && npm run test:e2e:auth` | Every PR that changes code |
+| **Operator Activation E2E** | Boots that same image with MongoDB and `e2e/operator/llm-stub.mjs`, a deterministic OpenAI-compatible model server, and runs the `operator` tier: the Platform Operator is activated through the Manager exactly as an administrator would — the spec is checked against the allow-list, `setup-api` gets the real prompt, the gate is read back and dry-run, the read and write canaries must pass, and a chat turn's tool call must come back with data. Locally, on a fresh datastore: `npm run infra:up:operator && PORT=7070 npm run test:e2e:operator` | Every PR that changes code |
 
 The **OpenAPI snapshot check** is blocking everywhere. The backend under test is
 built from your branch, so a stale `src/test/mocks/openapi-operations.json` means

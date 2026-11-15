@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.runtime.LogRecordRedactor;
+import ai.labs.eddi.modules.llm.pricing.UsageMetering;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
 import dev.langchain4j.model.chat.ChatModel;
@@ -150,6 +151,7 @@ public class ObservableChatModel implements ChatModel {
         } else {
             response = delegate.chat(chatRequest);
         }
+        response = UsageMetering.meter(response, modelType, chatRequest);
 
         long elapsedMs = System.currentTimeMillis() - startMs;
 
@@ -173,9 +175,9 @@ public class ObservableChatModel implements ChatModel {
      * <p>
      * This is the hook the whole decorator reshuffle exists for: the inherited
      * {@code chat} fires it around {@link #doChat}, so one implementation observes
-     * all eleven providers. The delegate's own listeners are <em>not</em> included
-     * — see the class javadoc; {@link #doChat} forwards to {@code delegate.chat},
-     * which dispatches them itself.
+     * every provider. The delegate's own listeners are <em>not</em> included — see
+     * the class javadoc; {@link #doChat} forwards to {@code delegate.chat}, which
+     * dispatches them itself.
      */
     @Override
     public List<ChatModelListener> listeners() {

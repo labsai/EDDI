@@ -124,9 +124,14 @@ public class ZipResourceSource implements IResourceSource {
 
         List<URI> workflowUris = agent.config().getWorkflows();
         IResourceSource.requireWorkflowCountWithinLimit(workflowUris);
+        // A workflow named more than once is read and parsed once; each further
+        // position shares that record. Parsing it again per occurrence let a small
+        // agent document multiply one archived file 256 times over in the heap.
+        Map<String, WorkflowSourceData> readByIdentity = new HashMap<>();
         for (int i = 0; i < workflowUris.size(); i++) {
             try {
-                WorkflowSourceData wfData = readSingleWorkflow(workflowUris.get(i), i);
+                WorkflowSourceData wfData = IResourceSource.atPosition(readByIdentity, workflowUris.get(i), i,
+                        this::readSingleWorkflow);
                 if (wfData != null) {
                     workflowDataList.add(wfData);
                 }
@@ -241,9 +246,13 @@ public class ZipResourceSource implements IResourceSource {
         // references is read once, under the workflow's key.
         Set<String> read = new HashSet<>();
         extensions.values().forEach(extension -> read.add(extension.sourceId()));
+        // A parser document several steps name is parsed and scanned once: the
+        // dictionaries it names are the same for every one of them.
+        Set<String> scanned = Collections.newSetFromMap(new IdentityHashMap<>());
         for (WorkflowExtensions.ExtensionRef ref : refs) {
             ExtensionSourceData document = extensions.get(ref.key());
-            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())) {
+            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())
+                    || !scanned.add(document.contentJson())) {
                 continue;
             }
             try {
@@ -275,7 +284,7 @@ public class ZipResourceSource implements IResourceSource {
                 return;
             }
 
-            String contentJson = readFile(resourcePath);
+            String contentJson = readExtensionFile(resourcePath);
             String name = readNameFromDescriptor(workflowDir, ref.resourceId().getId());
 
             extensions.put(ref.key(), new ExtensionSourceData(
@@ -373,6 +382,24 @@ public class ZipResourceSource implements IResourceSource {
     private String readFile(Path path) throws IOException {
         return Files.readString(path, StandardCharsets.UTF_8);
     }
+
+    /**
+     * An extension file's content, read once per archive path. Every step that
+     * names the same resource gets the same string: reading it again per reference
+     * kept one full copy per step, so a workflow repeating one large extension
+     * expanded a bounded archive into gigabytes of heap.
+     */
+    private String readExtensionFile(Path path) throws IOException {
+        Path key = path.toAbsolutePath().normalize();
+        String cached = extensionFiles.get(key);
+        if (cached == null) {
+            cached = readFile(key);
+            extensionFiles.put(key, cached);
+        }
+        return cached;
+    }
+
+    private final Map<Path, String> extensionFiles = new HashMap<>();
 
     /**
      * Recursively deletes a directory and all its contents.

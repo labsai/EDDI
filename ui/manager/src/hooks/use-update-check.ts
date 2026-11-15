@@ -1,5 +1,8 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
+import { getUpdateCheckSettings, setUpdateCheckEnabled } from "@/lib/api/update-check-settings";
 import { getEddiVersion, UNKNOWN_VERSION } from "@/lib/api/system";
 import { isUpdateUiVisible } from "@/lib/brand";
 import { useBrand } from "@/hooks/use-brand";
@@ -14,58 +17,48 @@ import {
   type UpdateStatus,
 } from "@/lib/api/updates";
 
-/** localStorage flag for the opt-in per-reload check. Off unless explicitly set. */
-export const AUTO_UPDATE_CHECK_KEY = "eddi-auto-update-check";
-
 export const UPDATE_CHECK_QUERY_KEY = ["eddi-update-check"] as const;
 export const EDDI_VERSION_QUERY_KEY = ["eddi-version"] as const;
+export const UPDATE_CHECK_SETTINGS_QUERY_KEY = ["eddi-update-check-settings"] as const;
 
-// ─── Auto-check preference (shared external store) ───────────────────────────
+// ─── Auto-check switch (server-side) ─────────────────────────────────────────
 //
-// The checkbox and the banner live in different subtrees, so a plain
-// useState-backed localStorage hook would leave them disagreeing until the next
-// reload — ticking the box would fetch, but the banner would keep its stale
-// `false` and stay hidden. A tiny external store keeps every subscriber on the
-// same value the moment it changes, in this tab and in others.
+// The switch lives on the backend, not in this browser: the operator's
+// `EDDI_UPDATE_CHECK_ENABLED=false` has to stop the check before anyone can
+// open the Manager, and an administrator's choice has to hold for every browser
+// and node. The checkbox and the banner share one query, so ticking the box
+// updates both at once.
 
-const listeners = new Set<() => void>();
+/**
+ * Read/write the server's update-check switch.
+ *
+ * `enabled` is false until the server has answered (and when it cannot be
+ * reached): nothing leaves the browser on a guess. `locked` means the operator
+ * switched the check off by property, which no one can undo from here.
+ */
+export function useUpdateCheckSwitch() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: UPDATE_CHECK_SETTINGS_QUERY_KEY,
+    queryFn: getUpdateCheckSettings,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
-function subscribeAutoUpdateCheck(onChange: () => void): () => void {
-  listeners.add(onChange);
-  // `storage` only fires for *other* tabs; same-tab writes go through notify().
-  window.addEventListener("storage", onChange);
-  return () => {
-    listeners.delete(onChange);
-    window.removeEventListener("storage", onChange);
+  const mutation = useMutation({
+    mutationFn: setUpdateCheckEnabled,
+    onSuccess: (next) => queryClient.setQueryData(UPDATE_CHECK_SETTINGS_QUERY_KEY, next),
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  return {
+    enabled: data?.enabled ?? false,
+    locked: data?.lockedByConfig ?? false,
+    /** The stored switch alone — what the checkbox shows while the config locks it off. */
+    stored: data?.uiEnabled ?? false,
+    setEnabled: (next: boolean) => mutation.mutate(next),
+    saving: mutation.isPending,
   };
-}
-
-/** Read straight from storage — a boolean needs no snapshot caching. */
-function getAutoUpdateCheck(): boolean {
-  try {
-    return localStorage.getItem(AUTO_UPDATE_CHECK_KEY) === "true";
-  } catch {
-    return false; // storage unavailable — stay off, which is the safe default
-  }
-}
-
-export function setAutoUpdateCheck(next: boolean): void {
-  try {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, String(next));
-  } catch {
-    /* storage unavailable — the value still applies for this page */
-  }
-  listeners.forEach((listener) => listener());
-}
-
-/** Read/write the "check on every reload" preference. */
-export function useAutoUpdateCheck(): [boolean, (next: boolean) => void] {
-  const value = useSyncExternalStore(
-    subscribeAutoUpdateCheck,
-    getAutoUpdateCheck,
-    () => false,
-  );
-  return [value, setAutoUpdateCheck];
 }
 
 // ─── Installed version ───────────────────────────────────────────────────────
@@ -88,7 +81,13 @@ export function useEddiVersion() {
 
 export interface UpdateCheckResult {
   autoCheck: boolean;
+  /** The operator switched the check off by property — it cannot be turned on here. */
+  autoCheckLocked: boolean;
+  /** The stored switch, which is what the checkbox shows. */
+  autoCheckStored: boolean;
   setAutoCheck: (next: boolean) => void;
+  /** A change to the switch is being saved. */
+  autoCheckSaving: boolean;
   /** Installed EDDI version, or `undefined` while it is still loading. */
   installedVersion: string | undefined;
   /**
@@ -112,13 +111,13 @@ export interface UpdateCheckResult {
 }
 
 /**
- * Opt-in check for a newer EDDI release.
+ * Check for a newer EDDI release.
  *
  * Two ways in, one shared cache, so the button and the checkbox can never
  * disagree about what the latest release is:
  *
  * - **Manual** — `checkNow()` refetches even while the query is disabled.
- * - **Automatic** — with the preference on, the query is enabled and
+ * - **Automatic** — with the server's switch on (the default), the query is enabled and
  *   `staleTime: Infinity` holds it to exactly one request for the lifetime of
  *   the QueryClient, which is the lifetime of the page. That is what "check
  *   once per reload" means: a reload builds a new client and checks again.
@@ -127,17 +126,24 @@ export interface UpdateCheckResult {
  * derived from the release rather than looked up — see `updates.ts` for why
  * that is accurate rather than a shortcut.
  *
- * With the preference off and no button press, nothing is ever sent.
+ * With the switch off (by the operator's property or by an administrator) and no
+ * button press, nothing is ever sent.
  */
 export function useUpdateCheck(): UpdateCheckResult {
-  const [autoCheck, setAutoCheck] = useAutoUpdateCheck();
+  const {
+    enabled: autoCheck,
+    locked: autoCheckLocked,
+    stored: autoCheckStored,
+    setEnabled: setAutoCheck,
+    saving: autoCheckSaving,
+  } = useUpdateCheckSwitch();
   const updateUi = isUpdateUiVisible(useBrand());
   const { data: installedVersion, isLoading: installedVersionLoading } = useEddiVersion();
 
   const query = useQuery({
     queryKey: UPDATE_CHECK_QUERY_KEY,
     queryFn: fetchLatestEddiRelease,
-    // A stored auto-check preference must not reach GitHub on a deployment whose
+    // An enabled switch must not reach GitHub on a deployment whose
     // brand hides the update UI (white-label plan, R5): nothing would show it.
     enabled: autoCheck && updateUi,
     staleTime: Infinity,
@@ -172,7 +178,10 @@ export function useUpdateCheck(): UpdateCheckResult {
 
   return {
     autoCheck,
+    autoCheckLocked,
+    autoCheckStored,
     setAutoCheck,
+    autoCheckSaving,
     installedVersion,
     knownInstalledVersion:
       installedVersion && installedVersion !== UNKNOWN_VERSION ? installedVersion : null,

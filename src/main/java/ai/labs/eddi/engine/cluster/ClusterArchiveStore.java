@@ -10,6 +10,9 @@ import io.nats.client.ObjectStore;
 import io.nats.client.ObjectStoreManagement;
 import io.nats.client.api.ObjectInfo;
 import io.nats.client.api.ObjectStoreConfiguration;
+import io.nats.client.api.ObjectStoreStatus;
+import io.nats.client.api.StreamConfiguration;
+import io.nats.client.api.StreamInfo;
 import io.nats.client.api.StorageType;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -33,6 +36,11 @@ import java.time.Duration;
  * Best-effort on the way in (a failure leaves the file node-local, as on a
  * single node) and a plain miss on the way out. Single node: disabled, nothing
  * of NATS is touched.
+ * <p>
+ * The bucket is capped at {@code eddi.cluster.archives.max-bytes} (1 GiB): it
+ * shares JetStream storage with the lease and nonce buckets, and an unbounded
+ * one let a few large exports fill the store and block lease creates. A bucket
+ * created before the cap existed is given it on first use.
  */
 @ApplicationScoped
 public class ClusterArchiveStore {
@@ -62,15 +70,42 @@ public class ClusterArchiveStore {
         Connection connection = connections.get().requireConnected();
         if (ensuredFor == null) {
             ObjectStoreManagement management = connection.objectStoreManagement();
+            long maxBytes = config.archivesMaxBytes() > 0 ? config.archivesMaxBytes() : -1;
             try {
-                management.getStatus(bucket());
+                ObjectStoreStatus status = management.getStatus(bucket());
+                if (status != null && status.getMaxBucketSize() != maxBytes && !capExistingBucket(connection, maxBytes)) {
+                    // Not marked as ensured: the next publish or fetch tries the cap again.
+                    return connection.objectStore(bucket());
+                }
             } catch (JetStreamApiException missing) {
                 management.create(ObjectStoreConfiguration.builder(bucket()).storageType(StorageType.File)
-                        .replicas(config.natsReplicas()).ttl(retention).build());
+                        .replicas(config.natsReplicas()).ttl(retention).maxBucketSize(maxBytes).build());
             }
             ensuredFor = retention;
         }
         return connection.objectStore(bucket());
+    }
+
+    /**
+     * Applies the configured size cap to a bucket that exists with another one
+     * (made before the cap existed). Best effort: a failure leaves the bucket as it
+     * is, is logged, and is retried on the next use.
+     *
+     * @return whether the cap was applied
+     */
+    private boolean capExistingBucket(Connection connection, long maxBytes) {
+        String stream = "OBJ_" + bucket();
+        try {
+            var management = connection.jetStreamManagement();
+            StreamInfo info = management.getStreamInfo(stream);
+            management.updateStream(StreamConfiguration.builder(info.getConfiguration()).maxBytes(maxBytes).build());
+            LOGGER.infof("Archive store %s capped at %d bytes (eddi.cluster.archives.max-bytes)", bucket(), maxBytes);
+            return true;
+        } catch (IOException | JetStreamApiException | RuntimeException e) {
+            LOGGER.warnf("Could not cap the archive store %s at %d bytes (retried on the next use): %s", bucket(), maxBytes,
+                    e.getMessage());
+            return false;
+        }
     }
 
     /**

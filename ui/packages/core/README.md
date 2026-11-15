@@ -15,7 +15,8 @@ backend through it.
 | `sse.ts` | The one SSE frame parser (`parseSseFrame`) and stream reader (`readSseStream`) for agent **and** group streams |
 | `conversation.ts` | The agent conversation API: start, read, send, stream, undo, redo, rerun, end, the managed variants, profile. `createConversationApi(http)`, plus bound functions over `defaultHttp` |
 | `hitl.ts` | Approval status, cancel, resume, deadline maths, poll cadence |
-| `stream-events.ts` | Pure interpretation of stream payloads: error frames, tool names, `inputField`, dropped vs paused turns, output texts and images |
+| `stream-events.ts` | Pure interpretation of stream payloads: error frames, tool activity, `inputField`, dropped vs paused turns, output texts and images |
+| `tool-labels.ts` | `humanizeToolName` and `ToolActivity`: a tool identifier in words, for the status line and the pause headline |
 | `snapshot.ts` | Snapshot steps → messages (masks secret input) |
 | `attachments.ts` | Upload/delete and `attachment_N` context construction |
 | `ratings.ts`, `rating-steps.ts` | The owner's rating client and profile parsing; which step a message belongs to |
@@ -56,16 +57,25 @@ Each rule names the test that pins it.
 
 - **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
   `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Ten SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
-  `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
-  `guardrail_triggered`, `done`, `error`. There is **no `thinking` event** — the
-  backend never emits one. (`conversation.test.ts`)
-- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** — the
-  name only; arguments reach the client later, redacted, in `task_complete`'s
-  `toolTrace`. There is **no "tool finished" event**: a client shows "Using {tool}…"
-  until the next `token`, a `task_failed`, an escalation, or the end of the turn. It
-  is not token-gated — a model can write a sentence and then call a tool.
-  (`parseToolCallName`, `stream-events.test.ts`)
+- **Fourteen SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
+  `task_failed`, `token`, `tool_call`, `tool_result`, `cascade_step_start`,
+  `cascade_escalation`, `guardrail_triggered`, `llm_retry`, `approval_required`
+  (just before `done` when the turn pauses), `hitl_resume` (resume streams only),
+  `done`, `error`. `SSEEventType` names the eleven a 1:1 client acts on; the widget
+  ignores `guardrail_triggered`, `llm_retry`, `approval_required` (the paused `done`
+  drives the approval card) and `hitl_resume` (it does not call `/resume/stream`).
+  There is **no `thinking` event** — the backend never emits one.
+  (`conversation.test.ts`)
+- **`tool_call` is `{"tool","callId","displayName"?,"display"?}`, sent right before
+  each tool runs** — never the full arguments; they reach the client later, redacted,
+  in `task_complete`'s `toolTrace`. `displayName`/`display` are present only for a
+  tool the agent's `toolDisplay` names (a static label and up to three allow-listed,
+  redacted, truncated values); a client then shows "label: values…", otherwise
+  "Using {tool}…" with the identifier in words (`humanizeToolName`, `tool-labels.ts`).
+  **`tool_result`** (`{tool, callId, status, durationMs}`, never the result, 6.7+)
+  follows each call; it, the next `token`, a `task_failed`, an escalation or the end
+  of the turn clears the tool line. It is not token-gated — a model can write a
+  sentence and then call a tool. (`parseToolCallActivity`, `stream-events.test.ts`)
 - **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn refused
   BEFORE it ran — every condition the non-streaming endpoint answers with a typed
   status (409, 410, 404, 413, 429, 403, 503) — also carries a `code`
@@ -127,7 +137,9 @@ Each rule names the test that pins it.
   file/byte quotas, empty files, and on Postgres any wrapped `SQLException`, so a
   database outage also arrives as a 400 "rejection". Only `error` says which. A
   body-less 413 from Quarkus is possible but not the normal path — this repo raises
-  `max-body-size` to 25M precisely so in-cap uploads do not hit it.
+  `quarkus.http.limits.max-body-size` to 60M, and `RequestBodyLimitGuard` lifts the
+  25M default request limit to fit a base64-encoded attachment at
+  `eddi.attachments.max-size-bytes`, precisely so in-cap uploads do not hit it.
 - **A 409 means the input was never consumed** — restore it, do not leave it in the
   transcript as if sent. (`turn-protocol.test.ts`)
 - **The rating endpoints answer `{error: "<CODE>", message}`** — the stable code is

@@ -16,7 +16,8 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * MongoDB store for {@link PromptSnippet} configuration documents.
+ * Store for {@link PromptSnippet} configuration documents, on the configured
+ * datastore (MongoDB or PostgreSQL).
  *
  * @author ginccc
  * @since 6.0.0

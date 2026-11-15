@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -162,6 +163,7 @@ public class MemberTurnExecutor {
             // a timeout or cancellation after the write must not swallow the event.
             // Drained even with a null listener so the queue never grows unbounded.
             announceArtifactChanges(gc, listener);
+            HandoffAnnouncer.announce(gc, listener);
         }
     }
 
@@ -357,6 +359,12 @@ public class MemberTurnExecutor {
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+        // F6: the team's budget (and, for a board, the budgets it oversees) as template
+        // values.
+        if (groupConversationService != null) {
+            groupConversationService.teamBudgetTemplateValues(gc)
+                    .forEach((key, value) -> context.put(key, new Context(Context.ContextType.object, value)));
+        }
 
         putDynamicAgentContext(gc, context);
 
@@ -450,6 +458,10 @@ public class MemberTurnExecutor {
                     // conversation's smaller one — silently shrinking totalCost and
                     // loosening I1's ceiling.
                     GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
+                    // F6: charge the increase to the root discussion's team.
+                    if (groupConversationService != null) {
+                        groupConversationService.chargeTeamBudget(gc);
+                    }
                     // Outside the ledger's monitor by construction — see announceCost.
                     announceCost(gc, convKey, member.displayName(), listener);
 
@@ -490,7 +502,7 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId);
+                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
                         if (graceful != null) {
                             return graceful;
                         }
@@ -667,20 +679,26 @@ public class MemberTurnExecutor {
      * infrastructure failure likewise returns {@code null} so the fallback still
      * terminates the turn cleanly.
      *
-     * {@code input} is unused and stays: static analysis flags it every run, but
-     * the caller passes the member's turn input positionally alongside eight other
-     * arguments, and this method is the natural home for a retry that re-sends it —
-     * which the plan's I7 (delegation hardening) will need. Dropping one parameter
-     * from the middle of a nine-argument call is also the shape of change most
-     * likely to be silently mis-applied at the call site.
-     *
      * @return a real contribution entry on graceful success, or {@code null} to
      *         signal "fall back to SKIP + cancel"
      */
     public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                     String input, int timeoutSeconds, int phaseIdx,
+                                                     int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId) {
+        return tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId,
+                member.agentId());
+    }
+
+    /**
+     * As above, with the key the member turn attributes its cost under
+     * ({@code GroupCostLedger}) — the member's agent id unless the turn runs in a
+     * separately keyed conversation.
+     */
+    public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                     int timeoutSeconds, int phaseIdx,
+                                                     DiscussionPhase phase, TranscriptEntryType entryType,
+                                                     String targetAgentId, String costKey) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
@@ -692,6 +710,9 @@ public class MemberTurnExecutor {
 
         var resumeFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
         try {
+            // Detailed, as the member's say: the default summary projection drops the
+            // dynamic-agent tracking keys, so agents created during the resumed run
+            // would never reach the group's cleanup registry.
             conversationService.resumeConversation(convId, decision,
                     new ConversationResponseHandler() {
                         @Override
@@ -705,7 +726,7 @@ public class MemberTurnExecutor {
                             // "could not complete" so the caller falls back.
                             resumeFuture.complete(null);
                         }
-                    });
+                    }, true, true, List.of());
         } catch (Exception e) {
             LOGGER.warnf("Graceful tool-pause resume failed to start for member '%s' (conv %s): %s — falling back to SKIP+cancel",
                     member.agentId(), convId, e.getMessage());
@@ -725,14 +746,21 @@ public class MemberTurnExecutor {
             return null;
         }
 
+        // Whatever the resumed run did — answered, abstained or paused again — it
+        // created what it created and spent what it spent: the same bookkeeping as
+        // the ordinary turn, before any return, so the next member's ceiling check
+        // sees this spend.
+        if (resumed != null) {
+            GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
+            GroupCostLedger.accumulateMemberCost(gc, costKey, resumed);
+        }
+
         // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
         if (resumed == null || resumed.getConversationState() == ConversationState.AWAITING_HUMAN) {
             LOGGER.warnf("Member '%s' re-paused after graceful tool rejection (conv %s) — falling back to SKIP+cancel",
                     member.agentId(), convId);
             return null;
         }
-
-        GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
 
         String response = contextBuilder.extractResponse(resumed);
         if ((response == null || response.isEmpty())
@@ -849,9 +877,12 @@ public class MemberTurnExecutor {
             // rather than a read of the current remainder — a design change, not a
             // tweak, and one that would also have to decide how to return unspent
             // slices. Sequential nesting — the common shape — is exact.
-            Double remainingBudget = protocol.maxCostPerDiscussion() == null
+            // F6: the ceiling includes the team's budget, so a nested group cannot
+            // spend past what the root's team has left either.
+            Double bindingCeiling = TeamBudgetCeilings.effective(gc, protocol).ceiling();
+            Double remainingBudget = bindingCeiling == null
                     ? null
-                    : Math.max(0.0, protocol.maxCostPerDiscussion() - gc.getTotalCost());
+                    : Math.max(0.0, bindingCeiling - gc.getTotalCost());
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
@@ -861,6 +892,7 @@ public class MemberTurnExecutor {
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
             // cancelled still counts the real spend its members already incurred.
             GroupCostLedger.accumulateNestedGroupCost(gc, member, subConversation);
+            groupConversationService.chargeTeamBudget(gc);
             // Same key GroupCostLedger derived, so the frame names the child
             // discussion rather than collapsing every child onto the agent id.
             announceCost(gc, subConversation.getId() != null ? member.agentId() + ":" + subConversation.getId() : member.agentId(),
