@@ -996,7 +996,8 @@ class PostgresUserMemoryStoreUnitTest {
         String update = sql.getAllValues().getLast();
         assertTrue(update.startsWith("UPDATE usermemories SET value = ?::jsonb"), update);
         assertTrue(update.endsWith("WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?"), update);
-        verify(preparedStatement).setString(7, "id-1");
-        verify(preparedStatement).setTimestamp(8, Timestamp.from(readAt));
+        verify(preparedStatement).setString(7, "ACCEPTED");
+        verify(preparedStatement).setString(9, "id-1");
+        verify(preparedStatement).setTimestamp(10, Timestamp.from(readAt));
     }
 }
