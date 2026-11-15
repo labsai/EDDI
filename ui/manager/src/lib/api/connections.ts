@@ -48,6 +48,7 @@ export const AUTH_TYPES = [
   "STATIC",
   "BASIC",
   "OAUTH2_CLIENT_CREDENTIALS",
+  "OAUTH2_JWT_BEARER",
   "OAUTH2_AUTHORIZATION_CODE",
 ] as const;
 export type AuthType = (typeof AUTH_TYPES)[number];
@@ -71,7 +72,11 @@ export type Binding = (typeof BINDINGS)[number];
 export const CLIENT_AUTH_METHODS = [
   "client_secret_basic",
   "client_secret_post",
+  "private_key_jwt",
 ] as const;
+
+/** The JOSE header a `private_key_jwt` client's certificate thumbprint travels in. */
+export const THUMBPRINT_HEADERS = ["x5t#S256", "x5t"] as const;
 
 export interface StaticAuth {
   /**
@@ -109,6 +114,20 @@ export interface OAuthConfig {
   usePkce?: boolean;
   clientAuthMethod?: string | null;
   discoveryUrl?: string | null;
+  /**
+   * `OAUTH2_JWT_BEARER`, and `private_key_jwt` client authentication. A
+   * `${vault:…}` reference whose secret is a PKCS#8 PEM or a whole Google
+   * service-account JSON key file — never a literal.
+   */
+  privateKey?: string | null;
+  /** Optional `kid` header. Not a secret. */
+  privateKeyId?: string | null;
+  /** `OAUTH2_JWT_BEARER` only: the assertion's `aud`; defaults to the token URL. */
+  audience?: string | null;
+  /** `private_key_jwt` only: the certificate thumbprint, hex or base64url. */
+  certificateThumbprint?: string | null;
+  /** `x5t#S256` (default) or `x5t`. */
+  certificateThumbprintHeader?: string | null;
 }
 
 export interface ConnectionConfiguration {
@@ -553,10 +572,45 @@ export function toStoredConnection(
   }
 
   const oauth = draft.oauth ?? {};
+  const blankToNull = (value: string | null | undefined) =>
+    value && value.trim() ? value : null;
+
+  if (draft.authType === "OAUTH2_JWT_BEARER") {
+    // The signed assertion is the whole proof: no client secret, no consent
+    // screen, no extra authorization parameters. The backend refuses each of
+    // them rather than ignoring it, so none is sent. The identifiers go as null
+    // when blank — an empty string is a value the backend refuses.
+    return {
+      ...base,
+      oauth: {
+        tokenUrl: oauth.tokenUrl ?? "",
+        clientId: blankToNull(oauth.clientId),
+        privateKey: oauth.privateKey ?? "",
+        privateKeyId: blankToNull(oauth.privateKeyId),
+        audience: blankToNull(oauth.audience),
+        scopes: oauth.scopes ?? [],
+        discoveryUrl: oauth.discoveryUrl ?? null,
+        authorizationUrl: null,
+        clientSecret: null,
+        extraAuthParams: {},
+        usePkce: oauth.usePkce ?? true,
+        clientAuthMethod: "client_secret_basic",
+      },
+    };
+  }
+
+  // Exactly one of the two client credentials travels: the backend refuses a
+  // client secret beside a private key, and a private key beside a secret.
+  const signsWithKey = oauth.clientAuthMethod === "private_key_jwt";
   const common: OAuthConfig = {
     tokenUrl: oauth.tokenUrl ?? "",
     clientId: oauth.clientId ?? "",
-    clientSecret: oauth.clientSecret ?? "",
+    clientSecret: signsWithKey ? null : (oauth.clientSecret ?? ""),
+    privateKey: signsWithKey ? (oauth.privateKey ?? "") : null,
+    privateKeyId: signsWithKey ? blankToNull(oauth.privateKeyId) : null,
+    certificateThumbprint: signsWithKey ? blankToNull(oauth.certificateThumbprint) : null,
+    certificateThumbprintHeader:
+      oauth.certificateThumbprintHeader ?? (signsWithKey ? "x5t#S256" : null),
     scopes: oauth.scopes ?? [],
     extraAuthParams: oauth.extraAuthParams ?? {},
     clientAuthMethod: oauth.clientAuthMethod ?? "client_secret_basic",
@@ -621,6 +675,23 @@ export function emptyConnection(
         valueTemplate: authType === "STATIC" ? "" : null,
         username: authType === "BASIC" ? "" : null,
         passwordRef: authType === "BASIC" ? "" : null,
+      },
+    };
+  }
+  if (authType === "OAUTH2_JWT_BEARER") {
+    return {
+      ...base,
+      oauth: {
+        authorizationUrl: null,
+        tokenUrl: "",
+        clientId: "",
+        clientSecret: null,
+        privateKey: "",
+        scopes: [],
+        extraAuthParams: {},
+        usePkce: true,
+        clientAuthMethod: "client_secret_basic",
+        discoveryUrl: null,
       },
     };
   }
