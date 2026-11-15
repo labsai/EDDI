@@ -32,6 +32,17 @@ function capStartersText(text: string): string | null {
   return lines.filter((line) => line.trim()).length > MAX_STARTERS ? null : lines.join("\n");
 }
 
+/** The title model's parameters that are specific to one provider. */
+const PROVIDER_CREDENTIAL_PARAMETERS = ["apiKey", "baseUrl"];
+
+/** `parameters` without the provider's key and endpoint; undefined when nothing else is left. */
+function withoutProviderCredentials(parameters: Record<string, string>): Record<string, string> | undefined {
+  const rest = Object.fromEntries(
+    Object.entries(parameters).filter(([key]) => !PROVIDER_CREDENTIAL_PARAMETERS.includes(key)),
+  );
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
 /**
  * How the agent presents itself to the people chatting with it — `appearance`,
  * `conversationControls` — and whether a model writes conversation titles
@@ -76,7 +87,14 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
   }
 
   function patchTitles(updates: Partial<TitleGeneration>) {
-    onChange({ ...agent, titleGeneration: { ...titles, ...updates } });
+    const next: TitleGeneration = { ...titles, ...updates };
+    // The endpoint and key belong to the provider they were written for: the title model is
+    // built from these parameters, so keeping them would send the old provider's key (a vault
+    // reference without allowedHosts) to the new one. Every other parameter stays.
+    if ("llmProvider" in updates && updates.llmProvider !== titles.llmProvider && titles.parameters) {
+      next.parameters = withoutProviderCredentials(titles.parameters);
+    }
+    onChange({ ...agent, titleGeneration: next });
   }
 
   const inputClass =

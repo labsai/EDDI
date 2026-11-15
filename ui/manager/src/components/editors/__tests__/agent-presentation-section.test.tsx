@@ -87,3 +87,46 @@ describe("AgentPresentationSection — conversation starters", () => {
     expect(starters().value).toBe("Hello");
   });
 });
+
+describe("AgentPresentationSection — title model provider", () => {
+  const withKey = {
+    ...baseAgent,
+    titleGeneration: {
+      enabled: true,
+      llmProvider: "openai",
+      llmModel: "gpt-4o-mini",
+      parameters: { apiKey: "${eddivault:openai-key}", baseUrl: "https://api.example.com", temperature: "0.2" },
+    },
+  } as unknown as Agent;
+
+  function provider() {
+    if (!screen.queryByTestId("title-generation-provider")) {
+      fireEvent.click(screen.getByRole("button", { expanded: false }));
+    }
+    return screen.getByTestId("title-generation-provider") as HTMLInputElement;
+  }
+
+  it("drops the old provider's key and endpoint when the provider changes, and keeps the rest", () => {
+    const onEdit = vi.fn();
+    render(<Harness initial={withKey} onEdit={onEdit} />);
+
+    fireEvent.change(provider(), { target: { value: "anthropic" } });
+
+    const titles = onEdit.mock.lastCall?.[0].titleGeneration;
+    expect(titles.llmProvider).toBe("anthropic");
+    expect(titles.parameters).toEqual({ temperature: "0.2" });
+    expect(titles.llmModel).toBe("gpt-4o-mini");
+  });
+
+  it("leaves the parameters alone when another field changes", () => {
+    const onEdit = vi.fn();
+    render(<Harness initial={withKey} onEdit={onEdit} />);
+    provider();
+
+    fireEvent.change(screen.getByTestId("title-generation-model"), { target: { value: "gpt-4.1-mini" } });
+
+    expect(onEdit.mock.lastCall?.[0].titleGeneration.parameters).toEqual(
+      (withKey.titleGeneration as { parameters: Record<string, string> }).parameters,
+    );
+  });
+});

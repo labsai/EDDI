@@ -1135,7 +1135,7 @@ export function AgentDetailPage() {
       <AgentPresentationSection
         agent={doc}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("appearance", "conversationControls", "titleGeneration")}
       />
 
