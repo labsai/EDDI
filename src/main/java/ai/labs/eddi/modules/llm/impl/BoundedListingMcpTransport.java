@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 
@@ -173,6 +174,18 @@ final class BoundedListingMcpTransport implements McpTransport {
                 source.cancel(true);
             }
         });
+        // The deadline covers every page while it is pending, the first included: a
+        // server that answers one page slowly must not hold the listing past it just
+        // because no next request comes to be checked. What is left of the deadline
+        // fails the page, drops the client and cancels the transport's request.
+        long remainingNanos = limits.deadline().toNanos() - (now - current.startedNanos);
+        if (remainingNanos > 0) {
+            CompletableFuture.delayedExecutor(remainingNanos, TimeUnit.NANOSECONDS).execute(() -> {
+                if (!mapped.isDone() && mapped.completeExceptionally(exceeded(method, "longer than " + limits.deadline().toMillis() + " ms"))) {
+                    source.cancel(true);
+                }
+            });
+        }
         return mapped;
     }
 

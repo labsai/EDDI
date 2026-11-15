@@ -462,7 +462,12 @@ public class UpgradeExecutor {
         AgentConfiguration incoming = jsonSerialization.deserialize(agentDiff.sourceContent(), AgentConfiguration.class);
         oversightGuard.requireNoOversightChange(targetAgentId, incoming, () -> {
             Integer version = resolveLatestVersion(targetAgentId);
-            return version == null ? null : agentStore.readAgent(targetAgentId, version);
+            if (version == null) {
+                // Not "no stored agent": unknown. Thrown, so the guard refuses up front
+                // instead of comparing against nothing and letting resources be written.
+                throw new IllegalStateException("the current version of agent " + targetAgentId + " could not be established");
+            }
+            return agentStore.readAgent(targetAgentId, version);
         });
     }
 

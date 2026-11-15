@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.service.tool.ToolProviderResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -21,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -165,5 +167,17 @@ class McpToolCapsAndNamesTest {
         assertTrue(probed.toolSpecs().isEmpty(), "the probe asked the server, not the cache");
         assertEquals(1, probed.failures().size());
         verify(manager).probeToolsFromServer(any());
+    }
+    @Test
+    @DisplayName("a client whose construction fails (e.g. the initialize handshake times out) has its transport closed")
+    void failedConstructionClosesTheTransport() throws Exception {
+        var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
+        McpTransport transport = mock(McpTransport.class);
+        doReturn(transport).when(manager).boundedTransport(any(), any(), any());
+        doThrow(new IllegalStateException("initialize timed out")).when(manager).buildClient(transport);
+
+        assertThrows(IllegalStateException.class, () -> manager.probeToolsFromServer(config()));
+
+        verify(transport).close();
     }
 }

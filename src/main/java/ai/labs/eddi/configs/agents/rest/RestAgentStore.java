@@ -180,11 +180,13 @@ public class RestAgentStore implements IRestAgentStore {
         restVersionInfo.requireEditAccess(id);
         // An agent's own call (marked X-EDDI-Agent-Call) may not change any agent's
         // oversight policy — sampled audit and earned autonomy are a human's to set.
+        // version 0 means "current". Resolved once, here, and used for both the
+        // oversight
+        // check and the write: resolving it twice let a version saved in between be
+        // checked against one version and overwritten as another.
+        Integer resolvedVersion = restVersionInfo.validateParameters(id, version);
         if (oversightGuard != null) {
-            // version 0 means "current": resolved here as the update below resolves it,
-            // since the store reads an exact version. Lazy, so only a marked request pays.
-            oversightGuard.requireNoOversightChange(id, agentConfiguration,
-                    () -> agentStore.read(id, restVersionInfo.validateParameters(id, version)));
+            oversightGuard.requireNoOversightChange(id, agentConfiguration, () -> agentStore.read(id, resolvedVersion));
         }
         requireWorkflowsExist(agentConfiguration);
         // dynamicOrigin is engine-written provenance that teardown_agent and group
@@ -192,7 +194,7 @@ public class RestAgentStore implements IRestAgentStore {
         // what the body says: an editor must not be able to erase the marker (the
         // sub-agent would then outlive its discussion) or plant one.
         agentConfiguration.setDynamicOrigin(storedDynamicOrigin(id));
-        Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
+        Response response = updateWithCompatibility(id, resolvedVersion, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
     }

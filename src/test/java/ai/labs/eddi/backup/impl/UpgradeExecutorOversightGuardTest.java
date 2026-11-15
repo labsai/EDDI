@@ -128,6 +128,16 @@ class UpgradeExecutorOversightGuardTest {
     }
 
     @Test
+    @DisplayName("a target whose current version cannot be established refuses even an agent without an oversight block")
+    void unresolvedStoredVersionIsRefused() throws Exception {
+        executor.useOversightGuard(guard(AgentCallMarker.VALUE));
+        when(agentStore.getCurrentResourceId(AGENT)).thenReturn(null);
+
+        assertThrows(ForbiddenException.class,
+                () -> executor.requireNoAgentOriginatedOversightChange(previewAdopting(new AgentConfiguration(), DiffAction.UPDATE), AGENT, null));
+    }
+
+    @Test
     @DisplayName("a CONFLICT nobody named is left alone by resolveConflict, so it does not stop the upgrade")
     void unnamedConflictPasses() throws Exception {
         executor.useOversightGuard(guard(AgentCallMarker.VALUE));

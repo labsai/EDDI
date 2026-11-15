@@ -24,6 +24,8 @@ A remote MCP server is untrusted, and an editor can point the `discover-tools` p
 - A configured `eddi.openai-compat.default-user` is refused as a principal name on every endpoint (`NamelessPrincipalAugmentor`), not only on `/v1`.
 - The agent-store oversight check resolves `version=0` before reading the stored agent and refuses when that read fails, even for a body without an oversight block; an upgrade checks an agent `CONFLICT` only when the caller selects the agent, matching `resolveConflict`.
 
+- Second review round: a client whose construction fails (the initialize handshake times out, the connection is refused) has its transport closed; the listing deadline also bounds a page that is still pending, the first one included, failing it and cancelling the request; the agent-store update resolves `version=0` once and uses it for both the oversight check and the write; an upgrade whose target version cannot be established is refused by the oversight check; decoded screening replaces a container nested past its depth limit with `[redacted]` instead of leaving it unscreened.
+
 ### Upgrade note
 
 Agents whose LLM tasks set **no** `toolResponseLimits` used to receive every tool result whole; they now get at most 50,000 characters per result (`headTail`: start and end kept, the middle replaced by a note). An agent that needs larger results sets `toolResponseLimits.defaultMaxChars` (or `perToolLimits`) on its task; `0` turns the cap off. See [langchain.md](../langchain.md#tool-response-limits).

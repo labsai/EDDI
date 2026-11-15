@@ -703,7 +703,7 @@ public class McpToolProviderManager {
 
         // Wrapped here rather than inside createTransport, which tests read back as
         // the concrete StreamableHttp transport.
-        McpTransport transport = new BoundedListingMcpTransport(createTransport(config, timeout), listingLimits(), onListingLimit);
+        McpTransport transport = boundedTransport(config, timeout, onListingLimit);
 
         // The trace context goes into params._meta (SEP-414) through the meta
         // supplier, which DefaultMcpClient invokes on the calling thread —
@@ -717,6 +717,32 @@ public class McpToolProviderManager {
         // single-thread scheduler pinging the server every 30 s for as long as the
         // client lives — one thread per URL ever named. A dead session is noticed on
         // the next request instead, and the transport reconnects then.
+        try {
+            return buildClient(transport);
+        } catch (RuntimeException | Error e) {
+            // The builder connects (the initialize handshake) and can fail — a refused
+            // connection, a legacy initialize that times out — after the transport is
+            // open. The half-built client is not returned and will never be closed, so
+            // the transport is closed here; that also cancels its pending exchanges.
+            try {
+                transport.close();
+            } catch (Exception closeFailure) {
+                e.addSuppressed(closeFailure);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * The transport a client is built on: the configured one, with the listing
+     * bounds. Seam for tests.
+     */
+    McpTransport boundedTransport(McpServerConfig config, Duration timeout, Runnable onListingLimit) {
+        return new BoundedListingMcpTransport(createTransport(config, timeout), listingLimits(), onListingLimit);
+    }
+
+    /** Builds and connects a client on {@code transport}. Seam for tests. */
+    McpClient buildClient(McpTransport transport) {
         return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
                 .metaSupplier(traceMetaSupplier()).autoHealthCheck(false).build();
     }

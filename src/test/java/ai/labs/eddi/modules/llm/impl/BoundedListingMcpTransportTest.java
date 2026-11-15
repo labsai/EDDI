@@ -200,6 +200,28 @@ class BoundedListingMcpTransportTest {
     }
 
     @Test
+    @Timeout(10)
+    @DisplayName("the deadline also covers a pending page, the first one included: it fails, the owner is told, the request is cancelled")
+    void deadlineCoversAPendingFirstPage() throws InterruptedException {
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        McpTransport delegate = mock(McpTransport.class);
+        when(delegate.sendRequest(any(McpCallContext.class))).thenReturn(pending);
+        var exceeded = new AtomicInteger();
+        var transport = new BoundedListingMcpTransport(delegate, new BoundedListingMcpTransport.Limits(100, 1000, Duration.ofMillis(200)),
+                exceeded::incrementAndGet);
+
+        var failure = assertThrows(ExecutionException.class, () -> transport.sendRequest(list(null)).get(5, TimeUnit.SECONDS));
+
+        assertInstanceOf(BoundedListingMcpTransport.ListingLimitExceededException.class, failure.getCause());
+        // The cancel follows the failure on the timer thread; give it a moment.
+        for (int i = 0; i < 100 && !pending.isCancelled(); i++) {
+            Thread.sleep(20);
+        }
+        assertTrue(pending.isCancelled(), "the transport's request is cancelled");
+        assertEquals(1, exceeded.get());
+    }
+
+    @Test
     @DisplayName("cancelling the listing future cancels the transport's own future")
     void cancellationReachesTheDelegate() {
         CompletableFuture<String> pending = new CompletableFuture<>();

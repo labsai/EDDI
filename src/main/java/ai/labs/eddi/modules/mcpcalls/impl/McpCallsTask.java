@@ -182,8 +182,11 @@ public class McpCallsTask implements ILifecycleTask {
     }
 
     /**
-     * Deeper than any real result; a deeper one is left as the raw-text screen saw
-     * it.
+     * Deeper than any real result. A container at this depth is replaced by
+     * {@link RemoteTextGovernor#REDACTED} rather than left unscreened: its strings
+     * cannot be checked without recursing further, and the parser's nesting limit
+     * is the mapper's setting, not this screen's. Failing closed costs nothing a
+     * real result contains; refusing the whole result would also cost the rest.
      */
     private static final int MAX_SCREEN_DEPTH = 64;
 
@@ -193,7 +196,7 @@ public class McpCallsTask implements ILifecycleTask {
             return redacted != null ? redacted : text;
         }
         if (depth >= MAX_SCREEN_DEPTH) {
-            return value;
+            return value instanceof Map<?, ?> || value instanceof List<?> ? RemoteTextGovernor.REDACTED : value;
         }
         if (value instanceof Map<?, ?> map) {
             Map<Object, Object> copy = null;
