@@ -501,6 +501,15 @@ export class AgentConversation {
     ) {
       dispatch({ type: "REPLACE_MESSAGES", messages: [] });
     }
+    // The state the next send is judged against (isSkippedTurn): an undo past
+    // a pause that was resolved meanwhile must not leave AWAITING_HUMAN behind.
+    if (snapshot.conversationState) {
+      dispatch({
+        type: "SET_CONVERSATION_STATE",
+        state: snapshot.conversationState,
+        endReason: snapshot.endReason ?? null,
+      });
+    }
     dispatch({
       type: "SET_UNDO_REDO",
       undoAvailable: snapshot.undoAvailable ?? fallback.undoAvailable,
@@ -1375,6 +1384,27 @@ export class AgentConversation {
     }
   }
 
+  /**
+   * A pause the host was showing ended elsewhere — another reviewer, the
+   * approvals inbox, the timeout policy — and the host is not re-reading the
+   * conversation (refreshAfterPause does, and needs no call to this).
+   *
+   * The state held here is what the next send is judged against: left at
+   * AWAITING_HUMAN, a next turn that pauses again reads exactly like one the
+   * server dropped into a paused conversation (isSkippedTurn), so its message
+   * was withdrawn as "not sent" and the new pause was never announced.
+   *
+   * @param state What the conversation is now, when the host knows it — a
+   *   cancel leaves it EXECUTION_INTERRUPTED. READY otherwise: any state that
+   *   is not a skip state lets the next turn's own `done` speak for itself.
+   */
+  pauseResolved(state: ConversationState = "READY"): void {
+    this.dispatch({ type: "SET_APPROVAL_STATUS", status: null });
+    if (this.state.conversationState === "AWAITING_HUMAN") {
+      this.dispatch({ type: "SET_CONVERSATION_STATE", state });
+    }
+  }
+
   /** Cancel a paused turn (the paused card's button). */
   async cancel(): Promise<void> {
     const conversationId = this.state.conversationId;
@@ -1439,7 +1469,19 @@ export class AgentConversation {
     this.abort = null;
     this.generation += 1;
     this.pendingTurns.clear();
+    this.forgetSecrets();
     this.dispatch({ type: "CLEAR_MESSAGES" });
+  }
+
+  /**
+   * Drop the raw texts of secret turns. They belong to the conversation being
+   * left; a controller that outlives it (the Manager's is app-wide) would
+   * otherwise keep every secret typed this session in memory across agents
+   * and logout. A host that replaces the transcript in its own store, without
+   * `reset()`, calls this.
+   */
+  forgetSecrets(): void {
+    this.secretTexts.clear();
   }
 
   /** New conversation (or Start over): abandon this one and open a fresh one. */

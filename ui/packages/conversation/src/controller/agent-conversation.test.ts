@@ -555,6 +555,74 @@ describe("pause, cancel, stop", () => {
   });
 });
 
+describe("a pause resolved elsewhere", () => {
+  const pausingStream = (text: string) =>
+    vi.fn(() => events(done({ conversationState: "AWAITING_HUMAN", conversationOutputs: [{ output: [text] as never }] })));
+
+  it("without pauseResolved, the second pausing turn reads as dropped (the regression)", async () => {
+    const onTurnSnapshot = vi.fn();
+    const transport = fakeTransport({ stream: pausingStream("Awaiting approval") });
+    const c = await opened(transport, { onTurnSnapshot, refreshAfterStream: false });
+    await c.send("first");
+    expect(onTurnSnapshot).toHaveBeenCalledTimes(1);
+    await c.send("second");
+    // Pinned so the fix below is visibly what changes it.
+    expect(c.getSnapshot().restoreDraft).toBe("second");
+    expect(onTurnSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("after pauseResolved, a next turn that pauses again is kept and announced as a pause", async () => {
+    const onTurnSnapshot = vi.fn();
+    const transport = fakeTransport({ stream: pausingStream("Awaiting approval") });
+    const c = await opened(transport, { onTurnSnapshot, refreshAfterStream: false });
+    await c.send("first");
+    c.setApprovalStatus({ conversationId: "c1" } as never);
+    c.pauseResolved();
+    expect(c.getSnapshot().conversationState).toBe("READY");
+    expect(c.getSnapshot().approvalStatus).toBeNull();
+    await c.send("second");
+    const s = c.getSnapshot();
+    expect(texts(c)).toContain("second");
+    expect(s.restoreDraft).toBeNull();
+    expect(s.messages.some((m) => m.kind === "notice")).toBe(false);
+    expect(s.conversationState).toBe("AWAITING_HUMAN");
+    expect(onTurnSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauseResolved takes the state the host knows, and leaves a non-paused state alone", async () => {
+    const c = await opened(fakeTransport({ stream: pausingStream("Wait") }), { refreshAfterStream: false });
+    await c.send("x");
+    c.pauseResolved("EXECUTION_INTERRUPTED");
+    expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+    c.pauseResolved();
+    expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+  });
+
+  it("undo re-reads the conversation state, so a pause resolved meanwhile does not linger", async () => {
+    const transport = fakeTransport({ stream: pausingStream("Wait") });
+    const c = await opened(transport, { refreshAfterStream: false });
+    await c.send("x");
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      conversationSteps: [{ conversationStep: [{ key: "output:text:0", value: "Welcome" }] }],
+      conversationOutputs: [output("Welcome")],
+    });
+    await c.undo();
+    expect(c.getSnapshot().conversationState).toBe("READY");
+  });
+});
+
+describe("reset", () => {
+  it("forgets the raw secrets typed in the abandoned conversation", async () => {
+    const c = await opened(fakeTransport());
+    await c.send("s3cret", true);
+    const held = (c as unknown as { secretTexts: Set<string> }).secretTexts;
+    expect(held.has("s3cret")).toBe(true);
+    c.reset();
+    expect(held.size).toBe(0);
+  });
+});
+
 describe("host hooks (a host with its own store and its own copy)", () => {
   it("keeps the state in the host's store and notifies through it", async () => {
     let held = { ...initialConversationState };

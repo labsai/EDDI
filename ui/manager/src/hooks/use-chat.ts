@@ -274,6 +274,7 @@ export const useChatStore = create<ChatState>((set) => ({
   // must not keep the new one's input locked.
   setSelectedAgent: (agentId, agentName) =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -344,6 +345,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   clearMessages: () =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -397,6 +399,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   reset: () =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -1303,6 +1306,38 @@ async function followExecutingTurn(conversationId: string, epoch: number, reques
 }
 
 /**
+ * Take a snapshot's conversation state into the store. The controller reads it
+ * there as the state the next send is judged against (isSkippedTurn): a load,
+ * undo, redo or rerun that left the previous AWAITING_HUMAN behind made the
+ * next turn that paused again look like one the server dropped — withdrawn as
+ * "not sent", with no pause banner.
+ */
+function adoptConversationState(snapshot: SimpleConversationMemorySnapshot): void {
+  if (!snapshot.conversationState) return;
+  useChatStore.setState({
+    conversationState: snapshot.conversationState,
+    endReason: snapshot.conversationState === "ENDED" ? (snapshot.endReason ?? null) : null,
+  });
+}
+
+/**
+ * The pause on the chat's conversation ended elsewhere — the review page, the
+ * approvals inbox, another reviewer, the timeout policy. Unlocks the composer
+ * AND tells the controller (pauseResolved): clearing only the banner left the
+ * controller at AWAITING_HUMAN, so the next turn that paused again was taken
+ * for a dropped one.
+ *
+ * @param conversationId Only the conversation still on screen is touched.
+ * @param state What it is now, when known (a cancel interrupts it).
+ */
+export function clearChatPause(conversationId: string | null, state?: ConversationState): void {
+  const chatState = useChatStore.getState();
+  if (!conversationId || chatState.conversationId !== conversationId) return;
+  chatState.setPaused(false, null);
+  chatConversation.pauseResolved(state);
+}
+
+/**
  * Put a snapshot of the conversation already selected in the store on screen:
  * its transcript, undo/redo, pause state and any requested input field.
  */
@@ -1311,6 +1346,7 @@ function installSnapshot(snapshot: SimpleConversationMemorySnapshot) {
   const messages = snapshotToMessages(snapshot);
   store.getState().replaceMessages(messages);
   store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+  adoptConversationState(snapshot);
   // Re-establish the pause state when loading a conversation that is still
   // AWAITING_HUMAN — otherwise a paused conversation opened from history
   // would show an enabled input with no banner until a send is rejected 409.
@@ -1496,6 +1532,7 @@ async function moveStepAndReload(move: "undo" | "redo"): Promise<boolean> {
     if (store.getState().conversationId !== conversationId) return moved;
     store.getState().replaceMessages(snapshotToMessages(snapshot));
     store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+    adoptConversationState(snapshot);
     store.getState().setPaused(
       snapshot.conversationState === "AWAITING_HUMAN",
       null,
@@ -1569,6 +1606,12 @@ export function useRerunConversation() {
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+      adoptConversationState(snapshot);
+      store.getState().setPaused(
+        snapshot.conversationState === "AWAITING_HUMAN",
+        null,
+        snapshot.hitlPausedAt ?? null,
+      );
       return snapshot;
     },
   });

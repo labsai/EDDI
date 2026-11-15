@@ -18,6 +18,7 @@ import {
   useUndoConversation,
   useRedoConversation,
   useRerunConversation,
+  clearChatPause,
 } from "@/hooks/use-chat";
 import type { SentAttachment } from "@/hooks/use-chat";
 import {
@@ -893,7 +894,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             testIdBase="chat-pause"
             // Decided elsewhere (another reviewer, or the timeout policy): unlock
             // the composer instead of leaving it stuck on "awaiting approval".
-            onResolved={() => useChatStore.getState().setPaused(false, null)}
+            // clearChatPause also moves the controller off AWAITING_HUMAN, or the
+            // next turn that pauses again would be taken for a dropped one.
+            onResolved={() => clearChatPause(conversationId)}
           />
         )}
 

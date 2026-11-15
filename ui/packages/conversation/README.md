@@ -43,6 +43,14 @@ Manager uses all of them (`ui/manager/src/hooks/use-chat.ts`).
 | `onTurnSnapshot`, `turnFailure` | The snapshot a finished turn answered with; why it failed, shown in its reply |
 | `presentFailure` | Show a refused or failed turn the host's way (toasts, error bubbles, a banner); `send` resolves `{ outcome }` so a caller can reject |
 
+Two methods go with them. A host that shows a pause and learns it ended without
+re-reading the conversation (`refreshAfterPause` does re-read) calls
+`pauseResolved(state?)`: the state the controller holds is what the next send is
+judged against, and left at `AWAITING_HUMAN` a next turn that pauses again reads
+as one the server dropped. A host that replaces the transcript in its own store
+without `reset()` calls `forgetSecrets()`, so the raw texts of secret turns do not
+outlive the conversation they were typed in.
+
 ## Using it
 
 ```ts

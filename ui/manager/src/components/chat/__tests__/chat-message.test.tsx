@@ -306,3 +306,25 @@ describe("ChatMessage — designer images", () => {
     expect(screen.queryByText("No response")).toBeNull();
   });
 });
+
+describe("ChatMessage — controller notices", () => {
+  it("renders a notice as a system line, not as an agent bubble with a copy button", () => {
+    // makeNotice writes role "agent" + kind "notice": the client talking
+    // ("…was not sent"), which is not something the agent said.
+    const notice: ChatMessageType = {
+      id: "n-1",
+      role: "agent",
+      kind: "notice",
+      content: "**Not** markdown. Your message was not sent.",
+      timestamp: new Date("2024-01-15T10:30:20Z").getTime(),
+    };
+    renderWithProviders(<ChatMessage message={notice} />);
+    const line = screen.getByTestId("chat-notice");
+    expect(line).toHaveAttribute("role", "note");
+    // Plain text: the asterisks stay, no <strong>.
+    expect(line).toHaveTextContent("**Not** markdown. Your message was not sent.");
+    expect(line.querySelector("strong")).toBeNull();
+    expect(screen.queryByRole("button", { name: /copy/i })).toBeNull();
+    expect(screen.queryByTestId("copy-message")).toBeNull();
+  });
+});

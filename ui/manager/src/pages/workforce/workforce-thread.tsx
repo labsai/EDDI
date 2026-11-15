@@ -71,6 +71,7 @@ import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
+import { ChatNotice } from "@/components/chat/chat-message";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -984,6 +985,10 @@ function WorkforceThread() {
             if (!isCurrent()) return;
             setConversationId(existingThread.conversationId);
             setMessages(parseConversationSteps(snapshot.conversationSteps ?? []));
+            // What the next send is judged against (dropped vs paused turns).
+            if (snapshot.conversationState) {
+              controller.dispatch({ type: "SET_CONVERSATION_STATE", state: snapshot.conversationState });
+            }
             updateActivityRef.current(boardId, memberId);
           } catch (err) {
             // The stored conversation no longer exists — deleted, erased, or
@@ -1272,7 +1277,11 @@ function WorkforceThread() {
             </div>
           )}
 
-          {messages.map((msg, idx) => (
+          {messages.map((msg, idx) => msg.kind === "notice" ? (
+            // The controller's own sentence ("…was not sent"), not the
+            // advisor's: a system line, not an advisor bubble with a copy button.
+            <ChatNotice key={`${msg.role}-${msg.timestamp}-${idx}`} content={msg.content} />
+          ) : (
             <div
               key={`${msg.role}-${msg.timestamp}-${idx}`}
               className={cn(
@@ -1428,7 +1437,13 @@ function WorkforceThread() {
                 headline={sendError.message}
                 testIdBase="thread-pause"
                 reviewTestId="thread-review-approvals"
-                onResolved={() => setSendError((current) => (current?.paused ? null : current))}
+                // The controller still holds AWAITING_HUMAN from the turn that
+                // paused; left there, the next turn that pauses again reads
+                // like one the server dropped (withdrawn, no pause notice).
+                onResolved={() => {
+                  controller.pauseResolved();
+                  setSendError((current) => (current?.paused ? null : current));
+                }}
               />
             </div>
           )}
