@@ -17,6 +17,7 @@ import type { AttachmentResult } from "@/api/attachments-api";
 import type { ApprovalStatus } from "@/api/hitl-api";
 import { agentAppearanceLayer, brandConfigLayer } from "@/api/brand";
 import type { RatingProfile } from "@/api/rating-api";
+import type { ToolActivity } from "@/tool-labels";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -47,7 +48,7 @@ export interface ChatState {
    * turn. Transient by design — it drives the status line only and never
    * becomes part of the transcript.
    */
-  activeTool: string | null;
+  activeTool: ToolActivity | null;
   undoAvailable: boolean;
   redoAvailable: boolean;
   agentName: string | null;
@@ -160,7 +161,7 @@ export type ChatAction =
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
-  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
+  | { type: "SET_ACTIVE_TOOL"; tool: ToolActivity | null }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
@@ -324,7 +325,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     // Cleared on every token, so the same unchanged-value bail-out applies.
     case "SET_ACTIVE_TOOL":
-      return state.activeTool === action.tool
+      return state.activeTool?.text === action.tool?.text &&
+        state.activeTool?.phrase === action.tool?.phrase
         ? state
         : { ...state, activeTool: action.tool };
 
