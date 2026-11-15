@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { useQuery } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { renderPage } from "@/test/test-utils";
 import { sampleSpendControlChange, seedSpendControlMock } from "@/test/mocks/spend-control-handlers";
@@ -46,6 +47,54 @@ describe("PendingSpendChanges", () => {
     fireEvent.click(screen.getByTestId("alert-dialog-confirm"));
     await waitFor(() => expect(approved).toBe("c-1"));
     await waitFor(() => expect(screen.queryByTestId("spend-change-c-1")).not.toBeInTheDocument());
+  });
+
+  it("keeps the approval open until the quota refetch has settled", async () => {
+    let quotaReads = 0;
+    let releaseRefetch: (() => void) | null = null;
+    // Stands in for the Quotas page: its quota query is what the approval must wait for.
+    function QuotaProbe() {
+      const { data } = useQuery({
+        queryKey: ["quotas", "detail", "default"],
+        queryFn: () => {
+          quotaReads += 1;
+          if (quotaReads === 1) return Promise.resolve("before");
+          return new Promise<string>((resolve) => {
+            releaseRefetch = () => resolve("approved");
+          });
+        },
+      });
+      return <span data-testid="quota-probe">{data ?? ""}</span>;
+    }
+    let approved: string | null = null;
+    server.use(
+      http.post("*/administration/spend-control-changes/:id/approve", ({ params }) => {
+        approved = String(params.id);
+        seedSpendControlMock([]);
+        return HttpResponse.json({ ...sampleSpendControlChange, id: "q-1", status: "APPLIED" });
+      }),
+    );
+    renderPage(
+      "/manage/quotas",
+      <>
+        <QuotaProbe />
+        <PendingSpendChanges kind="TENANT_QUOTA" isAdmin />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByTestId("quota-probe")).toHaveTextContent("before"));
+    fireEvent.click(await screen.findByTestId("spend-change-approve-q-1"));
+    fireEvent.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(approved).toBe("q-1"));
+    await waitFor(() => expect(releaseRefetch).not.toBeNull());
+
+    // the approval is applied but the quota still shows the old document: stay open
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeInTheDocument();
+    expect(screen.getByTestId("quota-probe")).toHaveTextContent("before");
+
+    act(() => releaseRefetch?.());
+    await waitFor(() => expect(screen.getByTestId("quota-probe")).toHaveTextContent("approved"));
+    await waitFor(() => expect(screen.queryByTestId("alert-dialog-confirm")).not.toBeInTheDocument());
   });
 
   it("rejects through the reject endpoint", async () => {

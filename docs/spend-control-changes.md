@@ -39,6 +39,7 @@ The classification errs towards "loosening": a change it cannot prove stricter g
 | Long-context threshold | lowered over a tier that costs at least the base price | raised, or lowered over a cheaper tier |
 | New entry | the policy in force is `ALLOW` **and** its lowest price of every kind is at least the highest price of every existing entry of the same provider (or of provider `*`) | otherwise — in particular **any new price while unpriced calls are refused** (`REFUSE`, `REFUSE_WHEN_BUDGETED`): a price admits calls that are refused today |
 | Removed entry | — | always: its models fall back to another entry or become unpriced |
+| Moved entry | — | when its position decides, against another kept entry, which of the two prices a model: patterns of one provider whose literal parts are equally long and can match one name (`abc*` and `*xyz` both match `abcxyz`, and the one listed first wins). Removing an entry and upserting it again moves it to the end, so a note-only re-upsert can be proposed for this reason alone |
 | `unpricedPolicy` | `ALLOW` → `REFUSE_WHEN_BUDGETED` → `REFUSE` | the other direction |
 | `asOf`, `source`, `note` | always (they change no price) | — |
 
@@ -51,7 +52,10 @@ Provider `*` counts as every provider.
 Prices are compared as metering charges them, unset ones included: an unset cache price is the input price, and an
 unset long-context price is the base price of its kind — except an unset long-context *cache* price, which is the
 entry's base cache price when one is set and otherwise the **tier's** input price. So with input 10, a tier input
-of 20 and no cache prices, long-context cache reads cost 20, and setting the tier's cache read to 15 is loosening.
+of 20 and no cache prices, long-context cache reads cost 20, and setting the tier's cache read to 15 is loosening. The
+long-context prices are compared on every change of an entry with a tier, not only when the tier itself changed: in
+the same example, setting only the *base* cache read price to 15 raises the base cache price (10 to 15) and lowers
+the long-context one (20 to 15), and is loosening.
 
 Under strict mode this means adding a price for a new model is a proposal. That is the point of strict mode: a
 model without a price is refused, and pricing it is admitting it.

@@ -19,14 +19,21 @@ export function usePendingSpendControlChanges(enabled: boolean) {
   });
 }
 
-/** After a decision the catalog or a quota may have changed: refresh both, and the list. */
+/**
+ * After a decision the catalog or a quota may have changed: refresh both, and the list.
+ * Returns the refetches so the mutation's onSettled waits for them: the decision stays
+ * pending (dialog open, buttons busy) until the pages hold the approved document. A
+ * Quotas form edited in the gap would otherwise go dirty on the pre-approval quota,
+ * stop syncing, and save it back over the approved one (the quota PUT has no version).
+ */
 function useInvalidateAfterDecision() {
   const qc = useQueryClient();
-  return () => {
-    qc.invalidateQueries({ queryKey: ["spend-control"] });
-    qc.invalidateQueries({ queryKey: ["model-prices"] });
-    qc.invalidateQueries({ queryKey: ["quotas"] });
-  };
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ["spend-control"] }),
+      qc.invalidateQueries({ queryKey: ["model-prices"] }),
+      qc.invalidateQueries({ queryKey: ["quotas"] }),
+    ]);
 }
 
 export function useApproveSpendControlChange() {

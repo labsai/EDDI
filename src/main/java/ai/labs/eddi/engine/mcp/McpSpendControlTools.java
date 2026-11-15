@@ -114,7 +114,8 @@ public class McpSpendControlTools {
             + "or set its unpricedPolicy, in one compare-and-set write: give expectedRevision from read_model_prices. A change that "
             + "only makes spending stricter is applied at once (result APPLIED): a higher price, a stricter unpricedPolicy, or a new "
             + "entry under the ALLOW policy that costs at least as much as every entry of the same provider (or of provider *). Anything that "
-            + "could lower what a call costs or admit a refused call — a lower or cleared price, a removed entry, a looser policy, a "
+            + "could lower what a call costs or admit a refused call — a lower or cleared price, a removed entry, an entry moved (removed "
+            + "and upserted again) where its position decides which pattern prices a model, a looser policy, a "
             + "new price while unpriced calls are refused — is NOT applied: it is filed for an administrator's approval in the Manager "
             + "(result PROPOSED, with the changeId and why it loosens). Lowering a price is raising a budget: propose it only when "
             + "the person you act for asked for it. Each upserted entry needs a source link (http/https) to the provider's price page.")

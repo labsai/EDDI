@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.spendcontrol;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogException;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogService;
 import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
+import ai.labs.eddi.engine.pricing.model.LongContextTier;
 import ai.labs.eddi.engine.pricing.model.ModelPriceCatalog;
 import ai.labs.eddi.engine.pricing.model.ModelPriceEntry;
 import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
@@ -167,6 +168,34 @@ class SpendControlChangeServiceTest {
         void mixedIsProposed() {
             Outcome outcome = service.changeModelPrices(4, List.of(entry("anthropic", "claude-x", 3.0, 15.0)),
                     List.of(new EntryKey("openai", "gpt-4o")), null, "swap", "assistant", "mcp");
+            assertEquals(Result.PROPOSED, outcome.result());
+            verify(catalogService, never()).replace(anyLong(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("removing a glob and upserting it again with only a new note is proposed when the move hands its models to another entry")
+        void reorderIsProposed() {
+            stored.set(new ModelPriceCatalog(4, UnpricedPolicy.ALLOW, null, null,
+                    List.of(entry("openai", "abc*", 10.0, 10.0), entry("openai", "*xyz", 1.0, 1.0))));
+            var renoted = new ModelPriceEntry("openai", "abc*", 10.0, 10.0, null, null, null, null, SRC, "re-checked");
+            Outcome outcome = service.changeModelPrices(4, List.of(renoted), List.of(new EntryKey("openai", "abc*")), null, "note only",
+                    "assistant", "mcp");
+
+            assertEquals(Result.PROPOSED, outcome.result());
+            assertTrue(outcome.loosening().stream().anyMatch(l -> l.startsWith("reordered ")), outcome.loosening().toString());
+            verify(catalogService, never()).replace(anyLong(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("a base cache price that lowers the long-context cache price is proposed")
+        void baseCacheUnderTierIsProposed() {
+            var tier = new LongContextTier(1_000L, 20.0, 20.0, null, null);
+            stored.set(new ModelPriceCatalog(4, UnpricedPolicy.ALLOW, null, null,
+                    List.of(new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, tier, null, SRC, null))));
+            Outcome outcome = service.changeModelPrices(4,
+                    List.of(new ModelPriceEntry("anthropic", "c", 10.0, 10.0, 15.0, null, tier, null, SRC, null)),
+                    List.of(), null, "cache price published", "assistant", "mcp");
+
             assertEquals(Result.PROPOSED, outcome.result());
             verify(catalogService, never()).replace(anyLong(), any(), anyString());
         }

@@ -71,6 +71,18 @@ approver as actor. See [Spend-Control Changes](../spend-control-changes.md).
 - **Four-eyes needs authentication.** With `authorization.enabled=false` principals cannot be told apart,
   so the check is skipped rather than blocking the single-operator deployment. With authentication, give
   the MCP client an account of its own, or have a second administrator approve.
+- **Position is a price.** `ModelPriceMatcher` breaks a tie between same-provider globs of equal literal
+  length by catalog order (`abc*` before `*xyz` prices `abcxyz`), and removing an entry and upserting it
+  again moves it to the end. So `SpendControlDiff` also compares the relative order of kept globs whose
+  order decides a match, and any such move is loosening — a note-only re-upsert can be a proposal for that
+  reason alone. Two prefixes (or two suffixes) of equal length share no model unless equal, so their order
+  is not judged.
+- **Long-context prices are compared on every change of a tiered entry**, not only when the tier record
+  changed: an unset tier cache price falls back to the base cache price, so setting only a base cache price
+  (input 10, tier input 20, base cache read 15) lowers long-context cache reads from 20 to 15.
+- **Approve and reject wait for the refetch.** The Manager's decision mutations return the invalidation
+  promises, so the dialog stays open until the Quotas and Model Prices pages hold the approved document; a
+  Quotas form edited in the gap would otherwise save the pre-approval quota over it.
 - **Mixed writes are proposed whole**, not split, so an approver sees one coherent document and nothing
   half-applies.
 - **Cadences need no proposal**: a run is skipped when the team budget is spent and charged to the tenant

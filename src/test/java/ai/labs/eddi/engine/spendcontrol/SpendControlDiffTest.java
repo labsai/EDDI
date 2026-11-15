@@ -254,6 +254,81 @@ class SpendControlDiffTest {
         }
 
         @Test
+        @DisplayName("a base cache price that lowers the unset long-context cache price loosens, though the tier is unchanged")
+        void baseCacheLowersTierCache() {
+            // base input 10, tier input 20, no cache prices: long-context cache reads and
+            // writes cost 20. A base cache price of 15 raises the base cache price (10 ->
+            // 15)
+            // but lowers the long-context one (20 -> 15), with the tier record untouched.
+            var tier = new LongContextTier(1_000L, 20.0, 20.0, null, null);
+            var before = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, tier, null, SRC, null));
+            var cacheRead = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, 15.0, null, tier, null, SRC, null));
+            var cacheWrite = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, 15.0, tier, null, SRC, null));
+
+            var read = diff(before, cacheRead);
+            assertTrue(read.loosens(), read.changes().toString());
+            assertTrue(read.loosening().get(0).contains("long-context cacheRead unset(20.0) -> unset(15.0)"), read.loosening().toString());
+            var write = diff(before, cacheWrite);
+            assertTrue(write.loosens(), write.changes().toString());
+            assertTrue(write.loosening().get(0).contains("long-context cacheWrite unset(20.0) -> unset(15.0)"), write.loosening().toString());
+        }
+
+        @Test
+        @DisplayName("a base price raise under an unchanged tier that sets every price is stricter")
+        void baseRaiseUnderFullTier() {
+            var tier = new LongContextTier(1_000L, 20.0, 20.0, 20.0, 20.0);
+            var before = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 10.0, 10.0, null, null, tier, null, SRC, null));
+            var after = catalog(UnpricedPolicy.ALLOW, new ModelPriceEntry("anthropic", "c", 12.0, 12.0, 15.0, 15.0, tier, null, SRC, null));
+            var result = diff(before, after);
+            assertFalse(result.isEmpty());
+            assertFalse(result.loosens(), result.loosening().toString());
+        }
+
+        @Test
+        @DisplayName("moving a glob behind another of equal length that matches the same model loosens, with only its note changed")
+        void reorderedTie() {
+            // abcxyz matches both; the matcher breaks the tie by catalog position
+            var abc = entry("openai", "abc*", 10.0, 10.0);
+            var xyz = entry("openai", "*xyz", 1.0, 1.0);
+            var before = catalog(UnpricedPolicy.ALLOW, abc, xyz);
+            // remove abc* and upsert it again with a new note: it moves to the end
+            var after = catalog(UnpricedPolicy.ALLOW, xyz, new ModelPriceEntry("openai", "abc*", 10.0, 10.0, null, null, null, null, SRC, "n"));
+
+            var result = diff(before, after);
+            assertTrue(result.loosens(), result.changes().toString());
+            assertTrue(result.loosening().stream().anyMatch(l -> l.startsWith("reordered openai/abc* and openai/*xyz")),
+                    result.loosening().toString());
+            // the order alone, nothing else changed
+            var orderOnly = diff(before, catalog(UnpricedPolicy.ALLOW, xyz, abc));
+            assertFalse(orderOnly.isEmpty());
+            assertTrue(orderOnly.loosens());
+        }
+
+        @Test
+        @DisplayName("moving entries whose order decides nothing loosens nothing")
+        void reorderedNoTie() {
+            var prefixA = entry("openai", "abc*", 10.0, 10.0);
+            var prefixB = entry("openai", "abd*", 1.0, 1.0);
+            var longer = entry("openai", "abcd*", 1.0, 1.0);
+            var exact = entry("openai", "gpt-4o", 1.0, 1.0);
+            var other = entry("anthropic", "*xyz", 1.0, 1.0);
+            var before = catalog(UnpricedPolicy.ALLOW, prefixA, prefixB, longer, exact, other);
+            var after = catalog(UnpricedPolicy.ALLOW, other, exact, longer, prefixB, prefixA);
+            var result = diff(before, after);
+            assertTrue(result.isEmpty(), result.changes().toString());
+        }
+
+        @ParameterizedTest
+        @CsvSource({"abc*,*xyz,true", "abc*,*bcd*,true", "*abc*,*xyz*,true", "abc*,abd*,false", "*abc,*abd,false", "abc*,abcd*,false",
+                "abc*,xyz,false"})
+        @DisplayName("the matcher breaks a tie by order only between same-provider globs of equal length that share a model")
+        void ties(String a, String b, boolean expected) {
+            assertEquals(expected, SpendControlDiff.tiesInMatcher(entry("openai", a, 1.0, 1.0), entry("openai", b, 1.0, 1.0)));
+            assertEquals(expected, SpendControlDiff.tiesInMatcher(entry("openai", b, 1.0, 1.0), entry("openai", a, 1.0, 1.0)));
+            assertFalse(SpendControlDiff.tiesInMatcher(entry("openai", a, 1.0, 1.0), entry("anthropic", b, 1.0, 1.0)));
+        }
+
+        @Test
         @DisplayName("a key differing only by case is a change of that entry, not an addition")
         void caseOnly() {
             var before = catalog(UnpricedPolicy.REFUSE, entry("openai", "gpt-4o", 2.5, 10.0));

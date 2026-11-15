@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Decides whether a change to a spending control makes spending stricter or
@@ -38,6 +39,9 @@ import java.util.Objects;
  * <li>a <b>changed</b> entry is stricter only if no price goes down, no price
  * is cleared, and the long-context threshold only moves down over a tier that
  * costs at least the base price;</li>
+ * <li>a <b>moved</b> entry is loosening when its position decides, against
+ * another kept entry, which of the two prices a model (globs of one provider
+ * with literal parts of equal length);</li>
  * <li>a quota limit counts {@code -1} (unlimited) as infinite, and
  * {@code enabled: false} switches every limit off.</li>
  * </ul>
@@ -105,7 +109,99 @@ public final class SpendControlDiff {
                 compareChanged(old, next, changes, loosening);
             }
         }
+        compareOrder(before.entries(), after.entries(), newEntries.keySet(), oldEntries.keySet(), changes, loosening);
         return new Result(List.copyOf(changes), List.copyOf(loosening));
+    }
+
+    /**
+     * Reports every pair of entries, kept in both catalogs, whose relative order
+     * changed although the order decides which of them prices a model.
+     * {@code ModelPriceMatcher} ranks the globs of one provider by the length of
+     * their literal part and breaks a tie by catalog position, so with {@code abc*}
+     * before {@code *xyz} the model {@code abcxyz} is priced by {@code abc*};
+     * swapping the two hands it to {@code *xyz}. Neither entry need change for that
+     * (removing an entry and upserting it again moves it to the end), so the move
+     * itself is judged — and, as nothing proves it stricter, it always loosens.
+     * Exact names are looked up by name, and a provider's entries always win over
+     * provider {@code *}, so neither depends on order.
+     */
+    private static void compareOrder(List<ModelPriceEntry> before, List<ModelPriceEntry> after, Set<String> keptAfter,
+                                     Set<String> keptBefore, List<String> changes, List<String> loosening) {
+        List<String> oldOrder = globKeys(before, keptAfter);
+        List<String> newOrder = globKeys(after, keptBefore);
+        Map<String, Integer> newPosition = new LinkedHashMap<>();
+        for (int i = 0; i < newOrder.size(); i++) {
+            newPosition.putIfAbsent(newOrder.get(i), i);
+        }
+        Map<String, ModelPriceEntry> oldByKey = byKey(before);
+        for (int i = 0; i < oldOrder.size(); i++) {
+            ModelPriceEntry first = oldByKey.get(oldOrder.get(i));
+            for (int j = i + 1; j < oldOrder.size(); j++) {
+                ModelPriceEntry second = oldByKey.get(oldOrder.get(j));
+                if (!tiesInMatcher(first, second)) {
+                    continue;
+                }
+                Integer a = newPosition.get(oldOrder.get(i));
+                Integer b = newPosition.get(oldOrder.get(j));
+                if (a != null && b != null && b < a) {
+                    String text = "reordered " + label(first) + " and " + label(second);
+                    changes.add(text);
+                    loosening.add(text + " (patterns of equal length that can match the same model, which the one listed first prices:"
+                            + " such models move from " + label(first) + " to " + label(second) + ")");
+                }
+            }
+        }
+    }
+
+    /** Keys of the glob entries, in catalog order, restricted to {@code kept}. */
+    private static List<String> globKeys(List<ModelPriceEntry> entries, Set<String> kept) {
+        List<String> keys = new ArrayList<>();
+        for (ModelPriceEntry e : entries) {
+            String key = key(e.provider(), e.model());
+            if (glob(e) && kept.contains(key) && !keys.contains(key)) {
+                keys.add(key);
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * Whether {@code ModelPriceMatcher} decides between the two by catalog order
+     * alone: the same provider, globs of equal literal length, and some model name
+     * both match. Two prefixes (or two suffixes) of equal length match a common
+     * name only when they are the same text; every other pair of shapes can (a
+     * prefix and a suffix: their concatenation; a contains-glob: any name holding
+     * both).
+     */
+    static boolean tiesInMatcher(ModelPriceEntry a, ModelPriceEntry b) {
+        if (!lower(a.provider()).equals(lower(b.provider())) || !glob(a) || !glob(b)) {
+            return false;
+        }
+        String ma = lower(a.model());
+        String mb = lower(b.model());
+        boolean leadingA = ma.startsWith("*");
+        boolean trailingA = ma.length() > 1 && ma.endsWith("*");
+        boolean leadingB = mb.startsWith("*");
+        boolean trailingB = mb.length() > 1 && mb.endsWith("*");
+        String literalA = ma.substring(leadingA ? 1 : 0, trailingA ? ma.length() - 1 : ma.length());
+        String literalB = mb.substring(leadingB ? 1 : 0, trailingB ? mb.length() - 1 : mb.length());
+        if (literalA.length() != literalB.length()) {
+            return false;
+        }
+        boolean containsA = leadingA && trailingA;
+        boolean containsB = leadingB && trailingB;
+        if (!containsA && !containsB && leadingA == leadingB) {
+            return literalA.equals(literalB);
+        }
+        return true;
+    }
+
+    /**
+     * A pattern with a leading and/or trailing {@code *}, as the matcher reads it.
+     */
+    private static boolean glob(ModelPriceEntry e) {
+        String model = lower(e.model());
+        return model.startsWith("*") || (model.length() > 1 && model.endsWith("*"));
     }
 
     private static void compareAdded(ModelPriceEntry added, List<ModelPriceEntry> existing, UnpricedPolicy policyInForce, List<String> changes,
@@ -157,7 +253,11 @@ public final class SpendControlDiff {
 
         LongContextTier oldTier = old.longContext();
         LongContextTier newTier = next.longContext();
-        if (!Objects.equals(oldTier, newTier)) {
+        // Compared whenever either side has a tier, not only when the tier record
+        // changed: an unset tier price falls back to a base price (an unset tier cache
+        // price to the base cache price), so a base-only change can lower what
+        // long-context calls cost while the tier record stays equal.
+        if (oldTier != null || newTier != null) {
             double[] oldTierPrices = tier(old, oldBase);
             double[] newTierPrices = tier(next, newBase);
             Double[][] rawTier = {{tierField(oldTier, 0), tierField(newTier, 0)}, {tierField(oldTier, 1), tierField(newTier, 1)},
