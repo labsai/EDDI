@@ -1,0 +1,15 @@
+## Broken JSON rescue: recoverFields and onUnwrappable (2026-11-15)
+
+Repo: EDDI, branch `feat/broken-json-rescue`.
+
+**Problem (production, 2026-11-13).** A Gemini agent with `onInvalidJson: "wrap"`, `wrapField: "htmlResponseText"`, `onSchemaMismatch: "retry"` answered with JSON that held the right field but was invalid inside (an unescaped quote, or a cut-off). `wrap` refuses text that starts with `{` by design (broken JSON, not prose), nothing parsed so `onSchemaMismatch: "retry"` never applied, and the user got the fallback although the answer was in the reply.
+
+**What changed (both opt-in, defaults unchanged).**
+
+- `responseValidation.recoverFields` (list of top-level string field names, at most 10): for a reply that starts with `{` (after an opening code fence) and still does not parse, each listed field is found as `"name": "` and read leniently by `ModelOutputParser.readLenientString` (standard escapes decoded; the value ends at the first unescaped quote followed by the end, `}` or `,` plus the next key; a cut-off reply yields the rest up to `wrapMaxChars` without a trailing half-escape). The fields are merged over `wrapDefaults` and checked like any parsed reply (`responseSchema`, `nonBlankFields`). New parse outcome `recovered` (`llm:output:outcome:*`, `eddi.llm.output{outcome=recovered}`), `eddi.llm.recovery{action=recover_fields,outcome=recovered}` and one `LLM recovery` log line. String fields only; never text that does not start with `{`; never a reply that parsed.
+- `responseValidation.onUnwrappable: "fallback" | "retry"` (default `fallback`): with `onInvalidJson: "wrap"`, `retry` re-asks once a reply that is neither wrappable nor recoverable, through the existing `FormatRetryRunner` (shares `maxRetries`, turn deadline, `minAttemptMs`, cost caps), then `fallbackAction` applies. Implemented by adding the `INVALID_JSON` trigger to the retry policy in `Policy.from`; the runner loop is unchanged.
+- Save-time validation (`RescueOptions.validate`, called from `LlmStore`): `recoverFields` entries must be plain names, at most 10, and need `convertToObject`; `onUnwrappable` must be `fallback` or `retry`; `retry` needs `onInvalidJson: "wrap"` and `convertToObject`.
+- Manager types (`ui/manager/src/components/editors/llm/types.ts`) gained both fields.
+- Docs: the order of recovery is documented in `docs/langchain.md` and `docs/llm-resilience.md`: fence strip or extraction, `\'` and double-escape repairs, parse, aliases, shape check, `recoverFields`, `wrap`, retry or fallback.
+
+**Design decisions.** `onUnwrappable` rather than `fallbackAction: "retry"`: `fallbackAction` is what happens after the re-asks are spent, so `retry` there would be circular; the new field names the situation it reacts to and leaves `fallbackAction` meaning unchanged. Recovery runs before wrap and only on text starting with `{`, so the two never compete. A recovered reply is not re-asked (it is usable), even under `onInvalidJson: "retry"`; that is why recovery is opt-in per field list. `RescueOptions.rewritesReply()` (wrap or recover) replaces `wraps()` in the three output-buffering gates so a recovered reply is never streamed raw.

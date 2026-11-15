@@ -758,7 +758,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // already streamed cannot be taken back. A warn-only guardrail streams.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean guardrailBuffering = outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps() || guardrailBuffering;
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).rewritesReply() || guardrailBuffering;
         // How an output guardrail's reprompt asks the model again — set by the branch
         // that produced the answer, so the reprompt runs on the same model and never
         // re-runs a tool. Null leaves a reprompt nothing to do but block.
@@ -2093,7 +2093,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 if (unwrappable == null || "retry".equalsIgnoreCase(unwrappable) || "wrap".equalsIgnoreCase(unwrappable)) {
                     unwrappable = "fallback";
                 }
-                LOGGER.warnf("[ResponseValidation] %s — the reply cannot be wrapped, applying fallbackAction '%s' (task=%s)", validationType,
+                LOGGER.warnf("[ResponseValidation] %s — the reply can be neither wrapped nor recovered, applying fallbackAction '%s' (task=%s)",
+                        validationType,
                         unwrappable, task.getId());
                 if (meterRegistry != null) {
                     meterRegistry.counter("eddi.llm.recovery", "action", LlmRecoveryLog.WRAP, "outcome", "not_wrappable", "trigger", validationType)
@@ -2196,6 +2197,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         if (outcome.wrapped() && outcome.kind() == ModelOutputParser.Kind.VALID) {
             recordRecovery(memory, LlmRecoveryLog.WRAP, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
         }
+        if (outcome.recovered() && outcome.kind() == ModelOutputParser.Kind.VALID) {
+            recordRecovery(memory, LlmRecoveryLog.RECOVER_FIELDS, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
+        }
         switch (outcome.kind()) {
             case SCHEMA_MISMATCH -> LOGGER.warnf("convertToObject=true but the response of task '%s' does not match the expected shape (%s)",
                     taskId, outcome.reason());
@@ -2203,7 +2207,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     outcome.reason());
             case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
             default -> {
-                if (outcome.repaired() && !outcome.wrapped()) {
+                if (outcome.repaired() && !outcome.wrapped() && !outcome.recovered()) {
                     recordRecovery(memory, LlmRecoveryLog.REPAIR, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
                 }
             }
@@ -2344,7 +2348,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // tokens of an attempt that is then retried cannot be taken back.
         // WS4: an output guardrail that can change the answer buffers it the same way.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).rewritesReply()
                 || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
         var resumeBridge = bufferOutput
                 ? null

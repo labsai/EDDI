@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -80,6 +81,43 @@ class LlmStoreRescueValidationTest {
         var error = assertThrows(IllegalArgumentException.class, () -> store.create(config("ignore", null, Map.of("a", "b.c"))));
 
         assertTrue(error.getMessage().startsWith("langchain.task[0].fieldAliases"), error.getMessage());
+        verifyNoInteractions(storage);
+    }
+
+    private static LlmConfiguration recoveryConfig(String convertToObject, List<String> recoverFields, String onUnwrappable, String onInvalidJson) {
+        var task = new LlmConfiguration.Task();
+        task.setId("t1");
+        if (convertToObject != null) {
+            task.setParameters(new HashMap<>(Map.of("convertToObject", convertToObject)));
+        }
+        var v = new LlmConfiguration.ResponseValidation();
+        v.setEnabled(true);
+        v.setOnInvalidJson(onInvalidJson);
+        v.setWrapField("htmlResponseText");
+        v.setRecoverFields(recoverFields);
+        v.setOnUnwrappable(onUnwrappable);
+        task.setResponseValidation(v);
+        return new LlmConfiguration(List.of(task));
+    }
+
+    @Test
+    @DisplayName("create rejects recoverFields on a task that does not convert to an object")
+    void createRejectsRecoverFieldsWithoutConvertToObject() {
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> store.create(recoveryConfig(null, List.of("htmlResponseText"), null, "ignore")));
+
+        assertTrue(error.getMessage().startsWith("langchain.task[0].responseValidation.recoverFields needs the task parameter convertToObject"),
+                error.getMessage());
+        verifyNoInteractions(storage);
+    }
+
+    @Test
+    @DisplayName("update rejects onUnwrappable retry with convertToObject false, and with a policy other than wrap")
+    void updateRejectsUnwrappableRetryWithoutWrap() {
+        assertThrows(IllegalArgumentException.class, () -> store.update("id", 1, recoveryConfig("false", null, "retry", "wrap")));
+        var error = assertThrows(IllegalArgumentException.class, () -> store.update("id", 1, recoveryConfig("true", null, "retry", "retry")));
+
+        assertTrue(error.getMessage().contains("only applies with onInvalidJson \"wrap\""), error.getMessage());
         verifyNoInteractions(storage);
     }
 }

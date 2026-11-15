@@ -296,6 +296,12 @@ final class FormatRetryRunner {
             addIfRetry(on, Trigger.CONTEXT_TOO_LONG, validation.getOnContextTooLong());
             if (convertToObject) {
                 addIfRetry(on, Trigger.INVALID_JSON, validation.getOnInvalidJson());
+                // wrap (+ recoverFields) already rescued what it can: the replies that are
+                // still invalid are the ones onUnwrappable=retry asks the model again for
+                if (RescueOptions.WRAP.equalsIgnoreCase(validation.getOnInvalidJson())
+                        && RescueOptions.ON_UNWRAPPABLE_RETRY.equalsIgnoreCase(validation.getOnUnwrappable())) {
+                    on.add(Trigger.INVALID_JSON);
+                }
                 addIfRetry(on, Trigger.SCHEMA_MISMATCH, validation.getOnSchemaMismatch());
             }
             if (on.isEmpty()) {

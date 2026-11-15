@@ -75,13 +75,24 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");
                 SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");
-                RescueOptions.validate(task.getResponseValidation(), task.getFieldAliases(), "langchain.task[" + i + "]");
+                RescueOptions.validate(task.getResponseValidation(), task.getFieldAliases(), "langchain.task[" + i + "]",
+                        convertsToObject(task));
                 warnStrictModeImplications(task.getToolApprovals(), fieldPath);
                 // answerMode: the terminal reply tool (convertToObject + object-root
                 // responseSchema, no name collision).
                 AnswerToolConfigValidator.validate(task, "langchain.task[" + i + "]");
             }
         }
+    }
+
+    /**
+     * Whether the task's {@code convertToObject} parameter is set to anything but
+     * {@code false}: a templated value is given the benefit of the doubt, an absent
+     * one is {@code false}.
+     */
+    private static boolean convertsToObject(LlmConfiguration.Task task) {
+        String value = task.getParameters() != null ? task.getParameters().get("convertToObject") : null;
+        return value != null && !"false".equalsIgnoreCase(value.trim());
     }
 
     /**

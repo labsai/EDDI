@@ -1641,8 +1641,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * {@code "retry"} re-asks the same model with a corrective message.
          * {@code "wrap"} (needs {@link #wrapField}) wraps a plain-text reply into an
          * object instead, with no second model call; a reply that cannot be wrapped
-         * (broken JSON, over {@link #wrapMaxChars}) gets {@link #fallbackAction}.
-         * Default: "ignore" — the raw reply is stored as a string, as before.
+         * (broken JSON that {@link #recoverFields} did not rescue, over
+         * {@link #wrapMaxChars}) gets {@link #fallbackAction}, after one corrective
+         * re-ask when {@link #onUnwrappable} is {@code "retry"}. Default: "ignore" —
+         * the raw reply is stored as a string, as before.
          */
         private String onInvalidJson = "ignore";
 
@@ -1679,6 +1681,41 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.7.0
          */
         private int wrapMaxChars = DEFAULT_WRAP_MAX_CHARS;
+
+        /**
+         * Top-level <em>string</em> fields to lift out of a reply that starts with
+         * <code>{</code> but is not valid JSON (an unescaped quote inside a value, a
+         * reply cut off mid-string), for example {@code ["htmlResponseText"]}. Runs
+         * after every other local repair and before {@code wrap}: each listed field is
+         * found as {@code "name": "} and its value read leniently (standard escapes
+         * decoded; it ends at the first unescaped quote followed by {@code ,} and the
+         * next key, a closing brace or the end of the reply; a reply cut off mid-string
+         * yields the rest of it, up to {@link #wrapMaxChars}). The recovered fields,
+         * merged over {@link #wrapDefaults}, are checked like any parsed reply and
+         * recorded as outcome {@code recovered}. Only string fields can be recovered:
+         * an array or object field (such as {@code quickReplies}) is not read, give it
+         * a default in {@link #wrapDefaults}. Never applied to text that does not start
+         * with <code>{</code> (that is {@code wrap}'s job) or to a reply that parsed.
+         * Null or empty (default) = off, today's behaviour. At most 10 plain names.
+         *
+         * @since 6.7.0
+         */
+        private List<String> recoverFields;
+
+        /**
+         * With {@code onInvalidJson: "wrap"}: what happens to a reply that can be
+         * neither wrapped nor recovered (broken JSON that {@link #recoverFields} did
+         * not rescue, or text over {@link #wrapMaxChars}). {@code "fallback"} (default)
+         * applies {@link #fallbackAction} at once, as before. {@code "retry"} first
+         * re-asks the same model with the corrective message (shares
+         * {@link #maxRetries}, the turn deadline, {@link #minAttemptMs} and
+         * {@link #maxRetryCostUsd} with every other re-ask), then applies
+         * {@link #fallbackAction}. Only valid together with {@code wrap}: with
+         * {@code onInvalidJson: "retry"} every invalid reply is already re-asked.
+         *
+         * @since 6.7.0
+         */
+        private String onUnwrappable = "fallback";
 
         /**
          * Action when a reply parses as JSON but breaks the response shape
@@ -1768,6 +1805,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setWrapDefaults(Map<String, Object> wrapDefaults) {
             this.wrapDefaults = wrapDefaults != null ? new LinkedHashMap<>(wrapDefaults) : null;
+        }
+
+        public List<String> getRecoverFields() {
+            return recoverFields;
+        }
+
+        public void setRecoverFields(List<String> recoverFields) {
+            this.recoverFields = recoverFields != null ? new ArrayList<>(recoverFields) : null;
+        }
+
+        public String getOnUnwrappable() {
+            return onUnwrappable;
+        }
+
+        public void setOnUnwrappable(String onUnwrappable) {
+            this.onUnwrappable = onUnwrappable;
         }
 
         public int getWrapMaxChars() {
