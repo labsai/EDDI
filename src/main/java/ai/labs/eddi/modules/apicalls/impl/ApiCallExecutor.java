@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -757,6 +758,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // Built here, in order, on the turn's thread — see the method comment.
         List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
+        // The first configuration refusal behind an item whose request was not built:
+        // a "fail" step carries it, so a conversation start answers 422, not 500.
+        Exception itemRefusal = null;
         for (ForEachItems.Element element : elements) {
             Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
             itemData.put(iterationName, element.value());
@@ -773,6 +777,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // that does not render): nothing of it is sent, and the others still are.
                 String reason = "request not built: " + ForEachItems.describe(e, Set.of(), MAX_ITEM_ERROR_CHARS);
                 LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(callName), element.index(), reason);
+                if (itemRefusal == null && AgentConfigurationRefusal.find(e) instanceof Exception refusal) {
+                    itemRefusal = refusal;
+                }
                 work.add(() -> ForEachItemResult.notSent(element.index(), reason));
                 continue;
             }
@@ -848,7 +855,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // After the results are stored: the work that succeeded (and was paid
             // for) stays readable; only the step reports failure.
             throw new LifecycleException("http call '" + LogSanitizer.sanitize(callName) + "': " + failureSummary
-                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'");
+                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'", itemRefusal);
         }
 
         Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, stepCode, false);
@@ -1552,6 +1559,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         stringOf(outgoing.get(IRequest.KEY_BODY)));
             }
             return built;
+        } catch (SecretResolver.MisconfiguredVaultReferenceException e) {
+            // Shown to the caller of a refused conversation start: say which call it is.
+            // Built from reference names only, so there is no plaintext to redact.
+            throw new SecretResolver.MisconfiguredVaultReferenceException("API call '" + call.getName() + "': " + e.getMessage(), e);
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1584,8 +1595,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return null;
         }
         String redacted = RequestRedactor.redactResolvedSecrets(String.valueOf(failure.getMessage()), secrets);
-        return new IllegalArgumentException(failure.getClass().getSimpleName() + ": " + redacted
-                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)");
+        String message = failure.getClass().getSimpleName() + ": " + redacted
+                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)";
+        // The cause chain is dropped, so a configuration refusal in it must be
+        // re-marked on the copy or a conversation start would answer 500, not 422.
+        return AgentConfigurationRefusal.find(failure) != null ? new RedactedRefusalException(message) : new IllegalArgumentException(message);
+    }
+
+    /**
+     * The secret-free copy of an exception that carried an
+     * {@link AgentConfigurationRefusal}: same marker, no cause, redacted message.
+     */
+    static final class RedactedRefusalException extends IllegalArgumentException implements AgentConfigurationRefusal {
+        private static final long serialVersionUID = 1L;
+
+        RedactedRefusalException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -2060,9 +2086,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         resolved.append(value, copied, value.length());
         if (unresolved != null) {
-            throw new IllegalArgumentException(location + " references " + unresolved
-                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
-                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+            // Diagnosed only now, on the failure path: it names the tenant looked up and
+            // tells a configuration error (answered 422 at conversation start) from a
+            // vault outage (still a 500).
+            throw SecretResolver.unresolvedReferenceFailure(location, unresolved,
+                    secretResolver.diagnoseUnresolved(SecretReference.parse(unresolved)));
         }
         return resolved.toString();
     }
