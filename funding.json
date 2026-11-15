@@ -5,7 +5,7 @@
     "type": "organisation",
     "role": "owner",
     "name": "EDDI Solutions",
-    "email": "eddi@labs.ai",
+    "email": "gregor.jarisch@eddi.solutions",
     "description": "EDDI Solutions builds and maintains EDDI, an open-source, config-driven middleware for orchestrating conversational AI agents. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
     "webpageUrl": {
       "url": "https://eddi.technology"
@@ -32,7 +32,7 @@
         "guid": "bank-transfer",
         "type": "bank",
         "address": "",
-        "description": "Bank transfer (SEPA or international). Write to eddi@labs.ai for account details."
+        "description": "Bank transfer (SEPA or international). Write to gregor.jarisch@eddi.solutions for account details."
       }
     ],
     "plans": [
