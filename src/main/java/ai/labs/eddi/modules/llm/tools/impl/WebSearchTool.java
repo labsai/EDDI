@@ -45,6 +45,7 @@ public class WebSearchTool {
      * the limit only has to stop a misbehaving endpoint from filling the heap.
      */
     static final long MAX_RESPONSE_BYTES = 2L * 1024 * 1024;
+    static final String GOOGLE_DEFAULT_BASE_URL = "https://www.googleapis.com/customsearch/v1";
     private final OutboundHttp http;
     private final ObjectMapper objectMapper;
 
@@ -53,6 +54,13 @@ public class WebSearchTool {
 
     @ConfigProperty(name = "eddi.tools.websearch.google.cx")
     Optional<String> googleCx;
+
+    /**
+     * Endpoint of the Custom Search JSON API. Empty means Google's own,
+     * {@link #GOOGLE_DEFAULT_BASE_URL}.
+     */
+    @ConfigProperty(name = "eddi.tools.websearch.google.base-url")
+    Optional<String> googleBaseUrl = Optional.empty();
 
     @ConfigProperty(name = "eddi.tools.websearch.provider", defaultValue = "duckduckgo")
     String searchProvider;
@@ -105,7 +113,9 @@ public class WebSearchTool {
 
     private String searchWithGoogle(String query, int maxResults) throws IOException, InterruptedException {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
-        String url = String.format("https://www.googleapis.com/customsearch/v1?key=%s&cx=%s&q=%s&num=%d",
+        String baseUrl = googleBaseUrl.map(String::strip).filter(s -> !s.isEmpty()).map(s -> s.replaceAll("/+$", ""))
+                .orElse(GOOGLE_DEFAULT_BASE_URL);
+        String url = String.format("%s?key=%s&cx=%s&q=%s&num=%d", baseUrl,
                 URLEncoder.encode(googleApiKey.get(), StandardCharsets.UTF_8), URLEncoder.encode(googleCx.get(), StandardCharsets.UTF_8),
                 encodedQuery, maxResults);
 
@@ -125,8 +135,8 @@ public class WebSearchTool {
     }
 
     /**
-     * A GET of a search provider's fixed host: the URL is trusted, every redirect
-     * hop is SSRF-checked.
+     * A GET of a search provider's fixed or configured host: the URL is trusted,
+     * every redirect hop is SSRF-checked.
      */
     private static OutboundRequest.Builder get(String url) {
         return OutboundRequest.get(Profile.DEFAULT, URI.create(url))

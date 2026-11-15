@@ -706,6 +706,40 @@ class WebSearchToolTest {
         }
 
         @Test
+        void withoutBaseUrlTheRequestGoesToGoogle() throws Exception {
+            answer(mockedClient, 200, "{\"items\":[]}");
+            textOf(() -> googleTool.searchWeb("q", 3));
+            var request = ArgumentCaptor.forClass(OutboundRequest.class);
+            verify(mockedClient).send(request.capture(), any());
+            assertEquals("https://www.googleapis.com/customsearch/v1?key=SECRET%26key+1&cx=cx+id&q=q&num=3",
+                    request.getValue().uri().toString());
+        }
+
+        @Test
+        void aConfiguredBaseUrlReplacesGoogle() throws Exception {
+            set("googleBaseUrl", Optional.of(" https://search.example.com/customsearch/v1/ "));
+            answer(mockedClient, 200, """
+                    {"items":[{"title":"Other Result","snippet":"Other snippet","link":"https://example.com"}]}
+                    """);
+            String result = textOf(() -> googleTool.searchWeb("q", 3));
+            var request = ArgumentCaptor.forClass(OutboundRequest.class);
+            verify(mockedClient).send(request.capture(), any());
+            assertEquals("https://search.example.com/customsearch/v1?key=SECRET%26key+1&cx=cx+id&q=q&num=3",
+                    request.getValue().uri().toString());
+            assertTrue(result.contains("Other Result"), result);
+        }
+
+        @Test
+        void aBlankBaseUrlFallsBackToGoogle() throws Exception {
+            set("googleBaseUrl", Optional.of("  "));
+            answer(mockedClient, 200, "{\"items\":[]}");
+            textOf(() -> googleTool.searchWeb("q", 3));
+            var request = ArgumentCaptor.forClass(OutboundRequest.class);
+            verify(mockedClient).send(request.capture(), any());
+            assertTrue(request.getValue().uri().toString().startsWith("https://www.googleapis.com/customsearch/v1?"));
+        }
+
+        @Test
         void aFailureNamingTheUriDoesNotLeakTheKey() throws Exception {
             doThrow(new IOException(
                     "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
