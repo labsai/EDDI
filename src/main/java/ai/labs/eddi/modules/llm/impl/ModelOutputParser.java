@@ -405,10 +405,10 @@ public final class ModelOutputParser {
      * control-character letters and the four-digit hex form, plus an escaped
      * apostrophe); an unknown escape keeps the character after the backslash.</li>
      * <li>The value ends at the first <em>unescaped</em> quote that is followed
-     * (after optional whitespace) by the end of the text, by a closing brace, or by
-     * a comma and then the next key's opening quote (or the end). Any other
-     * unescaped quote, such as the one in <code>style="color:red"</code> or a
-     * quotation, belongs to the value.</li>
+     * (after optional whitespace) by the end of the text, by a closing brace that
+     * ends the text, or by a comma and then the next key (a short quoted name and a
+     * colon) or the end. Any other unescaped quote, such as the one in
+     * <code>style="color:red"</code> or a quotation, belongs to the value.</li>
      * <li>When the text ends first (a reply cut off mid-string), the value is
      * everything read, at most {@code maxChars} long, without a trailing partial
      * escape.</li>
@@ -488,9 +488,18 @@ public final class ModelOutputParser {
     }
 
     /**
-     * Whether a quote followed by {@code text[from..]} closes a value: the end of
-     * the text, a closing brace, or a comma that is followed by the next key's
-     * quote.
+     * What the next key of an object looks like after a comma: a short quoted name
+     * and a colon, or a quote and name cut off by the end of the text.
+     */
+    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{1,64}(?:\"\\s*:|\\z)");
+
+    /**
+     * Whether a quote followed by {@code text[from..]} closes a value. Prose can
+     * hold a quote followed by a comma or a brace, so the rest must look like the
+     * rest of the object: the end of the text (or a closing code fence) after a
+     * closing brace, or a comma followed by the next real key (a short quoted name
+     * and a colon) or by the end of the text. A quote that is followed by anything
+     * else belongs to the value.
      */
     private static boolean endsValue(String text, int from) {
         int i = skipWhitespace(text, from);
@@ -499,11 +508,12 @@ public final class ModelOutputParser {
         }
         char c = text.charAt(i);
         if (c == '}') {
-            return true;
+            String rest = text.substring(i + 1).trim();
+            return rest.isEmpty() || rest.equals(FENCE);
         }
         if (c == ',') {
             int next = skipWhitespace(text, i + 1);
-            return next >= text.length() || text.charAt(next) == '"';
+            return next >= text.length() || NEXT_KEY.matcher(text).region(next, text.length()).lookingAt();
         }
         return false;
     }

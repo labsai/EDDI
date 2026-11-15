@@ -23,6 +23,8 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -573,6 +575,24 @@ class LlmTaskOutputOutcomeTest {
             assertEquals(0, recovered("repair", "recovered"), "a recovery is not also counted as a repair");
             assertEquals(1, model.requests().size());
             assertTrue(lines.stream().anyMatch(l -> l.contains("action=recover_fields") && l.contains("outcome=recovered")), lines.toString());
+        }
+
+        @Test
+        @DisplayName("a streamed turn with recoverFields is buffered: no live streaming model is used, no token reaches the sink before validation, the stored object is the recovered one")
+        void recoveredReplyIsNotStreamedLive() throws Exception {
+            var sink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(sink);
+            when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(mock(StreamingChatModel.class));
+            String broken = "{\"htmlResponseText\": \"Type \"ready\" to start";
+            liveModelReplies(Step.text(broken));
+            var t = rescueTask(false, "ignore", "ignore", null);
+            t.getResponseValidation().setRecoverFields(List.of("htmlResponseText"));
+
+            run(t);
+
+            verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+            assertEquals(Map.of("htmlResponseText", "Type \"ready\" to start"), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "recovered");
         }
 
         @Test

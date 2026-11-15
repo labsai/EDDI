@@ -253,4 +253,27 @@ class ModelOutputParserRecoverFieldsTest {
 
         assertFalse(map(outcome).get("quickReplies") == shared);
     }
+
+    @Test
+    @DisplayName("a quote, comma and another quoted word inside prose do not end the value: only a real next key does")
+    void quotedWordsAfterCommaStayInProse() {
+        String raw = "{\"htmlResponseText\": \"He said \"hi\", \"bye\" and left\", \"quickReplies\": [";
+
+        assertEquals("He said \"hi\", \"bye\" and left", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a real following key still ends the value, whatever its name")
+    void realNextKeyEndsValue() {
+        String raw = "{\"htmlResponseText\": \"answer\",\n  \"follow_up-1\" : \"x\"}";
+
+        assertEquals("answer", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a closing brace inside prose does not end the value; one that ends the reply, or precedes a closing fence, does")
+    void braceEndsOnlyAtTheEnd() {
+        assertEquals("x \"y\" use \"}\" z", map(parse("{\"htmlResponseText\": \"x \"y\" use \"}\" z\"}", recover(FIELD))).get(FIELD));
+        assertEquals("done", map(parse("```json\n{\"htmlResponseText\": \"done\"}\n```", recover(FIELD))).get(FIELD));
+    }
 }
