@@ -756,6 +756,7 @@ The Helm chart sets each of these from its `eddi.branding.*` values, and mounts 
 | `eddi.logs.db-enabled` | `true` | Also persist logs to the database |
 | `eddi.logs.db-flush-interval-seconds` | `5` | Persistence batch cadence |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level persisted. Lowering this to `DEBUG` in production will fill the database quickly |
+| `eddi.logs.exception-max-frames` | `10` | Stack frames kept per throwable in a log entry's `exception` field (ring buffer, SSE stream and database history). The type, message and `Caused by:` chain are always kept, within an 8 KB total; `0` keeps no frames. Redacted like the message |
 | `eddi.logs.db-retention-days` | `-1` | Delete persisted log entries older than this many days. `-1` (or `0`) keeps them until deleted by hand. Persisted entries carry the user id (pseudonymized on GDPR erasure) and the message text, so set this wherever a data-retention policy applies. Applies to entries already stored even after `eddi.logs.db-enabled=false` |
 | `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
 | `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |

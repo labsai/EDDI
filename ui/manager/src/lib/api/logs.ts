@@ -14,6 +14,8 @@ export interface LogEntry {
   conversationId?: string;
   userId?: string;
   instanceId?: string;
+  /** The record's throwable as redacted text (type, message, cause chain, first frames); absent when there was none. */
+  exception?: string;
 }
 
 export interface DatabaseLogEntry {
@@ -27,6 +29,7 @@ export interface DatabaseLogEntry {
   conversationId?: string;
   userId?: string;
   instanceId?: string;
+  exception?: string;
 }
 
 export interface InstanceInfo {

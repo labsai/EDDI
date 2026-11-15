@@ -134,8 +134,9 @@ function formatTimestamp(ts: number | string | undefined, withDate = false): str
 }
 
 /** Plain-text line used by export and per-row copy: unambiguous date + zone. */
-function logLine(entry: { timestamp?: number | string; level?: string; message?: string }): string {
-  return `[${toIsoWithOffset(entry.timestamp)}] [${entry.level}] ${entry.message}`;
+function logLine(entry: { timestamp?: number | string; level?: string; message?: string; exception?: string }): string {
+  const line = `[${toIsoWithOffset(entry.timestamp)}] [${entry.level}] ${entry.message}`;
+  return entry.exception ? `${line}\n${entry.exception}` : line;
 }
 
 // ==================== Tab type ====================
@@ -862,11 +863,16 @@ function LogRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
-  const isStacktrace = entry.message ? hasStacktrace(entry.message) : false;
-  const { main, frames } = isStacktrace
-    ? splitStacktrace(entry.message ?? "")
-    : { main: entry.message, frames: "" };
-  const frameCount = isStacktrace ? countFrames(frames) : 0;
+  // The server's own exception field wins; a stacktrace embedded in the
+  // message (older entries, other loggers) is still split out as before.
+  const exception = entry.exception;
+  const isStacktrace = exception ? true : entry.message ? hasStacktrace(entry.message) : false;
+  const { main, frames } = exception
+    ? { main: entry.message, frames: exception }
+    : isStacktrace
+      ? splitStacktrace(entry.message ?? "")
+      : { main: entry.message, frames: "" };
+  const frameCount = isStacktrace ? countFrames(`\n${frames}`) : 0;
 
   const handleCopy = useCallback(() => {
     const failed = () => toast.error(t("common.copyFailed", "Failed to copy to clipboard"));

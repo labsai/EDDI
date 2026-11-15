@@ -377,5 +377,33 @@ describe("LogsPage", () => {
     expect(screen.getByText("Hide stacktrace")).toBeInTheDocument();
     vi.mocked(useLogStream).mockReturnValue(base);
   });
-});
 
+  // The server now sends the record's throwable as its own field instead of
+  // leaving it in the container's stdout; the row renders it behind the same
+  // collapsed toggle as a stacktrace embedded in a message.
+  it("renders the exception field behind a collapsed toggle", async () => {
+    const base = vi.mocked(useLogStream)();
+    vi.mocked(useLogStream).mockReturnValue({
+      ...base,
+      entries: [
+        {
+          timestamp: 1700000004000,
+          level: "ERROR",
+          message: "API agent sync failed",
+          loggerName: "sync",
+          exception:
+            "java.net.ConnectException: refused\n\tat a.B.c(B.java:1)\nCaused by: java.io.IOException: boom\n\tat a.D.e(D.java:2)",
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderLogs();
+
+    expect(screen.getByText("API agent sync failed")).toBeInTheDocument();
+    expect(screen.queryByText(/java\.net\.ConnectException/)).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("stacktrace-toggle"));
+    expect(screen.getByText(/java\.net\.ConnectException: refused/)).toBeInTheDocument();
+    expect(screen.getByText(/Caused by: java\.io\.IOException: boom/)).toBeInTheDocument();
+    vi.mocked(useLogStream).mockReturnValue(base);
+  });
+});

@@ -97,7 +97,7 @@ public final class LogCaptureFilter implements Filter {
      *            the fully initialized store proxy
      */
     public static void setStore(BoundedLogStore store) {
-        List<ExtLogRecord> early;
+        List<PreStartRecord> early;
         long dropped;
         synchronized (PRE_START) {
             early = new ArrayList<>(PRE_START);
@@ -117,13 +117,13 @@ public final class LogCaptureFilter implements Filter {
                 ExtLogRecord note = new ExtLogRecord(Level.WARNING, "", FormatStyle.NO_FORMAT, LogCaptureFilter.class.getName());
                 note.setLoggerName(LogCaptureFilter.class.getName());
                 if (!early.isEmpty()) {
-                    note.setInstant(early.get(0).getInstant());
+                    note.setInstant(early.get(0).record().getInstant());
                 }
                 store.capture(note, dropped + " log record(s) logged before the log store started were dropped (pre-start buffer holds "
                         + PRE_START_CAPACITY + ")");
             }
-            for (ExtLogRecord r : early) {
-                store.capture(r, r.getMessage());
+            for (PreStartRecord held : early) {
+                store.captureRendered(held.record(), held.record().getMessage(), held.exception());
             }
         } catch (Exception _) {
             // Replay is best effort; it must never break startup
@@ -133,7 +133,15 @@ public final class LogCaptureFilter implements Filter {
     /** Most records held while no store is registered. */
     static final int PRE_START_CAPACITY = 1000;
 
-    private static final ArrayDeque<ExtLogRecord> PRE_START = new ArrayDeque<>();
+    /**
+     * A record held before the store exists, with its exception already rendered
+     * and redacted ({@code null} when it had none): only the text is kept, so a
+     * burst of early failures does not pin a thousand live stack traces.
+     */
+    private record PreStartRecord(ExtLogRecord record, String exception) {
+    }
+
+    private static final ArrayDeque<PreStartRecord> PRE_START = new ArrayDeque<>();
     private static long preStartDropped;
 
     /** Visible for testing: the number of records currently held. */
@@ -159,6 +167,8 @@ public final class LogCaptureFilter implements Filter {
                     mdc.forEach(copy::putMdc);
                 }
             }
+            // The configured frame cap is not known yet; the default applies.
+            String exception = LogExceptionText.render(record.getThrown(), LogExceptionText.DEFAULT_MAX_FRAMES);
             synchronized (PRE_START) {
                 if (staticStore != null) {
                     return staticStore;
@@ -167,7 +177,7 @@ public final class LogCaptureFilter implements Filter {
                     PRE_START.pollFirst();
                     preStartDropped++;
                 }
-                PRE_START.addLast(copy);
+                PRE_START.addLast(new PreStartRecord(copy, exception));
             }
         } catch (Exception _) {
             // Never let buffering break a log line

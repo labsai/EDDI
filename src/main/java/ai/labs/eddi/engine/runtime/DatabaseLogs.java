@@ -42,6 +42,7 @@ public class DatabaseLogs implements IDatabaseLogs {
     private static final String KEY_MESSAGE = "message";
     private static final String KEY_LEVEL = "level";
     private static final String KEY_LOGGER = "loggerName";
+    private static final String KEY_EXCEPTION = "exception";
     public static final String TIMESTAMP = "timestamp";
     private final MongoCollection<Document> logsCollection;
 
@@ -84,6 +85,9 @@ public class DatabaseLogs implements IDatabaseLogs {
             }
             if (entry.instanceId() != null) {
                 doc.put(KEY_INSTANCE_ID, entry.instanceId());
+            }
+            if (entry.exception() != null) {
+                doc.put(KEY_EXCEPTION, entry.exception());
             }
             documents.add(doc);
         }
@@ -134,7 +138,7 @@ public class DatabaseLogs implements IDatabaseLogs {
             Date ts = doc.getDate(TIMESTAMP);
             ret.add(new LogEntry(ts != null ? ts.getTime() : 0L, doc.getString(KEY_LEVEL), doc.getString(KEY_LOGGER), doc.getString(KEY_MESSAGE),
                     doc.getString(KEY_ENVIRONMENT), doc.getString(KEY_AGENT_ID), doc.getInteger(KEY_AGENT_VERSION),
-                    doc.getString(KEY_CONVERSATION_ID), doc.getString(KEY_USER_ID), doc.getString(KEY_INSTANCE_ID)));
+                    doc.getString(KEY_CONVERSATION_ID), doc.getString(KEY_USER_ID), doc.getString(KEY_INSTANCE_ID), doc.getString(KEY_EXCEPTION)));
         }
 
         return ret;

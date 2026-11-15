@@ -87,4 +87,20 @@ class LogEntryTest {
         var e2 = new LogEntry(1L, "INFO", "l", "m2", null, null, null, null, null, null);
         assertNotEquals(e1, e2);
     }
+
+    @Test
+    void exception_isAbsentFromJsonWhenNull_andPresentWhenSet() throws Exception {
+        var without = new LogEntry(1L, "WARN", "l", "msg", null, null, null, null, null, null);
+        var with = new LogEntry(1L, "ERROR", "l", "msg", null, null, null, null, null, null, "java.io.IOException: x");
+
+        assertFalse(mapper.readTree(mapper.writeValueAsString(without)).has("exception"));
+        assertEquals("java.io.IOException: x", mapper.readTree(mapper.writeValueAsString(with)).get("exception").asText());
+    }
+
+    @Test
+    void json_withoutExceptionField_stillDeserializes() throws Exception {
+        var entry = mapper.readValue("{\"timestamp\":1,\"level\":\"WARN\",\"message\":\"m\"}", LogEntry.class);
+
+        assertNull(entry.exception());
+    }
 }

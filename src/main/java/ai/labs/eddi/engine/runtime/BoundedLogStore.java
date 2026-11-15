@@ -57,6 +57,7 @@ public class BoundedLogStore {
     private final boolean dbEnabled;
     private final int dbFlushIntervalSeconds;
     private final String dbPersistMinLevel;
+    private final int exceptionMaxFrames;
 
     private final InstanceIdProducer instanceIdProducer;
     private final IDatabaseLogs databaseLogs;
@@ -89,7 +90,8 @@ public class BoundedLogStore {
             @ConfigProperty(name = "eddi.logs.buffer-size", defaultValue = "10000") int bufferSize,
             @ConfigProperty(name = "eddi.logs.db-enabled", defaultValue = "true") boolean dbEnabled,
             @ConfigProperty(name = "eddi.logs.db-flush-interval-seconds", defaultValue = "5") int dbFlushIntervalSeconds,
-            @ConfigProperty(name = "eddi.logs.db-persist-min-level", defaultValue = "WARN") String dbPersistMinLevel) {
+            @ConfigProperty(name = "eddi.logs.db-persist-min-level", defaultValue = "WARN") String dbPersistMinLevel,
+            @ConfigProperty(name = "eddi.logs.exception-max-frames", defaultValue = "10") int exceptionMaxFrames) {
 
         this.instanceIdProducer = instanceIdProducer;
         this.databaseLogs = databaseLogs;
@@ -99,10 +101,11 @@ public class BoundedLogStore {
         this.dbPersistMinLevel = dbPersistMinLevel.toUpperCase();
         this.buffer = new ArrayDeque<>(bufferSize);
         this.maxDbQueue = DEFAULT_MAX_DB_QUEUE;
+        this.exceptionMaxFrames = exceptionMaxFrames;
     }
 
     private BoundedLogStore(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
-            int dbFlushIntervalSeconds, String dbPersistMinLevel, int maxDbQueue) {
+            int dbFlushIntervalSeconds, String dbPersistMinLevel, int maxDbQueue, int exceptionMaxFrames) {
         this.instanceIdProducer = instanceIdProducer;
         this.databaseLogs = databaseLogs;
         this.bufferSize = bufferSize;
@@ -111,6 +114,7 @@ public class BoundedLogStore {
         this.dbPersistMinLevel = dbPersistMinLevel.toUpperCase();
         this.buffer = new ArrayDeque<>(bufferSize);
         this.maxDbQueue = maxDbQueue;
+        this.exceptionMaxFrames = exceptionMaxFrames;
     }
 
     /**
@@ -121,7 +125,19 @@ public class BoundedLogStore {
     static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
                                             int dbFlushIntervalSeconds, String dbPersistMinLevel, int maxDbQueue) {
         return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel,
-                maxDbQueue);
+                maxDbQueue, LogExceptionText.DEFAULT_MAX_FRAMES);
+    }
+
+    /**
+     * As
+     * {@link #createForTesting(InstanceIdProducer, IDatabaseLogs, int, boolean, int, String)},
+     * with a stack-frame cap for captured exceptions.
+     */
+    static BoundedLogStore createForTestingWithFrameCap(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize,
+                                                        boolean dbEnabled, int dbFlushIntervalSeconds, String dbPersistMinLevel,
+                                                        int exceptionMaxFrames) {
+        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel,
+                DEFAULT_MAX_DB_QUEUE, exceptionMaxFrames);
     }
 
     /**
@@ -130,7 +146,8 @@ public class BoundedLogStore {
      */
     static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
                                             int dbFlushIntervalSeconds, String dbPersistMinLevel) {
-        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel);
+        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel,
+                DEFAULT_MAX_DB_QUEUE, LogExceptionText.DEFAULT_MAX_FRAMES);
     }
 
     private volatile boolean initialized;
@@ -200,6 +217,19 @@ public class BoundedLogStore {
      *            threw, so the ring buffer is never fed an unscanned message
      */
     public void capture(LogRecord record, String preRedactedMessage) {
+        capture(record, preRedactedMessage, null, true);
+    }
+
+    /**
+     * Capture a record whose message AND exception text were both rendered and
+     * redacted earlier — the pre-start replay, where the original throwable is no
+     * longer held. A {@code null} {@code exceptionText} means the record had none.
+     */
+    void captureRendered(LogRecord record, String redactedMessage, String exceptionText) {
+        capture(record, redactedMessage, exceptionText, false);
+    }
+
+    private void capture(LogRecord record, String preRedactedMessage, String exceptionText, boolean renderException) {
         if (record == null)
             return;
 
@@ -260,8 +290,11 @@ public class BoundedLogStore {
             }
         }
 
+        // Redacted and escaped by the same rule as the message; see LogExceptionText.
+        String exception = renderException ? LogExceptionText.render(record.getThrown(), exceptionMaxFrames) : exceptionText;
+
         LogEntry entry = new LogEntry(record.getMillis(), record.getLevel().getName(), loggerName, message, environment, agentId, agentVersion,
-                conversationId, userId, instanceIdProducer.getInstanceId());
+                conversationId, userId, instanceIdProducer.getInstanceId(), exception);
 
         publish(entry);
     }
