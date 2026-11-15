@@ -84,6 +84,11 @@ describe("approvalDeadline", () => {
   it("is null when there is no pause instant", () => {
     expect(approvalDeadline(paused({ pausedAt: "" }))).toBeNull();
   });
+
+  it("is null for a WAIT_INDEFINITELY pause even when a timeout is stored", () => {
+    // That policy is never scheduled, so the stored timeout never fires.
+    expect(approvalDeadline(paused({ timeoutPolicy: "WAIT_INDEFINITELY" }))).toBeNull();
+  });
 });
 
 describe("gatedToolNames", () => {
