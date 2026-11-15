@@ -60,3 +60,17 @@ the profile before another admin saved, its late answer looked fresh. Each openi
 that request's answer, and a late answer from an earlier request never reaches it. This replaces the `openedAt`
 timestamp check. New test: "a reopening ignores an older GET still in flight and starts the draft from a request of
 its own". It holds an old answer across close and reopen, and fails with the previous code.
+
+## 🐛 fix(manager): a reopened profile editor replaces a first GET still in flight (2026-11-15)
+
+**Repo:** EDDI (`feat/agent-health-ui-wiring`)
+
+### What changed and why
+
+Review finding on PR #1390. `refetch({ cancelRefetch: true })` cancels a request in flight only when the query
+already holds data. With nothing cached, a dialog closed during its first GET and opened again joined that GET, and
+could start from a profile read before someone saved. Each opening now calls
+`queryClient.cancelQueries(healthKeys.profile(agentId))` before its `refetch()`, so a new request is always made.
+New test: "a reopening before the first GET answered starts a request of its own, with nothing cached". The three
+in-flight tests now hold responses with a `hold` flag instead of counting requests, because an opening sends a
+cancelled GET as well as its own.

@@ -607,16 +607,19 @@ describe("health profile editor", () => {
   });
 
   it("a reopening ignores an older GET still in flight and starts the draft from a request of its own", async () => {
+    // Requests that arrive while `hold` is set read the profile then and wait for `release`.
     let budget = 5;
-    let gets = 0;
+    let hold = false;
+    let heldRequests = 0;
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => (release = resolve));
     server.use(
       http.get("*/agents/:agentId/health/profile", async ({ params }) => {
-        gets += 1;
-        // What the server has when the request arrives; the second request is held.
         const seen = budget;
-        if (gets === 2) await held;
+        if (hold) {
+          heldRequests += 1;
+          await held;
+        }
         return HttpResponse.json({
           agentId: String(params.agentId),
           stored: true,
@@ -632,37 +635,87 @@ describe("health profile editor", () => {
     const { queryClient } = renderPanel(HEALTH_AGENTS.healthy);
     await openProfile();
     // A background GET reads the old profile and is held...
+    hold = true;
     act(() => void queryClient.invalidateQueries({ queryKey: healthKeys.profile(HEALTH_AGENTS.healthy) }));
-    await waitFor(() => expect(gets).toBe(2));
+    await waitFor(() => expect(heldRequests).toBeGreaterThan(0));
     await userEvent.click(screen.getByTestId("health-profile-cancel"));
     await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
     // ...while someone saves a new one, and the editor is opened again.
+    hold = false;
     budget = 9;
     await openProfile();
     expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("9");
     // The old answer arriving late changes nothing.
     release();
-    await waitFor(() => expect(gets).toBeGreaterThanOrEqual(3));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("9");
   });
 
-  it("a background refetch while editing keeps the form and what is being typed", async () => {
-    let gets = 0;
+  it("a reopening before the first GET answered starts a request of its own, with nothing cached", async () => {
+    // Requests that arrive while `hold` is set read the profile then and wait for `release`.
+    let budget = 5;
+    let hold = false;
+    let heldRequests = 0;
     let release: () => void = () => {};
     const held = new Promise<void>((resolve) => (release = resolve));
     server.use(
       http.get("*/agents/:agentId/health/profile", async ({ params }) => {
-        gets += 1;
-        // The refetch is held, so the test sees the dialog while it is in flight.
-        if (gets > 1) await held;
+        const seen = budget;
+        if (hold) {
+          heldRequests += 1;
+          await held;
+        }
         return HttpResponse.json({
           agentId: String(params.agentId),
           stored: true,
           preset: "support",
           critical: ["agentFailureRate"],
           thresholds: { resolutionRate: { green: 0.7, red: 0.4 } },
-          budgets: {},
+          budgets: { costPerResolvedUsd: seen },
+          slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
+          overrides: [],
+        });
+      }),
+    );
+    renderPanel(HEALTH_AGENTS.healthy);
+    await screen.findByTestId("health-section-reliability");
+    // The first opening's GET reads the old profile and is held.
+    hold = true;
+    await userEvent.click(screen.getByTestId("health-open-profile"));
+    await waitFor(() => expect(heldRequests).toBeGreaterThan(0));
+    // Closed while it is still out, then the profile changes on the server.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("health-profile-dialog")).not.toBeInTheDocument());
+    hold = false;
+    budget = 9;
+    await openProfile();
+    expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("9");
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByTestId("health-budget-costPerResolvedUsd")).toHaveValue("9");
+  });
+
+  it("a background refetch while editing keeps the form and what is being typed", async () => {
+    // Requests that arrive while `hold` is set read the profile then and wait for `release`.
+    const budget = 5;
+    let hold = false;
+    let heldRequests = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.get("*/agents/:agentId/health/profile", async ({ params }) => {
+        const seen = budget;
+        if (hold) {
+          heldRequests += 1;
+          await held;
+        }
+        return HttpResponse.json({
+          agentId: String(params.agentId),
+          stored: true,
+          preset: "support",
+          critical: ["agentFailureRate"],
+          thresholds: { resolutionRate: { green: 0.7, red: 0.4 } },
+          budgets: { costPerResolvedUsd: seen },
           slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
           overrides: [],
         });
@@ -673,12 +726,13 @@ describe("health profile editor", () => {
     const red = screen.getByTestId("health-threshold-resolutionRate-red");
     await userEvent.clear(red);
     await userEvent.type(red, "33");
-    // A background refetch, as window focus or a save elsewhere triggers one.
+    // A background refetch, as window focus or a save elsewhere triggers one, held in flight.
+    hold = true;
     let refetch: Promise<void> = Promise.resolve();
     act(() => {
       refetch = queryClient.invalidateQueries({ queryKey: healthKeys.profile(HEALTH_AGENTS.healthy) });
     });
-    await waitFor(() => expect(gets).toBe(2));
+    await waitFor(() => expect(heldRequests).toBeGreaterThan(0));
     // In flight: the form is still there, with what was typed.
     expect(screen.getByTestId("health-profile-form")).toBeInTheDocument();
     expect(screen.getByTestId("health-threshold-resolutionRate-red")).toHaveValue("33");

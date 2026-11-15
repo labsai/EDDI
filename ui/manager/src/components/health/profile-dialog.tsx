@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { HealthProfile, MeasureUnit, ProfileViolation } from "./api";
 import { normalizeProfile, profileViolations } from "./api";
-import { useHealthPresets, useHealthProfile, useResetHealthProfile, useSaveHealthProfile } from "./use-agent-health";
+import { healthKeys, useHealthPresets, useHealthProfile, useResetHealthProfile, useSaveHealthProfile } from "./use-agent-health";
 import { AccessibleDialog, Button, Skeleton, getErrorMessage } from "./deps";
 import { measureLabel } from "./format";
 import { Field, NumberField, OverrideRows, ThresholdRows, Violations } from "./profile-fields";
@@ -249,19 +250,24 @@ export function ProfileDialog({
   const [opened, setOpened] = useState<HealthProfile | null>(null);
   if (!open && opened !== null) setOpened(null);
   const { refetch } = profile;
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (!open) return;
     let current = true;
-    // A new request, cancelling any still in flight: a GET that started before this
-    // opening may have read the profile before someone saved over it, and neither the
-    // cache nor an earlier request's late answer may start the draft.
-    void refetch({ cancelRefetch: true }).then((result) => {
+    // A new request, after cancelling any still in flight: a GET that started before
+    // this opening may have read the profile before someone saved over it, and neither
+    // the cache nor an earlier request's late answer may start the draft. Cancelled
+    // explicitly, because a refetch on a query with no data yet joins the GET in flight
+    // rather than replacing it.
+    void (async () => {
+      await queryClient.cancelQueries({ queryKey: healthKeys.profile(agentId) });
+      const result = await refetch();
       if (current && result.isSuccess && result.data !== undefined) setOpened(result.data);
-    });
+    })();
     return () => {
       current = false;
     };
-  }, [open, refetch]);
+  }, [open, refetch, queryClient, agentId]);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">
       {/* The draft starts from the profile as the server has it now: a reopened dialog
