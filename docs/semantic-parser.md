@@ -544,7 +544,7 @@ Dictionaries only know the words they were given. The semantic fallback catches 
 
 What it costs and how it fails:
 
-- **One embedding request per turn the dictionaries did not understand**, and one batch of requests for the examples the first time it is used (at most 2,000 examples; inputs are cut at 1,000 characters). Turns the dictionaries understood never reach the provider. The counter `eddi_parser_semantic_fallback_total{outcome="match"|"no_match"}` counts the consultations.
+- **One embedding request per turn the dictionaries did not understand** (none while backing off after a provider failure), and a series of batch requests for the examples the first time it is used and after a model change (at most 2,000 examples; inputs are cut at 1,000 characters). Turns the dictionaries understood never reach the provider. The counter `eddi_parser_semantic_fallback_total{outcome="match"|"no_match"}` counts the consultations, not the provider requests: a consultation during the 60-second back-off after a provider failure sends no request and still counts as `no_match`.
 - **A provider failure only means "no match"**: the turn continues with the dictionaries' result. If the examples cannot be embedded, the next attempt waits 60 seconds.
 - **The examples are embedded again when the model changes**: when a global variable or secret the embedding configuration uses changes, or the model's client was idle for 30 minutes and was rebuilt. The input is always embedded by the same model as the examples it is compared with.
 - **A malformed block fails the deployment**, not a conversation: a missing or unsupported provider, no examples at all, an example without parseable expressions or a `minScore` out of range are refused when the workflow is built.

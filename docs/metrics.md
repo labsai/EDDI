@@ -339,7 +339,7 @@ The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The coun
 first consultation, so a deployment whose parsers have no `semanticFallback` shows no data.
 
 ```text
-eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure counts as no_match
+eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure, or a consultation skipped during the back-off after one, counts as no_match; not the provider request volume
 ```
 
 ### Scheduled Trigger Metrics
