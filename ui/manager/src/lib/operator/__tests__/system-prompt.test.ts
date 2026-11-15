@@ -1213,6 +1213,20 @@ describe("batched changes: the plan shape the operator is taught", () => {
   });
 });
 
+describe("the whole prompt renders as a Qute template", () => {
+  it("names no Qute namespace but the ones EDDI registers (vault, connection, caller)", () => {
+    // The backend renders the prompt on every turn, and `{name:` is a namespace
+    // expression to Qute: with no resolver for it the whole render fails, and the
+    // model is handed the raw template (`eddi_parser_semantic_fallback_total{outcome:
+    // match, …}` did exactly that). Section tests only see their own section.
+    const lists = [READ_ENDPOINTS, WITH_A_WRITE];
+    for (const endpoints of lists) {
+      const body = buildOperatorPromptBody(endpoints);
+      expect(body.match(/\{(?!(?:vault|connection|caller):)[A-Za-z_][\w-]*\s*:/g) ?? []).toEqual([]);
+    }
+  });
+});
+
 describe("conversation ratings", () => {
   const RATING_READS = ["GET /ratings", "GET /ratings/summary", "GET /ratings/attention-count"];
 
