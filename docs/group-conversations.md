@@ -592,6 +592,35 @@ reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
+**Human approval as done.** A team gated by a person instead of a VERIFY phase —
+`hitlConfig.granularity: TASK` with a `requiresApproval` EXECUTE phase — ends
+each run with its approved tasks `COMPLETED`, not `VERIFIED`, so by the rule
+above they return to `PENDING` and the next fire runs them again (for a team that
+publishes, it posts the same thing twice). Set
+`hitlConfig.approvalCompletesBacklogTask: true` to keep them done:
+
+```json
+"hitlConfig": {
+  "granularity": "TASK",
+  "timeoutPolicy": "WAIT_INDEFINITELY",
+  "approvalCompletesBacklogTask": true
+}
+```
+
+A task a person approved then lands on the backlog as `COMPLETED` (not
+`VERIFIED` — nobody verified it) with the approved result, which is the
+approver's edit when `review.allowResultEdits` was used, and is counted in
+`metrics.tasksApproved` and the member's `perMemberStats.tasksApproved` rather
+than `tasksVerified`. Only an approval somebody gave counts: the task list
+records each approval's decider (`taskList.approvals`), and a timeout
+auto-approval (`decidedBy: system:timeout`, under `timeoutPolicy: AUTO_APPROVE`)
+is a decision nobody made, so its tasks return to `PENDING` as before — the same
+line earned-autonomy evidence draws. A task that completed in an ungated phase,
+or that a later VERIFY phase failed, also returns to `PENDING`. The switch
+defaults to `false`, so stored configs behave exactly as before; it is read from
+the group's current version at writeback, and an unreadable config falls back to
+the default (logged).
+
 **Stale claims are reclaimed.** The default group HITL timeout policy is
 `WAIT_INDEFINITELY`, so a pause nobody resolves never reaches a terminal state:
 without a backstop the claim would be held forever, every subsequent fire
