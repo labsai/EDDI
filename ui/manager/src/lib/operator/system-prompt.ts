@@ -642,9 +642,9 @@ const BODY_KNOWLEDGE_BASES_INGESTION = `- An ingestion id (from a direct ingest 
  * write later cannot leave the prompt claiming the opposite.
  */
 const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge base, and you cannot ingest a document
-  into one or start a source's run — you have no tool for any of it. Point the
-  user at the knowledge base under Resources in the manager, and offer to read
-  the current configuration for them first.`;
+  into one, delete a document from one or start a source's run — you have no
+  tool for any of it. Point the user at the knowledge base under Resources in
+  the manager, and offer to read the current configuration for them first.`;
 
 /**
  * Shown INSTEAD of the section above when the reads are not granted.
@@ -1463,8 +1463,16 @@ your tool schemas do not cover it, not as a routine first step:
   logs a warning for deliver-best on a classifier (a safety check should not
   deliver what it flagged). block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
-  strings, never templates: pii-redaction takes patterns
-  ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
+  strings, never templates: pii-redaction takes patterns, a comma list of
+  kinds (absent = the standard set email, ssn, creditcard, phone, iban; also
+  ip_address, passport_mrz, date_of_birth and national identifiers named
+  <country>_<id> in lower case, e.g. de_tax_id, fr_nir, gb_nhs, in_aadhaar),
+  and countries, a comma list of ISO codes whose identifiers are all added
+  (US CA BR MX GB IE FR IT ES PT NL BE DE AT CH PL SE DK FI IN CN JP KR SG AU
+  NZ ZA). National identifiers are opt-in; several (e.g. pl_pesel, gb_nhs,
+  nl_bsn, de_id_card, date_of_birth) also need a keyword just before the
+  value. An unknown kind or country only logs a deploy warning and selects
+  nothing; no names or addresses. regex-filter and prompt-injection take
   patterns one regular expression per line, max-length takes maxChars. A
   guardrail that errors fails closed for block/reprompt (the turn is blocked,
   reason guardrail_error) and open for redact/warn; parameter failMode

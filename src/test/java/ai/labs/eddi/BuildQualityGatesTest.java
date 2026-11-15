@@ -1725,7 +1725,8 @@ class BuildQualityGatesTest {
                     directory + ": " + vitestSecurity + " must be declared before " + catchAll
                             + ", or the catch-all claims vitest first");
         }
-        assertTrue(graded >= 2, "expected ui/manager and ui/chat to group vitest; graded " + graded);
+        // One entry since the UIs became one npm workspace (/ui, one lockfile).
+        assertTrue(graded >= 1, "expected the /ui workspace entry to group vitest; graded " + graded);
     }
 
     /**
