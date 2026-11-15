@@ -2688,10 +2688,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
+      # One install for both apps at the npm workspaces root (ui/package.json).
       - name: Install dependencies
-        working-directory: ui/manager
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
