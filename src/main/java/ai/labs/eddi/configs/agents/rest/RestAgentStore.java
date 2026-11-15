@@ -181,7 +181,10 @@ public class RestAgentStore implements IRestAgentStore {
         // An agent's own call (marked X-EDDI-Agent-Call) may not change any agent's
         // oversight policy — sampled audit and earned autonomy are a human's to set.
         if (oversightGuard != null) {
-            oversightGuard.requireNoOversightChange(id, agentConfiguration, () -> agentStore.read(id, version));
+            // version 0 means "current": resolved here as the update below resolves it,
+            // since the store reads an exact version. Lazy, so only a marked request pays.
+            oversightGuard.requireNoOversightChange(id, agentConfiguration,
+                    () -> agentStore.read(id, restVersionInfo.validateParameters(id, version)));
         }
         requireWorkflowsExist(agentConfiguration);
         // dynamicOrigin is engine-written provenance that teardown_agent and group

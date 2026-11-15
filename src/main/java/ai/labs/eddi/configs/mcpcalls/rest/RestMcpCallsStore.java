@@ -306,6 +306,17 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                 return badRequest(reason);
             }
 
+            // A listing that failed — refused, stopped at a bound, the circuit open, a
+            // credential missing — is recorded as a failure, not thrown. Returning 200
+            // with no tools made it indistinguishable from a server that has none.
+            var failure = result.failures().stream().findFirst();
+            if (failure.isPresent() && result.toolSpecs().isEmpty()) {
+                return Response.status(Response.Status.BAD_GATEWAY)
+                        .entity(Map.of("error",
+                                "Failed to list tools from the MCP server (" + failure.get().kind() + ") — see server logs for details"))
+                        .build();
+            }
+
             // Convert to a simple JSON-serializable list of tool info
             List<Map<String, Object>> tools = new ArrayList<>();
             for (ToolSpecification spec : result.toolSpecs()) {

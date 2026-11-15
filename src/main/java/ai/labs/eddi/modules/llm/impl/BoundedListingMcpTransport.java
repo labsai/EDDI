@@ -157,13 +157,23 @@ final class BoundedListingMcpTransport implements McpTransport {
             }
         }
         Listing current = listing;
-        return send.send().thenApply(response -> {
+        CompletableFuture<String> source = send.send();
+        CompletableFuture<String> mapped = source.thenApply(response -> {
             int total = current.items.addAndGet(countItems(response, itemsField));
             if (total > limits.maxItems()) {
                 throw exceeded(method, "more than " + limits.maxItems() + " entries");
             }
             return response;
         });
+        // The client cancels what it is handed when a request times out; a dependent
+        // stage does not pass that on, so the transport's own future (and its open
+        // response subscription) is cancelled here.
+        mapped.whenComplete((response, failure) -> {
+            if (mapped.isCancelled()) {
+                source.cancel(true);
+            }
+        });
+        return mapped;
     }
 
     private ListingLimitExceededException exceeded(McpClientMethod method, String breach) {
@@ -220,43 +230,45 @@ final class BoundedListingMcpTransport implements McpTransport {
     }
 
     /**
-     * Number of entries in {@code result.<field>} (or a top-level {@code <field>})
-     * of one JSON-RPC response, counted with a streaming parser so the page is not
-     * materialised a second time. Anything unreadable counts as zero: the client
-     * rejects it on its own.
+     * Number of entries a list response carries under {@code <field>}, counted with
+     * a streaming parser so the page is not materialised a second time.
+     * <p>
+     * Every array of that name counts — in {@code result} (what the client reads)
+     * and at top level — and the largest wins: a server cannot put an empty decoy
+     * array first, or repeat the key, to pass a full one under the bound. A
+     * response that breaks off mid-way keeps what was counted before the break.
      */
     static int countItems(String json, String field) {
         if (json == null || json.isEmpty()) {
             return 0;
         }
+        int[] largest = {0};
         try (JsonParser parser = JSON.createParser(json)) {
-            if (parser.nextToken() != JsonToken.START_OBJECT) {
-                return 0;
+            if (parser.nextToken() == JsonToken.START_OBJECT) {
+                scan(parser, field, true, largest);
             }
-            return countIn(parser, field, true);
         } catch (IOException | RuntimeException e) {
-            return 0;
+            // unreadable from here on; the client rejects it on its own
         }
+        return largest[0];
     }
 
-    private static int countIn(JsonParser parser, String field, boolean topLevel) throws IOException {
+    private static void scan(JsonParser parser, String field, boolean topLevel, int[] largest) throws IOException {
         while (parser.nextToken() == JsonToken.FIELD_NAME) {
             String name = parser.currentName();
             JsonToken value = parser.nextToken();
             if (field.equals(name) && value == JsonToken.START_ARRAY) {
                 int count = 0;
-                while (parser.nextToken() != JsonToken.END_ARRAY) {
-                    count++;
+                for (JsonToken token = parser.nextToken(); token != null && token != JsonToken.END_ARRAY; token = parser.nextToken()) {
+                    largest[0] = Math.max(largest[0], ++count);
                     parser.skipChildren();
                 }
-                return count;
+            } else if (topLevel && "result".equals(name) && value == JsonToken.START_OBJECT) {
+                scan(parser, field, false, largest);
+            } else {
+                parser.skipChildren();
             }
-            if (topLevel && "result".equals(name) && value == JsonToken.START_OBJECT) {
-                return countIn(parser, field, false);
-            }
-            parser.skipChildren();
         }
-        return 0;
     }
 
     // ---- everything else is the delegate's ----

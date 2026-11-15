@@ -188,6 +188,31 @@ class BoundedListingMcpTransportTest {
     }
 
     @Test
+    @DisplayName("an empty top-level decoy array does not hide a full result.<field> from the item bound")
+    void decoyArrayDoesNotBypassTheItemBound() {
+        String decoy = page(11, null).replace("{\"jsonrpc\"", "{\"tools\":[],\"jsonrpc\"");
+        assertEquals(11, BoundedListingMcpTransport.countItems(decoy, "tools"));
+        assertEquals(3, BoundedListingMcpTransport.countItems("{\"result\":{\"tools\":[],\"tools\":[1,2,3]}}", "tools"),
+                "a repeated key counts its largest");
+
+        var transport = new BoundedListingMcpTransport(answering(decoy, new AtomicInteger()), LIMITS, null);
+        assertThrows(ExecutionException.class, () -> transport.sendRequest(list(null)).get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisplayName("cancelling the listing future cancels the transport's own future")
+    void cancellationReachesTheDelegate() {
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        McpTransport delegate = mock(McpTransport.class);
+        when(delegate.sendRequest(any(McpCallContext.class))).thenReturn(pending);
+        var transport = new BoundedListingMcpTransport(delegate, LIMITS, null);
+
+        transport.sendRequest(list(null)).cancel(true);
+
+        assertTrue(pending.isCancelled(), "the delegate's response subscription must not stay open");
+    }
+
+    @Test
     @DisplayName("items are counted in result.<field> and at top level; anything else counts zero")
     void countItems() {
         assertEquals(2, BoundedListingMcpTransport.countItems(page(2, "c"), "tools"));

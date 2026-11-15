@@ -77,6 +77,17 @@ class NamelessPrincipalAugmentorTest {
         assertEquals(NamelessPrincipalAugmentor.RESERVED_FAILURE_MESSAGE, failure.getMessage());
     }
 
+    @Test
+    @DisplayName("a configured /v1 default user is reserved on every path: an account of that name would own anonymous /v1 conversations")
+    void configuredOpenAiDefaultUser_rejected() {
+        augmentor.openAiDefaultUser = "shared-v1-user";
+
+        var failure = assertThrows(AuthenticationFailedException.class, () -> augment(identityNamed("Shared-V1-User")));
+        assertEquals(NamelessPrincipalAugmentor.RESERVED_FAILURE_MESSAGE, failure.getMessage());
+        var other = identityNamed("alice");
+        assertSame(other, augment(other));
+    }
+
     @ParameterizedTest(name = "name=[{0}]")
     @ValueSource(strings = {"alice", "alice@example.com", "systematic", "slacker", "groupie", "anonymously", "f81d4fae-7dec-11d0"})
     @DisplayName("L3: ordinary names that merely start like a reserved word pass")

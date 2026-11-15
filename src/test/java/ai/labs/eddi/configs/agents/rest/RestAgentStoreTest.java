@@ -295,6 +295,22 @@ class RestAgentStoreTest {
         }
 
         @Test
+        @DisplayName("version 0 is resolved to the current version before the oversight guard reads the stored agent")
+        void oversightGuardReadsTheResolvedVersion() throws Exception {
+            AgentCallOversightGuard oversightGuard = mock(AgentCallOversightGuard.class);
+            doAnswer(invocation -> ((AgentCallOversightGuard.StoredAgent) invocation.getArgument(2)).read())
+                    .when(oversightGuard).requireNoOversightChange(eq(AGENT_ID), any(), any());
+            restAgentStore.oversightGuard = oversightGuard;
+
+            restAgentStore.updateAgent(AGENT_ID, 0, referencing(PKG1_ID), false);
+
+            // read(AGENT_ID, 1) also serves the dynamicOrigin lookup; the point is that
+            // nothing asks the store for the literal version 0.
+            verify(AgentStore, atLeastOnce()).read(AGENT_ID, 1);
+            verify(AgentStore, never()).read(AGENT_ID, 0);
+        }
+
+        @Test
         @DisplayName("create names the missing workflow in a 400")
         void createRejectsMissingWorkflow() {
             when(restWorkflowStore.readWorkflow(PKG1_ID, 1)).thenThrow(new NotFoundException());

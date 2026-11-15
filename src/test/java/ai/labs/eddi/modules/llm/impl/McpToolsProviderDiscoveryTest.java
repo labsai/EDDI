@@ -176,6 +176,25 @@ class McpToolsProviderDiscoveryTest {
     }
 
     @Test
+    @DisplayName("two mcpcalls configs for the same server share its cap instead of doubling it")
+    void capIsPerServerAcrossConfigs() throws Exception {
+        wireAgentWithSteps(List.of(mcpStep("mc-a"), mcpStep("mc-b")));
+        var first = mcpConfig("first", "http://mcp.example/mcp");
+        var second = mcpConfig("second", "http://mcp.example/mcp");
+        when(resourceClientLibrary.getResource(any(URI.class), any()))
+                .thenAnswer(inv -> inv.getArgument(0).toString().contains("mc-a") ? first : second);
+        when(manager.toolsPerServerCap()).thenReturn(2);
+        when(manager.discoverTools(anyList())).thenAnswer(inv -> {
+            List<LlmConfiguration.McpServerConfig> servers = inv.getArgument(0);
+            String prefix = servers.getFirst().getName();
+            return new McpToolProviderManager.McpToolsResult(List.of(spec(prefix + "_1"), spec(prefix + "_2"), spec(prefix + "_3")),
+                    Map.of(prefix + "_1", executor(), prefix + "_2", executor(), prefix + "_3", executor()));
+        });
+
+        assertEquals(List.of("first_1", "first_2"), names(provider().discover(memory).toolSpecs()));
+    }
+
+    @Test
     @DisplayName("an unset cap (0) falls back to the default of 128")
     void unsetCapIsTheDefault() throws Exception {
         wireWorkflowWith(mcpConfig("big", "http://mcp.example/mcp"));

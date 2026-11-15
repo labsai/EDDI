@@ -103,9 +103,18 @@ public class AgentCallOversightGuard {
             // Unreadable here means unverifiable: refused, never admitted.
             return OversightWriteGuard.OVERSIGHT_CONFIG_REASON;
         }
+        // Read here, not inside OversightWriteGuard: there a failed read admits a body
+        // without an oversight block, and a full-document write without one deletes the
+        // stored block. A marked write whose stored side cannot be read is refused.
+        JsonNode storedHitl;
+        try {
+            storedHitl = storedHitlConfig(stored);
+        } catch (Exception e) {
+            return OversightWriteGuard.OVERSIGHT_CONFIG_REASON;
+        }
         // A fixed synthetic target: the id is the caller's path segment, and the stored
         // document is already the one for it.
-        return OversightWriteGuard.refusal(SYNTHETIC_TARGET, body, AGENT_TARGET, id -> storedHitlConfig(stored));
+        return OversightWriteGuard.refusal(SYNTHETIC_TARGET, body, AGENT_TARGET, id -> storedHitl);
     }
 
     private static JsonNode storedHitlConfig(StoredAgent stored) throws Exception {

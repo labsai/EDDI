@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -148,5 +149,21 @@ class McpToolCapsAndNamesTest {
         assertEquals(1, manager.probeTools(List.of(config())).toolSpecs().size());
         assertEquals(0, manager.getCachedToolServerCount());
         verify(manager, never()).fetchToolsFromServer(any());
+    }
+
+    @Test
+    @DisplayName("a probe does not read the tool cache either: a server that went down is reported down, not as its cached tools")
+    void probeBypassesTheToolCache() {
+        var manager = spy(new McpToolProviderManager(globalVariableResolver, secretResolver));
+        ToolExecutor executor = (request, memoryId) -> "ok";
+        doReturn(resultOf(Map.of(ToolSpecification.builder().name("cached_tool").build(), executor))).when(manager).fetchToolsFromServer(any());
+        assertEquals(1, manager.discoverTools(List.of(config())).toolSpecs().size(), "an agent turn fills the cache");
+        doThrow(new IllegalStateException("server down")).when(manager).probeToolsFromServer(any());
+
+        var probed = manager.probeTools(List.of(config()));
+
+        assertTrue(probed.toolSpecs().isEmpty(), "the probe asked the server, not the cache");
+        assertEquals(1, probed.failures().size());
+        verify(manager).probeToolsFromServer(any());
     }
 }

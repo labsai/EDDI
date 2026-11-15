@@ -104,6 +104,14 @@ class AgentCallOversightGuardTest {
     }
 
     @Test
+    @DisplayName("an unreadable stored agent also refuses a write WITHOUT an oversight block — it would delete the stored one")
+    void unreadableStoredRefusesAnOmittedBlock() {
+        assertEquals(OversightWriteGuard.OVERSIGHT_CONFIG_REASON, AgentCallOversightGuard.refusal("agent-1", agentWithSampleRate(null), () -> {
+            throw new IllegalStateException("version 0 is not a stored version");
+        }));
+    }
+
+    @Test
     @DisplayName("an unmarked request — a human's edit — changes oversight freely")
     void unmarkedPasses() {
         var guard = guard(null);

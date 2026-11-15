@@ -448,8 +448,15 @@ public class UpgradeExecutor {
             return;
         }
         ResourceDiff agentDiff = preview.resources().stream().filter(diff -> "agent".equals(diff.resourceType())).findFirst().orElse(null);
-        if (agentDiff == null || agentDiff.sourceContent() == null || !isSelected(selectedSourceIds, agentDiff.sourceId())
-                || (agentDiff.action() != DiffAction.UPDATE && agentDiff.action() != DiffAction.CONFLICT)) {
+        if (agentDiff == null || agentDiff.sourceContent() == null || !isSelected(selectedSourceIds, agentDiff.sourceId())) {
+            return;
+        }
+        // Mirrors resolveConflict: a CONFLICT is adopted only when the caller names the
+        // agent explicitly; otherwise its settings stay as they are and there is
+        // nothing to refuse.
+        boolean adopted = agentDiff.action() == DiffAction.UPDATE || (agentDiff.action() == DiffAction.CONFLICT
+                && selectedSourceIds != null && selectedSourceIds.contains(agentDiff.sourceId()));
+        if (!adopted) {
             return;
         }
         AgentConfiguration incoming = jsonSerialization.deserialize(agentDiff.sourceContent(), AgentConfiguration.class);

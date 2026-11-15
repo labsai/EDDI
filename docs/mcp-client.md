@@ -219,7 +219,9 @@ Rotating a vault secret evicts cached MCP clients immediately, so the next call 
 
 Clients run no background health-check ping. The `discover-tools` probe builds its
 client for the one listing and closes it — its client never enters the client
-cache, and its tool list is not cached. (The size and idle bound of the client
+cache, and it neither reads nor writes the tool cache, so it reports what the server
+answers now. A listing that fails (refused, stopped at a bound, circuit open) answers
+`502`, not `200` with no tools. (The size and idle bound of the client
 cache itself comes with a separate change, PR #1401.)
 
 ### Network safety

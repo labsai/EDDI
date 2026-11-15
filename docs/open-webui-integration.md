@@ -307,8 +307,9 @@ The header value is namespaced to `openwebui:<id>`, so a header can never name a
 OIDC principal or any other identity source. The prefix is reserved: an OIDC
 principal that begins with `openwebui:` is refused with `401`. So is an OIDC
 principal whose name equals `default-user` (ignoring case): it would otherwise own
-every anonymous conversation. The shipped default, `openai-anonymous`, is reserved
-deployment-wide like `anonymous`.
+every anonymous conversation. That name is reserved deployment-wide like
+`anonymous` — the shipped `openai-anonymous` and a configured one alike — so such an
+account is refused on every endpoint, not only on `/v1`.
 
 Chats created before header ids were namespaced are mapped under the raw id. Such
 a mapping does not record whether the header or an OIDC principal (while `/v1`

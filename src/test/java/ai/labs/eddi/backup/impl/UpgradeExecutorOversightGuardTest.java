@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -118,10 +119,19 @@ class UpgradeExecutorOversightGuardTest {
     }
 
     @Test
-    @DisplayName("a CONFLICT is checked too, since it may be adopted")
-    void conflictIsChecked() throws Exception {
+    @DisplayName("a CONFLICT the caller names explicitly is adopted, so it is checked")
+    void namedConflictIsChecked() throws Exception {
         executor.useOversightGuard(guard(AgentCallMarker.VALUE));
         assertThrows(ForbiddenException.class,
+                () -> executor.requireNoAgentOriginatedOversightChange(previewAdopting(agentWithSampleRate(1.0), DiffAction.CONFLICT), AGENT,
+                        Set.of("src-agent")));
+    }
+
+    @Test
+    @DisplayName("a CONFLICT nobody named is left alone by resolveConflict, so it does not stop the upgrade")
+    void unnamedConflictPasses() throws Exception {
+        executor.useOversightGuard(guard(AgentCallMarker.VALUE));
+        assertDoesNotThrow(
                 () -> executor.requireNoAgentOriginatedOversightChange(previewAdopting(agentWithSampleRate(1.0), DiffAction.CONFLICT), AGENT,
                         null));
     }

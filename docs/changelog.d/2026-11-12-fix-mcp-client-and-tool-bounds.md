@@ -15,6 +15,15 @@ A remote MCP server is untrusted, and an editor can point the `discover-tools` p
 7. **/v1 adapter.** An OIDC principal whose name equals `eddi.openai-compat.default-user` is refused (it would own every anonymous conversation), and `openai-anonymous` joins `ReservedPrincipals.NAMES`. A client `system` message over `eddi.conversations.max-input-chars` is refused with `400 input_too_large`.
 8. **Agent-originated oversight changes.** `AgentCallOversightGuard` refuses (403) a `PUT /agentstore/agents/{id}` carrying `X-EDDI-Agent-Call` that changes the stored `hitlConfig.oversight`, using `OversightWriteGuard`'s own comparison. On main no MCP tool writes an existing agent's `hitlConfig` (`update_agent` patches the descriptor; `update_resource` has no agent type), so the REST store is the path that needed it; the check sits in the store method, so an in-process caller acting for a marked request is covered too. Its twins are checked up front as well, before any workflow or extension is written: a merge import (`RestImportService.requireNoAgentOriginatedOversightChange`, for an archive agent that matches an existing one) and an upgrade/sync (`UpgradeExecutor.requireNoAgentOriginatedOversightChange`, for an agent diff that is UPDATE or CONFLICT). Both fail the operation with 403.
 
+### Review follow-up
+
+- The `discover-tools` probe no longer reads the tool cache (it reported a server that had gone down as its cached tools for up to five minutes), and a probe whose listing failed answers `502` instead of `200` with no tools.
+- The listing item bound counts every `<field>` array in the response, `result.<field>` included, and takes the largest, so an empty top-level decoy or a repeated key cannot pass a full list; cancelling a listing request now cancels the transport's own future.
+- The per-agent tool cap is counted per server URL across all `mcpcalls` configs naming that server.
+- Rule-triggered MCP results are also screened after JSON decoding, so a directive spelled with escapes (`Ignore…`) is redacted in the stored values.
+- A configured `eddi.openai-compat.default-user` is refused as a principal name on every endpoint (`NamelessPrincipalAugmentor`), not only on `/v1`.
+- The agent-store oversight check resolves `version=0` before reading the stored agent and refuses when that read fails, even for a body without an oversight block; an upgrade checks an agent `CONFLICT` only when the caller selects the agent, matching `resolveConflict`.
+
 ### Upgrade note
 
 Agents whose LLM tasks set **no** `toolResponseLimits` used to receive every tool result whole; they now get at most 50,000 characters per result (`headTail`: start and end kept, the middle replaced by a note). An agent that needs larger results sets `toolResponseLimits.defaultMaxChars` (or `perToolLimits`) on its task; `0` turns the cap off. See [langchain.md](../langchain.md#tool-response-limits).

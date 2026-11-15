@@ -386,7 +386,8 @@ public class McpToolProviderManager {
      * Discovery for a one-off probe
      * ({@code POST /mcpcallsstore/mcpcalls/discover-tools}): the same validation
      * and governance as {@link #discoverTools}, but on a client that is built for
-     * the call and closed after it, and without writing the tool cache.
+     * the call and closed after it, and without reading or writing the tool cache:
+     * a probe reports what the server answers now, not a list cached minutes ago.
      * <p>
      * The probe names whatever URL its caller chooses. Caching its client let a
      * loop over {@code https://host/mcp?n=1..N} leave N clients, connections and
@@ -460,7 +461,7 @@ public class McpToolProviderManager {
             // F12: serve the tool list from the TTL cache when it is still fresh —
             // a live tools/list RPC per server per turn was pure overhead.
             CachedTools cached = toolCache.get(cacheKey(serverConfig));
-            if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
+            if (!probe && cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
                 mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);

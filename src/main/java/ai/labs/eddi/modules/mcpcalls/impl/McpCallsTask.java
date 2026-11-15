@@ -167,6 +167,63 @@ public class McpCallsTask implements ILifecycleTask {
         return sanitize(UriRedactor.redactUri(url));
     }
 
+    /**
+     * The parsed result with every string value — at any depth — passed through
+     * {@link RemoteTextGovernor#redactResultDirectives}. Keys and the shape are
+     * kept; a container is copied only when something in it changed.
+     */
+    private static Object screenDecoded(Object value, String callName, String toolName) {
+        Object screened = screenValue(value, 0);
+        if (screened != value) {
+            LOGGER.warnf("MCP call '%s' → tool '%s' returned directive-shaped content inside its JSON values — redacted before it is "
+                    + "stored in memory", sanitize(callName), sanitize(toolName));
+        }
+        return screened;
+    }
+
+    /**
+     * Deeper than any real result; a deeper one is left as the raw-text screen saw
+     * it.
+     */
+    private static final int MAX_SCREEN_DEPTH = 64;
+
+    private static Object screenValue(Object value, int depth) {
+        if (value instanceof String text) {
+            String redacted = RemoteTextGovernor.redactResultDirectives(text);
+            return redacted != null ? redacted : text;
+        }
+        if (depth >= MAX_SCREEN_DEPTH) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = null;
+            for (var entry : map.entrySet()) {
+                Object screened = screenValue(entry.getValue(), depth + 1);
+                if (screened != entry.getValue() && copy == null) {
+                    copy = new LinkedHashMap<>(map);
+                }
+                if (copy != null) {
+                    copy.put(entry.getKey(), screened);
+                }
+            }
+            return copy != null ? copy : value;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = null;
+            for (int i = 0; i < list.size(); i++) {
+                Object screened = screenValue(list.get(i), depth + 1);
+                if (screened != list.get(i) && copy == null) {
+                    copy = new ArrayList<>(list);
+                }
+                if (copy != null) {
+                    copy.set(i, screened);
+                }
+            }
+            return copy != null ? copy : value;
+        }
+        return value;
+    }
+
     @Override
     public String getType() {
         return KEY_MCP_CALLS;
@@ -345,6 +402,12 @@ public class McpCallsTask implements ILifecycleTask {
                     // Try to parse as JSON, fallback to raw string
                     try {
                         responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
+                        // The raw-text screen above cannot see a directive spelled with JSON
+                        // escapes (Ignore…, ignore\nall…); decoding brings it back, so the
+                        // decoded strings are screened too before they reach memory.
+                        if (resultScreeningEnabled && mocked == null) {
+                            responseObject = screenDecoded(responseObject, callName, toolName);
+                        }
                     } catch (IOException e) {
                         responseObject = toolResult;
                     }

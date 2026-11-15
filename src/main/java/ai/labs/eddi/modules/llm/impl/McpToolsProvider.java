@@ -171,6 +171,9 @@ class McpToolsProvider implements ToolSourceProvider {
         // Accumulated across servers so a misconfigured or unreachable one has a
         // signal above this class's own log line — see asProviderFailures.
         List<McpToolProviderManager.McpServerFailure> failures = new ArrayList<>();
+        // Tools kept per server URL, across every mcpcalls config naming it: the cap is
+        // per server and agent, and two configs for one server must not double it.
+        Map<String, Integer> keptByServerUrl = new HashMap<>();
 
         try {
             LOGGER.debugf("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
@@ -205,7 +208,8 @@ class McpToolsProvider implements ToolSourceProvider {
                 int toolCap = mcpToolProviderManager.toolsPerServerCap() > 0
                         ? mcpToolProviderManager.toolsPerServerCap()
                         : McpToolProviderManager.DEFAULT_MAX_TOOLS_PER_SERVER;
-                int keptFromServer = 0;
+                String serverUrl = String.valueOf(mcpCallsConfig.getMcpServerUrl());
+                int keptFromServer = keptByServerUrl.getOrDefault(serverUrl, 0);
                 int droppedByCap = 0;
                 for (ToolSpecification spec : result.toolSpecs()) {
                     String name = spec.name();
@@ -239,6 +243,7 @@ class McpToolsProvider implements ToolSourceProvider {
                     toolSpecs.add(spec);
                     executors.put(name, executor);
                     keptFromServer++;
+                    keptByServerUrl.put(serverUrl, keptFromServer);
                     // Pin the call: without this the approver saw a tool name and
                     // nothing else, and the pre-execution re-check had nothing to
                     // compare against.

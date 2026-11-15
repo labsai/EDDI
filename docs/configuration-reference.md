@@ -665,7 +665,7 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.http-policy` | `permit` | `permit` accepts the shared key; `authenticated` has Quarkus OIDC validate per-user tokens instead, which, with `authorization.enabled=true`, must carry `eddi-admin`, `eddi-editor` or `eddi-user` (else 403) |
 | `eddi.openai-compat.trust-user-headers` | `true` | Believe `X-OpenWebUI-User-Id` as the EDDI userId. Safe only because the caller proved possession of the shared key — **a leaked key therefore permits impersonating any user** |
 | `eddi.openai-compat.allow-anonymous` | `false` | Serve requests carrying no user identity |
-| `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed. An OIDC principal of the same name is refused on `/v1` (`401`); the shipped value is a reserved principal name |
+| `eddi.openai-compat.default-user` | `openai-anonymous` | userId used when anonymous is allowed. An OIDC principal of the same name (ignoring case) is refused with `401` on every endpoint: it is a reserved principal name, like the shipped value |
 | `eddi.openai-compat.environment` | `production` | Deployment environment agents are resolved from |
 | `eddi.openai-compat.expose-stateless-variants` | `true` | Also list `…-stateless` model ids |
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
