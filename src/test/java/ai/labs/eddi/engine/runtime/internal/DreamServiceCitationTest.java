@@ -252,6 +252,78 @@ class DreamServiceCitationTest {
         assertEquals(1, meters.counter("eddi.dream.summarization.failed").count());
     }
 
+    /**
+     * Two objects under one key, the first citing nothing: merged, they share the
+     * second's sources, which back every number. Each must be checked on its own.
+     */
+    private static final String UNCITED_DUPLICATE = "[{\"key\": \"trip\", \"value\": \"2 seats\", \"sources\": []},"
+            + " {\"key\": \"trip\", \"value\": \"budget 1,000 EUR, 2 seats, near the station\", \"sources\": [0, 1, 2]}]";
+
+    /**
+     * Two objects under one key, the first stating a number its own source does not
+     * hold (1,000 is in ref 0, it cites ref 2); the second cites ref 0.
+     */
+    private static final String MISCITED_DUPLICATE = "[{\"key\": \"trip\", \"value\": \"budget 1,000 EUR\", \"sources\": [2]},"
+            + " {\"key\": \"trip\", \"value\": \"2 seats, budget 1,000 EUR, near the station\", \"sources\": [0, 1]}]";
+
+    @Test
+    @DisplayName("a duplicate-key object citing nothing cannot borrow its sibling's sources")
+    void uncitedDuplicateFallsBack() throws Exception {
+        config.setCiteSources(true);
+        answer(UNCITED_DUPLICATE);
+
+        dreamService.process(USER, AGENT, config);
+
+        verify(store, never()).insertIfAbsent(any());
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+        assertEquals(1, count("fallback"));
+        assertEquals(0, count("passed"));
+    }
+
+    @Test
+    @DisplayName("a duplicate-key object's numbers are checked against its own sources only")
+    void miscitedDuplicateFallsBack() throws Exception {
+        config.setCiteSources(true);
+        answer(MISCITED_DUPLICATE);
+
+        dreamService.process(USER, AGENT, config);
+
+        verify(store, never()).insertIfAbsent(any());
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+        assertEquals(1, count("fallback"));
+    }
+
+    @Test
+    @DisplayName("retry_once: a retried answer is checked per object before its duplicates merge")
+    void retryWithUncitedDuplicateFallsBack() throws Exception {
+        config.setCiteSources(true);
+        config.setOnValidationFailure("retry_once");
+        answer(BAD, UNCITED_DUPLICATE);
+
+        dreamService.process(USER, AGENT, config);
+
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(store, never()).insertIfAbsent(any());
+        assertEquals(1, count("fallback"));
+        assertEquals(0, count("retried"));
+    }
+
+    @Test
+    @DisplayName("correctly cited duplicates still merge and record the union of their sources")
+    void citedDuplicatesMergeAndPass() throws Exception {
+        config.setCiteSources(true);
+        answer("[{\"key\": \"trip\", \"value\": \"budget 1,000 EUR\", \"sources\": [0]},"
+                + " {\"key\": \"trip\", \"value\": \"2 seats near the station\", \"sources\": [1, 2]}]");
+
+        dreamService.process(USER, AGENT, config);
+
+        var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(store).insertIfAbsent(written.capture());
+        assertEquals("budget 1,000 EUR; 2 seats near the station", written.getValue().value());
+        assertEquals(List.of("e0", "e1", "e2"), written.getValue().sourceEntryIds());
+        assertEquals(1, count("passed"));
+    }
+
     @Test
     @DisplayName("duplicate keys merge their sources")
     void duplicateKeysMergeSources() {

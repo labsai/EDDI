@@ -252,13 +252,15 @@ public class ConversationSummarizer {
             return Map.of();
         }
 
-        boolean cut = newTurnsText.length() > turnBudget;
-        if (cut) {
+        // How many characters of the rendered turn were sent, or -1 when none was cut.
+        int sentRenderedChars = -1;
+        if (newTurnsText.length() > turnBudget) {
             // A single turn larger than the whole budget: summarize its head.
             // The notice counts toward the budget too, so the input stays within it.
             String notice = "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
             notice = notice.substring(0, Math.min(notice.length(), turnBudget));
-            newTurnsText = newTurnsText.substring(0, turnBudget - notice.length()) + notice;
+            sentRenderedChars = turnBudget - notice.length();
+            newTurnsText = newTurnsText.substring(0, sentRenderedChars) + notice;
         }
 
         // Build content to summarize: previous summary + new unsummarized turns
@@ -292,8 +294,8 @@ public class ConversationSummarizer {
 
         if (config.isCiteSources()) {
             // The check reads each turn as the summarizer saw it: screened, and — for a
-            // turn cut to fit the budget — only its head.
-            Map<Integer, String> stepTexts = stepTexts(outputs, alreadySummarized, summarizeThroughStep, cut ? turnBudget : -1);
+            // turn cut to fit the budget — only the part of it that was sent.
+            Map<Integer, String> stepTexts = stepTexts(outputs, alreadySummarized, summarizeThroughStep, sentRenderedChars);
             String previous = hasSummary ? existingSummary : null;
             var check = SummaryCitations.checkConversationSummary(summary, alreadySummarized, summarizeThroughStep, stepTexts, previous);
             if (check.valid()) {
@@ -396,11 +398,13 @@ public class ConversationSummarizer {
     /**
      * The text of each turn in {@code [from, to)} as the summarizer saw it — the
      * user input and the agent output, without the "Turn N" labels (they would back
-     * every step number trivially). {@code cutAt >= 0} keeps only that many
-     * characters of the batch's single turn, which is all of it the summarizer was
-     * sent.
+     * every step number trivially). {@code sentRenderedChars >= 0} is the length of
+     * the prefix of the batch's single turn, as {@link #renderTurns} renders it,
+     * that the summarizer was sent; only the user and agent text inside that prefix
+     * is kept. The labels and the cut notice take up part of the budget, so the
+     * text kept is shorter than the budget.
      */
-    static Map<Integer, String> stepTexts(List<ConversationOutput> outputs, int from, int to, int cutAt) {
+    static Map<Integer, String> stepTexts(List<ConversationOutput> outputs, int from, int to, int sentRenderedChars) {
         Map<Integer, String> texts = new LinkedHashMap<>();
         if (outputs == null) {
             return texts;
@@ -412,13 +416,42 @@ public class ConversationSummarizer {
             }
             var input = output.get("input", String.class);
             var outputText = ConversationOutputUtils.extractOutputText(output);
-            String text = (input != null ? input : "") + "\n" + (outputText != null ? outputText : "");
-            if (cutAt >= 0 && text.length() > cutAt) {
-                text = text.substring(0, cutAt);
-            }
+            String text = sentRenderedChars >= 0
+                    ? sentText(i, input, outputText, sentRenderedChars)
+                    : (input != null ? input : "") + "\n" + (outputText != null ? outputText : "");
             texts.put(i, text);
         }
         return texts;
+    }
+
+    /**
+     * The user and agent text of step {@code step} that lies within the first
+     * {@code sentChars} characters of its rendering, joined as {@link #stepTexts}
+     * joins an uncut turn. Walks the layout of {@link #renderTurns}: label, text,
+     * newline, for the user line and then the agent line.
+     */
+    static String sentText(int step, String input, String outputText, int sentChars) {
+        int remaining = sentChars;
+        String sentInput = "";
+        if (input != null && !input.isBlank()) {
+            remaining -= userLabel(step).length();
+            sentInput = input.substring(0, Math.clamp(remaining, 0, input.length()));
+            remaining -= input.length() + 1;
+        }
+        String sentOutput = "";
+        if (outputText != null && !outputText.isEmpty()) {
+            remaining -= agentLabel(step).length();
+            sentOutput = outputText.substring(0, Math.clamp(remaining, 0, outputText.length()));
+        }
+        return sentInput + "\n" + sentOutput;
+    }
+
+    private static String userLabel(int step) {
+        return "Turn " + step + " — User: ";
+    }
+
+    private static String agentLabel(int step) {
+        return "Turn " + step + " — Agent: ";
     }
 
     private static Map<String, Object> tokenUsage(int inputTokens, int outputTokens) {
@@ -517,10 +550,10 @@ public class ConversationSummarizer {
             // Labelled by step, as the recall tool reads them: turn 0 is the opening
             // step, turn 1 the user's first message.
             if (input != null && !input.isBlank()) {
-                sb.append("Turn ").append(i).append(" — User: ").append(input).append('\n');
+                sb.append(userLabel(i)).append(input).append('\n');
             }
             if (outputText != null && !outputText.isEmpty()) {
-                sb.append("Turn ").append(i).append(" — Agent: ").append(outputText).append('\n');
+                sb.append(agentLabel(i)).append(outputText).append('\n');
             }
         }
 

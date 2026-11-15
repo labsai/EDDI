@@ -272,7 +272,59 @@ class ConversationSummarizerCitationTest {
         outputs.add(output);
         var texts = ConversationSummarizer.stepTexts(outputs, 0, 1, -1);
         assertEquals("hello\nhi", texts.get(0));
-        assertEquals("hel", ConversationSummarizer.stepTexts(outputs, 0, 1, 3).get(0));
+        // A cut is measured in rendered characters: "Turn 0 — User: " (15) comes first,
+        // so 18 of them carry three characters of the input and nothing of the output.
+        assertEquals("hel\n", ConversationSummarizer.stepTexts(outputs, 0, 1, 18).get(0));
+        assertEquals("\n", ConversationSummarizer.stepTexts(outputs, 0, 1, 3).get(0), "the label alone carries no text");
+        // 15 + "hello" + newline + "Turn 0 — Agent: " (16) = 37; one more is the
+        // output's first character
+        assertEquals("hello\nh", ConversationSummarizer.stepTexts(outputs, 0, 1, 38).get(0));
         verify(summarizationService, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    /**
+     * One turn longer than maxCharsPerUpdate, its only number between where the
+     * request stops (labels and the cut notice take part of the budget) and the
+     * budget itself. The summarizer never saw it, so a summary stating it is not
+     * backed by the turn.
+     */
+    private static IConversationMemory memoryWithOneOversizedTurn(String numberSentence) {
+        var memory = memory();
+        memory.getConversationOutputs().getFirst().put("input", "x".repeat(920) + numberSentence + "y".repeat(2000));
+        return memory;
+    }
+
+    private static ConversationSummaryConfig cutConfig() {
+        var config = config(true, "fallback_to_previous");
+        config.setMaxTurnsPerUpdate(1);
+        config.setMaxCharsPerUpdate(1000); // the smallest budget the config accepts
+        return config;
+    }
+
+    @Test
+    void aCutTurn_isCheckedAgainstTheTextActuallySent() {
+        var memory = memoryWithOneOversizedTurn(" budget 4,250 EUR ");
+        answer("- Budget is 4,250 EUR [turn 0]");
+
+        run(memory, cutConfig(), null);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
+        assertTrue(content.getValue().length() <= 1000, content.getValue());
+        assertFalse(content.getValue().contains("4,250"), "premise: the number lies past the part of the turn that was sent");
+        assertNull(ConversationSummarizer.readSummary(memory), "a number the summarizer never saw fails the check");
+        assertEquals(1, count("fallback"));
+    }
+
+    @Test
+    void aCutTurn_aNumberInsideTheSentPartStillPasses() {
+        var memory = memory();
+        memory.getConversationOutputs().getFirst().put("input", "budget 4,250 EUR " + "y".repeat(2000));
+        answer("- Budget is 4,250 EUR [turn 0]");
+
+        run(memory, cutConfig(), null);
+
+        assertEquals("- Budget is 4,250 EUR [turn 0]", ConversationSummarizer.readSummary(memory));
+        assertEquals(1, count("passed"));
     }
 }

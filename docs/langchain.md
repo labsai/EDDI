@@ -1999,8 +1999,8 @@ its continuation lines, or any other line on its own):
   for the numbers they state.
 - Every number in a unit must appear **verbatim** in the turns the unit cites. A turn's text is its
   user input and agent output **as the summarizer saw it** — after the input guardrails were
-  re-applied (below), and, for a turn cut to fit `maxCharsPerUpdate`, only its head — without the
-  `Turn N` labels. A number is a run of digits with optional `,`/`.` separators between digit groups,
+  re-applied (below), and, for a turn cut to fit `maxCharsPerUpdate`, only the part of it the request
+  carried — without the `Turn N` labels. A number is a run of digits with optional `,`/`.` separators between digit groups,
   an optional leading `-` (not after a letter or digit, so the `7` of `4-7` has none) and an optional
   trailing `%`; `1,000` matches only `1,000` — not `1.000`, `1000` or `1,000.0` — and `10%` does not
   match `10`. Not checked: the indices inside citations, unbracketed references such as `turn 5` or

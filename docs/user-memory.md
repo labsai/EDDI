@@ -378,7 +378,9 @@ consolidation group is made extractive and checked before anything is written:
   states a number in its `value` that none of its cited sources (their key and value) contains
   verbatim. Numbers are defined as for the [rolling summary](langchain.md#traceable-summaries-citesources):
   `1,000` matches only `1,000`, `10%` does not match `10`, `-5` does not match `5`. The key is a label
-  and is not checked.
+  and is not checked. Each object of the answer is checked against its own `sources`, before objects
+  that share a key are merged: the merged entry records the union of their sources, but one object
+  cannot borrow another's citations to pass.
 
 **On failure**, `onValidationFailure` decides:
 

@@ -92,3 +92,15 @@ the rolling summary's check to every consolidation group. See
   the last summarized turn, so `[turn 40]` returned turn 4 as if it were the source. A citation wholly outside the
   summarized turns, or a bracket that is not a list of turn numbers, now names no turn: the tool says so and logs one
   DEBUG line. A range that only partly overlaps is still cut at the last summarized turn.
+
+### Review follow-up (2026-11-15)
+
+- **Dream checks each cited object before merging duplicate keys.** The citation check used to run on
+  `mergeDuplicateKeys`' output, whose sources are the union of every object sharing a key. An object citing nothing,
+  or citing an original that does not hold its number, borrowed a sibling's sources and passed, and the originals were
+  then deleted. The check now reads the parsed answer object by object, on the first call and on the `retry_once` call
+  alike; the merge still runs afterwards and still records the union of the (now individually valid) sources.
+- **A cut turn is checked against the text that was sent.** When a single turn is longer than `maxCharsPerUpdate`, the
+  check kept that many characters of the turn's raw text. The request itself is shorter: the "Turn N — User:" labels
+  and the cut notice take part of the budget, so a number just past the sent prefix could back a summary the
+  summarizer could not have read. The check now keeps exactly the user and agent text inside the sent prefix.

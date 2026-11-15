@@ -713,9 +713,14 @@ public class DreamService {
             // 4. Parse response (handles markdown fences, validates output). Two
             // consolidated entries with the same key would upsert onto the same
             // document, the second silently overwriting the first — so they are
-            // merged here, never dropped.
-            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(
-                    cite ? parseCitedConsolidatedEntries(llmResult.summary()) : parseConsolidatedEntries(llmResult.summary()));
+            // merged here, never dropped. With citeSources the citation check reads the
+            // objects as the model wrote them, BEFORE the merge: merging unions their
+            // sources, so an object citing nothing (or the wrong entry) would
+            // otherwise borrow a sibling's citations and pass.
+            List<ConsolidatedEntry> parsed = cite
+                    ? parseCitedConsolidatedEntries(llmResult.summary())
+                    : parseConsolidatedEntries(llmResult.summary());
+            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(parsed);
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
@@ -727,7 +732,7 @@ public class DreamService {
             // from, and every number it states must appear in them verbatim. The
             // originals are deleted below, so by default a failing group is skipped.
             if (cite) {
-                SummaryCitations.Result check = checkCitations(consolidated, groupEntries);
+                SummaryCitations.Result check = checkCitations(parsed, groupEntries);
                 String outcome = SummaryCitations.OUTCOME_PASSED;
                 if (!check.valid()) {
                     var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(),
@@ -752,8 +757,9 @@ public class DreamService {
                             estimatedCostAccumulated += estimateCost(second, content.length(), config.getInputPricePer1M(),
                                     config.getOutputPricePer1M());
                             meterTenantCost(second, content.length(), config);
-                            List<ConsolidatedEntry> retried = mergeDuplicateKeys(parseCitedConsolidatedEntries(second.summary()));
-                            if (!retried.isEmpty() && checkCitations(retried, groupEntries).valid()) {
+                            List<ConsolidatedEntry> retriedParsed = parseCitedConsolidatedEntries(second.summary());
+                            List<ConsolidatedEntry> retried = mergeDuplicateKeys(retriedParsed);
+                            if (!retried.isEmpty() && checkCitations(retriedParsed, groupEntries).valid()) {
                                 consolidated = retried;
                                 outcome = SummaryCitations.OUTCOME_RETRIED;
                             }
@@ -1385,6 +1391,12 @@ public class DreamService {
      * The {@code citeSources} check of a group's answer: each consolidated entry
      * against the originals it cites, by ref. A source's text is its key and value,
      * as the model was given them.
+     * <p>
+     * Pass the parsed answer, not {@link #mergeDuplicateKeys}' output: each object
+     * must be backed by its own sources. Once two objects sharing a key are merged,
+     * either one's numbers are checked against the union of both citation lists.
+     * Checking every object on its own also covers the merged entry, whose values
+     * and sources are just the two objects' values and sources combined.
      */
     static SummaryCitations.Result checkCitations(List<ConsolidatedEntry> consolidated, List<UserMemoryEntry> originals) {
         List<String> sourceTexts = originals.stream().map(o -> o.key() + ": " + o.value()).toList();
