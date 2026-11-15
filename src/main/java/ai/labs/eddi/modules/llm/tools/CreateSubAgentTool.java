@@ -38,8 +38,8 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
 /**
  * LLM tool for dynamically creating sub-agents during group conversations.
- * Constructed per-invocation by {@code AgentOrchestrator} with the parent
- * agent's context and the group's {@link DynamicAgentConfig} guardrails.
+ * Constructed per-invocation by {@code DynamicAgentToolsProvider} with the
+ * parent agent's context and the group's {@link DynamicAgentConfig} guardrails.
  *
  * <p>
  * The LLM can call this tool to spin up a new specialist agent on the fly,
@@ -47,7 +47,8 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class CreateSubAgentTool {
 
     private static final Logger LOGGER = Logger.getLogger(CreateSubAgentTool.class);

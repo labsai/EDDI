@@ -271,6 +271,7 @@ public class ImapMailTransport implements MailTransport {
         return permanent != null && (permanent.contains(Flags.Flag.USER) || permanent.contains(PROCESSED_KEYWORD));
     }
 
+    /** One open folder. */
     static final class ImapSession extends UidFolderSession {
         private final String integrationId;
         private final IMAPStore store;

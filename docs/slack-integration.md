@@ -616,6 +616,9 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 | `targets[].type` | ✅ | `AGENT` or `GROUP` |
 | `targets[].targetId` | ✅ | Agent ID or Group Config ID |
 | `targets[].triggers` | ❌ | List of trigger keywords (case-insensitive) |
+| `targets[].observeMode` | ❌ | `true` makes an `AGENT` target answer plain channel traffic — see [Observe Mode](#observe-mode-passive-watching) |
+| `targets[].observeConfig` | ❌ | `triggerKeywords`, `triggerMimeTypes`, `cooldownSeconds` (default `60`), `maxDailyResponses` (default `50`), `maxCostPerDay` (default `5.0`) |
+| `platformConfig.hitlApprovalChannel`, `platformConfig.hitlApproverUserIds` | ❌ | Slack approval cards — see [HITL → Slack Integration](hitl.md#slack-integration) |
 
 ### Legacy ChannelConnector (on Agent, deprecated)
 
