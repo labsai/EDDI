@@ -120,7 +120,7 @@ export default tseslint.config(
       name: "@playwright/test",
       importNames: ["test"],
       message:
-        "UI specs must import `test` from ./fixtures so the unhandled-API-call guard applies. Type-only imports and the integration/fullstack tiers are exempt.",
+        "UI specs must import `test` from ./fixtures so the unhandled-API-call guard applies. Type-only imports and the integration/fullstack/auth/operator tiers are exempt.",
     };
 
     return [
@@ -152,7 +152,7 @@ export default tseslint.config(
         files: ["e2e/**/*.spec.{ts,tsx}"],
         // The three real-backend tiers are exempt: the fixture's guard asserts that
         // nothing reached an unmocked API, which is exactly what they are for.
-        ignores: ["e2e/**/integration/**", "e2e/**/fullstack/**", "e2e/**/auth/**"],
+        ignores: ["e2e/**/integration/**", "e2e/**/fullstack/**", "e2e/**/auth/**", "e2e/**/operator/**"],
         rules: {
           "no-restricted-imports": ["error", { paths: [IMPORT_THE_FIXTURE] }],
         },

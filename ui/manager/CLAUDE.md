@@ -47,7 +47,9 @@ of `ui/` and `shared/` plus eight pieces of chrome from `src/components/layout/`
 here. `AppLayout` and `ConfigEditorLayout` are excluded on purpose — both pull Monaco into the
 bundle. Others are unsynced too: `UpdateCheckCard` and `UpdateBanner` are newer than the last
 sync, `ChipInput` and `StepDots` are left out deliberately (NOTES.md says why), and
-`ResizeHandle` and the two `ConnectionReference*` components have not been considered yet. `.design-sync/conventions.md` is the styling contract;
+`ResizeHandle`, the two `ConnectionReference*` components, `DurationField`, `EditableTitle`,
+`ModelCombobox`, `NavigationGuardDialog`, `PermanentDeleteOption` and `ProviderSelect` are not in
+the map either and have not been considered yet. `.design-sync/conventions.md` is the styling contract;
 `.design-sync/NOTES.md` explains the build wiring. (`.ds-sync/` is the vendored converter
 toolchain that reads this configuration — not a second design system.)
 
