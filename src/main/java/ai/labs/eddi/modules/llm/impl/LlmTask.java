@@ -116,6 +116,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     private static final String KEY_PROMPT = "prompt";
     private static final String KEY_LOG_SIZE_LIMIT = "logSizeLimit";
     private static final String KEY_INCLUDE_FIRST_AGENT_MESSAGE = "includeFirstAgentMessage";
+    private static final String KEY_EMPTY_INPUT_PROMPT = "emptyInputPrompt";
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     /** Step key prefix for the convertToObject parse outcome (task id appended). */
     static final String KEY_OUTPUT_OUTCOME = "llm:output:outcome:";
@@ -671,11 +672,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             String resolvedModelName = resolveModelNameOf(processedParams, resolvedType);
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
-                    anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
+                    anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps,
+                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
         } else {
             // Legacy step-count windowing
             messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
-                    includeFirstAgentMessage, summaryPrefix, skipSteps);
+                    includeFirstAgentMessage, summaryPrefix, skipSteps,
+                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
         }
 
         // Where the user's typed text sits in the current message, taken before the
@@ -1510,7 +1513,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             }
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolveModelNameOf(processedParams, resolvedType));
             smaller = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, prompt, half, anchorFirstSteps,
-                    includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
+                    includeFirstAgentMessage, estimator, summaryPrefix, skipSteps,
+                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
         } else {
             if (logSizeLimit == 0) {
                 return null; // the prompt carried no history: nothing to halve
@@ -1521,7 +1525,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 return null;
             }
             smaller = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, half, includeFirstAgentMessage, summaryPrefix,
-                    skipSteps);
+                    skipSteps, ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
         }
         forwardAttachments(smaller, memory, task, resolvedType, processedParams, true);
         return smaller;

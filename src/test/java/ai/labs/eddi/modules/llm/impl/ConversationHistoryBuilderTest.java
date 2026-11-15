@@ -1061,4 +1061,75 @@ class ConversationHistoryBuilderTest {
             assertInstanceOf(UserMessage.class, messages.getFirst());
         }
     }
+
+    // ==================== emptyInputPrompt ====================
+
+    @Nested
+    @DisplayName("emptyInputPrompt — a request never leaves without conversational content")
+    class EmptyInputPromptTests {
+
+        private IConversationMemory openingMemory() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(List.of(new ConversationOutput()));
+            return memory;
+        }
+
+        @Test
+        @DisplayName("without the argument a greeting request is system-only (the Gemini 400)")
+        void legacyOverloadAddsNothing() {
+            List<ChatMessage> messages = builder.buildMessages(openingMemory(), "System", null, -1, true);
+
+            assertEquals(1, messages.size());
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+        }
+
+        @Test
+        @DisplayName("step-count mode appends the turn after the system message")
+        void stepCountAddsTurn() {
+            List<ChatMessage> messages = builder.buildMessages(openingMemory(), "System", null, -1, true, null, 0, "Greet.");
+
+            assertEquals(2, messages.size());
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            assertEquals("Greet.", ((UserMessage) messages.getLast()).singleText());
+        }
+
+        @Test
+        @DisplayName("token-aware mode appends the turn too")
+        void tokenAwareAddsTurn() {
+            var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(openingMemory(), "System", null, 4000, 2, true, estimator, null, 0,
+                    "Greet.");
+
+            assertEquals("Greet.", ((UserMessage) messages.getLast()).singleText());
+        }
+
+        @Test
+        @DisplayName("history with a user turn is left alone")
+        void contentIsUnchanged() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            var output = new ConversationOutput();
+            output.put("input", "Hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildMessages(memory, "System", null, -1, true, null, 0, "Greet.");
+
+            assertEquals(2, messages.size());
+            assertEquals("Hi", ((UserMessage) messages.getLast()).singleText());
+        }
+
+        @Test
+        @DisplayName("a completely empty list stays empty (the caller skips the call), and null disables")
+        void emptyAndNullAreLeftAlone() {
+            assertTrue(builder.buildMessages(openingMemory(), null, null, -1, true, null, 0, "Greet.").isEmpty());
+            assertEquals(1, builder.buildMessages(openingMemory(), "System", null, -1, true, null, 0, null).size());
+        }
+
+        @Test
+        @DisplayName("resolveEmptyInputPrompt: configured text wins, unset or blank gives the default")
+        void resolve() {
+            assertEquals("Hello.", ConversationHistoryBuilder.resolveEmptyInputPrompt("Hello."));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt(null));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt("   "));
+        }
+    }
 }

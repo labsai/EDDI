@@ -572,7 +572,11 @@ class LlmTaskCoverage2Test {
         var messagesCaptor = ArgumentCaptor.forClass(List.class);
         verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), messagesCaptor.capture(), any(), any(), any(), anyInt(), anyInt(), any());
         List<ChatMessage> messages = messagesCaptor.getValue();
-        assertTrue(messages.isEmpty(), "summary_through_step=3 must skip the single stored turn out of the history window");
+        // Nothing of the stored turn is left; the history holds only the request-only
+        // empty-input turn that keeps a content-less request from reaching the
+        // provider.
+        assertEquals(1, messages.size(), "summary_through_step=3 must skip the single stored turn out of the history window");
+        assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ((UserMessage) messages.getFirst()).singleText());
 
         // …and the summary-enabled path still ran end-to-end, with inheritance applied.
         var effective = capturedSummaryConfig();

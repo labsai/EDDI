@@ -543,6 +543,7 @@ class ToolLoopResumer {
         String systemMessage = "";
         String prompt = null;
         boolean includeFirstAgentMessage = true;
+        String emptyInputPrompt = null;
         int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
         if (task.getParameters() != null) {
             Object sys = task.getParameters().get("systemMessage");
@@ -553,6 +554,10 @@ class ToolLoopResumer {
             if (p != null) {
                 prompt = p.toString();
             }
+            Object empty = task.getParameters().get("emptyInputPrompt");
+            if (empty != null) {
+                emptyInputPrompt = empty.toString();
+            }
             Object inc = task.getParameters().get("includeFirstAgentMessage");
             if (inc != null) {
                 includeFirstAgentMessage = Boolean.parseBoolean(inc.toString());
@@ -560,7 +565,7 @@ class ToolLoopResumer {
         }
 
         List<ChatMessage> base = orchestrator.conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, logSizeLimit,
-                includeFirstAgentMessage, null, 0);
+                includeFirstAgentMessage, null, 0, ConversationHistoryBuilder.resolveEmptyInputPrompt(emptyInputPrompt));
 
         List<ChatMessage> messages = new ArrayList<>(base);
         List<ToolExecutionRequest> requests = new ArrayList<>();

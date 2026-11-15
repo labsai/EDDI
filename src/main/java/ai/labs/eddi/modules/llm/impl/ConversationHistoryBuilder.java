@@ -43,6 +43,49 @@ class ConversationHistoryBuilder {
     private static final Logger LOGGER = Logger.getLogger(ConversationHistoryBuilder.class);
 
     /**
+     * The user turn sent when a request would otherwise hold no user or assistant
+     * message at all (see {@link #withConversationalContent}). A default for the
+     * task's {@code emptyInputPrompt} parameter, not a switch: the turn is always
+     * added when the request needs it.
+     */
+    static final String DEFAULT_EMPTY_INPUT_PROMPT = "(The conversation has just started. Greet the user.)";
+
+    /**
+     * The configured {@code emptyInputPrompt}, or
+     * {@link #DEFAULT_EMPTY_INPUT_PROMPT} when it is unset or blank.
+     */
+    static String resolveEmptyInputPrompt(String configured) {
+        return isNullOrEmpty(configured) || configured.isBlank() ? DEFAULT_EMPTY_INPUT_PROMPT : configured;
+    }
+
+    /**
+     * Guarantees the request carries conversational content. Providers reject a
+     * request with no user/assistant turn (Gemini:
+     * "GenerateContentRequest.contents: contents is not specified", because EDDI
+     * sends system messages as the system instruction, not as contents). That is
+     * exactly what a greeting at conversation start produces: the opening step has
+     * no user input, so history is empty and only the system message remains.
+     * <p>
+     * When the list holds system messages but no {@link UserMessage} or
+     * {@link AiMessage}, a user turn with {@code emptyInputPrompt} is appended. A
+     * list that already has content, a completely empty list (the caller skips the
+     * call), and a null prompt are left unchanged. The turn exists only in the
+     * request: it is never written to conversation memory.
+     */
+    static void withConversationalContent(List<ChatMessage> messages, String emptyInputPrompt) {
+        if (emptyInputPrompt == null || messages.isEmpty()) {
+            return;
+        }
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage || message instanceof AiMessage) {
+                return;
+            }
+        }
+        LOGGER.debug("Request has no user or assistant message; adding the emptyInputPrompt turn (request-only)");
+        messages.add(UserMessage.from(emptyInputPrompt));
+    }
+
+    /**
      * Build the full list of ChatMessages for an LLM call (step-count mode).
      *
      * @param memory
@@ -121,6 +164,15 @@ class ConversationHistoryBuilder {
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
                                     boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
+        return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, summaryPrefix, skipSteps, null);
+    }
+
+    /**
+     * As above, plus the {@code emptyInputPrompt} turn added when the request would
+     * otherwise carry no user/assistant message ({@code null} = never add).
+     */
+    List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
+                                    boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps, String emptyInputPrompt) {
 
         systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
@@ -145,6 +197,7 @@ class ConversationHistoryBuilder {
             messages.add(new SystemMessage(systemMessage));
         }
         messages.addAll(chatMessages);
+        withConversationalContent(messages, emptyInputPrompt);
 
         return messages;
     }
@@ -217,6 +270,17 @@ class ConversationHistoryBuilder {
     List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
                                               int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
                                               String summaryPrefix, int skipSteps) {
+        return buildTokenAwareMessages(memory, systemMessage, prompt, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage, estimator,
+                summaryPrefix, skipSteps, null);
+    }
+
+    /**
+     * As above, plus the {@code emptyInputPrompt} turn added when the request would
+     * otherwise carry no user/assistant message ({@code null} = never add).
+     */
+    List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
+                                              int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
+                                              String summaryPrefix, int skipSteps, String emptyInputPrompt) {
 
         systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
@@ -243,6 +307,7 @@ class ConversationHistoryBuilder {
                 messages.add(new SystemMessage(systemMessage));
             }
             messages.addAll(allMessages);
+            withConversationalContent(messages, emptyInputPrompt);
             return messages;
         }
 
@@ -353,6 +418,7 @@ class ConversationHistoryBuilder {
         }
 
         messages.addAll(recentMessages);
+        withConversationalContent(messages, emptyInputPrompt);
 
         return messages;
     }

@@ -54,7 +54,7 @@ final class ModelParameterValues {
      * {@code ChatModelRegistry} before a builder is ever reached.
      */
     private static final Set<String> PIPELINE_KEYS = Set.of(
-            "systemMessage", "prompt", "logSizeLimit", "includeFirstAgentMessage",
+            "systemMessage", "prompt", "logSizeLimit", "includeFirstAgentMessage", "emptyInputPrompt",
             "convertToObject", "addToOutput", "responseSchema", "logRequests", "logResponses", "timeout");
 
     private static final ObjectMapper JSON = new ObjectMapper();

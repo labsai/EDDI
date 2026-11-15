@@ -118,6 +118,7 @@ This is the standard way to use the LLM task - just connect to an LLM and start 
 | **Context Control**        |         |                                                       |                   |
 | `logSizeLimit`             | int     | Conversation history limit (`-1` = unlimited, `0` = none) | falls back to `conversationHistoryLimit` (default 10) |
 | `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
+| `emptyInputPrompt`         | string  | The user turn EDDI adds to a model request that would otherwise hold no user or assistant message — typically the greeting that runs at conversation start with empty input. A default, not a switch: blank or unset uses the built-in text, and a request that already has content is never changed. Request-only: it is never stored in the conversation | `(The conversation has just started. Greet the user.)` |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format. If it is a JSON Schema it is also validated against the parsed reply and sent natively to OpenAI, Azure OpenAI, Mistral and Gemini — see [Structured Output](#shape-validation-responseschema-and-nonblankfields) | ""                |
@@ -3388,6 +3389,12 @@ not a provider requirement.
 - **Solution**: Historical. The Messages API no longer documents a "first message must be
   the user's" rule, and an assistant-first history is accepted — so `includeFirstAgentMessage`
   is not the fix for a modern Anthropic failure. Leave it unset.
+
+### `GenerateContentRequest.contents: contents is not specified` (Gemini, HTTP 400)
+
+- **Problem**: The task that opens the conversation (a greeting) fails with `INVALID_ARGUMENT` and the configured fallback is served.
+- **Cause**: The greeting runs at `CONVERSATION_START` with empty input. The history is empty, so the request held only the system message — which EDDI sends as Gemini's `systemInstruction`, not as `contents` — and Gemini rejects any request without contents.
+- **Solution**: Fixed in the engine: a request with no user or assistant message gets one user turn, `emptyInputPrompt` (default `(The conversation has just started. Greet the user.)`). The turn lives only in the request. Set `emptyInputPrompt` on the task to change its wording.
 
 ### `invalid_request_error: messages: Field required` (Anthropic)
 
