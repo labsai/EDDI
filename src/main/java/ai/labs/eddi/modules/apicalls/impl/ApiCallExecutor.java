@@ -532,9 +532,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
                     // so that ordering survives serialization.
                     //
-                    // The tool result is truncated from the FRONT
-                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
-                    // so whatever serializes first is what survives. With a plain
+                    // The tool result is kept from the FRONT (ToolResponseTruncator's
+                    // `truncate` strategy cuts `result.substring(0, maxChars)`; the
+                    // default `headTail` keeps the start and the end and drops the
+                    // middle), so whatever serializes first is what survives. With a plain
                     // HashMap "headers" hashed ahead of "body" on both the success and
                     // the error path regardless of insertion order — so a per-tool
                     // limit, or the always-on tool-context budget, would spend the
@@ -1484,6 +1485,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
+     * The plaintexts substituted into one request (the set every redaction reads)
+     * plus the references they came from, which the destination check needs after
+     * the target URL is known.
+     */
+    static final class ResolvedSecrets extends HashSet<String> {
+        private final Set<String> vaultReferences = new LinkedHashSet<>();
+
+        Set<String> vaultReferences() {
+            return vaultReferences;
+        }
+    }
+
+    /**
      * A request ready to send, together with the names of the headers a connection
      * filled.
      * <p>
@@ -1501,20 +1515,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * @param connectionOwnedHeaders
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
+     * @param resolvedSecrets
+     *            the secret plaintexts substituted into this request, which every
+     *            redaction of its debug record, errors and response masks
      */
-    /**
-     * The plaintexts substituted into one request (the set every redaction reads)
-     * plus the references they came from, which the destination check needs after
-     * the target URL is known.
-     */
-    static final class ResolvedSecrets extends HashSet<String> {
-        private final Set<String> vaultReferences = new LinkedHashSet<>();
-
-        Set<String> vaultReferences() {
-            return vaultReferences;
-        }
-    }
-
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
@@ -1882,8 +1886,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setFollowRedirects(false);
         }
         Map<String, String> queryParams = requestConfig.getQueryParams();
+        List<String> optionalQueryParams = requestConfig.getOptionalQueryParams() != null ? requestConfig.getOptionalQueryParams() : List.of();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            // An optional parameter the caller left out: send nothing, so the server
+            // applies its own default (see Request#getOptionalQueryParams). Judged on
+            // the rendered template, before any reference resolution, so a value that
+            // is a reference is never dropped.
+            if (optionalQueryParams.contains(queryParam) && (qpValue == null || qpValue.isEmpty())) {
+                continue;
+            }
             // Resolve global variable references, then vault references in query params
             qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
                     templateDataObjects, conversationProperties);
