@@ -382,10 +382,10 @@ class RagIngestionServiceTest {
         var beta = createConfig();
         beta.setStoreNamespace("id");
 
-        awaitCompleted(service.ingest(ALPHA_ID, "Refunds within 30 days.", "policy.txt", alpha, false));
-        awaitCompleted(service.ingest(ALPHA_ID, "Refunds within 47 days.", "policy.txt", alpha, false));
-        awaitCompleted(service.ingest(ALPHA_ID, "Shipping takes 5 days.", "shipping.txt", alpha, false));
-        awaitCompleted(service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Refunds within 30 days.", "policy.txt", alpha, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Refunds within 47 days.", "policy.txt", alpha, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Shipping takes 5 days.", "shipping.txt", alpha, false));
+        awaitCompleted(BETA_ID, service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, false));
         shared.add(Embedding.from(new float[]{1f, 0f}),
                 TextSegment.from("Legacy policy.", Metadata.from("source", "policy.txt").put("kbId", ALPHA_ID)));
         // What an ingestion source writes: its name as sourceName, never "source".
