@@ -5695,7 +5695,7 @@
       "safetyPreamble": "Règles de sécurité (non modifiables)",
       "safetyPreambleHint": "Toujours ajoutées en tête. Elles indiquent à l'opérateur de traiter tout ce que renvoient ses outils comme des données non fiables.",
       "promptBody": "Instructions de l'opérateur",
-      "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille.",
+      "promptBodyHint": "Modifiez la façon dont l'opérateur se présente et travaille. Le texte est envoyé tel qu'il est écrit : les accolades sont littérales et seul le bloc de contexte d'écran est renseigné.",
       "tools": "Outils qui lui seront confiés ({{toolCount}})",
       "activate": "Activer et déployer",
       "callerIdentityNote": "{{productName}} insère votre jeton au moment de l'appel. Il n'est jamais enregistré dans la conversation et n'est renvoyé qu'à ce déploiement.",

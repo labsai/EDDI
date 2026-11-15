@@ -1,3 +1,5 @@
+import { BODY_APP_CONTEXT } from "./context-block";
+
 /**
  * Literal braces in the operator's system prompt.
  *
@@ -17,91 +19,93 @@
  *   its own templates accordingly. This is the worse one, because nothing
  *   reports it.
  *
- * Rewording each mention fixes only the ones somebody noticed. This escapes
- * them all, at the one place the prompt is built: every span Qute would treat
- * as an expression is wrapped in an unparsed block (`{|…|}`, the convention of
- * `TemplateEscaping` on the backend), so it reaches the model as typed.
+ * The rule is deliberately NOT "escape what Qute's lexer treats as an
+ * expression". That rule has to be mirrored (letters, `! # / |`, underscores,
+ * Unicode identifiers, `{@…}` declarations, `{0}`, backslash escapes …), a
+ * mirror drifts, and what it gets wrong is dropped silently. The rule is the
+ * conservative one instead: every `{` is escaped, except in exactly three places.
  *
- * Left alone, because they are meant to be live:
+ * - the Manager's own per-turn context block ({@link BODY_APP_CONTEXT}), matched
+ *   as that exact text and nothing looser. `{context.screen}` or `{#if …}`
+ *   typed into the instructions is therefore literal text;
+ * - a reference mention (`${vault:…}`, `${vars:…}`, `${connection:…}`,
+ *   `${caller:…}`, legacy `${eddivault:…}`): `LlmTask.escapeConfigReferenceMentions`
+ *   wraps those itself, and a second wrap would nest raw blocks and render their
+ *   markers. The escape therefore splits AROUND a mention and never wraps it;
+ * - an unparsed block (`{|…|}`) the author already wrote, which is safe for any
+ *   content.
  *
- * - the Manager's own per-turn context block (`{#if context.screen}…{/if}`,
- *   `{context.agentId}`), which {@link LIVE_SYNTAX} names exactly — a new
- *   template feature has to be added there on purpose;
- * - `{vault:…}`, `{vars:…}`, `{connection:…}`, `{caller:…}` and the legacy
- *   `{eddivault:…}`: `LlmTask.escapeConfigReferenceMentions` wraps those itself,
- *   and a second wrap would render its markers (its "known limit");
- * - an unparsed block the author already wrote.
+ * An escaped brace is `{|{|}`: an unparsed block holding the brace. Per brace,
+ * not per span, so no span can contain the `|}` that would end the block early
+ * and nothing has to decide where an "expression" stops. A run of backslashes in
+ * front of a brace goes inside the block with it, because Qute reads `\{` and
+ * `\}` as escapes and eats the backslash.
  *
- * What counts as an expression is the lexer's rule, not a guess:
- * `qute-literal-corpus.json` records, case by case, what the engine does with a
- * brace in each position, and `OperatorPromptQuteCorpusTest` (Java) renders
- * every case through EDDI's real templating engine and fails when this file's
- * idea of the rule and the engine's drift apart. In short: a `{` opens an
- * expression when the next character is an ASCII letter or one of `! # / |`;
- * anything else (`{"json": 1}`, `{}`, `{ x }`, `{0}`) is literal text, and a
- * doubled `{{` is a pair of literal braces.
+ * `qute-literal-corpus.json` records the outcome, case by case, and
+ * `OperatorPromptQuteCorpusTest` (Java) renders every case through EDDI's real
+ * templating engine, the way `LlmTask` does, and fails if the escaped text does
+ * not come back exactly as typed.
  */
 
-/**
- * `{{`: two literal braces. Qute reads a doubled opener as a pair of plain
- * characters, so `{{a}}` is text and only the odd brace of a longer run can
- * open an expression. Consumed pairwise, left to right, like the lexer.
- */
-const DOUBLE_OPENER = String.raw`\{\{`;
-/** A `{vault:…}`-style reference mention, which the backend escapes itself. */
+/** A reference mention, which the backend escapes itself. Same shape as `LlmTask`'s. */
 const MENTION = String.raw`\{(?:vault|eddivault|vars|connection|caller):[^}]*\}`;
 /** An unparsed block the author already wrote. */
 const RAW_BLOCK = String.raw`\{\|[\s\S]*?\|\}`;
-/** `\{` and `\}`: Qute consumes the backslash. */
-const BACKSLASH_BRACE = String.raw`\\[{}]`;
-/** An expression: opened by a letter or `! # /`, closed by the next `}`. */
-const EXPRESSION = String.raw`\{[A-Za-z!#/][^}]*\}`;
-/** An opener with no closing brace anywhere after it: a parse error to Qute. */
-const UNTERMINATED = String.raw`\{(?=[A-Za-z!#/|])`;
+/** Spans the escape leaves exactly as it found them (the context block is matched separately). */
+const KEPT = new RegExp(`${RAW_BLOCK}|${MENTION}`, "g");
+/** What gets wrapped: an opener (with any backslashes before it), or a backslash-escaped closer. */
+const BRACE = /\\*\{|\\+\}/g;
 
-const TOKEN = new RegExp(
-  [DOUBLE_OPENER, MENTION, RAW_BLOCK, BACKSLASH_BRACE, EXPRESSION, UNTERMINATED].join("|"),
-  "g",
-);
+/** One piece of the text, in order: left alone, or subject to the escape. */
+interface Segment {
+  text: string;
+  /** True when the piece is left exactly as written. */
+  kept: boolean;
+}
 
-/**
- * The only template syntax the prompt is meant to evaluate: the per-turn
- * application context block of `system-prompt.ts` (`BODY_APP_CONTEXT`).
- */
-const LIVE_SYNTAX = /^\{(?:#if context\.[A-Za-z]+|\/if|context\.[A-Za-z]+)\}$/;
-
-/** How a matched span is treated. */
-function isKept(token: string): boolean {
-  return (
-    new RegExp(`^(?:${DOUBLE_OPENER}|${MENTION}|${RAW_BLOCK})$`).test(token) ||
-    LIVE_SYNTAX.test(token)
-  );
+/** `text` cut at the spans the escape never touches. */
+function segments(text: string): Segment[] {
+  const out: Segment[] = [];
+  let rest = text;
+  while (rest.length > 0) {
+    const at = rest.indexOf(BODY_APP_CONTEXT);
+    const head = at < 0 ? rest : rest.slice(0, at);
+    let last = 0;
+    for (const match of head.matchAll(KEPT)) {
+      if (match.index > last) out.push({ text: head.slice(last, match.index), kept: false });
+      out.push({ text: match[0], kept: true });
+      last = match.index + match[0].length;
+    }
+    if (last < head.length) out.push({ text: head.slice(last), kept: false });
+    if (at < 0) break;
+    out.push({ text: BODY_APP_CONTEXT, kept: true });
+    rest = rest.slice(at + BODY_APP_CONTEXT.length);
+  }
+  return out;
 }
 
 /**
- * Every span of `text` that Qute would evaluate and that is neither a
- * reference mention, an existing unparsed block nor the Manager's own context
- * syntax. Empty means the text renders exactly as written (apart from that
- * context block).
+ * Every brace of `text` the engine would still read as syntax: each `{` (with
+ * its backslashes) and each backslash-escaped `}` outside the places the
+ * escape leaves alone. Empty means the text renders exactly as written, apart
+ * from the context block. Fed `escapeQuteLiterals`' output, it is empty.
  */
-export function findQuteExpressions(text: string): string[] {
+export function findUnescapedBraces(text: string): string[] {
   const found: string[] = [];
-  for (const match of text.matchAll(TOKEN)) {
-    if (!isKept(match[0])) found.push(match[0]);
+  for (const segment of segments(text)) {
+    if (segment.kept) continue;
+    for (const match of segment.text.matchAll(BRACE)) found.push(match[0]);
   }
   return found;
 }
 
 /**
- * `text` with every span {@link findQuteExpressions} reports wrapped in an
- * unparsed block, so the engine outputs it unchanged. Idempotent: a wrapped
- * span is an unparsed block, which is left alone.
+ * `text` with every brace outside the three exceptions wrapped in an unparsed
+ * block, so the engine outputs it unchanged. Idempotent: what it wrote is an
+ * unparsed block, which is left alone.
  */
 export function escapeQuteLiterals(text: string): string {
-  return text.replace(TOKEN, (token) => {
-    if (isKept(token)) return token;
-    // An opener with nothing to close it: wrap just the brace.
-    if (token === "{") return "{|{|}";
-    return `{|${token}|}`;
-  });
+  return segments(text)
+    .map((segment) => (segment.kept ? segment.text : segment.text.replace(BRACE, (brace) => `{|${brace}|}`)))
+    .join("");
 }

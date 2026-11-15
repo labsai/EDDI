@@ -5640,7 +5640,7 @@
       "safetyPreamble": "安全规则（不可编辑）",
       "safetyPreambleHint": "始终置于最前。它要求操作员将工具返回的一切内容视为不可信数据。",
       "promptBody": "操作员指令",
-      "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
+      "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。文本将按原样发送：花括号视为字面字符，只有屏幕上下文块会被填充。",
       "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署",
       "callerIdentityNote": "{{productName}} 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",

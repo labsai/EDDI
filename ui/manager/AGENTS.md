@@ -363,9 +363,9 @@ what it finds. Off by default. Worth knowing before touching it:
   and fails until you do, printing the new fingerprint.
   **The prompt is a Qute template on the server**, and most of it is documentation
   that looks like expressions (`metric_total{reason}`, `/agents/{agentId}`,
-  `{input}`). `buildOperatorSystemPrompt` escapes every such span (`qute-literal.ts`),
+  `{input}`). `buildOperatorSystemPrompt` escapes every brace (`qute-literal.ts`),
   so write the text naturally and do not reword or hand-wrap braces; the only live
-  syntax is the per-turn context block. `qute-literal.test.ts` fails on anything
+  syntax is the per-turn context block (`context-block.ts`, matched as that exact text). `qute-literal.test.ts` fails on anything
   else, and its rule is held to the real engine by the Java
   `OperatorPromptQuteCorpusTest` through `qute-literal-corpus.json`. Add a case
   there before changing the rule.

@@ -18,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Holds the Manager's idea of "what Qute treats as an expression" to the real
- * engine.
+ * Holds the Manager's escape of the operator prompt to the real engine.
  * <p>
  * The Platform Operator's system prompt is stored as an LLM task's
  * {@code systemMessage}, which {@code LlmTask} renders as a Qute template on
@@ -42,23 +40,33 @@ import static org.junit.jupiter.api.Assertions.fail;
  * {@code {input}}). 6.7.0 shipped one that did not parse (every turn logged
  * {@code Parser error: invalid virtual method in
  * {required),(iterationObjectName}} and sent the model the raw prompt), and a
- * render that does parse drops the span without a word. The Manager now escapes
- * such spans when it builds the prompt
- * ({@code ui/manager/src/lib/operator/qute-literal.ts}) and its own vitest
- * checks every prompt it can send.
+ * render that does parse drops the span without a word. The Manager escapes
+ * every brace when it builds the prompt
+ * ({@code ui/manager/src/lib/operator/qute-literal.ts}), apart from its own
+ * per-turn context block, reference mentions and unparsed blocks the author
+ * wrote.
  * <p>
- * That check is only as good as the rule it applies, and the rule is Qute's
- * lexer, which a browser test cannot run. So the rule is written down as a
- * corpus ({@code qute-literal-corpus.json}, read by both suites), and this test
- * renders every case through the engine EDDI uses: what the engine does with
- * the text, and that the Manager's escaped form renders back to exactly the
- * text. A Qute upgrade that moves the lexer's rule fails here, in the plain
- * unit run, without Docker and without a browser; the TypeScript side then has
- * to follow.
+ * The rule is conservative on purpose (it does not mirror the lexer), so the
+ * corpus ({@code qute-literal-corpus.json}, read by both suites) is the source
+ * of truth: each case is rendered here through the engine EDDI uses, and the
+ * escaped form has to come back as exactly what was typed.
+ * <p>
+ * <b>Every render here is forced to parse.</b> {@link TemplatingEngine} returns
+ * a string without any of its control characters untouched, without parsing it,
+ * so a case such as {@code {0}} or {@code {_x}} rendered on its own proves
+ * nothing. The real prompt always carries markers (its context block, and the
+ * unparsed blocks of the escape itself), so the engine always parses it; the
+ * harness reproduces that with a leading comment.
  */
 class OperatorPromptQuteCorpusTest {
 
     private static final Path CORPUS = Path.of("ui", "manager", "src", "lib", "operator", "__tests__", "qute-literal-corpus.json");
+
+    /**
+     * Makes the engine parse a template that would otherwise skip it; renders to
+     * nothing.
+     */
+    private static final String FORCE_PARSE = "{!force!}";
 
     private final TemplatingEngine engine = new TemplatingEngine(Engine.builder().addDefaults().build());
 
@@ -71,19 +79,19 @@ class OperatorPromptQuteCorpusTest {
 
     /**
      * What {@code LlmTask.runTemplateEngineOnParams} does to a prompt: escape
-     * reference mentions, then render with nothing in the data map.
+     * reference mentions, then render. Forced to parse, see the class comment.
      */
-    private String render(String template) throws ITemplatingEngine.TemplateEngineException {
-        return engine.processTemplate(LlmTask.escapeConfigReferenceMentions(template), Map.of());
+    private String render(String template, Map<String, Object> data) throws ITemplatingEngine.TemplateEngineException {
+        return engine.processTemplate(FORCE_PARSE + LlmTask.escapeConfigReferenceMentions(template), data);
     }
 
     /**
-     * The outcome of rendering {@code text}: its output, or {@code null} when the
-     * render fails.
+     * The outcome of rendering {@code text} as typed: its output, or {@code null}
+     * when the render fails.
      */
     private String renderOrNull(String text) {
         try {
-            return render(text);
+            return render(text, Map.of());
         } catch (ITemplatingEngine.TemplateEngineException | RuntimeException e) {
             return null;
         }
@@ -92,31 +100,56 @@ class OperatorPromptQuteCorpusTest {
     @TestFactory
     List<DynamicTest> everyCaseBehavesAsTheCorpusRecordsItForTheRealEngine() throws IOException {
         List<DynamicTest> tests = new ArrayList<>();
+        String contextBlock = contextBlock();
         for (JsonNode c : cases()) {
             String name = c.get("name").asText();
             String text = c.get("text").asText();
             String kind = c.get("kind").asText();
             String escaped = c.get("escaped").asText();
-            tests.add(DynamicTest.dynamicTest(kind + ": " + name, () -> check(kind, text, escaped)));
+            tests.add(DynamicTest.dynamicTest(kind + ": " + name, () -> check(kind, text, escaped, contextBlock)));
         }
         return tests;
     }
 
-    private void check(String kind, String text, String escaped) throws Exception {
-        switch (kind) {
-            case "literal", "mention" -> {
-                assertEquals(text, escaped, "a " + kind + " is left exactly as written");
-                assertEquals(text, render(text), "the engine must leave a " + kind + " as it is");
+    private String contextBlock() throws IOException {
+        for (JsonNode c : cases()) {
+            if ("the context block alone".equals(c.get("name").asText())) {
+                return c.get("text").asText();
             }
+        }
+        return fail("the corpus has no 'the context block alone' case");
+    }
+
+    private void check(String kind, String text, String escaped, String contextBlock) throws Exception {
+        switch (kind) {
             case "expression" -> {
                 String rendered = renderOrNull(text);
                 assertTrue(rendered == null || !rendered.equals(text),
-                        "the engine must evaluate (or reject) this, or the case is not an expression: " + text);
-                assertEquals(text, render(escaped), "the escaped form must render back to the text: " + escaped);
+                        "the engine must change (or reject) this, or the case is not an expression: " + text);
+                assertEquals(text, render(escaped, Map.of()), "the escaped form must render back to the text: " + escaped);
             }
+            case "inert" -> {
+                assertEquals(text, renderOrNull(text), "the engine leaves an inert case alone, even when forced to parse it");
+                assertEquals(text, render(escaped, Map.of()), "the escaped form must render back to the text: " + escaped);
+            }
+            case "mention" -> {
+                assertEquals(text, render(escaped, Map.of()), "a reference mention reaches the model exactly as written: " + escaped);
+                assertFalse(escaped.contains("{|{vault"), "the escape must split around a mention, not wrap it: " + escaped);
+            }
+            case "raw" -> assertEquals(text.replaceAll("\\{\\|([\\s\\S]*?)\\|\\}", "$1"), render(escaped, Map.of()),
+                    "an unparsed block the author wrote is kept and unwrapped by the engine");
             case "live" -> {
-                assertEquals(text, escaped, "live syntax is left for the engine to evaluate");
-                assertNull(engine.validateTemplate(text), "live syntax must parse: " + text);
+                Map<String, Object> data = Map.of("context", Map.of("screen", "Home", "agentId", "a1"));
+                assertNull(engine.validateTemplate(contextBlock), "the context block must parse");
+                String block = render(contextBlock, data);
+                assertTrue(block.contains("currently viewing: Home (agent a1)"), "the context block must be evaluated: " + block);
+                // The block's closing {/if} is a line of its own, which the engine removes
+                // together
+                // with its newline (quarkus.qute.remove-standalone-lines): the block ends where
+                // it ends.
+                String blockAndNewline = contextBlock + "\n";
+                String expected = text.contains(blockAndNewline) ? text.replace(blockAndNewline, block) : text.replace(contextBlock, block);
+                assertEquals(expected, render(escaped, data), "the context block is evaluated, every other brace comes back as typed");
             }
             default -> fail("unknown kind '" + kind + "' in the corpus");
         }
@@ -128,40 +161,18 @@ class OperatorPromptQuteCorpusTest {
         for (JsonNode c : cases()) {
             kinds.add(c.get("kind").asText());
         }
-        assertEquals(Set.of("literal", "expression", "mention", "live"), kinds);
+        assertEquals(Set.of("expression", "inert", "mention", "raw", "live"), kinds);
     }
 
     /**
-     * The probe behind the rule's one-line summary: for every ASCII character that
-     * can follow a lone {@code {}, whether the engine treats the brace as the start
-     * of an expression. {@code qute-literal.ts} says: an ASCII letter or one of
-     * {@code ! # / |}, nothing else.
+     * Why the harness forces a parse: the engine skips a string with none of its
+     * control characters, so {@code {0}} and {@code {_x}} come back as typed on
+     * their own, whatever they would do inside a real prompt.
      */
     @Test
-    void onlyLettersAndFourPunctuationMarksOpenAnExpression() {
-        StringBuilder opens = new StringBuilder();
-        for (char c = 0; c < 128; c++) {
-            String text = "a{" + c + "x} b";
-            String rendered = renderOrNull(text);
-            if (rendered == null || !rendered.equals(text)) {
-                opens.append(c);
-            }
-        }
-        String expected = "!#/|ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        assertEquals(sorted(expected), sorted(opens.toString()),
-                "the characters after '{' that the engine evaluates changed; update qute-literal.ts and its corpus");
-    }
-
-    @Test
-    void aDoubledOpenerIsAPairOfLiteralBraces() throws Exception {
-        assertEquals("{{a}}", render("{{a}}"));
-        assertNotEquals("{{{a}}}", render("{{{a}}}"), "the odd brace of a run of three opens an expression");
-    }
-
-    private static String sorted(String s) {
-        char[] chars = s.toCharArray();
-        Arrays.sort(chars);
-        return new String(chars);
+    void theEngineOnlyParsesATemplateThatHasAControlCharacter() throws Exception {
+        assertEquals("{0}", engine.processTemplate("{0}", Map.of()), "skipped, never parsed");
+        assertNotEquals("{0} {input}", engine.processTemplate("{0} {input}", Map.of()), "parsed: one control character is enough");
     }
 
     @Test

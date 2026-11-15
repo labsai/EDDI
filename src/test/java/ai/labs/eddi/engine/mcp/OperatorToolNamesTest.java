@@ -76,6 +76,11 @@ class OperatorToolNamesTest {
     private static final Pattern PATH_PARAM = Pattern.compile("\\{([^}]+)}");
     private static final Pattern PATH_PARAM_REGEX = Pattern.compile("\\{([^}:]+):[^}]*}");
     private static final Pattern GRANTED_LITERAL = Pattern.compile("(?m)^\\s*\"((?:GET|POST|PUT|PATCH|DELETE) /[^\"]*)\",?\\s*(?://.*)?$");
+    /**
+     * A template literal such as {@code `PUT /${store}/{id}`}: an endpoint
+     * generated per store.
+     */
+    private static final Pattern GENERATED_TEMPLATE = Pattern.compile("`((?:GET|POST|PUT|PATCH|DELETE) /\\$\\{store}[^`]*)`");
     private static final Set<String> VERBS = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
 
     /**
@@ -248,12 +253,20 @@ class OperatorToolNamesTest {
     }
 
     /**
-     * Every {@code "METHOD /path"} array entry in the Manager's allow-list source
-     * (one per line, so a path quoted in a doc comment is not an entry).
+     * Every endpoint the Manager's allow-list source grants: the {@code "METHOD
+     * /path"} array entries (one per line, so a path quoted in a doc comment is not
+     * an entry), plus the ones {@code tool-scopes.ts} builds per extension store
+     * with {@code map}/{@code flatMap}.
+     * <p>
+     * The generated half is reproduced here, not skipped: it is the extension
+     * stores' GET/PUT/POST/PATCH, which are exactly the operations a rename like
+     * the {@code list} collision would hit. A template the generator uses that this
+     * method does not know fails the test rather than going unchecked.
      */
     private static Set<String> grantedEndpoints() throws IOException {
         assertTrue(TOOL_SCOPES.isFile(), "missing " + TOOL_SCOPES.getAbsolutePath());
-        Matcher matcher = GRANTED_LITERAL.matcher(Files.readString(TOOL_SCOPES.toPath(), StandardCharsets.UTF_8));
+        String source = Files.readString(TOOL_SCOPES.toPath(), StandardCharsets.UTF_8);
+        Matcher matcher = GRANTED_LITERAL.matcher(source);
         Set<String> granted = new TreeSet<>();
         while (matcher.find()) {
             String entry = matcher.group(1);
@@ -261,6 +274,48 @@ class OperatorToolNamesTest {
                 granted.add(entry);
             }
         }
+
+        Set<String> templatesInSource = new TreeSet<>();
+        Matcher template = GENERATED_TEMPLATE.matcher(source);
+        while (template.find()) {
+            templatesInSource.add(template.group(1));
+        }
+        Set<String> known = Set.of("GET /${store}/{id}", "PUT /${store}/{id}", "POST /${store}", "PATCH /${store}/{id}");
+        Set<String> unknown = new TreeSet<>(templatesInSource);
+        unknown.removeAll(known);
+        assertTrue(unknown.isEmpty(), "tool-scopes.ts builds endpoints from a template this test does not expand: " + unknown);
+
+        for (String store : storeList(source, "WORKFLOW_EXTENSION_STORES")) {
+            granted.add("GET /" + store + "/{id}");
+        }
+        for (String store : storeList(source, "WRITABLE_EXTENSION_STORES")) {
+            granted.add("PUT /" + store + "/{id}");
+            granted.add("POST /" + store);
+        }
+        for (String store : storeList(source, "PATCHABLE_EXTENSION_STORES")) {
+            granted.add("PATCH /" + store + "/{id}");
+        }
         return granted;
+    }
+
+    /**
+     * The string literals of {@code const NAME = [...]}, following a plain alias
+     * ({@code const NAME = OTHER;}). An empty list fails: it would make the
+     * generated half of the check vacuous.
+     */
+    private static List<String> storeList(String source, String name) {
+        Matcher alias = Pattern.compile("const " + name + " = ([A-Z_]+);").matcher(source);
+        if (alias.find()) {
+            return storeList(source, alias.group(1));
+        }
+        Matcher array = Pattern.compile("const " + name + " = \\[([^\\]]*)]").matcher(source);
+        assertTrue(array.find(), "tool-scopes.ts no longer declares " + name + " as a string array; update this test");
+        List<String> stores = new ArrayList<>();
+        Matcher literal = Pattern.compile("\"([^\"]+)\"").matcher(array.group(1));
+        while (literal.find()) {
+            stores.add(literal.group(1));
+        }
+        assertTrue(!stores.isEmpty(), name + " is empty");
+        return stores;
     }
 }

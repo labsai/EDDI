@@ -5695,7 +5695,7 @@
       "safetyPreamble": "Regras de segurança (não editáveis)",
       "safetyPreambleHint": "São sempre antepostas. Instruem o operador a tratar tudo o que as suas ferramentas devolvem como dados não fiáveis.",
       "promptBody": "Instruções do operador",
-      "promptBodyHint": "Edite como o operador se apresenta e como trabalha.",
+      "promptBodyHint": "Edite como o operador se apresenta e como trabalha. O texto é enviado exatamente como escrito: as chaves são literais e apenas o bloco de contexto da tela é preenchido.",
       "tools": "Ferramentas que receberá ({{toolCount}})",
       "activate": "Ativar e implantar",
       "callerIdentityNote": "O {{productName}} insere o seu token no momento da chamada. Nunca é guardado na conversa e só é enviado de volta para esta instalação.",

@@ -5640,7 +5640,7 @@
       "safetyPreamble": "Sicherheitsregeln (nicht bearbeitbar)",
       "safetyPreambleHint": "Wird immer vorangestellt. Sie weist den Operator an, alles von seinen Tools Zurückgelieferte als nicht vertrauenswürdige Daten zu behandeln.",
       "promptBody": "Anweisungen für den Operator",
-      "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet.",
+      "promptBodyHint": "Passen Sie an, wie sich der Operator vorstellt und wie er arbeitet. Der Text wird so gesendet, wie er geschrieben ist: geschweifte Klammern sind wörtlich gemeint, und nur der Block mit dem Bildschirmkontext wird ausgefüllt.",
       "tools": "Tools, die er erhält ({{toolCount}})",
       "activate": "Aktivieren & deployen",
       "callerIdentityNote": "{{productName}} setzt Ihr Token erst beim Aufruf ein. Es wird nie in der Konversation gespeichert und ausschließlich an diese Installation zurückgesendet.",

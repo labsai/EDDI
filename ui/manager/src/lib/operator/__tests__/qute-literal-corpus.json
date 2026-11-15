@@ -1,149 +1,149 @@
 {
-  "//": "Shared by qute-literal.test.ts (this file's TypeScript rule) and OperatorPromptQuteCorpusTest (EDDI's real Qute engine, Java). Each case says what the ENGINE does with a brace, and what escapeQuteLiterals must produce. kind: literal = engine leaves the text as written; expression = engine evaluates it (renders it as nothing, or fails to parse); mention = a vault/vars/connection/caller reference, which LlmTask escapes itself; live = the Manager's own per-turn context syntax, deliberately evaluated. For literal, mention and live, escaped equals text. For literal and expression the engine must render `escaped` back to exactly `text`. Add a case here before changing the rule in qute-literal.ts; the Java test will say if the engine disagrees.",
+  "//": "Shared by qute-literal.test.ts (the Manager's escape) and OperatorPromptQuteCorpusTest (EDDI's real Qute engine, Java). The rule is conservative: every `{` outside the Manager's own context block, an existing {|...|} block and a ${vault|eddivault|vars|connection|caller:...} mention is wrapped in its own unparsed block ({|{|}); a run of backslashes before a brace goes inside the block. kind: expression = the engine, made to parse the text, changes or rejects it; inert = the engine leaves it as written (escaped anyway, so no rule has to know why); mention = contains a reference mention, which the escape splits around and LlmTask wraps itself; raw = an unparsed block the author wrote, kept; live = contains the context block, which stays evaluated. For every kind the engine must render `escaped` back to exactly `text` (live: apart from the context block, which is evaluated). Add a case here before changing the rule; the Java test will say if the engine disagrees.",
   "cases": [
     {
       "name": "empty braces",
       "text": "send {} when you have no context",
-      "kind": "literal",
-      "escaped": "send {} when you have no context"
+      "kind": "inert",
+      "escaped": "send {|{|}} when you have no context"
     },
     {
       "name": "brace then space",
       "text": "a { b } c",
-      "kind": "literal",
-      "escaped": "a { b } c"
+      "kind": "inert",
+      "escaped": "a {|{|} b } c"
     },
     {
       "name": "JSON object, quoted key",
       "text": "takes {\"input\": \"your message\"} as a body",
-      "kind": "literal",
-      "escaped": "takes {\"input\": \"your message\"} as a body"
+      "kind": "inert",
+      "escaped": "takes {|{|}\"input\": \"your message\"} as a body"
     },
     {
       "name": "JSON patch array",
       "text": "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":[{\"name\":\"docs\"}]}]",
-      "kind": "literal",
-      "escaped": "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":[{\"name\":\"docs\"}]}]"
+      "kind": "inert",
+      "escaped": "[{|{|}\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":[{|{|}\"name\":\"docs\"}]}]"
     },
     {
       "name": "nested JSON",
       "text": "{\"chat_template_kwargs\":{\"guardian_config\":{\"criteria_id\":\"jailbreak\"}}}",
-      "kind": "literal",
-      "escaped": "{\"chat_template_kwargs\":{\"guardian_config\":{\"criteria_id\":\"jailbreak\"}}}"
+      "kind": "inert",
+      "escaped": "{|{|}\"chat_template_kwargs\":{|{|}\"guardian_config\":{|{|}\"criteria_id\":\"jailbreak\"}}}"
     },
     {
       "name": "digit after brace",
       "text": "{0} and {1a}",
-      "kind": "literal",
-      "escaped": "{0} and {1a}"
+      "kind": "expression",
+      "escaped": "{|{|}0} and {|{|}1a}"
     },
     {
       "name": "underscore after brace",
       "text": "{_x}",
-      "kind": "literal",
-      "escaped": "{_x}"
+      "kind": "expression",
+      "escaped": "{|{|}_x}"
     },
     {
       "name": "punctuation after brace",
       "text": "{-a} {.a} {@a} {$a} {(a)} {[a]} {'a'} {<a>} {%a} {:a} {;a} {=a} {?a} {*a} {+a} {&a} {^a} {~a} {,a} {>a}",
-      "kind": "literal",
-      "escaped": "{-a} {.a} {@a} {$a} {(a)} {[a]} {'a'} {<a>} {%a} {:a} {;a} {=a} {?a} {*a} {+a} {&a} {^a} {~a} {,a} {>a}"
+      "kind": "expression",
+      "escaped": "{|{|}-a} {|{|}.a} {|{|}@a} {|{|}$a} {|{|}(a)} {|{|}[a]} {|{|}'a'} {|{|}<a>} {|{|}%a} {|{|}:a} {|{|};a} {|{|}=a} {|{|}?a} {|{|}*a} {|{|}+a} {|{|}&a} {|{|}^a} {|{|}~a} {|{|},a} {|{|}>a}"
     },
     {
       "name": "double open brace",
       "text": "{{a}}",
-      "kind": "literal",
-      "escaped": "{{a}}"
+      "kind": "inert",
+      "escaped": "{|{|}{|{|}a}}"
     },
     {
       "name": "brace then newline",
       "text": "{\nname }",
-      "kind": "literal",
-      "escaped": "{\nname }"
+      "kind": "inert",
+      "escaped": "{|{|}\nname }"
     },
     {
       "name": "trailing brace",
       "text": "ends with {",
-      "kind": "literal",
-      "escaped": "ends with {"
+      "kind": "expression",
+      "escaped": "ends with {|{|}"
     },
     {
       "name": "unpaired brace before an expression is a pair",
       "text": "{{a}",
-      "kind": "literal",
-      "escaped": "{{a}"
+      "kind": "inert",
+      "escaped": "{|{|}{|{|}a}"
     },
     {
       "name": "tripled opener: a pair, then an expression",
       "text": "{{{a}}}",
       "kind": "expression",
-      "escaped": "{{{|{a}|}}}"
+      "escaped": "{|{|}{|{|}{|{|}a}}}"
     },
     {
       "name": "metric label",
       "text": "eddi_cluster_nats_errors_total{cause}",
       "kind": "expression",
-      "escaped": "eddi_cluster_nats_errors_total{|{cause}|}"
+      "escaped": "eddi_cluster_nats_errors_total{|{|}cause}"
     },
     {
       "name": "metric label with a value",
       "text": "eddi_turn_rejected_total{reason=\"in_flight_limit\"}",
       "kind": "expression",
-      "escaped": "eddi_turn_rejected_total{|{reason=\"in_flight_limit\"}|}"
+      "escaped": "eddi_turn_rejected_total{|{|}reason=\"in_flight_limit\"}"
     },
     {
       "name": "label list with a comma",
       "text": "eddi.guardrail.judge.duration{provider,outcome}",
       "kind": "expression",
-      "escaped": "eddi.guardrail.judge.duration{|{provider,outcome}|}"
+      "escaped": "eddi.guardrail.judge.duration{|{|}provider,outcome}"
     },
     {
       "name": "label list spanning lines",
       "text": "total{kind=\"reply\", outcome sent,\n  retry}",
       "kind": "expression",
-      "escaped": "total{|{kind=\"reply\", outcome sent,\n  retry}|}"
+      "escaped": "total{|{|}kind=\"reply\", outcome sent,\n  retry}"
     },
     {
       "name": "path parameter",
       "text": "(/agents/{agentId}/profile, deployed version)",
       "kind": "expression",
-      "escaped": "(/agents/{|{agentId}|}/profile, deployed version)"
+      "escaped": "(/agents/{|{|}agentId}/profile, deployed version)"
     },
     {
       "name": "template variable",
       "text": "rendered with {input}, {output} and {risk}",
       "kind": "expression",
-      "escaped": "rendered with {|{input}|}, {|{output}|} and {|{risk}|}"
+      "escaped": "rendered with {|{|}input}, {|{|}output} and {|{|}risk}"
     },
     {
       "name": "field list with spaces",
       "text": "Each entry is {type, action, maxRetries,\n  blockMessage, parameters}.",
       "kind": "expression",
-      "escaped": "Each entry is {|{type, action, maxRetries,\n  blockMessage, parameters}|}."
+      "escaped": "Each entry is {|{|}type, action, maxRetries,\n  blockMessage, parameters}."
     },
     {
       "name": "the 6.7.0 forEach line (parses as a virtual method)",
       "text": "forEach {pathToTargetArray (a plain dot path such as\n  properties.orderIds, required), iterationObjectName (default \"item\")} sends",
       "kind": "expression",
-      "escaped": "forEach {|{pathToTargetArray (a plain dot path such as\n  properties.orderIds, required), iterationObjectName (default \"item\")}|} sends"
+      "escaped": "forEach {|{|}pathToTargetArray (a plain dot path such as\n  properties.orderIds, required), iterationObjectName (default \"item\")} sends"
     },
     {
       "name": "the 6.7.0 metric line (parses as a namespace)",
       "text": "eddi_email_outbound_total{outcome: sent, retry}",
       "kind": "expression",
-      "escaped": "eddi_email_outbound_total{|{outcome: sent, retry}|}"
+      "escaped": "eddi_email_outbound_total{|{|}outcome: sent, retry}"
     },
     {
       "name": "section opener and closer",
       "text": "{#each items}x{/each}",
       "kind": "expression",
-      "escaped": "{|{#each items}|}x{|{/each}|}"
+      "escaped": "{|{|}#each items}x{|{|}/each}"
     },
     {
       "name": "comment",
       "text": "{! a comment !}",
       "kind": "expression",
-      "escaped": "{|{! a comment !}|}"
+      "escaped": "{|{|}! a comment !}"
     },
     {
       "name": "no closing brace",
@@ -155,19 +155,19 @@
       "name": "closing brace doubled",
       "text": "{a}}",
       "kind": "expression",
-      "escaped": "{|{a}|}}"
+      "escaped": "{|{|}a}}"
     },
     {
       "name": "pipe inside the span",
       "text": "{a|}",
       "kind": "expression",
-      "escaped": "{|{a|}|}"
+      "escaped": "{|{|}a|}"
     },
     {
       "name": "nested opener",
       "text": "{a {b} c}",
       "kind": "expression",
-      "escaped": "{|{a {b}|} c}"
+      "escaped": "{|{|}a {|{|}b} c}"
     },
     {
       "name": "backslash-escaped brace (Qute eats the backslash)",
@@ -206,16 +206,106 @@
       "escaped": "${eddivault:old}"
     },
     {
-      "name": "context section",
-      "text": "{#if context.screen}viewing {context.screen}{/if}",
-      "kind": "live",
-      "escaped": "{#if context.screen}viewing {context.screen}{/if}"
+      "name": "digit then more text, forced to render",
+      "text": "{0} {input}",
+      "kind": "expression",
+      "escaped": "{|{|}0} {|{|}input}"
     },
     {
-      "name": "context value",
-      "text": "(agent {context.agentId})",
+      "name": "underscore identifier",
+      "text": "{_x}",
+      "kind": "expression",
+      "escaped": "{|{|}_x}"
+    },
+    {
+      "name": "unicode identifier",
+      "text": "{überschrift} and {名前}",
+      "kind": "expression",
+      "escaped": "{|{|}überschrift} and {|{|}名前}"
+    },
+    {
+      "name": "parameter declaration",
+      "text": "{@java.lang.String x}",
+      "kind": "expression",
+      "escaped": "{|{|}@java.lang.String x}"
+    },
+    {
+      "name": "section the admin typed",
+      "text": "{#if properties.ready}OK{/if}",
+      "kind": "expression",
+      "escaped": "{|{|}#if properties.ready}OK{|{|}/if}"
+    },
+    {
+      "name": "context value the admin typed",
+      "text": "Literal example: {context.screen}",
+      "kind": "expression",
+      "escaped": "Literal example: {|{|}context.screen}"
+    },
+    {
+      "name": "namespace expressions typed by the admin",
+      "text": "{properties.x} {snippets.s} {vars.v} {userInfo.userId}",
+      "kind": "expression",
+      "escaped": "{|{|}properties.x} {|{|}snippets.s} {|{|}vars.v} {|{|}userInfo.userId}"
+    },
+    {
+      "name": "backslash-escaped closer",
+      "text": "a\\}b",
+      "kind": "expression",
+      "escaped": "a{|\\}|}b"
+    },
+    {
+      "name": "double backslash then brace",
+      "text": "C:\\\\{a}",
+      "kind": "expression",
+      "escaped": "C:{|\\\\{|}a}"
+    },
+    {
+      "name": "line holding only an expression",
+      "text": "first\n{agentId}\nlast",
+      "kind": "expression",
+      "escaped": "first\n{|{|}agentId}\nlast"
+    },
+    {
+      "name": "line holding only a section tag",
+      "text": "first\n{#if x}\nlast",
+      "kind": "expression",
+      "escaped": "first\n{|{|}#if x}\nlast"
+    },
+    {
+      "name": "reference mention inside a brace span",
+      "text": "{passwordRef: ${vault:key}}",
+      "kind": "mention",
+      "escaped": "{|{|}passwordRef: ${vault:key}}"
+    },
+    {
+      "name": "reference mention between expressions",
+      "text": "{a} ${vars:m} {b}",
+      "kind": "mention",
+      "escaped": "{|{|}a} ${vars:m} {|{|}b}"
+    },
+    {
+      "name": "author-written unparsed block",
+      "text": "keep {|{raw}|} as is",
+      "kind": "raw",
+      "escaped": "keep {|{raw}|} as is"
+    },
+    {
+      "name": "the context block alone",
+      "text": "{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}",
       "kind": "live",
-      "escaped": "(agent {context.agentId})"
+      "escaped": "{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}"
+    },
+    {
+      "name": "the context block among admin braces",
+      "text": "Use {a} here.\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}\nThen {b}.",
+      "kind": "live",
+      "escaped": "Use {|{|}a} here.\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}\nThen {|{|}b}."
+    },
+    {
+      "name": "the context block with an admin copy of its first line",
+      "text": "{#if context.screen}\nadmin text\n{/if}\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}",
+      "kind": "live",
+      "escaped": "{|{|}#if context.screen}\nadmin text\n{|{|}/if}\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}"
     }
   ]
 }
