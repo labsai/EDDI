@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -105,7 +105,7 @@ class ConversationSummarizerCitationTest {
         return counter != null ? counter.count() : 0;
     }
 
-    private Map<String, Object> run(IConversationMemory memory, ConversationSummaryConfig config, BooleanSupplier admit) {
+    private Map<String, Object> run(IConversationMemory memory, ConversationSummaryConfig config, Predicate<Map<String, Object>> admit) {
         return summarizer.updateIfNeeded(memory, config, null, null, null, admit);
     }
 
@@ -196,15 +196,19 @@ class ConversationSummarizerCitationTest {
     void retryOnce_secondAnswerPasses_storedAndBothCallsAccounted() {
         var memory = memory();
         answer(BAD, GOOD);
-        int[] admissions = {0};
+        var pending = new ArrayList<Map<String, Object>>();
 
-        var usage = run(memory, config(true, "retry_once"), () -> {
-            admissions[0]++;
+        var usage = run(memory, config(true, "retry_once"), p -> {
+            pending.add(Map.copyOf(p));
             return true;
         });
 
         assertEquals(GOOD, ConversationSummarizer.readSummary(memory));
-        assertEquals(2, admissions[0], "the retry is asked of the spend check like the first call");
+        assertEquals(2, pending.size(), "the retry is asked of the spend check like the first call");
+        assertTrue(pending.get(0).isEmpty(), "nothing is pending before the first call");
+        assertEquals(100, ((Number) pending.get(1).get("inputTokens")).intValue(),
+                "the retry's check is given the first call's unrecorded usage");
+        assertEquals(120, ((Number) pending.get(1).get("totalTokens")).intValue());
         assertEquals(200, ((Number) usage.get("inputTokens")).intValue());
         assertEquals(240, ((Number) usage.get("totalTokens")).intValue());
         assertEquals(1, count("retried"));
@@ -233,7 +237,7 @@ class ConversationSummarizerCitationTest {
         var memory = memory();
         answer(BAD, GOOD);
         int[] admissions = {0};
-        run(memory, config(true, "retry_once"), () -> ++admissions[0] == 1);
+        run(memory, config(true, "retry_once"), p -> ++admissions[0] == 1);
         verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
         assertNull(ConversationSummarizer.readSummary(memory));
         assertEquals(1, count("fallback"));

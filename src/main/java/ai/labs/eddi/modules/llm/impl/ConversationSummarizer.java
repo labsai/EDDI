@@ -18,10 +18,11 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 
 /**
@@ -161,16 +162,21 @@ public class ConversationSummarizer {
      *            summarizer (and through the summary every later system prompt)
      *            verbatim; null sends the stored text
      * @param admitCall
-     *            asked right before the summarizer is called — the conversation's
-     *            cost ceiling and the tenant budget; false skips the update (the
-     *            boundary stays, the turns keep reaching the model verbatim, and
-     *            the next turn tries again); null always admits
+     *            asked right before each summarizer call — the conversation's cost
+     *            ceiling and the tenant budget. Its argument is the token usage
+     *            this update has already spent and not yet reported: empty before
+     *            the first call, the first call's usage before a {@code retry_once}
+     *            call. The caller prices it into the check, since it is not in
+     *            {@code audit:cost} until the caller records the returned usage.
+     *            False skips the call (the boundary stays, the turns keep reaching
+     *            the model verbatim, and the next turn tries again); null always
+     *            admits
      * @return the token usage of the summarizer call (a {@code tokenUsage} map),
      *         empty when no call was made — the caller prices and records it
      */
     public Map<String, Object> updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
                                               Map<String, String> inheritedParameters, UnaryOperator<String> inputScreen,
-                                              BooleanSupplier admitCall) {
+                                              Predicate<Map<String, Object>> admitCall) {
         config.validate();
         int totalSteps = memory.getConversationOutputs().size();
         int recentWindow = config.getRecentWindowSteps();
@@ -268,7 +274,7 @@ public class ConversationSummarizer {
                 ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, newTurnsText)
                 : newTurnsText;
 
-        if (admitCall != null && !admitCall.getAsBoolean()) {
+        if (admitCall != null && !admitCall.test(Map.of())) {
             LOGGER.warnf("[SUMMARY] Rolling summary update skipped for conversation='%s': the spend check refused the summarizer call. "
                     + "Will retry next turn.", sanitize(memory.getConversationId()));
             return Map.of();
@@ -359,17 +365,18 @@ public class ConversationSummarizer {
 
     /**
      * The {@code retry_once} policy: one more call over the same, already screened
-     * content, asked of the spend check first like the first call, with the
-     * problems appended to the instructions. Its tokens are added to {@code usage},
-     * so the caller prices and records both calls.
+     * content, asked of the spend check first like the first call — with the first
+     * call's {@code usage} as the pending spend, since it is not recorded yet — and
+     * with the problems appended to the instructions. Its tokens are added to
+     * {@code usage}, so the caller prices and records both calls, once.
      *
      * @return the second summary when it passes the check; null when it fails,
      *         comes back empty, throws, or the spend check refuses the call
      */
     private String retry(IConversationMemory memory, String content, String instructions, ConversationSummaryConfig config,
-                         Map<String, String> inheritedParameters, BooleanSupplier admitCall, Map<String, Object> usage, int fromStep, int toStep,
-                         Map<Integer, String> stepTexts, String previousSummary) {
-        if (admitCall != null && !admitCall.getAsBoolean()) {
+                         Map<String, String> inheritedParameters, Predicate<Map<String, Object>> admitCall, Map<String, Object> usage,
+                         int fromStep, int toStep, Map<Integer, String> stepTexts, String previousSummary) {
+        if (admitCall != null && !admitCall.test(Collections.unmodifiableMap(usage))) {
             LOGGER.warnf("[SUMMARY] Citation retry for conversation='%s' refused by the spend check; keeping the previous summary.",
                     sanitize(memory.getConversationId()));
             return null;

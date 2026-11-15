@@ -104,3 +104,9 @@ the rolling summary's check to every consolidation group. See
   check kept that many characters of the turn's raw text. The request itself is shorter: the "Turn N — User:" labels
   and the cut notice take part of the budget, so a number just past the sent prefix could back a summary the
   summarizer could not have read. The check now keeps exactly the user and agent text inside the sent prefix.
+- **A `retry_once` summary call is spend-checked with the first call's cost.** The retry's admission ran before the
+  first summary call's cost was recorded, with `0.0` pending, so a $1 ceiling with $0.90 recorded admitted a retry after
+  a $0.20 first call. `ConversationSummarizer`'s admission callback now takes the update's unrecorded token usage
+  (empty before the first call, the first call's usage before the retry), and `LlmTask` prices it with the same
+  `ModelPrices` it records the summary spend with and passes it as `pendingUsd`. The cost is only checked there; both
+  calls are still recorded once, together, after the update.
