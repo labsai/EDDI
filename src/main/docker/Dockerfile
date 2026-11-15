@@ -144,7 +144,7 @@ LABEL name="labsai/eddi" \
       Ollama, Mistral, Azure OpenAI, Amazon Bedrock, and more) via a unified REST API. \
       Built on Quarkus for cloud-native, high-performance operation." \
       maintainer="LABS.AI GmbH <contact@labs.ai>" \
-      url="https://eddi.labs.ai" \
+      url="https://eddi.technology" \
       org.opencontainers.image.source="https://github.com/labsai/EDDI" \
       org.opencontainers.image.revision="${EDDI_COMMIT}" \
       io.k8s.display-name="EDDI AI Platform" \

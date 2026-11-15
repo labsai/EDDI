@@ -10,6 +10,8 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -226,7 +228,8 @@ public class ConnectionConfiguration {
                     + "header, so a space, '/', '}' or ':' in it could never be referenced or supplied.");
         }
         if (authType == null) {
-            throw new IllegalArgumentException("authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE).");
+            throw new IllegalArgumentException(
+                    "authType is required (STATIC, BASIC, OAUTH2_CLIENT_CREDENTIALS, OAUTH2_JWT_BEARER or OAUTH2_AUTHORIZATION_CODE).");
         }
         validateBinding();
         validateUnverifiedPrincipalFlag();
@@ -234,7 +237,7 @@ public class ConnectionConfiguration {
         validateTimeout();
         switch (authType) {
             case STATIC, BASIC -> validateStaticAuth();
-            case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> validateOAuth();
+            case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE, OAUTH2_JWT_BEARER -> validateOAuth();
         }
     }
 
@@ -252,6 +255,11 @@ public class ConnectionConfiguration {
      * anywhere naming the cause.
      */
     private void validateBinding() {
+        if (authType == AuthType.OAUTH2_JWT_BEARER && binding != Binding.SERVICE) {
+            throw new IllegalArgumentException("authType OAUTH2_JWT_BEARER requires binding SERVICE. The assertion is signed with one "
+                    + "key that belongs to the deployment, so the token it buys is the same for everybody; acting as an individual "
+                    + "user needs domain-wide delegation, which this connection type does not do.");
+        }
         if (binding == Binding.PER_USER && authType != AuthType.OAUTH2_AUTHORIZATION_CODE) {
             throw new IllegalArgumentException("PER_USER binding requires authType OAUTH2_AUTHORIZATION_CODE — it is the only flow that "
                     + "produces a grant per end user. A static key is the same key for everybody however it is bound.");
@@ -414,10 +422,11 @@ public class ConnectionConfiguration {
         }
         requireCredentialEndpoint(oauth.getTokenUrl(), "oauth.tokenUrl", true);
         requireCredentialEndpoint(oauth.getDiscoveryUrl(), "oauth.discoveryUrl", false);
-        if (oauth.getClientId() == null || oauth.getClientId().isBlank()) {
-            throw new IllegalArgumentException("oauth.clientId is required.");
+        if (authType == AuthType.OAUTH2_JWT_BEARER) {
+            validateJwtBearer();
+        } else {
+            validateClientAuthentication();
         }
-        requireReference(oauth.getClientSecret(), "oauth.clientSecret");
         if (authType == AuthType.OAUTH2_AUTHORIZATION_CODE) {
             requireCredentialEndpoint(oauth.getAuthorizationUrl(), "oauth.authorizationUrl", true);
             if (!oauth.isUsePkce()) {
@@ -425,12 +434,183 @@ public class ConnectionConfiguration {
                         + "PKCE it is an authorization-code interception vector.");
             }
         }
-        String method = oauth.getClientAuthMethod();
-        if (method != null && !OAuthConfig.CLIENT_AUTH_BASIC.equals(method) && !OAuthConfig.CLIENT_AUTH_POST.equals(method)) {
-            throw new IllegalArgumentException("oauth.clientAuthMethod must be " + OAuthConfig.CLIENT_AUTH_BASIC + " or "
-                    + OAuthConfig.CLIENT_AUTH_POST + ", got: " + method);
-        }
+        requireNonSecretIdentifier(oauth.getPrivateKeyId(), "oauth.privateKeyId");
         validateExtraAuthParams();
+    }
+
+    /**
+     * {@code client_credentials} and {@code authorization_code}: the client proves
+     * itself with a vaulted secret, or — {@code private_key_jwt} — with an
+     * assertion signed by a vaulted key. Exactly one of the two is configured; the
+     * other is refused rather than ignored, because a {@code clientSecret} left
+     * beside a {@code privateKey} reads as the credential in use and is not.
+     */
+    private void validateClientAuthentication() {
+        if (oauth.getClientId() == null || oauth.getClientId().isBlank()) {
+            throw new IllegalArgumentException("oauth.clientId is required.");
+        }
+        String method = oauth.getClientAuthMethod();
+        if (method != null && !OAuthConfig.CLIENT_AUTH_BASIC.equals(method) && !OAuthConfig.CLIENT_AUTH_POST.equals(method)
+                && !OAuthConfig.CLIENT_AUTH_PRIVATE_KEY_JWT.equals(method)) {
+            throw new IllegalArgumentException("oauth.clientAuthMethod must be " + OAuthConfig.CLIENT_AUTH_BASIC + ", "
+                    + OAuthConfig.CLIENT_AUTH_POST + " or " + OAuthConfig.CLIENT_AUTH_PRIVATE_KEY_JWT + ", got: " + method);
+        }
+        if (oauth.usesPrivateKeyJwt()) {
+            requireReference(oauth.getPrivateKey(), "oauth.privateKey");
+            requireAbsent(oauth.getClientSecret(), "oauth.clientSecret",
+                    "clientAuthMethod private_key_jwt authenticates with oauth.privateKey; a client secret would never be sent");
+            if (oauth.getCertificateThumbprint() != null && !oauth.getCertificateThumbprint().isBlank()) {
+                canonicalThumbprint(oauth.getCertificateThumbprint(), thumbprintHeaderOrDefault());
+            } else {
+                requireThumbprintHeader(thumbprintHeaderOrDefault());
+            }
+        } else {
+            requireReference(oauth.getClientSecret(), "oauth.clientSecret");
+            // null is what the token client treats as the default, client_secret_basic.
+            String effective = method == null ? OAuthConfig.CLIENT_AUTH_BASIC : method;
+            String why = "it belongs to clientAuthMethod private_key_jwt, and with " + effective + " it would never be used";
+            requireAbsent(oauth.getPrivateKey(), "oauth.privateKey", why);
+            requireAbsent(oauth.getPrivateKeyId(), "oauth.privateKeyId", why);
+            requireAbsent(oauth.getCertificateThumbprint(), "oauth.certificateThumbprint", why);
+        }
+        requireAbsent(oauth.getAudience(), "oauth.audience", "it is the audience of an OAUTH2_JWT_BEARER grant assertion; a "
+                + "private_key_jwt client assertion is always addressed to oauth.tokenUrl");
+    }
+
+    /**
+     * RFC 7523 §2.1: the signed assertion is the grant. Only the key, the issuer
+     * and the audience mean anything here; every field of the other flows is
+     * refused rather than silently ignored.
+     */
+    private void validateJwtBearer() {
+        requireReference(oauth.getPrivateKey(), "oauth.privateKey");
+        // clientId is optional: a Google JSON key file names its own client_email.
+        // When both are present the token client refuses a mismatch at use.
+        requireNonSecretIdentifier(oauth.getClientId(), "oauth.clientId");
+        String why = "OAUTH2_JWT_BEARER authenticates with an assertion signed by oauth.privateKey and nothing else";
+        requireAbsent(oauth.getClientSecret(), "oauth.clientSecret", why);
+        requireAbsent(oauth.getAuthorizationUrl(), "oauth.authorizationUrl", "OAUTH2_JWT_BEARER has no consent screen");
+        requireAbsent(oauth.getCertificateThumbprint(), "oauth.certificateThumbprint",
+                "it identifies the certificate of a private_key_jwt client; a JWT bearer assertion names its key with oauth.privateKeyId");
+        if (oauth.getExtraAuthParams() != null && !oauth.getExtraAuthParams().isEmpty()) {
+            throw new IllegalArgumentException("oauth.extraAuthParams must be empty for OAUTH2_JWT_BEARER: they are added to an "
+                    + "authorization request, and this flow has none.");
+        }
+        // The field defaults to client_secret_basic, so every stored config carries it;
+        // that one value is tolerated. Any other is a setting this flow ignores.
+        String method = oauth.getClientAuthMethod();
+        if (method != null && !OAuthConfig.CLIENT_AUTH_BASIC.equals(method)) {
+            throw new IllegalArgumentException("oauth.clientAuthMethod does not apply to OAUTH2_JWT_BEARER — the assertion is the client's "
+                    + "proof and nothing else is sent. Remove it (got: " + method + ").");
+        }
+        String audience = oauth.getAudience();
+        if (audience != null) {
+            if (audience.isBlank() || audience.length() > MAX_IDENTIFIER_CHARS || audience.contains("${")) {
+                throw new IllegalArgumentException("oauth.audience must be a non-empty literal of at most " + MAX_IDENTIFIER_CHARS
+                        + " characters with no ${…} reference; leave it unset to use oauth.tokenUrl.");
+            }
+        }
+    }
+
+    /**
+     * Longest {@code clientId}, {@code privateKeyId} or {@code audience} accepted.
+     */
+    static final int MAX_IDENTIFIER_CHARS = 512;
+
+    /**
+     * A field that is an identifier, not a credential: optional, but when present a
+     * bounded literal. A {@code ${…}} here would be sent unresolved — these are
+     * claims and headers, not secret slots.
+     */
+    private static void requireNonSecretIdentifier(String value, String field) {
+        if (value == null) {
+            return;
+        }
+        if (value.isBlank() || value.length() > MAX_IDENTIFIER_CHARS || value.contains("${") || value.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(field + " must be a non-empty literal of at most " + MAX_IDENTIFIER_CHARS + " characters, "
+                    + "with no ${…} reference and no control characters. It is an identifier, not a secret.");
+        }
+    }
+
+    private static void requireAbsent(String value, String field, String why) {
+        if (value != null && !value.isBlank()) {
+            throw new IllegalArgumentException(field + " must not be set: " + why + ".");
+        }
+    }
+
+    private String thumbprintHeaderOrDefault() {
+        String header = oauth.getCertificateThumbprintHeader();
+        return header == null || header.isBlank() ? OAuthConfig.THUMBPRINT_X5T_S256 : header;
+    }
+
+    private static void requireThumbprintHeader(String header) {
+        if (!OAuthConfig.THUMBPRINT_X5T_S256.equals(header) && !OAuthConfig.THUMBPRINT_X5T.equals(header)) {
+            throw new IllegalArgumentException("oauth.certificateThumbprintHeader must be " + OAuthConfig.THUMBPRINT_X5T_S256 + " (SHA-256, "
+                    + "the default) or " + OAuthConfig.THUMBPRINT_X5T + " (SHA-1), got: " + header);
+        }
+    }
+
+    private static final Pattern HEX = Pattern.compile("[0-9A-Fa-f]+");
+
+    /**
+     * Upper bound on a thumbprint once colons and spaces are removed: 64 hex digits
+     * is the longest valid spelling (SHA-256), so twice that leaves room for
+     * nothing a real certificate produces.
+     */
+    private static final int MAX_THUMBPRINT_CHARS = 128;
+
+    /**
+     * {@code value} without its trailing {@code '='} run. A loop rather than
+     * {@code replaceAll("=+$", "")}, which backtracks quadratically on a long run
+     * of '=' that is not at the end.
+     */
+    private static String stripTrailingPadding(String value) {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '=') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    /**
+     * The base64url form a JOSE {@code x5t} / {@code x5t#S256} header carries, from
+     * a thumbprint written either as hex (how Entra, AD FS and {@code openssl x509
+     * -fingerprint} show it, colons and spaces allowed) or already as base64url.
+     * The digest length must match the header: 20 bytes for {@code x5t}, 32 for
+     * {@code x5t#S256} — a SHA-1 thumbprint pasted where SHA-256 is expected is the
+     * likeliest mistake, and the provider's answer to it names nothing.
+     *
+     * @throws IllegalArgumentException
+     *             naming the field and the fix
+     */
+    public static String canonicalThumbprint(String thumbprint, String header) {
+        requireThumbprintHeader(header);
+        int expected = OAuthConfig.THUMBPRINT_X5T.equals(header) ? 20 : 32;
+        String compact = thumbprint.strip().replace(":", "").replace(" ", "");
+        byte[] digest;
+        if (compact.length() > MAX_THUMBPRINT_CHARS) {
+            // Longer than any SHA-256 thumbprint in any accepted spelling; refused
+            // before anything scans it.
+            digest = null;
+        } else if (HEX.matcher(compact).matches() && compact.length() % 2 == 0) {
+            digest = HexFormat.of().parseHex(compact);
+        } else {
+            try {
+                digest = Base64.getUrlDecoder().decode(stripTrailingPadding(compact.replace('+', '-').replace('/', '_')));
+            } catch (IllegalArgumentException e) {
+                digest = null;
+            }
+        }
+        if (digest == null || digest.length != expected) {
+            throw new IllegalArgumentException("oauth.certificateThumbprint must be the " + (expected == 20 ? "SHA-1" : "SHA-256")
+                    + " thumbprint of the client certificate (" + expected + " bytes, as hex or base64url) to match "
+                    + "oauth.certificateThumbprintHeader " + header + "." + (digest != null && digest.length != expected
+                            ? " It decodes to " + digest.length + " bytes — " + (digest.length == 20
+                                    ? "a SHA-1 thumbprint: set certificateThumbprintHeader to x5t, or use the SHA-256 thumbprint."
+                                    : "check that the whole value was copied.")
+                            : ""));
+        }
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
     }
 
     /**
@@ -671,8 +851,8 @@ public class ConnectionConfiguration {
     private static void requireCredentialEndpoint(String url, String field, boolean required) {
         if (url == null || url.isBlank()) {
             if (required) {
-                throw new IllegalArgumentException(field + " is required for an OAuth connection (OAUTH2_CLIENT_CREDENTIALS or "
-                        + "OAUTH2_AUTHORIZATION_CODE).");
+                throw new IllegalArgumentException(field + " is required for an OAuth connection (OAUTH2_CLIENT_CREDENTIALS, "
+                        + "OAUTH2_JWT_BEARER or OAUTH2_AUTHORIZATION_CODE).");
             }
             return;
         }
