@@ -547,6 +547,43 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("a sibling property the target's additionalProperties forbids is dropped, refused when required, or merged with its schema")
+    void siblingPropertiesAreIntersectedWithTheTargetsAdditionalProperties() {
+        String defs = "{\"Closed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},\"additionalProperties\":false},"
+                + "\"Typed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
+                + "\"additionalProperties\":{\"type\":\"string\",\"maxLength\":5}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String template = """
+                {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{
+                   "Dropped":{"$ref":"https://example.com/defs.json#/Closed","properties":{"b":{"type":"integer"}}},
+                   "Merged":{"$ref":"https://example.com/defs.json#/Typed","properties":{"b":{"type":"string","maxLength":50}}}}}}
+                """;
+        String conflict = """
+                {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Closed",
+                   "properties":{"b":{"type":"integer"}},"required":["b"]}}}}
+                """;
+
+        for (String version : new String[]{"3.1.0", "3.0.0"}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec(template.formatted(version), fetcher);
+
+            Map<String, Object> dropped = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("Dropped"), openAPI);
+            Map<?, ?> droppedProperties = (Map<?, ?>) dropped.get("properties");
+            assertTrue(droppedProperties.containsKey("a") && !droppedProperties.containsKey("b"), version + ": " + dropped);
+            assertEquals(Boolean.FALSE, dropped.get("additionalProperties"), version + ": " + dropped);
+
+            Map<String, Object> merged = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("Merged"), openAPI);
+            Map<?, ?> b = (Map<?, ?>) ((Map<?, ?>) merged.get("properties")).get("b");
+            assertEquals(5, ((Number) b.get("maxLength")).intValue(), version + ": the target's additionalProperties schema applies: " + merged);
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> McpApiToolBuilder.parseSpec(conflict.formatted(version), fetcher), version);
+            assertTrue(e.getMessage().contains("no value can satisfy both"), e.getMessage());
+        }
+    }
+
+    @Test
     @DisplayName("merging properties beside many references to a schema with a large literal shares it, and the output cap refuses")
     void propertyMergeSharesLargeLiterals() {
         // Each holder's empty "properties" sibling makes the merge copy the target's

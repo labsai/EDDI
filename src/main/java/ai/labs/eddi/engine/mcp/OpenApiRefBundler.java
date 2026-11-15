@@ -515,18 +515,17 @@ final class OpenApiRefBundler {
      * pattern).
      */
     private ObjectNode copySiblings(JsonNode holder, ObjectNode into, Doc doc, Deque<String> chain) {
+        ObjectNode siblings = NODES.objectNode();
         for (Map.Entry<String, JsonNode> field : holder.properties()) {
             String name = field.getKey();
             if ("$ref".equals(name) || "$id".equals(name) && field.getValue().isTextual()) {
                 continue;
             }
-            JsonNode sibling = isLiteralField(name, field.getValue(), Context.KEYWORDS)
+            siblings.set(name, isLiteralField(name, field.getValue(), Context.KEYWORDS)
                     ? field.getValue()
-                    : expand(field.getValue(), doc, chain, childContext(name, field.getValue(), Context.KEYWORDS));
-            JsonNode existing = into.get(name);
-            into.set(name, existing == null ? sibling : stricter(name, existing, sibling));
+                    : expand(field.getValue(), doc, chain, childContext(name, field.getValue(), Context.KEYWORDS)));
         }
-        return into;
+        return mergeSchemas(into, siblings);
     }
 
     /**
@@ -573,7 +572,65 @@ final class OpenApiRefBundler {
             JsonNode existing = merged.get(field.getKey());
             merged.set(field.getKey(), existing == null ? field.getValue() : stricter(field.getKey(), existing, field.getValue()));
         }
+        if (holder.isObject()) {
+            constrainUndeclared(merged, target, holder);
+            constrainUndeclared(merged, holder, target);
+        }
         return merged;
+    }
+
+    /**
+     * Both schemas apply (allOf): a property that only {@code other} declares is,
+     * on {@code side}, an additional property, governed by {@code side}'s
+     * {@code additionalProperties}. {@code false} forbids it - it is dropped from
+     * the merged properties, and the spec is refused when the merged schema also
+     * requires it, since no value could ever validate. A schema there is merged
+     * into the property's schema. {@code true} or none leaves it as it is. A side
+     * with {@code patternProperties} is left alone: the property may match one of
+     * its patterns, which the bundler does not evaluate.
+     */
+    private static void constrainUndeclared(ObjectNode merged, JsonNode side, JsonNode other) {
+        JsonNode additional = side.get("additionalProperties");
+        JsonNode otherProperties = other.get("properties");
+        if (additional == null || side.has("patternProperties") || otherProperties == null || !otherProperties.isObject()
+                || !(merged.get("properties") instanceof ObjectNode shared)) {
+            return;
+        }
+        // A container of its own before it is changed: the merged properties may still
+        // be
+        // one side's own map.
+        ObjectNode mergedProperties = NODES.objectNode();
+        mergedProperties.setAll(shared);
+        merged.set("properties", mergedProperties);
+        JsonNode sideProperties = side.path("properties");
+        for (Map.Entry<String, JsonNode> property : otherProperties.properties()) {
+            String key = property.getKey();
+            if (sideProperties.has(key)) {
+                continue;
+            }
+            if (additional.isBoolean() && !additional.asBoolean()) {
+                if (requires(merged, key)) {
+                    throw new IllegalArgumentException("OpenAPI spec merges a $ref with a sibling that requires property '" + key
+                            + "', which the referenced schema forbids (additionalProperties: false): no value can satisfy both; refused");
+                }
+                mergedProperties.remove(key);
+            } else if (additional.isObject() && mergedProperties.get(key) instanceof ObjectNode propertySchema) {
+                mergedProperties.set(key, mergeSchemas(propertySchema, additional));
+            }
+        }
+    }
+
+    private static boolean requires(JsonNode schema, String key) {
+        JsonNode required = schema.get("required");
+        if (required == null || !required.isArray()) {
+            return false;
+        }
+        for (JsonNode name : required) {
+            if (key.equals(name.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static JsonNode stricter(String name, JsonNode target, JsonNode holder) {
