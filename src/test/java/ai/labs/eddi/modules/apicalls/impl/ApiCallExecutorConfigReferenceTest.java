@@ -522,6 +522,19 @@ class ApiCallExecutorConfigReferenceTest {
         }
 
         @Test
+        @DisplayName("an empty error body falls back to a status message whose base64 echo of the key is redacted")
+        void statusMessageEncodedEchoRedacted() throws Exception {
+            String encoded = java.util.Base64.getEncoder().encodeToString(SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            IResponse echo = respond(401, "");
+            when(echo.getHttpCodeMessage()).thenReturn("rejected " + encoded);
+
+            var result = executor.execute(savingCall(), memory, data("hi"), SERVER);
+
+            assertFalse(String.valueOf(result).contains(encoded), "tool result: " + result);
+            assertTrue(String.valueOf(result).contains("rejected"), "tool result: " + result);
+        }
+
+        @Test
         @DisplayName("review #7: a connection credential echoed in an error body is redacted like a vault plaintext")
         void connectionCredentialEchoRedacted() throws Exception {
             when(connectionResolver.resolve(eq("${connection:jira}"), any(), any()))

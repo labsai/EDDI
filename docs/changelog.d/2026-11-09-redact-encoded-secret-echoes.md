@@ -41,6 +41,7 @@ paths store the same text.
   and a secret inside a longer base64 blob (`base64(user:secret)` does not contain
   `base64(secret)`). The redaction protects later readers of a conversation from an accidental
   echo; it is not a defence against the target server.
+- **Follow-up (review):** the per-call response log line (`RequestRedactor.safeResponseLog`: status message, body and headers) and the non-2xx status-message fallback now use the same encoded-form needles as the error-body path.
 - The change lives in a new helper rather than in `SecretValueScrubber` or `SecretScrubber`, and the
   `ApiCallExecutor` edits stay in its helper section, away from open PRs touching those files.
 

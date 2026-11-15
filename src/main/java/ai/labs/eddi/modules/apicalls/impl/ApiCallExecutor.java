@@ -428,7 +428,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(),
+                                SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
                         LOGGER.warn("Error Msg:" + httpCodeMessage);
 
                         // A server that rejects a credential routinely echoes it ("invalid

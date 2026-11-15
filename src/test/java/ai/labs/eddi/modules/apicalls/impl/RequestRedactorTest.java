@@ -346,6 +346,25 @@ class RequestRedactorTest {
         }
 
         @Test
+        @DisplayName("a base64 echo of a substituted secret is redacted from message, body and headers")
+        void encodedEchoIsRedacted() {
+            String secret = "deadbeefcafe1234";
+            String encoded = java.util.Base64.getEncoder().encodeToString(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            IResponse response = mock(IResponse.class);
+            when(response.getHttpCode()).thenReturn(401);
+            when(response.getHttpCodeMessage()).thenReturn("rejected " + encoded);
+            when(response.getContentAsString()).thenReturn("echo " + encoded);
+            var headers = new HashMap<String, String>();
+            headers.put("X-Echo", encoded);
+            when(response.getHttpHeader()).thenReturn(headers);
+
+            String logged = RequestRedactor.safeResponseLog(response, Set.of(secret));
+
+            assertFalse(logged.contains(encoded), logged);
+            assertFalse(logged.contains(secret), logged);
+        }
+
+        @Test
         @DisplayName("redaction happens before truncation, so a long body cannot leave half a secret")
         void redactsBeforeTruncating() {
             String secret = "s".repeat(60) + "-tail";
