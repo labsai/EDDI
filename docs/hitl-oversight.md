@@ -273,8 +273,11 @@ erased person again. Erasure now writes the person to the `gdpr_erased_subjects`
 identities of every row against it: for a decision made no later than the erasure it stores what erasure leaves — no
 `userId`, the same keyed pseudonym as decider — so the rebuilt counts match the erased ones. A decision made after the
 erasure (a returning user) keeps its id. When the record cannot be read the unit is not stored and counts as a failed
-projection, which the next rebuild repairs. A "not erased" answer is never cached, and a row inserted with an identity
-kept is checked again after the insert and scrubbed if an erasure was recorded in between.
+projection, which the next rebuild repairs. A "not erased" answer is never cached. A row inserted with an identity kept is
+stored pending and checked again after the insert; the result is written to that row alone (compare-and-set, so an
+erasure's own pass is never undone). If that second check fails the row is removed so the next rebuild projects it
+again; a row left pending by a failure or a crash is checked by the hourly maintenance run (at most 1,000 per run) and
+after every rebuild.
 
 ## Metrics and properties
 

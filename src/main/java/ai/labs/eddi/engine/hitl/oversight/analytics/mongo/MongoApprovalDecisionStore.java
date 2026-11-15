@@ -30,7 +30,9 @@ import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.set;
+import static com.mongodb.client.model.Updates.unset;
 
 /**
  * MongoDB implementation of {@link IApprovalDecisionStore}: collection
@@ -61,6 +63,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     static final String USER_ID = "userId";
     static final String DECIDED_BY = "decidedBy";
     static final String DATA = "data";
+    static final String PENDING_CHECK = "pendingCheck";
 
     private final MongoCollection<Document> collection;
 
@@ -74,12 +77,17 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
         collection.createIndex(Indexes.descending(DECIDED_AT), new IndexOptions().name("idx_decision_decided"));
         collection.createIndex(Indexes.ascending(USER_ID), new IndexOptions().name("idx_decision_user").sparse(true));
         collection.createIndex(Indexes.ascending(DECIDED_BY), new IndexOptions().name("idx_decision_decider"));
+        collection.createIndex(Indexes.ascending(PENDING_CHECK), new IndexOptions().name("idx_decision_pending_check").sparse(true));
     }
 
     @Override
     public boolean insertIfAbsent(ApprovalDecision decision) {
         try {
-            collection.insertOne(toDocument(decision));
+            Document doc = toDocument(decision);
+            if (decision.userId() != null || decision.decidedBy() != null) {
+                doc.put(PENDING_CHECK, true);
+            }
+            collection.insertOne(doc);
             return true;
         } catch (MongoException e) {
             if (e.getCode() == DUPLICATE_KEY) {
@@ -123,6 +131,26 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
         long changed = collection.updateMany(eq(USER_ID, userId), set(USER_ID, null)).getModifiedCount();
         changed += collection.updateMany(eq(DECIDED_BY, userId), set(DECIDED_BY, pseudonym)).getModifiedCount();
         return changed;
+    }
+
+    @Override
+    public boolean markChecked(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy) {
+        return collection.updateOne(and(eq(ID, id), eq(USER_ID, expectedUserId), eq(DECIDED_BY, expectedDecidedBy)),
+                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), unset(PENDING_CHECK))).getMatchedCount() > 0;
+    }
+
+    @Override
+    public List<ApprovalDecision> pendingCheck(int limit) {
+        List<ApprovalDecision> rows = new ArrayList<>();
+        for (Document doc : collection.find(eq(PENDING_CHECK, true)).limit(Math.max(0, limit))) {
+            rows.add(fromDocument(doc));
+        }
+        return rows;
+    }
+
+    @Override
+    public boolean deleteById(String id) {
+        return collection.deleteOne(eq(ID, id)).getDeletedCount() > 0;
     }
 
     public static Document toDocument(ApprovalDecision d) {

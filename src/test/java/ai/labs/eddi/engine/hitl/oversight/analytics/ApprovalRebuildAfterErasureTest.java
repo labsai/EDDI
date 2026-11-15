@@ -29,6 +29,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -235,22 +238,91 @@ class ApprovalRebuildAfterErasureTest {
     void erasureBetweenCheckAndInsert() {
         ledger.add(entry("d1", "alice", "bob", DECIDED));
         ledger.add(entry("d2", "bob", "carol", DECIDED));
+        ApprovalDecision afterErasure = ApprovalDecision.of(HitlApprovalAudit.parse(entry("d3", "alice", "bob", ERASED.plusSeconds(60)))
+                .getFirst(), 0);
         // The erasure runs completely (record + participant pass) after the projector
-        // checked and before it inserted, so the participant pass finds nothing to
-        // scrub.
-        decisions.beforeInsert = () -> {
-            if (erasedStore.rows.isEmpty()) {
+        // checked d1 and before it inserted it, so the participant pass misses d1.
+        // Right
+        // after it, bob (a returning user) decides d3, which keeps his id.
+        decisions.beforeInsert = d -> {
+            if (d.id().startsWith("d1#") && erasedStore.rows.isEmpty()) {
                 erase("bob", ERASED);
+                decisions.rows.put(afterErasure.id(), afterErasure);
             }
         };
 
         backfill.rebuild(null, null);
 
-        assertTrue(!anyRowNames("bob"), "no row keeps the identity erased in the window: " + decisions.rows.values());
-        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy());
+        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy(), "the row inserted in the window");
         assertNull(decisions.rows.get(ApprovalDecision.idOf("d2", 0)).userId());
         assertEquals("alice", decisions.rows.get(ApprovalDecision.idOf("d1", 0)).userId());
         assertEquals("carol", decisions.rows.get(ApprovalDecision.idOf("d2", 0)).decidedBy());
+        assertEquals("bob", decisions.rows.get(ApprovalDecision.idOf("d3", 0)).decidedBy(),
+                "the correction touches only the row it checked, not bob's decision made after the erasure");
+        assertTrue(decisions.pending.isEmpty(), "every row was confirmed");
+    }
+
+    @Test
+    @DisplayName("erasure completes before the insert and the second lookup fails: the row is taken back, and the next rebuild "
+            + "stores it pseudonymised")
+    void secondLookupFailsRowIsWithdrawn() {
+        ledger.add(entry("d1", "alice", "bob", DECIDED));
+        decisions.beforeInsert = d -> {
+            erase("bob", ERASED);
+            erasedStore.failReads = true;
+        };
+
+        assertEquals(0, backfill.rebuild(null, null).unitsStored());
+
+        assertTrue(decisions.rows.isEmpty(), "the row with the raw id was removed: " + decisions.rows.values());
+        verify(metrics).projectionFailed();
+
+        decisions.beforeInsert = d -> {
+        };
+        erasedStore.failReads = false;
+        assertEquals(1, backfill.rebuild(null, null).unitsStored());
+        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy());
+    }
+
+    @Test
+    @DisplayName("when the confirmation and the removal both fail, the row stays pending and maintenance's reconciliation fixes it")
+    void confirmationAndRemovalFailReconciled() {
+        ledger.add(entry("d1", "alice", "bob", DECIDED));
+        decisions.beforeInsert = d -> erase("bob", ERASED);
+        decisions.failMarkChecked = true;
+        decisions.failDelete = true;
+
+        backfill.rebuild(null, null);
+        assertEquals("bob", decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy(), "still raw, but pending");
+        assertEquals(Set.of(ApprovalDecision.idOf("d1", 0)), decisions.pending);
+
+        decisions.failMarkChecked = false;
+        decisions.failDelete = false;
+        assertEquals(1, backfill.reconcilePending());
+
+        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy());
+        assertTrue(decisions.pending.isEmpty());
+        assertTrue(!anyRowNames("bob"));
+    }
+
+    @Test
+    @DisplayName("a process that died between insert and check leaves a pending row; reconciliation scrubs it, and confirms "
+            + "rows of people who were not erased as they are")
+    void interruptedProjectionReconciled() {
+        erasedSubjects.record("bob", ERASED);
+        // What an interrupted projection leaves behind: the raw rows, pending.
+        decisions.insertIfAbsent(ApprovalDecision.of(HitlApprovalAudit.parse(entry("d1", "alice", "bob", DECIDED)).getFirst(), 0));
+        decisions.insertIfAbsent(ApprovalDecision.of(HitlApprovalAudit.parse(entry("d2", "alice", "carol", DECIDED)).getFirst(), 0));
+        decisions.insertIfAbsent(
+                ApprovalDecision.of(HitlApprovalAudit.parse(entry("d3", "alice", "bob", ERASED.plusSeconds(60))).getFirst(), 0));
+
+        assertEquals(3, backfill.reconcilePending());
+
+        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy());
+        assertEquals("carol", decisions.rows.get(ApprovalDecision.idOf("d2", 0)).decidedBy());
+        assertEquals("bob", decisions.rows.get(ApprovalDecision.idOf("d3", 0)).decidedBy(), "decided after the erasure");
+        assertTrue(decisions.pending.isEmpty());
+        assertEquals(0, backfill.reconcilePending(), "idempotent");
     }
 
     @Test
@@ -273,17 +345,51 @@ class ApprovalRebuildAfterErasureTest {
     /** The approval-decision store, with the erasure semantics of the real ones. */
     static final class InMemoryDecisions implements IApprovalDecisionStore {
         final Map<String, ApprovalDecision> rows = new LinkedHashMap<>();
-        Runnable beforeInsert = () -> {
+        final Set<String> pending = new LinkedHashSet<>();
+        Consumer<ApprovalDecision> beforeInsert = d -> {
         };
+        boolean failMarkChecked;
+        boolean failDelete;
 
         @Override
         public boolean insertIfAbsent(ApprovalDecision decision) {
             if (rows.containsKey(decision.id())) {
                 return false;
             }
-            beforeInsert.run();
+            beforeInsert.accept(decision);
             rows.put(decision.id(), decision);
+            if (decision.userId() != null || decision.decidedBy() != null) {
+                pending.add(decision.id());
+            }
             return true;
+        }
+
+        @Override
+        public boolean markChecked(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy) {
+            if (failMarkChecked) {
+                throw new IllegalStateException("store down");
+            }
+            ApprovalDecision r = rows.get(id);
+            if (r == null || !Objects.equals(r.userId(), expectedUserId) || !Objects.equals(r.decidedBy(), expectedDecidedBy)) {
+                return false;
+            }
+            rows.put(id, r.withPersonalFields(userId, decidedBy));
+            pending.remove(id);
+            return true;
+        }
+
+        @Override
+        public List<ApprovalDecision> pendingCheck(int limit) {
+            return pending.stream().map(rows::get).limit(limit).toList();
+        }
+
+        @Override
+        public boolean deleteById(String id) {
+            if (failDelete) {
+                throw new IllegalStateException("store down");
+            }
+            pending.remove(id);
+            return rows.remove(id) != null;
         }
 
         @Override

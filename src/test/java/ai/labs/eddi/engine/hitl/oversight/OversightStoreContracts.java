@@ -93,6 +93,57 @@ public final class OversightStoreContracts {
             assertEquals("gdpr:y", after.decidedBy());
             assertTrue(decisions().readByUser("user-1", 10).isEmpty());
         }
+
+        @Test
+        default void aRowWithAnIdentityIsPendingUntilChecked_andOnlyThatRowIsChanged() {
+            ApprovalDecision first = decision("APPROVED", NOW.minusSeconds(60));
+            ApprovalDecision second = decision("REJECTED", NOW);
+            ApprovalDecision anonymous = decision("APPROVED", NOW.minusSeconds(120)).withPersonalFields(null, null);
+            decisions().insertIfAbsent(first);
+            decisions().insertIfAbsent(second);
+            decisions().insertIfAbsent(anonymous);
+            assertEquals(List.of(first.id(), second.id()).stream().sorted().toList(),
+                    decisions().pendingCheck(10).stream().map(ApprovalDecision::id).sorted().toList(), "the anonymous row is not pending");
+
+            assertTrue(decisions().markChecked(first.id(), "user-1", "alice", null, "gdpr:alice"));
+
+            assertEquals(List.of(second.id()), decisions().pendingCheck(10).stream().map(ApprovalDecision::id).toList());
+            var rows = decisions().query(DecisionFilter.ofCategory(AGENT, CATEGORY, null, null), 0, 10);
+            ApprovalDecision checked = rows.stream().filter(r -> r.id().equals(first.id())).findFirst().orElseThrow();
+            ApprovalDecision untouched = rows.stream().filter(r -> r.id().equals(second.id())).findFirst().orElseThrow();
+            assertNull(checked.userId());
+            assertEquals("gdpr:alice", checked.decidedBy());
+            assertEquals("user-1", untouched.userId(), "another row of the same people is not touched");
+            assertEquals("alice", untouched.decidedBy());
+        }
+
+        @Test
+        default void markCheckedIsCompareAndSet_neverOverwritingAnErasure() {
+            ApprovalDecision row = decision("APPROVED", NOW);
+            decisions().insertIfAbsent(row);
+            decisions().eraseUser("alice", "gdpr:alice");
+
+            assertFalse(decisions().markChecked(row.id(), "user-1", "alice", "user-1", "alice"), "a stale check must not restore the raw id");
+
+            ApprovalDecision stored = decisions().query(DecisionFilter.ofCategory(AGENT, CATEGORY, null, null), 0, 1).getFirst();
+            assertEquals("gdpr:alice", stored.decidedBy());
+            assertEquals(List.of(row.id()), decisions().pendingCheck(10).stream().map(ApprovalDecision::id).toList(), "still pending");
+            assertTrue(decisions().markChecked(row.id(), "user-1", "gdpr:alice", "user-1", "gdpr:alice"));
+            assertTrue(decisions().pendingCheck(10).isEmpty());
+        }
+
+        @Test
+        default void deleteByIdRemovesOneRow() {
+            ApprovalDecision row = decision("APPROVED", NOW);
+            ApprovalDecision other = decision("REJECTED", NOW);
+            decisions().insertIfAbsent(row);
+            decisions().insertIfAbsent(other);
+
+            assertTrue(decisions().deleteById(row.id()));
+            assertFalse(decisions().deleteById(row.id()));
+            assertEquals(1, decisions().count(new DecisionFilter(null, null, null, null, null, null, null, null, null)));
+            assertTrue(decisions().insertIfAbsent(row), "a deleted row can be projected again");
+        }
     }
 
     /** {@link IAuditSampleStore}. */

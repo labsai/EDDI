@@ -38,11 +38,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * record cannot be read the unit is not stored (counted as a failed projection)
  * rather than stored with an identity that may be erased.
  * <p>
- * The check runs again, with a fresh read, after a row was inserted with an
- * identity kept; if an erasure was recorded in between, the row is scrubbed
- * with {@link IApprovalDecisionStore#eraseUser}. Erasure records the person
+ * <b>After the insert.</b> A row that kept an identity is stored <em>pending
+ * check</em> and checked again, with a fresh read, after the insert: the store
+ * then gets what the second check says
+ * ({@link IApprovalDecisionStore#markChecked}, this row only, compare-and-set
+ * so an erasure's own pass is never overwritten). Erasure records the person
  * before it pseudonymises the stored rows, so a row inserted in that window is
- * reached by one side or the other (see {@link ErasedSubjects}).
+ * reached by one side or the other (see {@link ErasedSubjects}). If the second
+ * check or the confirmation fails, the row is deleted so the next rebuild
+ * projects it again; if even that fails, or the process dies after the insert,
+ * the row stays pending and {@link #reconcilePending} (hourly maintenance)
+ * checks it.
  *
  * @since 6.7.0
  */
@@ -97,7 +103,13 @@ public class ApprovalDecisionProjector {
             try {
                 ApprovalDecision row = withoutErasedIdentities(ApprovalDecision.of(unit, i));
                 if (store.insertIfAbsent(row)) {
-                    row = scrubIfErasedSinceCheck(row);
+                    ApprovalDecision stored = row;
+                    try {
+                        row = confirm(row);
+                    } catch (RuntimeException e) {
+                        withdraw(stored, e);
+                        continue;
+                    }
                     inserted.add(row);
                     metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
                 }
@@ -141,30 +153,65 @@ public class ApprovalDecisionProjector {
     }
 
     /**
-     * The second check of an inserted row: an identity it kept that is now covered
-     * by an erasure recorded after the first check is erased from the store.
+     * The second check of an inserted row: what the erased-subject record says now
+     * is written to this row only, and its pending mark is cleared. A row without
+     * an identity is not pending.
      *
      * @return the row as now stored
+     * @throws RuntimeException
+     *             the record could not be read or the row not confirmed
      */
-    private ApprovalDecision scrubIfErasedSinceCheck(ApprovalDecision row) {
+    private ApprovalDecision confirm(ApprovalDecision row) {
         if (erasedSubjects == null || row.userId() == null && row.decidedBy() == null) {
             return row;
         }
-        ApprovalDecision now;
-        try {
-            now = withoutErasedIdentities(row);
-        } catch (RuntimeException e) {
-            metrics.projectionFailed();
-            LOGGER.errorf("Approval decision %s was stored, but the erased-subject record could not be re-read; if its user was erased "
-                    + "concurrently, re-run the erasure: %s", sanitize(row.id()), e.getMessage());
-            return row;
-        }
-        if (row.userId() != null && now.userId() == null) {
-            store.eraseUser(row.userId(), erasedSubjects.pseudonymOf(row.userId()));
-        }
-        if (row.decidedBy() != null && !row.decidedBy().equals(now.decidedBy())) {
-            store.eraseUser(row.decidedBy(), now.decidedBy());
-        }
+        ApprovalDecision now = withoutErasedIdentities(row);
+        // False when the row changed under us: an erasure's own pass pseudonymised it.
+        // That is already what must be stored; it stays pending and the next
+        // reconciliation confirms what is there now.
+        store.markChecked(row.id(), row.userId(), row.decidedBy(), now.userId(), now.decidedBy());
         return now;
+    }
+
+    /**
+     * Takes back a row whose second check failed, so the next rebuild projects it
+     * again through the check. If that fails too, the row stays pending for
+     * {@link #reconcilePending}.
+     */
+    private void withdraw(ApprovalDecision row, RuntimeException cause) {
+        metrics.projectionFailed();
+        try {
+            store.deleteById(row.id());
+            LOGGER.warnf("Approval decision %s could not be checked against the erased-subject record after it was stored, so it was "
+                    + "removed again (a rebuild repairs it): %s", sanitize(row.id()), cause.getMessage());
+        } catch (RuntimeException e) {
+            LOGGER.errorf("Approval decision %s could not be checked after it was stored, nor removed; it stays pending and the next "
+                    + "maintenance run checks it: %s / %s", sanitize(row.id()), cause.getMessage(), e.getMessage());
+        }
+    }
+
+    /**
+     * Checks rows left pending (a projection that failed or was interrupted after
+     * its insert) against the erased-subject record, at most {@code limit} per
+     * call. Idempotent; a row that cannot be checked now stays pending.
+     *
+     * @return how many rows were confirmed
+     */
+    public int reconcilePending(int limit) {
+        if (erasedSubjects == null) {
+            return 0;
+        }
+        int confirmed = 0;
+        for (ApprovalDecision row : store.pendingCheck(limit)) {
+            try {
+                ApprovalDecision now = withoutErasedIdentities(row);
+                if (store.markChecked(row.id(), row.userId(), row.decidedBy(), now.userId(), now.decidedBy())) {
+                    confirmed++;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Pending approval decision %s could not be checked yet: %s", sanitize(row.id()), e.getMessage());
+            }
+        }
+        return confirmed;
     }
 }

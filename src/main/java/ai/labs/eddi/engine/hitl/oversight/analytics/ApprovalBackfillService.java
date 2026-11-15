@@ -35,6 +35,12 @@ public class ApprovalBackfillService {
     static final int PAGE_SIZE = 500;
     /** Upper bound of entries one rebuild reads (2 million). */
     static final int MAX_PAGES = 4_000;
+    /**
+     * Upper bound of pending rows one reconciliation checks. Rows are pending only
+     * while a projection is in flight or after one failed, so this is a backlog
+     * bound, not a throughput limit.
+     */
+    static final int RECONCILE_LIMIT = 1_000;
 
     private final IAuditStore auditStore;
     private final ApprovalDecisionProjector projector;
@@ -48,6 +54,27 @@ public class ApprovalBackfillService {
 
     /** What a rebuild did. */
     public record Result(long entriesRead, long unitsStored, boolean truncated) {
+    }
+
+    /**
+     * Checks rows a projection left pending (it failed, or the process stopped,
+     * between its insert and its erased-subject check) — at most
+     * {@value #RECONCILE_LIMIT}. Run by the hourly HITL maintenance and after every
+     * rebuild.
+     *
+     * @return how many rows were confirmed
+     */
+    public int reconcilePending() {
+        try {
+            int confirmed = projector.reconcilePending(RECONCILE_LIMIT);
+            if (confirmed > 0) {
+                LOGGER.infof("Confirmed %d approval decision row(s) left pending the erased-subject check", confirmed);
+            }
+            return confirmed;
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not reconcile approval decisions pending the erased-subject check: %s", e.getMessage());
+            return 0;
+        }
     }
 
     /** Whether a rebuild is running on this node. */
@@ -89,6 +116,7 @@ public class ApprovalBackfillService {
                     break;
                 }
             }
+            reconcilePending();
             LOGGER.infof("Approval analytics rebuild read %d hitl.approval entries and stored %d new decision rows%s", read, stored,
                     truncated ? " (stopped at the page limit)" : "");
             return new Result(read, stored, truncated);
