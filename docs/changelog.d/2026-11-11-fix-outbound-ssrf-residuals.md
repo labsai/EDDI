@@ -95,7 +95,9 @@ Seven confirmed findings from a security review of the outbound paths.
   either side wins, a schema beats `true`, two schemas are merged. The argument converter reads an OpenAPI 3.1 boolean
   schema: `additionalProperties: false` arrives as one, and was reported as `true`. A property only one side of the
   merge declares is governed by the other side's `additionalProperties` (allOf): `false` drops it, or refuses the
-  spec when it is required; a schema is merged into it.
+  spec when it is required; a schema is merged into it. `patternProperties` are not evaluated (ECMA regexes from an
+  untrusted spec: backtracking and dialect risk); a side with them is taken to match nothing, which errs toward the
+  stricter contract, and a required property it would forbid is refused saying so.
 - **Crawl scope**: an ambiguous path (an encoded `/` or `\`) keeps its raw form through canonicalization instead of
   a normalized one that a scope check would approve; the URL that will be fetched is scope-checked too, for links and
   sitemap entries. The parameter-preserving path reading resolves only complete dot segments (`..;` is a segment to

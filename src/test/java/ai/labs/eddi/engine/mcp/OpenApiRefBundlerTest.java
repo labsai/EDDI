@@ -584,6 +584,34 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("patternProperties are not evaluated: a closed target with patterns drops a sibling property, and refuses a required one")
+    void patternPropertiesAreTakenToMatchNothing() {
+        String defs = "{\"Patterned\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
+                + "\"patternProperties\":{\"^x\":{}},\"additionalProperties\":false}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String dropTemplate = """
+                {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Patterned","properties":{"b":{"type":"integer"}}}}}}
+                """;
+        String requiredTemplate = """
+                {"openapi":"%s","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Patterned",
+                   "properties":{"b":{"type":"integer"}},"required":["b"]}}}}
+                """;
+
+        for (String version : new String[]{"3.1.0", "3.0.0"}) {
+            OpenAPI openAPI = McpApiToolBuilder.parseSpec(dropTemplate.formatted(version), fetcher);
+            Map<String, Object> converted = OpenApiArgumentSchemas.bodySchema(openAPI.getComponents().getSchemas().get("S"), openAPI);
+            Map<?, ?> properties = (Map<?, ?>) converted.get("properties");
+            assertTrue(properties.containsKey("a") && !properties.containsKey("b"), version + ": b does not match ^x: " + converted);
+
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> McpApiToolBuilder.parseSpec(requiredTemplate.formatted(version), fetcher), version);
+            assertTrue(e.getMessage().contains("patternProperties are not evaluated"), e.getMessage());
+        }
+    }
+
+    @Test
     @DisplayName("merging properties beside many references to a schema with a large literal shares it, and the output cap refuses")
     void propertyMergeSharesLargeLiterals() {
         // Each holder's empty "properties" sibling makes the merge copy the target's

@@ -585,14 +585,20 @@ final class OpenApiRefBundler {
      * {@code additionalProperties}. {@code false} forbids it - it is dropped from
      * the merged properties, and the spec is refused when the merged schema also
      * requires it, since no value could ever validate. A schema there is merged
-     * into the property's schema. {@code true} or none leaves it as it is. A side
-     * with {@code patternProperties} is left alone: the property may match one of
-     * its patterns, which the bundler does not evaluate.
+     * into the property's schema. {@code true} or none leaves it as it is.
+     * <p>
+     * A side with {@code patternProperties} is treated as if those patterns matched
+     * nothing. They are ECMA regular expressions from an untrusted spec: evaluating
+     * them invites catastrophic backtracking and dialect mismatches, so they are
+     * not evaluated. That errs toward the stricter contract - a property that
+     * happens to match a pattern is dropped, which only means the tool sends less -
+     * and a required one is refused, with a message that says patterns are not
+     * evaluated.
      */
     private static void constrainUndeclared(ObjectNode merged, JsonNode side, JsonNode other) {
         JsonNode additional = side.get("additionalProperties");
         JsonNode otherProperties = other.get("properties");
-        if (additional == null || side.has("patternProperties") || otherProperties == null || !otherProperties.isObject()
+        if (additional == null || otherProperties == null || !otherProperties.isObject()
                 || !(merged.get("properties") instanceof ObjectNode shared)) {
             return;
         }
@@ -611,7 +617,8 @@ final class OpenApiRefBundler {
             if (additional.isBoolean() && !additional.asBoolean()) {
                 if (requires(merged, key)) {
                     throw new IllegalArgumentException("OpenAPI spec merges a $ref with a sibling that requires property '" + key
-                            + "', which the referenced schema forbids (additionalProperties: false): no value can satisfy both; refused");
+                            + "', which the referenced schema forbids (additionalProperties: false): no value can satisfy both; refused"
+                            + (side.has("patternProperties") ? " (patternProperties are not evaluated, so they are taken to match nothing)" : ""));
                 }
                 mergedProperties.remove(key);
             } else if (additional.isObject() && mergedProperties.get(key) instanceof ObjectNode propertySchema) {
