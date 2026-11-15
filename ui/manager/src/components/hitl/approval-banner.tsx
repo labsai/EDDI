@@ -13,7 +13,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { formatToolArguments } from "@/lib/hitl-format-args";
+import {
+  argumentsForEditing,
+  formatToolArguments,
+  parseToolArgumentsForDisplay,
+  REDACTION_MARKER,
+  sameJsonText,
+} from "@/lib/hitl-format-args";
+import { humanizeToolName, toolArgumentFields } from "@/lib/tool-labels";
+import { ToolArgumentFields } from "@/components/shared/tool-argument-fields";
 import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
@@ -166,6 +174,9 @@ function isJsonObject(s: string): boolean {
   }
 }
 
+/** How a gated call's arguments are shown: label/value rows, formatted JSON, or the exact text. */
+type ArgsView = "fields" | "formatted" | "raw";
+
 /** Per-call reviewer state for a TOOL_CALL pause. Absent verdict = "inherit the
  *  top-level verdict"; a non-empty `amend` replaces the call's arguments. */
 interface CallState {
@@ -302,8 +313,10 @@ export function ApprovalBanner({
       // compares it with the stored arguments and would answer a reason code on
       // that "plain approval" with a 400. Arguments redacted for display differ from
       // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      // The editor is pre-filled with the arguments pretty-printed, so a copy
+      // that differs from them only in whitespace is untouched, not amended.
       const typed = s?.amend?.trim();
-      const amend = typed && typed !== call.arguments ? typed : undefined;
+      const amend = typed && !(call.arguments && sameJsonText(typed, call.arguments)) ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;
@@ -316,6 +329,15 @@ export function ApprovalBanner({
         }
         if (!isJsonObject(amend)) {
           setSubmitError(t("hitl.amendInvalidJson", "Amended arguments must be a valid JSON object."));
+          return;
+        }
+        if (amend.includes(REDACTION_MARKER)) {
+          setSubmitError(
+            t(
+              "hitl.amendRedactedMarker",
+              "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written.",
+            ),
+          );
           return;
         }
         if (byteLength(amend) > AMENDED_ARGS_MAX_BYTES) {
@@ -394,7 +416,7 @@ export function ApprovalBanner({
   // Distinct gated tool names for the Approve confirmation on a TOOL_CALL pause,
   // so the reviewer sees exactly what will execute before it runs.
   const gatedToolNames = toolPause
-    ? Array.from(new Set(toolPause.calls.map((c) => c.toolName)))
+    ? Array.from(new Set(toolPause.calls.map((c) => humanizeToolName(c.toolName) || c.toolName)))
     : [];
 
   // Fire the pending action only after the reviewer confirms. Validation and the
@@ -618,7 +640,16 @@ export function ApprovalBanner({
                   verdict: callStates[call.callId]?.verdict === verdict ? undefined : verdict,
                 })
               }
-              onToggleAmend={() => setCall(call.callId, { showAmend: !callStates[call.callId]?.showAmend })}
+              onToggleAmend={() => {
+                const current = callStates[call.callId];
+                // Edit-on-approve starts from the call as the model wrote it
+                // (redacted), so the approver changes a value instead of
+                // retyping the whole object. An untouched copy is no amendment.
+                setCall(call.callId, {
+                  showAmend: !current?.showAmend,
+                  amend: current?.amend ?? (call.arguments ? argumentsForEditing(call.arguments) : ""),
+                });
+              }}
               onAmendChange={(amend) => setCall(call.callId, { amend })}
             />
           ))}
@@ -967,7 +998,26 @@ function ToolCallRow({
     () => formatToolArguments(call.arguments ?? "", call.argsTruncated),
     [call.arguments, call.argsTruncated],
   );
-  const [showRaw, setShowRaw] = useState(false);
+  const argumentFields = useMemo(
+    () => toolArgumentFields(parseToolArgumentsForDisplay(call.arguments, call.argsTruncated)),
+    [call.arguments, call.argsTruncated],
+  );
+  // Fields (label/value rows) when the arguments are a JSON object, the
+  // formatted JSON when it reads differently from the raw text, and always the
+  // exact raw text — the one the decision is made on.
+  const views: ArgsView[] = [
+    ...(argumentFields ? (["fields"] as const) : []),
+    ...(formattedArguments !== call.arguments ? (["formatted"] as const) : []),
+    "raw",
+  ];
+  const [chosenView, setView] = useState<ArgsView | null>(null);
+  const view: ArgsView = chosenView && views.includes(chosenView) ? chosenView : views[0]!;
+  const toolLabel = humanizeToolName(call.toolName) || call.toolName;
+  const viewLabel: Record<ArgsView, string> = {
+    fields: t("hitl.argsViewFields", "Fields"),
+    formatted: t("hitl.argsViewJson", "JSON"),
+    raw: t("hitl.argsViewRaw", "Raw"),
+  };
   return (
     <div
       className={cn(
@@ -986,7 +1036,16 @@ function ToolCallRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <Wrench className="h-3.5 w-3.5 text-warn-500" aria-hidden="true" />
-            <span className="font-mono text-sm font-medium text-foreground">{call.toolName}</span>
+            <span className="text-sm font-medium text-foreground" data-testid={`tool-label-${call.callId}`}>
+              {toolLabel}
+            </span>
+            {/* The exact name stays visible: it is what the gate patterns and the
+                audit trail name, and two tools can humanise alike. */}
+            {toolLabel !== call.toolName && (
+              <span className="font-mono text-[11px] text-muted-foreground" data-testid={`tool-name-${call.callId}`}>
+                {call.toolName}
+              </span>
+            )}
             {call.source && (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {call.source}
@@ -1015,7 +1074,7 @@ function ToolCallRow({
           <button
             type="button"
             aria-pressed={state.verdict === "APPROVED"}
-            aria-label={`${t("hitl.approve", "Approve")} — ${call.toolName}`}
+            aria-label={`${t("hitl.approve", "Approve")} — ${toolLabel}`}
             onClick={() => onToggle("APPROVED")}
             // Undecided reads as an OUTLINED control, not flat muted-on-muted:
             // these were being mistaken for disabled labels, which made a
@@ -1034,7 +1093,7 @@ function ToolCallRow({
           <button
             type="button"
             aria-pressed={state.verdict === "REJECTED"}
-            aria-label={`${t("hitl.reject", "Reject")} — ${call.toolName}`}
+            aria-label={`${t("hitl.reject", "Reject")} — ${toolLabel}`}
             onClick={() => onToggle("REJECTED")}
             className={cn(
               "rounded-md border px-2.5 py-1 text-xs transition-colors",
@@ -1052,28 +1111,47 @@ function ToolCallRow({
       {extra}
       {call.arguments && (
         <div className="min-w-0">
-          {formattedArguments !== call.arguments && (
-            <div className="mb-1 flex justify-end">
-              <button
-                type="button"
-                aria-pressed={showRaw}
-                onClick={() => setShowRaw((v) => !v)}
-                className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                data-testid={`tool-args-view-toggle-${call.callId}`}
-                data-view={showRaw ? "raw" : "formatted"}
-              >
-                {showRaw
-                  ? t("hitl.argsShowFormatted", "Show formatted")
-                  : t("hitl.argsShowRaw", "Show raw")}
-              </button>
+          {views.length > 1 && (
+            <div
+              className="mb-1 flex justify-end gap-1"
+              role="group"
+              aria-label={t("hitl.argsViewLabel", "Show arguments as")}
+              data-testid={`tool-args-views-${call.callId}`}
+              data-view={view}
+            >
+              {views.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                    view === v
+                      ? "border-primary/40 bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                  data-testid={`tool-args-view-${v}-${call.callId}`}
+                >
+                  {viewLabel[v]}
+                </button>
+              ))}
             </div>
           )}
-          <pre
-            className="max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
-            data-testid={`tool-args-${call.callId}`}
-          >
-            {showRaw ? call.arguments : formattedArguments}
-          </pre>
+          {view === "fields" && argumentFields ? (
+            <ToolArgumentFields
+              fields={argumentFields}
+              className="max-h-96 overflow-auto rounded bg-muted/60 p-2"
+              testId={`tool-args-fields-${call.callId}`}
+            />
+          ) : (
+            <pre
+              className="max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
+              data-testid={`tool-args-${call.callId}`}
+            >
+              {view === "raw" ? call.arguments : formattedArguments}
+            </pre>
+          )}
         </div>
       )}
       {!call.argsTruncated && (

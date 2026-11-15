@@ -433,6 +433,12 @@ public final class A2AWireFormat {
         if (value != null && value.length() > MAX_ID_LENGTH) {
             throw new InvalidA2ARequestException("'" + name + "' is longer than " + MAX_ID_LENGTH + " characters");
         }
+        // A control character is written as a six-byte escape sequence in the
+        // shared-cache JSON,
+        // which would let a full index shard outgrow the NATS payload limit.
+        if (value != null && value.chars().anyMatch(Character::isISOControl)) {
+            throw new InvalidA2ARequestException("'" + name + "' contains control characters");
+        }
         return value;
     }
 

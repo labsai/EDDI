@@ -23,6 +23,7 @@ import { PauseChangedError, type ShownPause } from "@/lib/hitl-pause-binding";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import { OPERATOR_PROBE_USER_ID, type OperatorConfig } from "@/lib/api/operator";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { parseToolCallEvent, toolCallActivity, type ToolActivity } from "@/lib/tool-labels";
 import { abortableSleep } from "@/lib/abortable-sleep";
 
 /**
@@ -57,7 +58,7 @@ export interface OperatorChatState {
    * `events`: the authoritative record (arguments, results) still arrives in
    * task_complete's toolTrace, and merging both would double-count.
    */
-  liveToolCalls: string[];
+  liveToolCalls: ToolActivity[];
   /** True once tokens resumed after the last tool_call — the tool phase is over. */
   liveToolsSettled: boolean;
   /**
@@ -1382,15 +1383,19 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         if (event.type === "tool_call") {
           // Live "Using {tool}…" signal — name only; arguments arrive later,
           // redacted, in the task_complete toolTrace.
-          try {
-            const parsed: { tool?: unknown } = JSON.parse(event.data);
-            if (typeof parsed.tool === "string" && parsed.tool) {
-              const tool = parsed.tool;
-              set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, tool], liveToolsSettled: false }));
-            }
-          } catch {
-            // Malformed payload — the status line just keeps its last state.
+          // Shown as the designer's toolDisplay label when set, else the humanised name.
+          const call = parseToolCallEvent(event.data);
+          // Malformed payload — the status line just keeps its last state.
+          if (call) {
+            const label = toolCallActivity(call);
+            set((s) => ({ ...s, liveToolCalls: [...s.liveToolCalls, label], liveToolsSettled: false }));
           }
+          continue;
+        }
+
+        if (event.type === "tool_result") {
+          // 6.7: one per call, right after it ran — the newest call is done.
+          set((s) => (s.liveToolCalls.length > 0 && !s.liveToolsSettled ? { ...s, liveToolsSettled: true } : s));
           continue;
         }
 

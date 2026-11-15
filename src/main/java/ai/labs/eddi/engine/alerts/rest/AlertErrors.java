@@ -27,6 +27,11 @@ public final class AlertErrors {
     /** Webhook targets are an administrator's. */
     public static final String WEBHOOK_ADMIN_ONLY = "WEBHOOK_ADMIN_ONLY";
     public static final String RULE_NOT_FOUND = "RULE_NOT_FOUND";
+    /**
+     * Saving the rule would put an agent, or the rules over every agent, past
+     * {@code eddi.alerts.max-rules-per-agent}.
+     */
+    public static final String RULE_LIMIT_REACHED = "RULE_LIMIT_REACHED";
     public static final String EVENT_NOT_FOUND = "EVENT_NOT_FOUND";
     /**
      * The caller may not act on this event (an agent-less digest is an
