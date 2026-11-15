@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
 import ai.labs.eddi.configs.hitl.model.GroupHitlReviewConfig;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
@@ -1994,6 +1995,25 @@ public class AgentGroupConfiguration {
 
         public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
             this.approvalContext = approvalContext;
+        }
+
+        /**
+         * Who is told when this group pauses for approval — {@code notify.slack} (a
+         * Slack approval card posted by the named channel integration, wherever the
+         * discussion was started). {@code notify.email} is refused for groups. Absent =
+         * the deployment default ({@code eddi.slack.hitl.notify.default-integration}),
+         * and without one nobody is notified.
+         *
+         * @since 6.8.0
+         */
+        private HitlNotifyConfig notify;
+
+        public HitlNotifyConfig getNotify() {
+            return notify;
+        }
+
+        public void setNotify(HitlNotifyConfig notify) {
+            this.notify = notify;
         }
     }
 

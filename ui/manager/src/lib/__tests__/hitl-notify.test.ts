@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isValidNotifyAddress, parseNotifyRecipients } from "@/lib/hitl-notify";
-import { MAX_NOTIFY_RECIPIENTS } from "@/lib/api/hitl";
+import { isValidNotifyAddress, mergeNotify, parseNotifyRecipients, slackIntegrationProblem } from "@/lib/hitl-notify";
+import { MAX_NOTIFY_INTEGRATION_NAME, MAX_NOTIFY_RECIPIENTS } from "@/lib/api/hitl";
 
 describe("parseNotifyRecipients — mirrors HitlConfigValidation.validateNotify", () => {
   it("splits on commas, semicolons, spaces and new lines", () => {
@@ -80,5 +80,32 @@ describe("internationalised domains — the server converts the domain to ASCII"
     const parsed = parseNotifyRecipients("ops@bücher.example, OPS@xn--bcher-kva.example");
     expect(parsed.error).toBe("duplicate");
     expect(parsed.index).toBe(1);
+  });
+});
+
+describe("slackIntegrationProblem — mirrors HitlConfigValidation.validateNotifySlack", () => {
+  it("accepts a plain name and refuses blank, '|' and over-long ones", () => {
+    expect(slackIntegrationProblem(" ops-slack ")).toBeNull();
+    expect(slackIntegrationProblem("  ")).toBe("empty");
+    expect(slackIntegrationProblem("ops|slack")).toBe("pipe");
+    expect(slackIntegrationProblem("x".repeat(MAX_NOTIFY_INTEGRATION_NAME))).toBeNull();
+    expect(slackIntegrationProblem("x".repeat(MAX_NOTIFY_INTEGRATION_NAME + 1))).toBe("tooLong");
+  });
+});
+
+describe("mergeNotify", () => {
+  const email = { recipients: ["ops@example.com"] };
+  const slack = { integration: "ops-slack" };
+
+  it("replaces one channel and keeps the other", () => {
+    expect(mergeNotify({ email }, { slack })).toEqual({ email, slack });
+    expect(mergeNotify({ email, slack }, { email: null })).toEqual({ slack });
+    expect(mergeNotify({ email, slack }, { slack: null })).toEqual({ email });
+  });
+
+  it("is null once neither channel is left", () => {
+    expect(mergeNotify({ slack }, { slack: null })).toBeNull();
+    expect(mergeNotify(null, { email: null })).toBeNull();
+    expect(mergeNotify(undefined, { email })).toEqual({ email });
   });
 });

@@ -4663,7 +4663,15 @@
     "argsViewFields": "Fields",
     "argsViewJson": "JSON",
     "argsViewRaw": "Raw",
-    "amendRedactedMarker": "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written."
+    "amendRedactedMarker": "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written.",
+    "slackNotifyEmpty": "Name a Slack integration, or switch the Slack card off.",
+    "slackNotifyPipe": "The name contains '|', which approval buttons cannot carry — rename the integration.",
+    "slackNotifyTooLong": "At most {{max}} characters.",
+    "slackNotifyEnableGroup": "Post a Slack approval card when this group waits for approval",
+    "slackNotifyEnableAgent": "Post a Slack approval card when this agent waits for approval",
+    "slackNotifyIntegration": "Slack integration name",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyHint": "The named Slack channel integration posts the same approval card a Slack-started pause gets — also for scheduled runs, team cadences, webhooks, REST and MCP. Its own settings decide the channel (hitlApprovalChannel), who may press the buttons (hitlApproverUserIds) and whether the approval context is shown. The card is updated when the request is decided anywhere else."
   },
   "hitlReview": {
     "approveEdited": "Approve with edits",

@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ApprovalContextEditor } from "@/components/editors/approval-context-editor";
 import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
+import { mergeNotify } from "@/lib/hitl-notify";
+import { SlackNotifyField } from "@/components/hitl/slack-notify-field";
 import { useUpdateGroup } from "@/hooks/use-groups";
 import { getErrorMessage } from "@/lib/api-client";
 import type { AgentGroupConfiguration } from "@/lib/api/groups";
@@ -67,6 +69,9 @@ export function GroupHitlEditor({
   const noPhaseSelected =
     enabled && basePhases.length > 0 && approvalPhases.size === 0;
   const contextInvalid = enabled && approvalContextHasErrors(hitl.approvalContext, "group");
+  const [slackIntegration, setSlackIntegration] = useState<string | null>(config.hitlConfig?.notify?.slack?.integration ?? null);
+  const [slackInvalidState, setSlackInvalid] = useState(false);
+  const slackInvalid = enabled && slackInvalidState;
 
   const togglePhase = (name: string) =>
     setApprovalPhases((prev) => {
@@ -79,7 +84,7 @@ export function GroupHitlEditor({
   const patchHitl = (u: Partial<GroupHitlConfig>) => setHitl((h) => ({ ...h, ...u }));
 
   const save = () => {
-    if (timeoutInvalid || noPhaseSelected || contextInvalid) return;
+    if (timeoutInvalid || noPhaseSelected || contextInvalid || slackInvalid) return;
     let phases: AgentGroupConfiguration["phases"];
     let hitlConfig: GroupHitlConfig | undefined;
     if (enabled) {
@@ -96,6 +101,7 @@ export function GroupHitlEditor({
         granularity: isTaskForce ? hitl.granularity : "PHASE",
         onTaskRejection: hitl.onTaskRejection,
         approvalContext: hitl.approvalContext ?? null,
+        notify: mergeNotify(config.hitlConfig?.notify, { slack: slackIntegration ? { integration: slackIntegration } : null }),
       };
     } else {
       // Disable: clear every approval gate and drop the hitl block.
@@ -217,6 +223,13 @@ export function GroupHitlEditor({
             idPrefix="group-approval-context"
           />
 
+          <SlackNotifyField
+            value={slackIntegration}
+            onChange={setSlackIntegration}
+            onInvalidChange={setSlackInvalid}
+            subject="group"
+          />
+
           {/* Granularity + on-rejection (TASK_FORCE only) */}
           {isTaskForce && (
             <>
@@ -256,7 +269,7 @@ export function GroupHitlEditor({
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={save}
-          disabled={update.isPending || timeoutInvalid || noPhaseSelected || contextInvalid}
+          disabled={update.isPending || timeoutInvalid || noPhaseSelected || contextInvalid || slackInvalid}
           data-testid="group-hitl-save"
         >
           {update.isPending ? <RefreshCw className="h-3 w-3 animate-spin me-1" /> : <Save className="h-3 w-3 me-1" />}

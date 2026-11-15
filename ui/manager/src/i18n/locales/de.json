@@ -4622,7 +4622,15 @@
     "argsViewFields": "Felder",
     "argsViewJson": "JSON",
     "argsViewRaw": "Roh",
-    "amendRedactedMarker": "Die geänderten Argumente enthalten noch <REDACTED>. Ersetzen Sie es durch den echten Wert oder genehmigen Sie ohne Änderung: eine Änderung wird genau so gesendet, wie sie dasteht."
+    "amendRedactedMarker": "Die geänderten Argumente enthalten noch <REDACTED>. Ersetzen Sie es durch den echten Wert oder genehmigen Sie ohne Änderung: eine Änderung wird genau so gesendet, wie sie dasteht.",
+    "slackNotifyEmpty": "Geben Sie eine Slack-Integration an oder schalten Sie die Slack-Karte aus.",
+    "slackNotifyPipe": "Der Name enthält '|', das Freigabe-Schaltflächen nicht transportieren können — benennen Sie die Integration um.",
+    "slackNotifyTooLong": "Höchstens {{max}} Zeichen.",
+    "slackNotifyEnableGroup": "Eine Slack-Freigabekarte posten, wenn diese Gruppe auf Freigabe wartet",
+    "slackNotifyEnableAgent": "Eine Slack-Freigabekarte posten, wenn dieser Agent auf Freigabe wartet",
+    "slackNotifyIntegration": "Name der Slack-Integration",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyHint": "Die genannte Slack-Kanalintegration postet dieselbe Freigabekarte wie bei einer in Slack gestarteten Pause — auch für geplante Läufe, Team-Kadenzen, Webhooks, REST und MCP. Ihre eigenen Einstellungen bestimmen den Kanal (hitlApprovalChannel), wer die Schaltflächen drücken darf (hitlApproverUserIds) und ob der Freigabekontext angezeigt wird. Die Karte wird aktualisiert, wenn die Anfrage an anderer Stelle entschieden wird."
   },
   "hitlReview": {
     "approveEdited": "Mit Änderungen genehmigen",

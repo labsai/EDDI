@@ -112,4 +112,56 @@ class PostgresSlackApprovalRecordStoreUnitTest {
                 .anyMatch(s -> s.contains("ADD COLUMN IF NOT EXISTS card_id")),
                 "a table created before card binding must gain the card_id column");
     }
+
+    @Test
+    void schema_addsTheMessageTsColumn_andReplacingAnExpiredRowClearsIt() throws Exception {
+        when(statement.executeUpdate()).thenReturn(1);
+        store.tryRecord("acme-int", "conv-1", "1000", "card-a", "C_APPROVAL");
+
+        ArgumentCaptor<String> ddlSql = ArgumentCaptor.forClass(String.class);
+        verify(ddl, atLeastOnce()).execute(ddlSql.capture());
+        assertTrue(ddlSql.getAllValues().stream().anyMatch(s -> s.contains("ADD COLUMN IF NOT EXISTS message_ts")));
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String insert = sql.getAllValues().stream().filter(s -> s.contains("INSERT")).findFirst().orElseThrow();
+        assertTrue(insert.contains("message_ts = NULL"), "a replaced expired row must not keep the earlier card's ts: " + insert);
+    }
+
+    @Test
+    void markPosted_updatesTheRowOfThatPause() throws Exception {
+        store.markPosted("acme-int", "conv-1", "1000", "1700000000.000100");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.startsWith("UPDATE") && s.contains("SET message_ts = ?")));
+        verify(statement).setString(1, "1700000000.000100");
+        verify(statement).setString(2, "acme-int");
+        verify(statement).setString(3, "conv-1");
+        verify(statement).setString(4, "1000");
+    }
+
+    @Test
+    void findPosted_readsOnlyTrackedLiveRows() throws Exception {
+        ResultSet rows = mock(ResultSet.class);
+        when(statement.executeQuery()).thenReturn(rows);
+        when(rows.next()).thenReturn(true, false);
+        when(rows.getString("integration_name")).thenReturn("acme-int");
+        when(rows.getString("subject")).thenReturn("conv-1");
+        when(rows.getString("pause_epoch")).thenReturn("1000");
+        when(rows.getString("card_id")).thenReturn("card-a");
+        when(rows.getString("approval_channel_id")).thenReturn("C_APPROVAL");
+        when(rows.getString("message_ts")).thenReturn("1700000000.000100");
+        Instant now = Instant.now();
+        when(rows.getTimestamp("created_at")).thenReturn(Timestamp.from(now));
+        when(rows.getTimestamp("expires_at")).thenReturn(Timestamp.from(now.plusSeconds(60)));
+
+        List<SlackApprovalRecord> records = store.findPosted(7);
+
+        assertEquals("1700000000.000100", records.get(0).messageTs());
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String select = sql.getAllValues().stream().filter(s -> s.contains("message_ts IS NOT NULL")).findFirst().orElseThrow();
+        assertTrue(select.contains("expires_at > ?") && select.contains("LIMIT ?"), select);
+        verify(statement).setInt(2, 7);
+    }
 }

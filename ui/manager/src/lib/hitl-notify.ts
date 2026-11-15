@@ -1,4 +1,5 @@
-import { MAX_NOTIFY_RECIPIENTS } from "./api/hitl";
+import { MAX_NOTIFY_INTEGRATION_NAME, MAX_NOTIFY_RECIPIENTS } from "./api/hitl";
+import type { HitlNotifyConfig } from "./api/hitl";
 
 /** Why a recipients draft cannot be saved; the UI turns it into a sentence. */
 export type NotifyRecipientsError = "empty" | "tooMany" | "invalid" | "duplicate";
@@ -83,4 +84,30 @@ export function parseNotifyRecipients(draft: string): ParsedNotifyRecipients {
     seen.add(key);
   }
   return { recipients, error: null, index: null };
+}
+
+/** Why a Slack integration name cannot be saved (`HitlConfigValidation.validateNotifySlack`). */
+export type SlackIntegrationError = "empty" | "pipe" | "tooLong";
+
+export function slackIntegrationProblem(name: string): SlackIntegrationError | null {
+  const trimmed = name.trim();
+  if (!trimmed) return "empty";
+  if (trimmed.length > MAX_NOTIFY_INTEGRATION_NAME) return "tooLong";
+  if (trimmed.includes("|")) return "pipe";
+  return null;
+}
+
+/**
+ * `hitlConfig.notify` with one channel replaced and the other kept — so
+ * switching email off does not drop the Slack card, and the reverse. `null`
+ * for a channel removes it; `null` overall when neither is left.
+ */
+export function mergeNotify(
+  current: HitlNotifyConfig | null | undefined,
+  update: Partial<HitlNotifyConfig>,
+): HitlNotifyConfig | null {
+  const next: HitlNotifyConfig = { ...(current ?? {}), ...update };
+  if (!next.email) delete next.email;
+  if (!next.slack) delete next.slack;
+  return next.email || next.slack ? next : null;
 }

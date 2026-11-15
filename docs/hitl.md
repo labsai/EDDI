@@ -86,7 +86,7 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
 | `maxRevisionsPerTurn` | integer, `1`..`10` | `3` | Under `REVISE`, how many revisions one turn may take. A rejection after that skips. |
 | `requirePlanHash` | boolean | `false` | Strict [plan binding](#plan-binding-planhash): a human decision without the pause's `planHash` is refused with `400`. `eddi.hitl.plan-hash.strict=true` turns it on for every agent and group. |
 
-The same `hitlConfig` also holds `toolApprovals` ([Tool-Level Approval Gating](#tool-level-approval-gating)), `review` ([HITL Review & Audit](hitl-review-and-audit.md)), `approvalContext` ([HITL Approval Card Context](hitl-approval-context.md)), `oversight` ([HITL Oversight](hitl-oversight.md)) and `notify` ([Email notifications](#email-notifications)).
+The same `hitlConfig` also holds `toolApprovals` ([Tool-Level Approval Gating](#tool-level-approval-gating)), `review` ([HITL Review & Audit](hitl-review-and-audit.md)), `approvalContext` ([HITL Approval Card Context](hitl-approval-context.md)), `oversight` ([HITL Oversight](hitl-oversight.md)) and `notify` ([Email notifications](#email-notifications), [Slack cards](#slack-cards-for-pauses-started-anywhere)).
 
 Validation happens at **save time** (and on ZIP import): a finite policy without a valid positive `approvalTimeout` (or a malformed duration like `"30m"`, or an overlong `pauseReason`) is rejected with an actionable 400 — it never degrades silently to wait-forever at runtime.
 
@@ -696,6 +696,37 @@ Behavior:
 - **Decisions are bound to the card that was posted** — the signature and approver list prove *which integration* a decision came from, not that the conversation named in the button belongs to it. So every approval card is recorded when it is posted (`slack_hitl_approval_records`, MongoDB or PostgreSQL — persisted, so it survives restarts and also keeps "one card per pause" across them), keyed by integration, subject (conversation id or `group:<id>`) and pause identity (`hitlPausedAt` / the group's `pausedAt`). Each record also holds a random **card id** (128 bits), generated before the record is written and embedded in that card's buttons (`<integration>|<subject>|<cardId>`). A decision is accepted only if the owning integration has a record for that subject **whose card id matches the clicked button**, and that record is for the pause the subject is in now. So a card only ever resolves the pause it was posted for: an approver clicking an old card ("delete file A") while a newer pause of the same conversation or group is live ("delete everything") does not approve the newer action — the old card is marked "already resolved". A subject the integration never posted a card for, a card id no record holds, and a button without a card id (a card posted before card binding) are refused and logged (`SLACK_HITL_DECISION_REFUSED`); resolve such a pause through REST/MCP, or — for a conversation — have its own user send another message in the paused thread, which posts a fresh card (a message from anyone else opens that person's own conversation, and a reply in a group discussion's thread does not post the group's card again, so a group pause is resolved through REST/MCP). Records expire after `eddi.slack.hitl.approval-record-retention` (default `30d`); a decision on an older card is refused — resolve it through REST/MCP, or have the conversation's own user send another message in the paused thread, which posts a fresh card (groups: REST/MCP only). If a card cannot be recorded it is posted **without** buttons (fail-closed), and so is a card whose pause could not be read yet (the pause had not been persisted when the card was built): without its pause identity it could only be matched to *some* pause, possibly a later one it does not show. Nothing is recorded for it, and the card says so in place of the buttons: for a conversation, its own user sending another message in the paused thread posts a card with buttons; a group pause is resolved through REST/MCP. The pause check and the resume are two steps, so the decision carries the checked pause as its `pauseId` and the engine re-checks it under the resume CAS: a resume and re-pause landing between the two is refused there, and the card is marked "already resolved". Since 6.8 the buttons also carry the [plan hash](#plan-binding-planhash) of the pause the card was posted for (a fourth field, `<integration>|<subject>|<cardId>|<planHash>`), so a click binds to that exact plan and Slack approvals work under strict plan binding; cards posted earlier carry none.
 - **Continuation push** — when the pause is resolved (human, Slack button, or `system:timeout`), the originating thread automatically receives the verdict and the resumed conversation's output — no polling. This works cross-pod: the resume fires an async CDI event (`HitlResumeCompletedEvent`) and the Slack observer resolves the thread from the persistent conversation mapping.
 - **Group discussions** — Slack-driven group discussions post pause/resume/cancel notices (and `member_pause_skipped` explanations) into their thread.
+- **Pauses started anywhere else** — a schedule, a team cadence, a webhook-triggered agent, REST or MCP: an agent or group that names an integration in `hitlConfig.notify.slack` gets the same approval card in that integration's `hitlApprovalChannel`. See [Slack cards for pauses started anywhere](#slack-cards-for-pauses-started-anywhere).
+
+### Slack cards for pauses started anywhere
+
+Everything above starts with a Slack message: the card is posted because the conversation or discussion came from a Slack thread. A pause from a scheduled run, a team cadence, a webhook-triggered agent, or a conversation started over REST, MCP or the Manager has no thread, so on its own it posts nothing and someone has to watch the Approvals page. Since 6.8 the agent or group can name the Slack integration that announces its pauses:
+
+```json
+{
+  "hitlConfig": {
+    "notify": {
+      "slack": { "integration": "ops-slack" }
+    }
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `notify.slack.integration` | — (required when `slack` is present) | The `name` of a Slack channel integration. Not blank, at most 255 characters, no `\|` (refused at save time with a 400). Agents and groups (`AgentGroupConfiguration.hitlConfig.notify`) both take it |
+| `eddi.slack.hitl.notify.default-integration` | unset — off | Deployment default: the integration used by every agent and group that sets no `notify.slack`. Without it and without `notify.slack`, nothing changes |
+| `eddi.slack.hitl.notify.sweep-interval` | `60s` | How often each instance checks its tracked cards for pauses that ended (below) |
+
+**The integration decides the rest.** The card goes to *its* `hitlApprovalChannel` (without one, nothing is posted and a WARN says so), posted with *its* bot token (never another integration's), with buttons only when it lists `hitlApproverUserIds`, the approval context only when it sets `hitlApprovalContext`, and its `teamId` workspace binding. The agent configuration picks an integration — never a channel, a token or an approver. A name that matches no Slack integration, or more than one, posts nothing and is logged when the pause would have used it.
+
+**The same card, the same security.** The card is built from the stored pause exactly like the Slack-started one: conversation, agent name, the designer's `pauseReason`, the timeout, for a `TOOL_CALL` pause the redacted tool-call preview, and the Edit & approve / Reject with reason modals. It is recorded before it is posted, with its own card id in the buttons, so every rule in [Decisions are bound to the card that was posted](#slack-integration) holds unchanged: the click is accepted only from this card, only for the pause it was posted for, only from that integration's approvers. Groups get the group card (`group:<id>`, phase approval).
+
+**One card per pause and integration.** A pause of a Slack-started conversation whose agent also names the *same* integration still gets one card — whichever path writes the record first posts it. A *different* integration posts a second card, in its own channel, as configured.
+
+**When the pause ends anywhere else** — the Manager, REST, MCP, a timeout, a cancel, a newer pause — the card's buttons are replaced by the outcome, so nobody approves from a stale card: a conversation's card at once (`HitlResumeCompletedEvent`: "✅ Approved by …", "⛔ Approval rejected …", "cancelled or expired"), every other card by a sweep on each instance (`eddi.slack.hitl.notify.sweep-interval`) that checks whether the card's subject is still in the card's pause. A subject that cannot be read is left for the next sweep. Cards posted by the Slack thread path itself are not tracked this way; clicking one after the pause ended marks it "already resolved", as before.
+
+**Observability.** `eddi_slack_hitl_notify_total{outcome="posted|duplicate|failed|no_integration|no_channel|no_token|resolved"}`.
 
 **Delegated/managed conversations** (agent-to-agent tools, MCP `chat_managed`): when a nested conversation pauses, the calling tool receives a structured `PAUSED_FOR_APPROVAL` result naming the conversation and reason instead of hanging — the delegated approval stays pending (it is *not* auto-cancelled; a reviewer decides, then the tool can be re-invoked).
 
@@ -776,8 +807,9 @@ the audit ledger is write-once, so the address itself is not written there. Ledg
 `DELETE /admin/gdpr/{userId}` and the export, matched through the user id when it is an address and the email the
 user directory recorded for that principal.
 
-**Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email; their approvals
-appear on the Approvals page and in Slack as before.
+**Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email — a group's
+`hitlConfig.notify.email` is refused at save time. Their approvals appear on the Approvals page, and in Slack through
+[`hitlConfig.notify.slack`](#slack-cards-for-pauses-started-anywhere).
 
 ## Email conversations
 

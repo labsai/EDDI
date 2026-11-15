@@ -4622,7 +4622,15 @@
     "argsViewFields": "フィールド",
     "argsViewJson": "JSON",
     "argsViewRaw": "そのまま",
-    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。"
+    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。",
+    "slackNotifyEmpty": "Slack 連携を指定するか、Slack カードをオフにしてください。",
+    "slackNotifyPipe": "名前に '|' が含まれています。承認ボタンでは扱えないため、連携の名前を変更してください。",
+    "slackNotifyTooLong": "{{max}} 文字以内で入力してください。",
+    "slackNotifyEnableGroup": "このグループが承認待ちになったら Slack に承認カードを投稿する",
+    "slackNotifyEnableAgent": "このエージェントが承認待ちになったら Slack に承認カードを投稿する",
+    "slackNotifyIntegration": "Slack 連携の名前",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyHint": "指定した Slack チャネル連携が、Slack から始まった一時停止と同じ承認カードを投稿します。スケジュール実行、チームのケイデンス、Webhook、REST、MCP でも同様です。チャネル (hitlApprovalChannel)、ボタンを押せる人 (hitlApproverUserIds)、承認コンテキストを表示するかどうかは、その連携自身の設定で決まります。リクエストが他の場所で決定されると、カードは更新されます。"
   },
   "hitlReview": {
     "approveEdited": "編集して承認",

@@ -4814,7 +4814,15 @@
     "argsViewFields": "الحقول",
     "argsViewJson": "JSON",
     "argsViewRaw": "خام",
-    "amendRedactedMarker": "لا تزال الوسائط المعدّلة تحتوي على <REDACTED>. استبدلها بالقيمة الحقيقية، أو وافق دون تعديل: يُرسل التعديل كما هو مكتوب تمامًا."
+    "amendRedactedMarker": "لا تزال الوسائط المعدّلة تحتوي على <REDACTED>. استبدلها بالقيمة الحقيقية، أو وافق دون تعديل: يُرسل التعديل كما هو مكتوب تمامًا.",
+    "slackNotifyEmpty": "حدّد تكامل Slack، أو أوقف بطاقة Slack.",
+    "slackNotifyPipe": "يحتوي الاسم على '|'، ولا تستطيع أزرار الموافقة حمله — أعد تسمية التكامل.",
+    "slackNotifyTooLong": "{{max}} حرفًا على الأكثر.",
+    "slackNotifyEnableGroup": "انشر بطاقة موافقة في Slack عندما تنتظر هذه المجموعة الموافقة",
+    "slackNotifyEnableAgent": "انشر بطاقة موافقة في Slack عندما ينتظر هذا الوكيل الموافقة",
+    "slackNotifyIntegration": "اسم تكامل Slack",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyHint": "ينشر تكامل قناة Slack المحدد بطاقة الموافقة نفسها التي يحصل عليها توقف بدأ من Slack — وكذلك للتشغيلات المجدولة وإيقاعات الفرق وخطافات الويب وREST وMCP. تحدد إعداداته الخاصة القناة (hitlApprovalChannel) ومن يمكنه الضغط على الأزرار (hitlApproverUserIds) وما إذا كان سياق الموافقة يظهر. تُحدَّث البطاقة عندما يُبتّ في الطلب في مكان آخر."
   },
   "hitlReview": {
     "approveEdited": "الموافقة مع التعديلات",

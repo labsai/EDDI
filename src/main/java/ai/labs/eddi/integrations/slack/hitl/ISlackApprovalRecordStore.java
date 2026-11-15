@@ -81,9 +81,20 @@ public interface ISlackApprovalRecordStore {
      *            when the record was written
      * @param expiresAt
      *            when it stops being honoured
+     * @param messageTs
+     *            the Slack {@code ts} of the posted card, set by
+     *            {@link ISlackApprovalRecordStore#markPosted} when the poster wants
+     *            the card updated once its pause is resolved elsewhere;
+     *            {@code null} otherwise
      */
     record SlackApprovalRecord(String integrationName, String subject, String pauseEpoch, String cardId,
-            String approvalChannelId, Instant createdAt, Instant expiresAt) {
+            String approvalChannelId, Instant createdAt, Instant expiresAt, String messageTs) {
+
+        /** A record whose card is not tracked for a resolution update. */
+        public SlackApprovalRecord(String integrationName, String subject, String pauseEpoch, String cardId,
+                String approvalChannelId, Instant createdAt, Instant expiresAt) {
+            this(integrationName, subject, pauseEpoch, cardId, approvalChannelId, createdAt, expiresAt, null);
+        }
 
         /**
          * Whether a clicked button carrying {@code presentedCardId} belongs to this
@@ -168,4 +179,22 @@ public interface ISlackApprovalRecordStore {
      * again rather than being suppressed until the record expires.
      */
     void delete(String integrationName, String subject, String pauseEpoch);
+
+    /**
+     * Remember the Slack {@code ts} of the card posted for this record, so the card
+     * can be updated when its pause is resolved somewhere else — in the Manager,
+     * over REST or MCP, by a timeout or a cancel. A record that no longer exists is
+     * left alone.
+     *
+     * @throws RuntimeException
+     *             on a storage failure
+     */
+    void markPosted(String integrationName, String subject, String pauseEpoch, String messageTs);
+
+    /**
+     * Live records whose card has a {@link SlackApprovalRecord#messageTs()} — the
+     * cards still to be updated when their pause is resolved — oldest first, at
+     * most {@code limit}.
+     */
+    List<SlackApprovalRecord> findPosted(int limit);
 }

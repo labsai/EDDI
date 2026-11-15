@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -127,5 +128,38 @@ class MongoSlackApprovalRecordStoreTest extends MongoTestBase {
         assertTrue(store.findBySubject(INT, SUBJECT).isEmpty());
         // After delete, the same pause can be recorded again (retry path).
         assertTrue(store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL"));
+    }
+
+    @Test
+    void markPosted_keepsTheCardTs_andFindPostedListsOnlyTrackedCards() {
+        store.tryRecord(INT, SUBJECT, "1000", "card-1000", "C_APPROVAL");
+        store.tryRecord(INT, "untracked", "1000", "card-u", "C_APPROVAL");
+        assertTrue(store.findPosted(10).isEmpty(), "a card without a ts is not tracked");
+
+        store.markPosted(INT, SUBJECT, "1000", "1700000000.000100");
+
+        List<SlackApprovalRecord> posted = store.findPosted(10);
+        assertEquals(1, posted.size());
+        assertEquals(SUBJECT, posted.get(0).subject());
+        assertEquals("1700000000.000100", posted.get(0).messageTs());
+        assertEquals("1700000000.000100", store.findBySubject(INT, SUBJECT).get(0).messageTs());
+    }
+
+    @Test
+    void markPosted_onAMissingRecord_writesNothing() {
+        store.markPosted(INT, SUBJECT, "1000", "1700000000.000100");
+        assertTrue(store.findPosted(10).isEmpty());
+        assertTrue(store.findBySubject(INT, SUBJECT).isEmpty());
+    }
+
+    @Test
+    void replacingAnExpiredRecord_dropsTheEarlierCardsTs() {
+        var shortLived = new MongoSlackApprovalRecordStore(getDatabase(), Duration.ofMillis(1));
+        assertTrue(shortLived.tryRecord(INT, "conv-ttl", "1000", "card-1000", "C_APPROVAL"));
+        shortLived.markPosted(INT, "conv-ttl", "1000", "1700000000.000100");
+        sleepPastExpiry();
+
+        assertTrue(store.tryRecord(INT, "conv-ttl", "1000", "card-new", "C_APPROVAL"));
+        assertNull(store.findBySubject(INT, "conv-ttl").get(0).messageTs());
     }
 }

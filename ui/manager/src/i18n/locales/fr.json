@@ -4670,7 +4670,15 @@
     "argsViewFields": "Champs",
     "argsViewJson": "JSON",
     "argsViewRaw": "Brut",
-    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle."
+    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle.",
+    "slackNotifyEmpty": "Indiquez une intégration Slack, ou désactivez la carte Slack.",
+    "slackNotifyPipe": "Le nom contient « | », que les boutons d'approbation ne peuvent pas transporter — renommez l'intégration.",
+    "slackNotifyTooLong": "{{max}} caractères au maximum.",
+    "slackNotifyEnableGroup": "Publier une carte d'approbation Slack quand ce groupe attend une approbation",
+    "slackNotifyEnableAgent": "Publier une carte d'approbation Slack quand cet agent attend une approbation",
+    "slackNotifyIntegration": "Nom de l'intégration Slack",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyHint": "L'intégration de canal Slack indiquée publie la même carte d'approbation qu'une pause démarrée depuis Slack — y compris pour les exécutions planifiées, les cadences d'équipe, les webhooks, REST et MCP. Ses propres réglages déterminent le canal (hitlApprovalChannel), qui peut appuyer sur les boutons (hitlApproverUserIds) et si le contexte d'approbation est affiché. La carte est mise à jour quand la demande est tranchée ailleurs."
   },
   "hitlReview": {
     "approveEdited": "Approuver avec modifications",

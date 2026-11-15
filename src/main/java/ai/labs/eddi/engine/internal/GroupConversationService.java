@@ -17,6 +17,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.engine.events.GroupHitlPauseCommittedEvent;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
@@ -92,6 +94,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -301,6 +304,37 @@ public class GroupConversationService implements IGroupConversationService, User
     /** Whether every human group decision must carry the pause's plan hash. */
     public boolean planHashStrict() {
         return planHashStrict;
+    }
+
+    /**
+     * {@link GroupHitlPauseCommittedEvent}, fired once a group pause is durable
+     * (see {@link #firePauseCommitted}). Field-injected; {@code null} in a directly
+     * constructed instance, which then fires nothing.
+     */
+    @Inject
+    Event<GroupHitlPauseCommittedEvent> groupHitlPauseCommittedEvent;
+
+    /**
+     * Announces a group pause that is now durable to asynchronous observers — the
+     * Slack pause notifier today. Called by
+     * {@code GroupHitlCoordinator.commitPause} after the commit; never throws,
+     * since the pause is already persisted and an observer's trouble is not the
+     * discussion's.
+     */
+    public void firePauseCommitted(String groupConversationId, Instant pausedAt) {
+        if (groupHitlPauseCommittedEvent == null || groupConversationId == null) {
+            return;
+        }
+        try {
+            String pauseId = HitlDecision.pauseIdOf(pausedAt);
+            if (pauseId == null) {
+                return; // no pause time: nothing an observer could match against
+            }
+            groupHitlPauseCommittedEvent.fireAsync(new GroupHitlPauseCommittedEvent(groupConversationId, pauseId));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not announce the committed pause of group conversation %s: %s", LogSanitizer.sanitize(groupConversationId),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     /**

@@ -734,6 +734,7 @@ eddi_hitl_approval_context_render_total     # approvalContext blocks rendered at
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
+eddi_slack_hitl_notify_total                # Slack approval cards for hitlConfig.notify.slack; tag: outcome (posted, duplicate, failed, no_integration, no_channel, no_token, resolved)
 ```
 
 ```text

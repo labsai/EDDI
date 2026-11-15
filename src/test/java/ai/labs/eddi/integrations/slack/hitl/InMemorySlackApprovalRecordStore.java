@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.slack.hitl;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -63,6 +64,28 @@ public class InMemorySlackApprovalRecordStore implements ISlackApprovalRecordSto
     @Override
     public void delete(String integrationName, String subject, String pauseEpoch) {
         records.remove(key(integrationName, subject, pauseEpoch));
+    }
+
+    @Override
+    public void markPosted(String integrationName, String subject, String pauseEpoch, String messageTs) {
+        records.computeIfPresent(key(integrationName, subject, pauseEpoch),
+                (k, r) -> new SlackApprovalRecord(r.integrationName(), r.subject(), r.pauseEpoch(), r.cardId(), r.approvalChannelId(),
+                        r.createdAt(), r.expiresAt(), messageTs));
+    }
+
+    @Override
+    public List<SlackApprovalRecord> findPosted(int limit) {
+        Instant now = Instant.now();
+        return records.values().stream()
+                .filter(r -> r.messageTs() != null && r.expiresAt().isAfter(now))
+                .sorted(Comparator.comparing(SlackApprovalRecord::createdAt))
+                .limit(Math.max(1, limit))
+                .toList();
+    }
+
+    /** The record for one pause, or null. */
+    public SlackApprovalRecord get(String integrationName, String subject, String pauseEpoch) {
+        return records.get(key(integrationName, subject, pauseEpoch));
     }
 
     public int size() {

@@ -1938,9 +1938,12 @@ public class AgentConfiguration {
 
         /**
          * Who is told when this agent pauses a conversation for approval —
-         * {@code notify.email.recipients} today. Absent = nobody is notified. The
-         * notification links to the Manager's approvals page and carries no
-         * conversation content; it confers no right to decide.
+         * {@code notify.email.recipients} (a mail that links to the Manager's approvals
+         * page, carries no conversation content and confers no right to decide) and
+         * {@code notify.slack.integration} (the named Slack integration's approval
+         * card, whose buttons its {@code hitlApproverUserIds} may press). Absent =
+         * nobody is mailed, and a card is posted only through the deployment default
+         * {@code eddi.slack.hitl.notify.default-integration}.
          *
          * @since 6.6.0
          */
