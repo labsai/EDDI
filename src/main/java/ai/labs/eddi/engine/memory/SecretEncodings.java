@@ -34,7 +34,9 @@ import java.util.regex.Pattern;
  * <li><b>base64</b> of its UTF-8 bytes — standard and URL-safe alphabet, each
  * with and without padding;</li>
  * <li><b>percent-encoding</b> — a space as {@code +} or {@code %20}, hex digits
- * in upper or lower case, {@code ~} escaped or literal;</li>
+ * in upper or lower case, {@code ~} escaped or literal, and the characters
+ * {@code URLEncoder} leaves literal ({@code *}, {@code -}, {@code .},
+ * {@code _}) left alone, only {@code *} escaped, or all four escaped;</li>
  * <li><b>JSON string escaping</b> (the text between the quotes) — {@code /}
  * escaped or not, non-ASCII characters literal or as {@code \}{@code uXXXX} in
  * either hex case;</li>
@@ -124,8 +126,12 @@ public final class SecretEncodings {
         String plus = URLEncoder.encode(value, StandardCharsets.UTF_8);
         for (String spaced : List.of(plus, plus.replace("+", "%20"))) {
             for (String tilde : List.of(spaced, spaced.replace("%7E", "~"))) {
-                forms.add(tilde);
-                forms.add(lowerHex(tilde));
+                // URLEncoder leaves * - . _ literal; stricter encoders escape them. Variants:
+                // none, only the asterisk (%2A), or all four.
+                for (String escaped : List.of(tilde, tilde.replace("*", "%2A"), escapeUnreservedMarks(tilde))) {
+                    forms.add(escaped);
+                    forms.add(lowerHex(escaped));
+                }
             }
         }
 
@@ -152,6 +158,10 @@ public final class SecretEncodings {
             end--;
         }
         forms.add(padded.substring(0, end));
+    }
+
+    private static String escapeUnreservedMarks(String percentEncoded) {
+        return percentEncoded.replace("*", "%2A").replace("-", "%2D").replace(".", "%2E").replace("_", "%5F");
     }
 
     private static String lowerHex(String percentEncoded) {

@@ -14,7 +14,7 @@ stored in conversation memory as it came**.
 `SecretEncodings` (new, next to `SecretValueScrubber`) expands a set of secrets into the needle set
 the scrubbers search for: every value of at least the minimum length also contributes its base64
 (standard and URL-safe, padded and unpadded), percent-encoding (`+` or `%20`, upper or lower hex,
-`~` escaped or literal), JSON string escaping (`/` escaped or not, non-ASCII literal or `\u`-escaped
+`~` escaped or literal, and the characters `URLEncoder` leaves literal — `*` `-` `.` `_` — left alone, only `*` escaped as `%2A`/`%2a`, or all four escaped), JSON string escaping (`/` escaped or not, non-ASCII literal or `\u`-escaped
 in either case) and HTML entity forms, and a whole `Basic <base64>` credential also contributes its
 decoded `user:password` and password. The set is built once per redaction and handed to the existing
 scrubber, so the walk itself is unchanged.

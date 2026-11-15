@@ -63,6 +63,23 @@ class SecretEncodingsTest {
         }
 
         @Test
+        @DisplayName("an asterisk may be escaped as %2A / %2a although URLEncoder leaves it literal")
+        void asteriskEscaped() {
+            Set<String> forms = SecretEncodings.encodedForms("abc*defgh");
+            assertTrue(forms.containsAll(List.of("abc%2Adefgh", "abc%2adefgh")), forms.toString());
+            assertTrue(SecretEncodings.withEncodedForms(List.of("abc*defgh"), 8).contains("abc%2Adefgh"));
+        }
+
+        @Test
+        @DisplayName("- . _ may be escaped too, alone or together with the asterisk")
+        void otherUnreservedMarksEscaped() {
+            Set<String> forms = SecretEncodings.encodedForms("a-b.c_d*efgh");
+            assertTrue(forms.containsAll(List.of(
+                    "a%2Db%2Ec%5Fd%2Aefgh", "a%2db%2ec%5fd%2aefgh", "a-b.c_d%2Aefgh", "a-b.c_d*efgh".replace("*", "%2a"))),
+                    forms.toString());
+        }
+
+        @Test
         @DisplayName("a literal + in the value is %2B, never confused with a space")
         void literalPlus() {
             Set<String> forms = SecretEncodings.encodedForms("a+b c+d-1234");
