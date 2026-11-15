@@ -119,7 +119,7 @@ describe("command palette page and action entries", () => {
       renderWithProviders(<CommandPalette />);
 
       fireEvent.click(await screen.findByText(label));
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(path));
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(path, undefined));
     });
   }
 });

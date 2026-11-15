@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vites
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { CommandPalette } from "@/components/shared/command-palette";
+import { pageNavigation } from "@eddi/app-kit/lib/app-paths";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 
 // cmdk uses ResizeObserver and scrollIntoView internally
@@ -61,6 +62,18 @@ describe("CommandPalette", () => {
     expect(screen.getAllByText("Agents").length).toBeGreaterThan(0);
     expect(screen.getByText("Workflows")).toBeInTheDocument();
     expect(screen.getByText("Resources")).toBeInTheDocument();
+  });
+
+  it("opens Workforce with a page navigation, since it is a separate app the Manager router cannot render", async () => {
+    const assign = vi.spyOn(pageNavigation, "assign").mockImplementation(() => {});
+    try {
+      useCommandPalette.setState({ isOpen: true });
+      renderWithProviders(<CommandPalette />);
+      await userEvent.click(screen.getByText("Workforce"));
+      expect(assign).toHaveBeenCalledWith("/workforce");
+    } finally {
+      assign.mockRestore();
+    }
   });
 
   it("shows Quick Actions section", () => {

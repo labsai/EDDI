@@ -66,7 +66,7 @@ describe("command palette — pages", () => {
     renderWithProviders(<CommandPalette />);
 
     fireEvent.click(screen.getByText("Create New Agent"));
-    expect(mockNavigate).toHaveBeenCalledWith("/manage/agents/wizard");
+    expect(mockNavigate).toHaveBeenCalledWith("/manage/agents/wizard", undefined);
   });
 });
 
