@@ -356,7 +356,7 @@ export function CreateConnectionDialog({
                     >
                       <option value="">{t("connections.presetNone", "None — fill in every field")}</option>
                       {CONNECTION_PRESETS.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
+                        <option key={preset.id} value={preset.id} data-testid={`create-connection-preset-option-${preset.id}`}>
                           {/* The JSON text is the fallback, so a new preset file works before it is translated. */}
                           {t(`connections.presets.${preset.id}.label`, preset.label)}
                         </option>

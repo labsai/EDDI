@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
+import i18n from "@/i18n/config";
 import { CreateConnectionDialog } from "@/components/connections/create-connection-dialog";
 
 /**
@@ -82,14 +83,13 @@ describe("CreateConnectionDialog — the auth type chooser", () => {
 });
 
 describe("CreateConnectionDialog — templates", () => {
-  it("offers the presets by their translated labels, and choosing one fills the draft", async () => {
+  it("offers the presets, and choosing one fills the draft", async () => {
     const user = userEvent.setup();
     await renderDialog();
 
     const chooser = screen.getByTestId("create-connection-preset");
-    // The label comes from the locale file, keyed by the preset id.
-    const google = within(chooser).getByRole("option", { name: "Google service account (JSON key)" });
-    expect(within(chooser).getByRole("option", { name: "Microsoft Entra app with a certificate" })).toBeInTheDocument();
+    const google = within(chooser).getByTestId("create-connection-preset-option-google-service-account");
+    expect(within(chooser).getByTestId("create-connection-preset-option-entra-app-certificate")).toBeInTheDocument();
 
     await user.selectOptions(chooser, google);
 
@@ -103,6 +103,30 @@ describe("CreateConnectionDialog — templates", () => {
         "true",
       ),
     );
+  });
+});
+
+describe("CreateConnectionDialog — template labels come from the locale", () => {
+  it("renders the translated label of a preset, not the JSON fallback", async () => {
+    // A sentinel bundle proves the option text is looked up by key: with the
+    // translation call removed the JSON fallback would be shown instead.
+    const key = "google-service-account";
+    const original = i18n.getResource(i18n.language, "translation", `connections.presets.${key}.label`);
+    i18n.addResourceBundle(
+      i18n.language,
+      "translation",
+      { connections: { presets: { [key]: { label: "Sentinel template label" } } } },
+      true,
+      true,
+    );
+    try {
+      await renderDialog();
+      expect(
+        screen.getByTestId(`create-connection-preset-option-${key}`),
+      ).toHaveTextContent("Sentinel template label");
+    } finally {
+      i18n.addResource(i18n.language, "translation", `connections.presets.${key}.label`, original as string);
+    }
   });
 });
 
