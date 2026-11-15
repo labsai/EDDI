@@ -68,4 +68,30 @@ class UserMemoryWriteRulesTest {
     void categoryDefault() {
         assertEquals("fact", UserMemoryWriteRules.withDefaults(entry("k", "v", null, Visibility.global, null, List.of())).category());
     }
+
+    @Test
+    @DisplayName("withDefaults stores an edited contested or superseded entry as ACCEPTED, with or without a category")
+    void withDefaultsClearsTheVerdict() {
+        var contested = entry("k", "new value", "fact", Visibility.self, "a", List.of()).withAssessment(UserMemoryEntry.Assessment.CONTESTED,
+                null);
+        var normalized = UserMemoryWriteRules.withDefaults(contested);
+        assertEquals(UserMemoryEntry.Assessment.ACCEPTED, normalized.assessment());
+        assertFalse(normalized.conflicted());
+
+        var superseded = entry("k", "v", null, Visibility.self, "a", List.of()).withAssessment(UserMemoryEntry.Assessment.SUPERSEDED, "x");
+        var defaulted = UserMemoryWriteRules.withDefaults(superseded);
+        assertEquals("fact", defaulted.category());
+        assertEquals(UserMemoryEntry.Assessment.ACCEPTED, defaulted.assessment());
+        assertNull(defaulted.supersededBy());
+    }
+
+    @Test
+    @DisplayName("withDefaults clears sourceEntryIds, with or without a category: only Dream records provenance")
+    void withDefaultsClearsSourceEntryIds() {
+        var withCategory = entry("k", "v", "fact", Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withCategory).sourceEntryIds());
+
+        var withoutCategory = entry("k", "v", null, Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withoutCategory).sourceEntryIds());
+    }
 }

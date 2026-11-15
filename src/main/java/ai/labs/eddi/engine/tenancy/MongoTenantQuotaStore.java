@@ -37,7 +37,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MongoDB-backed tenant quota store. Uses {@code findOneAndModify} for atomic
+ * MongoDB-backed tenant quota store. Uses {@code findOneAndUpdate} for atomic
  * counter operations — safe for multi-instance deployments.
  * <p>
  * Collections:

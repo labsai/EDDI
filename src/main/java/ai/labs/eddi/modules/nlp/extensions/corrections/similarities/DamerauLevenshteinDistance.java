@@ -23,8 +23,9 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
      *            Source input string
      * @param target
      *            Target input string
-     * @return The number of substitutions it would take to make the source string
-     *         identical to the target string
+     * @return The number of insertions, deletions, substitutions and adjacent
+     *         transpositions it would take to make the source string identical to
+     *         the target string
      */
     public int calculate(String source, String target) {
         // If both strings are empty, I'm of the opinion that

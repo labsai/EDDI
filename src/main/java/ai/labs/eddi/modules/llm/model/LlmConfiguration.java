@@ -427,9 +427,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Limits for the agent-operations tools ({@code read_team_scorecard},
-         * {@code propose_team_budget_change}, {@code schedule_followup}). The tools
-         * themselves are off unless named in {@code builtInToolsWhitelist}; this only
-         * tunes their caps. See {@link AgentOpsConfig}.
+         * {@code propose_team_budget_raise}, {@code propose_team_budget_transfer},
+         * {@code schedule_followup}). The tools themselves are off unless their keys
+         * ({@code team_scorecard}, {@code propose_team_budget},
+         * {@code schedule_followup}) are named in {@code builtInToolsWhitelist}; this
+         * only tunes their caps. See {@link AgentOpsConfig}.
          *
          * @since 6.7.0
          */
@@ -2841,7 +2843,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Phrases indicating refusal (scored {@code refusalScore}). */
         private List<String> refusalPhrases;
 
-        /** Responses shorter than this many characters score {@code shortScore}. */
+        /**
+         * Responses shorter than this many characters score {@code shortScore}. Default
+         * 20.
+         */
         private Integer shortLengthThreshold;
 
         /** Score assigned to very short responses. Default 0.3. */
@@ -2999,6 +3004,28 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String summarizationPrompt;
 
         /**
+         * When true, the summarizer is told to end every point with the conversation
+         * steps it came from ({@code [turns 4-7]}, numbered as
+         * {@code conversationRecall} reads them), to copy numbers verbatim and to write
+         * "unclear in source" rather than guess — and its answer is checked, without a
+         * model, before it is stored: every citation must lie in the summarized range
+         * and every number must appear verbatim in the turns it cites. Off by default;
+         * while off, the check never runs and the prompt is unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What happens to a summary that fails the {@link #citeSources} check:
+         * {@code keep} (store it anyway — the default), {@code retry_once} (one more
+         * summarizer call with the problems listed, screened and spend-checked like the
+         * first; if that fails too, as {@code fallback_to_previous}) or
+         * {@code fallback_to_previous} (discard it; the previous summary and its
+         * boundary stay, and the next turn tries again). Unknown values log a WARN and
+         * act as {@code keep}. Ignored while {@code citeSources} is false.
+         */
+        private String onValidationFailure = "keep";
+
+        /**
          * Validate and sanitize configuration values. Enforces sensible floor values to
          * prevent IndexOutOfBoundsException (negative window), wasteful LLM calls (zero
          * window triggers every turn), and NPE (null provider).
@@ -3103,6 +3130,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
     }
 
