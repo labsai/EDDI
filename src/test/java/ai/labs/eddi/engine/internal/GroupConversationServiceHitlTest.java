@@ -1093,6 +1093,14 @@ class GroupConversationServiceHitlTest {
             // Both tasks should now be approved (not still AWAITING_APPROVAL)
             assertFalse(result.getTaskList().hasAwaitingApproval(),
                     "All tasks should be auto-approved when TASK pauseType + APPROVED + null taskApprovals");
+            // The timeout decider is recorded per task, so a cadence writeback can tell
+            // it from a person's approval (hitlConfig.approvalCompletesBacklogTask).
+            for (var task : tasks) {
+                var approval = result.getTaskList().approvalOf(task.id());
+                assertNotNull(approval, "approval recorded for " + task.subject());
+                assertEquals("system:timeout", approval.decidedBy());
+                assertFalse(approval.byPerson());
+            }
         }
     }
 
