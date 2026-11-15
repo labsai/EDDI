@@ -176,7 +176,10 @@ public final class VoteTallyEngine {
                     next++;
                 }
                 if (next >= lines.size() || lines.get(next).length() > MAX_OPTION_LINE_LENGTH || optionLine(lines.get(next)) != null) {
-                    continue; // no text for this label; a following option line is left for the loop
+                    // A label with no text — last in the synthesis, or followed by
+                    // another option — leaves the choice set incomplete: no vote.
+                    LOGGER.debugf("Synthesis options rejected: option line %d has no text", i + 1);
+                    return List.of();
                 }
                 String continuation = lines.get(next).strip();
                 for (int markers = 0; markers < 2 && !continuation.isEmpty()
@@ -186,9 +189,10 @@ public final class VoteTallyEngine {
                 text = optionText(continuation);
                 i = next;
             }
-            if (!text.isEmpty()) {
-                options.add(text);
+            if (text.isEmpty()) {
+                return List.of(); // the continuation line held only emphasis markers
             }
+            options.add(text);
         }
         return options;
     }

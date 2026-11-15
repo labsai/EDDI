@@ -153,6 +153,29 @@ docs: [`group-conversations.md`](../group-conversations.md), [`passing-context-i
 [`GroupContextBuilder.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupContextBuilder.java);
 docs: [`group-conversations.md`](../group-conversations.md).
 
+## 🔒 fix(groups): second review round — unbreakable fences, unambiguous subjects, no empty last option (2026-11-15)
+
+**Repo:** EDDI (`fix/group-engine-hardening`, PR #1395)
+
+- **Fences:** `PeerContentGuard` broke a triple-backtick fence with `String.replace`, which left a
+  fence behind in a run of four or more backticks — enough to close a quoted block
+  early. `breakFences` now breaks every run in one linear, idempotent pass, used
+  by `fenced`, `content` and `speaker`, so a bid subject shown once matches when a
+  member echoes it.
+- **Bid subjects:** two announced subjects that show as the same line
+  (`Review\nlogs`, `Review logs`) match no bid; both tasks fall back to ROLE.
+- **VERIFY prompt:** the planner-written subject (on one line) and description are
+  fenced like the result, the assignee name reduced to one line; a verdict naming
+  the subject as shown still lands on its task, and an ambiguous one on neither.
+- **Votes:** a label with no text rejects the synthesis even when it is the last
+  option (`Option A: Adopt\nOption B:` used to give `["Adopt"]`).
+
+**Files:** [`PeerContentGuard.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/PeerContentGuard.java),
+[`TaskBidEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/TaskBidEngine.java),
+[`TaskForceEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/TaskForceEngine.java),
+[`VoteTallyEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/VoteTallyEngine.java);
+docs: [`group-conversations.md`](../group-conversations.md).
+
 ```decision-log
 | 2026-11-12 | A `LAST_SYNTHESIS` vote with option labels out of sequence does not run | A skipped option line shifted every later label onto another option's text | Carrying a label-to-text map through ballot resolution: the options are a plain list in every consumer (prompt, tally, tie-break), so a map would touch all of them |
 | 2026-11-11 | `taskListConfig.onUnparseableVerdict` defaults to PASS, FAIL recommended | VERIFY auto-verified every task when the verdict was unreadable | Defaulting to FAIL: the fail-open was documented behaviour, so flipping it would break existing groups silently |

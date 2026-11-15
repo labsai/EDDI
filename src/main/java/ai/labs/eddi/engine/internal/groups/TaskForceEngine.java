@@ -955,9 +955,11 @@ public class TaskForceEngine {
         data.put("displayName", verifier.displayName());
         List<Map<String, Object>> taskData = completedTasks.stream().map(t -> {
             Map<String, Object> td = new LinkedHashMap<>();
-            td.put("subject", t.subject());
-            td.put("description", t.description());
-            td.put("assignedDisplayName", t.assignedDisplayName());
+            // Planner-written subject and description are quoted like the result; the
+            // subject on one line, the form verdictTarget matches a verdict against.
+            td.put("subject", PeerContentGuard.fenced(TaskBidEngine.subjectLine(t.subject())));
+            td.put("description", PeerContentGuard.fenced(t.description()));
+            td.put("assignedDisplayName", PeerContentGuard.speaker(t.assignedDisplayName()));
             td.put("result", t.result() != null ? PeerContentGuard.fenced(t.result()) : "(no result)");
             return td;
         }).collect(Collectors.toList());
@@ -1229,8 +1231,9 @@ public class TaskForceEngine {
                     String feedback = stringOrNull(map.get("feedback"));
 
                     if (subject != null) {
+                        TaskItem target = verdictTarget(completedTasks, subject);
                         for (TaskItem task : completedTasks) {
-                            if (!task.subject().equalsIgnoreCase(subject)) {
+                            if (task != target) {
                                 continue;
                             }
                             // Live status, not the snapshot's: `completedTasks` was
@@ -1311,6 +1314,32 @@ public class TaskForceEngine {
      *            a value read from a deserialized JSON map
      * @return its string form, or null
      */
+    /**
+     * The task a verdict entry's {@code subject} names: the task with that exact
+     * subject (any case) or, failing that, the one task whose subject shows as that
+     * line in the VERIFY prompt ({@link TaskBidEngine#subjectLine}). Two tasks that
+     * show as the same line match neither, so the verdict cannot land on the wrong
+     * one.
+     */
+    static TaskItem verdictTarget(List<TaskItem> tasks, String subject) {
+        for (TaskItem task : tasks) {
+            if (task.subject() != null && task.subject().equalsIgnoreCase(subject)) {
+                return task;
+            }
+        }
+        String shown = TaskBidEngine.subjectLine(subject);
+        TaskItem match = null;
+        for (TaskItem task : tasks) {
+            if (TaskBidEngine.subjectLine(task.subject()).equalsIgnoreCase(shown)) {
+                if (match != null) {
+                    return null;
+                }
+                match = task;
+            }
+        }
+        return match;
+    }
+
     private static String stringOrNull(Object value) {
         return value != null ? String.valueOf(value) : null;
     }

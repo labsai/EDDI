@@ -229,6 +229,18 @@ class VoteTallyEngineTest {
     }
 
     @Test
+    @DisplayName("an empty last option rejects the synthesis instead of leaving an incomplete choice set")
+    void resolveOptions_emptyFinalOption_rejectsTheSynthesis() {
+        // "Option B:" used to be skipped, so A could win a vote B was never in.
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Adopt\nOption B:"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Adopt\nOption B:\n\n   \n"));
+        assertEquals(List.of(), VoteTallyEngine.synthesisOptions("Option A: Adopt\n**Option B:**\n**"),
+                "a continuation line of emphasis markers only is no text either");
+        assertEquals(List.of("Adopt", "Stay"), VoteTallyEngine.synthesisOptions("Option A: Adopt\nOption B:\nStay"),
+                "a label whose text follows on the next line is still complete");
+    }
+
+    @Test
     @DisplayName("the option cap truncates the tail only: labels before it keep their text, labels after it resolve to nothing")
     void resolveOptions_capDoesNotShiftLabels() {
         var synthesis = new StringBuilder();

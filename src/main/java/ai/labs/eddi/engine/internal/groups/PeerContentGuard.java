@@ -53,6 +53,8 @@ final class PeerContentGuard {
     static final String FENCE = "```";
     /** {@link #FENCE} with a zero-width space (U+200B) after its first backtick. */
     static final String BROKEN_FENCE = "`​``";
+    /** The character {@link #BROKEN_FENCE} carries after its first backtick. */
+    private static final char ZERO_WIDTH_SPACE = BROKEN_FENCE.charAt(1);
 
     private static final String ENTRY_CUT_NOTE = "\n[... %d more characters not shown]";
     private static final String DIGEST_CUT_NOTE = "[%d earlier entries not shown: the quoted discussion is over %d characters]";
@@ -103,7 +105,7 @@ final class PeerContentGuard {
         if (text == null) {
             return null;
         }
-        String safe = text.replace(FENCE, BROKEN_FENCE);
+        String safe = breakFences(text);
         if (safe.length() <= MAX_ENTRY_CHARS) {
             return safe;
         }
@@ -122,7 +124,45 @@ final class PeerContentGuard {
      * have their own bounds where they need one.
      */
     static String fenced(String text) {
-        return FENCE + "\n" + (text == null ? "" : text.replace(FENCE, BROKEN_FENCE)) + "\n" + FENCE;
+        return FENCE + "\n" + (text == null ? "" : breakFences(text)) + "\n" + FENCE;
+    }
+
+    /**
+     * {@code text} with no three backticks in a row: every run of three or more is
+     * broken with zero-width spaces ({@code ```} becomes {@link #BROKEN_FENCE}; a
+     * longer run gets a zero-width space after its first backtick and after every
+     * second one from there). {@code String.replace(FENCE, …)} was not enough — it
+     * left a fence behind in a run of four or more, which then closed the quoted
+     * block early. One linear pass, and idempotent: applied twice, the text does
+     * not change, so a value broken once can be shown and matched again.
+     */
+    static String breakFences(String text) {
+        if (text == null || !text.contains(FENCE)) {
+            return text;
+        }
+        var sb = new StringBuilder(text.length() + 8);
+        int i = 0;
+        int length = text.length();
+        while (i < length) {
+            if (text.charAt(i) != '`') {
+                sb.append(text.charAt(i++));
+                continue;
+            }
+            int end = i;
+            while (end < length && text.charAt(end) == '`') {
+                end++;
+            }
+            int run = end - i;
+            sb.append('`');
+            for (int k = 1; k < run; k++) {
+                if (run >= 3 && k % 2 == 1) {
+                    sb.append(ZERO_WIDTH_SPACE);
+                }
+                sb.append('`');
+            }
+            i = end;
+        }
+        return sb.toString();
     }
 
     /**
@@ -150,7 +190,7 @@ final class PeerContentGuard {
         if (!sb.isEmpty() && Character.isHighSurrogate(sb.charAt(sb.length() - 1))) {
             sb.setLength(sb.length() - 1);
         }
-        return sb.toString().replace(FENCE, BROKEN_FENCE).strip();
+        return breakFences(sb.toString()).strip();
     }
 
     private static boolean isEntryList(List<?> list) {

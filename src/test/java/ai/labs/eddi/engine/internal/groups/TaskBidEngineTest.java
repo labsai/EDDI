@@ -185,6 +185,33 @@ class TaskBidEngineTest {
         assertEquals(hostile, bids.getFirst().taskSubject(), "the bid lands on the task's real subject");
     }
 
+    @Test
+    @DisplayName("a subject with four backticks is escaped once: the shown line still matches its task")
+    void buildBidPrompt_fourBackticks_escapedOnce() {
+        String subject = "Run ````shell```` step";
+        var prompt = TaskBidEngine.buildBidPrompt(List.of(new TaskItem(subject, "desc", 0)), BOB, "Q");
+        String shown = TaskBidEngine.subjectLine(subject);
+
+        assertEquals(shown, TaskBidEngine.subjectLine(shown), "escaping is idempotent");
+        assertFalse(shown.contains("```"), "no fence survives in the shown subject: " + shown);
+        assertTrue(prompt.contains("subject: " + shown + "\n"), "the prompt shows exactly that line: " + prompt);
+        var bids = TaskBidEngine.parseBids("{\"bids\": [{\"subject\": " + jsonString(shown) + ", \"confidence\": 0.5}]}", BOB,
+                Set.of(subject));
+        assertEquals(1, bids.size(), "echoing the shown subject matches the task");
+        assertEquals(subject, bids.getFirst().taskSubject());
+    }
+
+    @Test
+    @DisplayName("two subjects that show as the same line get no bids, so both fall back to ROLE")
+    void parseBids_ambiguousShownSubjects_areDropped() {
+        var bids = TaskBidEngine.parseBids(
+                "{\"bids\": [{\"subject\": \"Review logs\", \"confidence\": 0.9}, {\"subject\": \"Write the migration\", \"confidence\": 0.4}]}",
+                BOB, Set.of("Review\nlogs", "Review logs", "Write the migration"));
+
+        assertEquals(1, bids.size(), "the ambiguous subject must not land on either task: " + bids);
+        assertEquals("Write the migration", bids.getFirst().taskSubject(), "a unique subject still matches");
+    }
+
     private static String jsonString(String value) {
         return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }

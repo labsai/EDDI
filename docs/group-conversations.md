@@ -349,7 +349,7 @@ peer-hidden until their phase completes (commit-reveal).
   `Option D. …`, in any letter case. The labels must run in sequence — A, B, C…
   or 1, 2, 3… — because a ballot may vote by label and the label is resolved by
   position: a synthesis with a gap, a repeat, an option line over 1,000
-  characters or a label with no text before the next option yields no options,
+  characters or a label with no text (the last one included) yields no options,
   and the vote does not run. At most 32 options are read.
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method

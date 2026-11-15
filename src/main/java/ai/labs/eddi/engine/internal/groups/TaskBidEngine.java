@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -138,7 +139,9 @@ public final class TaskBidEngine {
             space = false;
             sb.append(c);
         }
-        return sb.toString().replace(PeerContentGuard.FENCE, PeerContentGuard.BROKEN_FENCE);
+        // Idempotent (PeerContentGuard.breakFences): the prompt fences this line
+        // again, and a bid echoing what it shows must map back to the same key.
+        return PeerContentGuard.breakFences(sb.toString());
     }
 
     /**
@@ -159,8 +162,20 @@ public final class TaskBidEngine {
         }
         // Keyed by the one-line form the prompt shows (buildBidPrompt), so a bid that
         // echoes it lands on the task's real subject.
-        Map<String, String> canonicalBySubject = announcedSubjects.stream()
-                .collect(Collectors.toMap(s -> subjectLine(s).toLowerCase(Locale.ROOT), s -> s, (a, b) -> a));
+        // Two announced subjects that show as the same line ("Review\nlogs" and
+        // "Review logs") cannot be told apart by a bid, so neither key is kept: their
+        // tasks get no bids and fall back to ROLE assignment, rather than one task
+        // receiving bids meant for the other.
+        Map<String, String> canonicalBySubject = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
+        for (String announced : announcedSubjects) {
+            String key = subjectLine(announced).toLowerCase(Locale.ROOT);
+            String prior = canonicalBySubject.putIfAbsent(key, announced);
+            if (prior != null && !prior.equals(announced)) {
+                ambiguous.add(key);
+            }
+        }
+        ambiguous.forEach(canonicalBySubject::remove);
         List<Bid> bids = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (JsonNode b : node.path("bids")) {
