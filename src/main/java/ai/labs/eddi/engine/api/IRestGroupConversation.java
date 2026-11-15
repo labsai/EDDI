@@ -187,11 +187,9 @@ public interface IRestGroupConversation {
                description = "Re-run all discussion phases with SSE event streaming for progress. "
                        + "Emits round_start (new round marker) followed by the same events as the "
                        + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
-                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL events "
                        + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
                        + "human_input_requested). NOTE: "
-                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
-                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
                        + "'attachments' are NOT supported on a continuation and are rejected with a "
                        + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")

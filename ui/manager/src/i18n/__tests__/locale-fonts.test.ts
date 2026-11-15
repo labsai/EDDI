@@ -107,3 +107,18 @@ describe("main.tsx", () => {
     expect(main).toMatch(/installLocaleFonts\(i18n\)/);
   });
 });
+
+describe("index.css", () => {
+  const css = readFileSync(resolve(__dirname, "../../index.css"), "utf8");
+
+  it.each([
+    [":root:lang(ja)", "JP"],
+    [":root:lang(ko)", "KR"],
+    [":root:lang(zh)", "SC"],
+    [":root:lang(zh-TW)", "TC"],
+  ])("%s puts its own CJK family first, so an earlier locale's glyphs lose", (selector, family) => {
+    const rule = css.slice(css.indexOf(selector));
+    const stack = /--font-sans:\s*([^;]+);/.exec(rule)![1]!;
+    expect(stack.startsWith(`'Noto Sans ${family} Variable'`)).toBe(true);
+  });
+});

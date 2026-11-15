@@ -1,6 +1,6 @@
 # Cryptography and Post-Quantum Readiness
 
-> **Status:** Inventory current as of 2026-10-15. Guarded by `CryptoInventoryTest`.
+> **Status:** Inventory current as of 2026-11-06. Guarded by `CryptoInventoryTest`.
 
 This page lists every cryptographic algorithm EDDI uses, what each one protects, and how exposed it is to a future quantum computer. It also describes what EDDI is doing about that exposure.
 
@@ -38,10 +38,14 @@ Two attacks follow from that:
 | Agent identity and signed inter-agent envelopes | **Ed25519** | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
 | Agent signature on audit entries | **Ed25519**, over the entry's HMAC | `engine/audit/AuditLedgerService` (via `AgentSigningService`) | ❌ Classical signature |
 | Slack request verification | `HmacSHA256` (scheme defined by Slack) | `integrations/slack/SlackSignatureVerifier` | ✅ |
+| Signed webhook channel: inbound request verification | `HmacSHA256` (`X-Eddi-Signature` or a provider's scheme) | `integrations/webhook/WebhookSignatureVerifier` (via `integrations/channels/HmacSignatures`) | ✅ |
+| Alert webhook delivery: signature on outbound alerts | `HmacSHA256` over timestamp and body | `engine/alerts/AlertSenders` (via `integrations/channels/HmacSignatures`) | ✅ |
+| Cluster control-plane messages (node RPCs, replies, cluster events) | `HmacSHA256` signature with a shared `eddi.cluster.signing.key`, body hashed with `SHA-256`; user-id hashes on NATS sealed with `AES/GCM/NoPadding` under a key derived from it | `engine/cluster/ClusterMessageSigner` (see [Clustering](clustering.md)) | ✅ |
+| HITL oversight sampling decision | `HmacSHA256` keyed from the audit signing key (or a random per-node key) | `engine/hitl/oversight/samples/SamplingKey` | ✅ |
 | Inbound mail sender authentication: DKIM signature **verification** only (EDDI never signs mail) | RSA-SHA256 (`Signature` `SHA256withRSA`, keys from `KeyFactory` `RSA`, at least 1024 bits; `rsa-sha1` refused) and **Ed25519** (RFC 8463), body hash `SHA-256` | `engine/mail/DkimVerifier` | ❌ Classical signature, chosen by the sending domain rather than by EDDI |
 | Content hashes, cache keys, idempotency and dedup keys | `SHA-256` | `MessageDigest` call sites across the codebase | ✅ Not used for secrecy |
 | HITL plan binding — the `planHash` a decision must match (integrity of what an approval lets run, not secrecy) | `SHA-256` over a canonical JSON document; a tool-call plan includes a 128-bit per-pause nonce from `SecureRandom`, never served, so the published hash is no guessing oracle over the raw arguments | `engine/hitl/HitlPlanHash` | ✅ |
-| NATS client TLS context | `SSLContext` `TLS` with the JDK's default trust and key managers | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
+| NATS client TLS context | `SSLContext` `TLS` with the configured NATS key and trust stores, or the JDK defaults when none are set | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
 | OIDC / JWT verification | RS256, ES256 and similar, as chosen by the issuer (for example Keycloak) | `quarkus-oidc` configuration | ❌ Classical signature, decided by the identity provider rather than by EDDI |
 | Inbound TLS (HTTP server) | JDK JSSE through Vert.x | `quarkus.http.ssl*` configuration, or a reverse proxy | ❌ Classical key exchange |
 | Outbound TLS (LLM providers, HTTP calls, MCP, A2A, Slack, agent sync) | JDK JSSE (`java.net.http.HttpClient`) and Vert.x | — | ❌ Classical key exchange |
@@ -51,7 +55,7 @@ All algorithms come from the JDK's own providers. BouncyCastle is on the classpa
 
 ## What is quantum-safe today
 
-**Safe:** everything symmetric, which covers the secrets vault, the vault checksums, the HMAC integrity of the audit ledger, and Slack verification.
+**Safe:** everything symmetric, which covers the secrets vault, the vault checksums, the HMAC integrity of the audit ledger, cluster message signing, and the Slack, webhook and alert signatures.
 
 **Not yet safe:** the Ed25519 agent signatures, and every TLS connection. TLS is the more urgent of the two, because it is exposed to harvest-now-decrypt-later.
 
