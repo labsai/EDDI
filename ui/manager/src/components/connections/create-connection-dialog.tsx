@@ -175,6 +175,9 @@ export function CreateConnectionDialog({
     const preset = CONNECTION_PRESETS.find((candidate) => candidate.id === id);
     if (!preset) return;
     setDraft((prev) => applyPreset(preset, prev));
+    // An origin typed for the previous configuration but never committed to a
+    // chip must not ride into the preset's allowlist through effectiveDraft.
+    setPendingOrigin("");
   };
 
   const selectedPreset = CONNECTION_PRESETS.find((preset) => preset.id === presetId);

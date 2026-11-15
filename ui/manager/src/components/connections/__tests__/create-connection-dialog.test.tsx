@@ -104,6 +104,58 @@ describe("CreateConnectionDialog — templates", () => {
       ),
     );
   });
+  it("drops an origin typed for the previous configuration when a preset is applied", async () => {
+    const user = userEvent.setup();
+    let sent: Record<string, unknown> | null = null;
+    server.use(
+      http.post("*/connectionstore/connections", async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/connectionstore/connections/new-1?version=1" },
+        });
+      }),
+    );
+    await renderDialog();
+
+    // Leave text in the origin box that blur cannot commit: a valid origin
+    // becomes a chip on blur (which the preset replaces), but one with no
+    // scheme stays pending.
+    await toCredentials(user);
+    await user.type(screen.getByTestId("create-connection-header-name"), "X-Api-Key");
+    await user.type(
+      screen.getByTestId("create-connection-header-value-secret-input"),
+      "${{vault:notion-key}",
+    );
+    await user.click(screen.getByTestId("create-connection-next"));
+    await user.type(screen.getByTestId("create-connection-origins-input"), "stale.example.com");
+
+    // Back to the basics, apply a preset, then return to a static key (a type
+    // switch keeps the preset's allowlist).
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const chooser = screen.getByTestId("create-connection-preset");
+    await user.selectOptions(
+      chooser,
+      within(chooser).getByTestId("create-connection-preset-option-google-service-account"),
+    );
+    await user.click(screen.getByTestId("auth-type-choice-STATIC"));
+
+    await user.click(screen.getByTestId("create-connection-next"));
+    await screen.findByTestId("create-connection-header-name");
+    await user.type(screen.getByTestId("create-connection-header-name"), "X-Api-Key");
+    await user.type(
+      screen.getByTestId("create-connection-header-value-secret-input"),
+      "${{vault:google-key}",
+    );
+    await user.click(screen.getByTestId("create-connection-next"));
+
+    expect(screen.getByTestId("create-connection-origins-input")).toHaveValue("");
+    await user.click(screen.getByTestId("create-connection-submit"));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.baseUrlAllowlist).toEqual(["https://www.googleapis.com"]);
+  });
 });
 
 describe("CreateConnectionDialog — template labels come from the locale", () => {
