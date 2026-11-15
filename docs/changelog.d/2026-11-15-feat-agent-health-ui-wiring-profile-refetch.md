@@ -47,3 +47,16 @@ had saved since. Two changes close this:
 
 New test: "a reopening asks the server again even when the app's cache would still call the profile fresh". It runs
 with `staleTime: 30_000` and fails without the change.
+
+## 🐛 fix(manager): a reopened health profile editor starts its own request (2026-11-15)
+
+**Repo:** EDDI (`feat/agent-health-ui-wiring`)
+
+### What changed and why
+
+Review finding on PR #1390. Reopening could reuse a background GET still in flight from before. If that GET had read
+the profile before another admin saved, its late answer looked fresh. Each opening of `ProfileDialog` now calls
+`refetch({ cancelRefetch: true })`, which drops any request in flight and starts a new one. The draft starts only from
+that request's answer, and a late answer from an earlier request never reaches it. This replaces the `openedAt`
+timestamp check. New test: "a reopening ignores an older GET still in flight and starts the draft from a request of
+its own". It holds an old answer across close and reopen, and fails with the previous code.

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { HealthProfile, MeasureUnit, ProfileViolation } from "./api";
@@ -242,22 +242,26 @@ export function ProfileDialog({
 }) {
   const { t } = useTranslation();
   const profile = useHealthProfile(agentId, open);
-  // The profile the editor opened on: the first successful fetch after opening. Held
+  // The profile the editor opened on: the answer to a request this opening started. Held
   // until the dialog closes, so a background refetch (window focus, a save elsewhere)
   // never unmounts the form and throws away what is being typed; closing clears it, so
   // the next opening waits for the server again.
   const [opened, setOpened] = useState<HealthProfile | null>(null);
-  // When this opening began: only a profile the server answered after it is fresh, never
-  // one the cache held from an earlier opening.
-  const [openedAt, setOpenedAt] = useState<number | null>(null);
-  if (!open && (opened !== null || openedAt !== null)) {
-    setOpened(null);
-    setOpenedAt(null);
-  }
-  if (open && openedAt === null) setOpenedAt(Date.now());
-  const fresh =
-    profile.data !== undefined && !profile.isFetching && !profile.isError && openedAt !== null && profile.dataUpdatedAt >= openedAt;
-  if (open && opened === null && fresh) setOpened(profile.data!);
+  if (!open && opened !== null) setOpened(null);
+  const { refetch } = profile;
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    // A new request, cancelling any still in flight: a GET that started before this
+    // opening may have read the profile before someone saved over it, and neither the
+    // cache nor an earlier request's late answer may start the draft.
+    void refetch({ cancelRefetch: true }).then((result) => {
+      if (current && result.isSuccess && result.data !== undefined) setOpened(result.data);
+    });
+    return () => {
+      current = false;
+    };
+  }, [open, refetch]);
   return (
     <AccessibleDialog open={open} onClose={onClose} title={t("health.profile.title", "Health profile")} maxWidth="max-w-2xl" testId="health-profile-dialog">
       {/* The draft starts from the profile as the server has it now: a reopened dialog
