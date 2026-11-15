@@ -29,13 +29,13 @@ npm ci
 npm run dev
 ```
 
-It listens on port 3000 (override with the `PORT` environment variable) and proxies the API paths to an EDDI backend on `http://localhost:7070`. If no backend answers at startup, the dev build falls back to an in-browser mock API (MSW), so the UI can be explored without a running EDDI. See [`ui/manager/AGENTS.md`](https://github.com/labsai/EDDI/blob/main/ui/manager/AGENTS.md) for the full contributor guide.
+It listens on port 3000 (override with the `PORT` environment variable) and proxies the API paths to an EDDI backend on `http://localhost:7070` (override with `EDDI_BACKEND_URL`). If no backend answers at startup, the dev build falls back to an in-browser mock API (MSW), so the UI can be explored without a running EDDI. See [`ui/manager/AGENTS.md`](https://github.com/labsai/EDDI/blob/main/ui/manager/AGENTS.md) for the full contributor guide.
 
 ## Sign-in and roles
 
 When OIDC is enabled on the backend (`QUARKUS_OIDC_TENANT_ENABLED=true`), the backend tells the Manager to sign in through Keycloak (`keycloak-js`, client `eddi-frontend`); the access token is refreshed before it expires. With authentication off, the Manager is open to anyone who can reach it. See [Security](security.md) for the Keycloak setup.
 
-The sidebar is not filtered by role: every entry is visible to everyone, and the **backend** decides what each request may do. A screen you lack the role for shows a permission error (or, for Connections, falls back to your own linked accounts). The roles that matter most here:
+The **backend** decides what each request may do; the Manager only stops offering what it would refuse. When your token carries EDDI roles, the sidebar and the command palette hide the screens whose backend your roles cannot use — Logs, Coordinator, Audit Trail, Secrets, Quotas, Orphans, Privacy and Branding need `eddi-admin`; Connections, Feedback and Alerts need `eddi-admin` or `eddi-editor`; User Data needs `eddi-admin` or `eddi-user`. With authentication off, or when the token holds no EDDI role at all (roles mapped from another claim), every entry is shown and a screen you lack the role for answers with a permission error. The roles that matter most here:
 
 | Role | Typical use in the Manager |
 | --- | --- |
@@ -43,7 +43,7 @@ The sidebar is not filtered by role: every entry is visible to everyone, and the
 | `eddi-editor` | Authoring agents, workflows and resources; global variables, schedules, import/export |
 | `eddi-approver` | Deciding human-in-the-loop approvals across all conversations |
 | `eddi-user` | Talking to agents and handling their own conversations and approvals |
-| `eddi-viewer` | Little in the Manager: it is accepted by the MCP read tools and by only a few REST endpoints (documentation, usage, workspaces, resource sharing), not by the configuration stores, so most screens answer with a permission error |
+| `eddi-viewer` | Little in the Manager: it is accepted by the MCP read tools and by only a few REST endpoints (documentation, usage, conversation reads, workspaces, resource sharing, team budgets, cluster status, update check), not by the configuration stores, so most screens answer with a permission error |
 
 There is no role hierarchy on the REST API: `eddi-admin` does not imply the others. See [Security](security.md) for the role model.
 
@@ -149,6 +149,9 @@ Map an intent to one or more agent deployments for managed, automatically routed
 - **Active Conversations** (`/manage/conversations/monitoring`) — the in-flight conversations of one agent version; end a selection safely (paused conversations have their approvals cancelled) or purge ended conversations older than N days.
 - **Coordinator** (`/manage/coordinator`) — conversation-processing statistics and the dead-letter queue, with replay, discard and purge. See [Coordinator Admin](coordinator-admin.md).
 - **Approvals** (`/manage/approvals`) — the human-in-the-loop inbox for paused conversations and paused group phases: inspect what each pending tool call would do (arguments redacted), approve or reject per call, amend arguments, or cancel. Admins and approvers see every pending approval; other users see their own conversations'. The sidebar shows the pending count. See [Human-in-the-Loop](hitl.md).
+- **Oversight** (`/manage/oversight`) — how approvals turn out, what ran without approval, and which tool categories have earned less friction. See [HITL Oversight](hitl-oversight.md).
+- **Feedback** (`/manage/feedback`) — the ratings people gave your agents' conversations, and the ones still waiting for a look. See [Conversation Ratings](conversation-ratings.md).
+- **Alerts** (`/manage/alerts`) — rules that raise an alert on low ratings or failed turns, delivered to this inbox, Slack or a webhook. See [Alerts](alerts.md).
 - **Audit Trail** (`/manage/audit`) — the audit ledger by conversation or by agent: each pipeline task with its inputs, outputs, LLM details, tool calls, cost and timing, and its integrity verification. See [Audit Ledger](audit-ledger.md).
 
 ## Admin
@@ -158,12 +161,14 @@ Map an intent to one or more agent deployments for managed, automatically routed
 - **Connections** (`/manage/connections`) — named outbound credentials (static keys, HTTP Basic, OAuth service accounts, per-user OAuth) that agents reference as `${connection:name}`. Managing them needs `eddi-admin`; every signed-in user can link their own accounts under **Linked accounts** (`/manage/linked-accounts`, in the user menu). See [Connections](connections.md).
 - **Variables** (`/manage/variables`) — deployment-wide global variables, used as `{vars.key}` in prompts or `${vars:key}` in configs, with an option to include each in agent exports. Not for sensitive values. See [Global Variables](global-variables.md).
 - **Quotas** (`/manage/quotas`) — per-tenant rate limits, conversation caps and monthly cost budgets, live usage, and counter reset. See [Tenant Quotas](tenant-quotas.md).
+- **Model Prices** (`/manage/model-prices`) — the deployment-wide price table every model call is charged at when its config names no price, and what happens to a call nobody priced. See [Model Pricing](model-pricing.md).
 - **Schedules** (`/manage/schedules`) — cron and heartbeat schedules that trigger agents, their fire history, and failed or dead-lettered fires. See [Scheduling](scheduling.md).
 - **User Data** (`/manage/userdata`) — per-user persistent memories, long-term properties and managed-conversation bindings, in tabs. See [User Memory](user-memory.md) and [Properties](properties.md).
 - **Orphans** (`/manage/orphans`) — scan for extension configs no workflow or agent references, then purge them. Purging is blocked unless the last scan completed.
 - **Sync** (`/manage/sync`) — connect to another EDDI instance, match its agents to local ones, preview the changes and sync. Synced changes are saved as new versions and are not deployed automatically. See [Agent Sync](agent-sync-guide.md).
 - **Privacy** (`/manage/gdpr`) — for one user ID: export all stored data (Art. 15/20), erase it (Art. 17) with a per-category result, and restrict or resume processing (Art. 18). The page says explicitly when an export or an erasure is incomplete. See [GDPR Compliance](gdpr-compliance.md).
-- **Updates** (`/manage/updates`) — checks GitHub, from your browser and only when you ask (or on every page load if you opt in), whether a newer EDDI release exists, and shows how to update.
+- **Branding** (`/manage/branding`) — run the Manager, Workforce and Chat UI under your own name, logo and colours. `eddi-admin` only. See [White-Labeling](white-labeling.md).
+- **Updates** (`/manage/updates`) — checks GitHub, from your browser and only when you ask (or on every page load if you opt in), whether a newer EDDI release exists, and shows how to update. A brand can hide this page.
 
 ## Workforce (`/workforce`)
 

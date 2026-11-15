@@ -175,9 +175,9 @@ public class ObservableChatModel implements ChatModel {
      * <p>
      * This is the hook the whole decorator reshuffle exists for: the inherited
      * {@code chat} fires it around {@link #doChat}, so one implementation observes
-     * all eleven providers. The delegate's own listeners are <em>not</em> included
-     * — see the class javadoc; {@link #doChat} forwards to {@code delegate.chat},
-     * which dispatches them itself.
+     * every provider. The delegate's own listeners are <em>not</em> included — see
+     * the class javadoc; {@link #doChat} forwards to {@code delegate.chat}, which
+     * dispatches them itself.
      */
     @Override
     public List<ChatModelListener> listeners() {

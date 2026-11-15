@@ -34,7 +34,13 @@ import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.INormalizerProv
 import ai.labs.eddi.modules.nlp.internal.InputParser;
 import ai.labs.eddi.modules.nlp.internal.Limits;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
+import ai.labs.eddi.modules.nlp.semantic.SemanticFallback;
+import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -48,8 +54,12 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.BOOLEAN;
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.DOUBLE;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.INT;
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_ALTERNATIVES;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_CONFIDENCE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_INPUT_TRUNCATED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_MATCHES;
 import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 import static ai.labs.eddi.engine.memory.MemoryKeys.INPUT;
@@ -75,10 +85,33 @@ public class InputParserTask implements ILifecycleTask {
     private static final String CONFIG_MAX_INPUT_TOKENS = "maxInputTokens";
     private static final String CONFIG_MAX_SUGGESTIONS = "maxSuggestions";
     private static final String CONFIG_MAX_SOLUTIONS = "maxSolutions";
+    private static final String CONFIG_MATCH_PARTIAL_PHRASES = "matchPartialPhrases";
+    private static final String CONFIG_MIN_PARTIAL_PHRASE_COVERAGE = "minPartialPhraseCoverage";
+    private static final String CONFIG_MIN_MATCHING_ACCURACY = "minMatchingAccuracy";
+    private static final String CONFIG_MAX_ALTERNATIVES = "maxAlternatives";
+    private static final String CONFIG_SEMANTIC_FALLBACK = "semanticFallback";
+    /**
+     * Upper bound on {@code maxAlternatives}: each one is a string in conversation
+     * memory.
+     */
+    static final int MAX_ALTERNATIVES_LIMIT = 10;
+    static final double DEFAULT_SEMANTIC_MIN_SCORE = 0.8;
+    static final String METRIC_SEMANTIC_FALLBACK = "eddi.parser.semantic.fallback";
     private static final String EXTENSION_NAME_NORMALIZER = "normalizer";
     private static final String EXTENSION_NAME_DICTIONARIES = "dictionaries";
     private static final String EXTENSION_NAME_CORRECTIONS = "corrections";
-    private static final Pattern NON_ALPHANUMERIC = Pattern.compile("[^a-zA-Z0-9 ]+");
+    /**
+     * What a generated quick-reply expression keeps: letters and digits of any
+     * script. This was {@code [^a-zA-Z0-9 ]}, which turned "Größe" into "gre" and a
+     * Cyrillic, Greek, Arabic or CJK quick reply into an empty expression — one
+     * that a click on it could never produce.
+     */
+    private static final Pattern NOT_LETTER_OR_DIGIT = Pattern.compile("[^\\p{L}\\p{N}\\s]+");
+    /**
+     * Characters of the expression notation itself, removed from a fallback name.
+     */
+    private static final Pattern EXPRESSION_SYNTAX = Pattern.compile("[(),\\s]+");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private final ObjectMapper objectMapper;
 
     private static final String KEY_EXPRESSIONS = "expressions";
@@ -96,15 +129,29 @@ public class InputParserTask implements ILifecycleTask {
     private final Map<String, Provider<IDictionaryProvider>> dictionaryProviders;
     private final Map<String, Provider<ICorrectionProvider>> correctionProviders;
     private final IResourceClientLibrary resourceClientLibrary;
+    private final EmbeddingModelFactory embeddingModelFactory;
+    private final MeterRegistry meterRegistry;
 
     private static final Logger log = Logger.getLogger(InputParserTask.class);
+
+    /**
+     * Without an embedding model factory or metrics — a parser configured with a
+     * {@code semanticFallback} is then refused at deployment.
+     */
+    public InputParserTask(IExpressionProvider expressionProvider, Map<String, Provider<INormalizerProvider>> normalizerProviders,
+            Map<String, Provider<IDictionaryProvider>> dictionaryProviders, Map<String, Provider<ICorrectionProvider>> correctionProviders,
+            ObjectMapper objectMapper, IResourceClientLibrary resourceClientLibrary) {
+        this(expressionProvider, normalizerProviders, dictionaryProviders, correctionProviders, objectMapper, resourceClientLibrary, null, null);
+    }
 
     @Inject
     public InputParserTask(IExpressionProvider expressionProvider,
             @ParserNormalizerExtensions Map<String, Provider<INormalizerProvider>> normalizerProviders,
             @ParserDictionaryExtensions Map<String, Provider<IDictionaryProvider>> dictionaryProviders,
             @ParserCorrectionExtensions Map<String, Provider<ICorrectionProvider>> correctionProviders, ObjectMapper objectMapper,
-            IResourceClientLibrary resourceClientLibrary) {
+            IResourceClientLibrary resourceClientLibrary, EmbeddingModelFactory embeddingModelFactory, MeterRegistry meterRegistry) {
+        this.embeddingModelFactory = embeddingModelFactory;
+        this.meterRegistry = meterRegistry;
         this.expressionProvider = expressionProvider;
         this.resourceClientLibrary = resourceClientLibrary;
         this.normalizerProviders = normalizerProviders;
@@ -133,13 +180,18 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
-        String userLanguage = retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties());
+        // Resolved once, so the dictionaries and the semantic fallback read the turn in
+        // the same language; the fallback used to get null when the conversation had
+        // none and then accepted examples of every language, while the dictionaries
+        // parsed in the default one.
+        String userLanguage = InputParser.effectiveLanguage(retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties()));
 
-        List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory);
         List<RawSolution> parsedSolutions;
+        String normalizedUserInput;
         try {
+            List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory, parser, userLanguage);
             String userInput = inputData.getResult();
-            String normalizedUserInput = parser.normalize(userInput, userLanguage);
+            normalizedUserInput = parser.normalize(userInput, userLanguage);
             storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
             parsedSolutions = parser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
@@ -153,7 +205,65 @@ public class InputParserTask implements ILifecycleTask {
             return;
         }
 
-        storeResultInMemory(memory.getCurrentStep(), parsedSolutions, parser.getConfig());
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        Limits limits = parser.getLimits();
+        if (limits != null && InputParser.exceedsTokenLimit(normalizedUserInput, limits)) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
+        }
+
+        IInputParser.Config config = parser.getConfig();
+        List<Solution> solutions = parsedSolutions.isEmpty()
+                ? List.of()
+                : extractExpressions(parsedSolutions, config.isIncludeUnused(), config.isIncludeUnknown(), config.getMinMatchingAccuracy());
+        Solution solution = solutions.isEmpty() ? null : solutions.getFirst();
+
+        if ((solution == null || !solution.hasMeaningfulExpressions()) && parser.getSemanticFallback() != null) {
+            // The same tokens the dictionaries read: words past maxInputTokens must not
+            // select an example either.
+            String fallbackInput = limits == null ? normalizedUserInput : InputParser.withinTokenLimit(normalizedUserInput, limits);
+            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), fallbackInput, userLanguage);
+            if (semantic != null) {
+                solution = semantic;
+                solutions = List.of(semantic);
+            }
+        }
+
+        if (solution != null) {
+            storeResultInMemory(currentStep, solution, solutions, config);
+        }
+    }
+
+    /**
+     * @return the semantic match as a solution, or {@code null} when no example is
+     *         similar enough (or the provider failed — the fallback never fails the
+     *         turn)
+     */
+    private Solution consultSemanticFallback(SemanticFallback fallback, String normalizedInput, String userLanguage) {
+        var match = fallback.classify(normalizedInput, userLanguage);
+        countSemanticFallback(match.isPresent() ? "match" : "no_match");
+        if (match.isEmpty()) {
+            return null;
+        }
+        Expressions expressions;
+        try {
+            expressions = expressionProvider.parseExpressions(match.get().example().expressions());
+        } catch (RuntimeException e) {
+            log.warnf("Semantic parser fallback example '%s' has unparseable expressions: %s", match.get().example().text(), e.getMessage());
+            return null;
+        }
+        if (expressions.isEmpty()) {
+            return null;
+        }
+        double score = match.get().score();
+        String detail = String.format(Locale.ROOT, "\"%s\" [semantic %.2f, like \"%s\"] → %s", normalizedInput, score, match.get().example().text(),
+                expressions);
+        return new Solution(expressions, List.of(detail), score, false);
+    }
+
+    private void countSemanticFallback(String outcome) {
+        if (meterRegistry != null) {
+            meterRegistry.counter(METRIC_SEMANTIC_FALLBACK, "outcome", outcome).increment();
+        }
     }
 
     /**
@@ -171,7 +281,8 @@ public class InputParserTask implements ILifecycleTask {
      * expression on the next turn — an action on every agent with
      * {@code expressionsAsActions}.
      */
-    private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory) {
+    private List<IDictionary> prepareTemporaryDictionaries(IConversationMemory memory, IInputParser parser, String userLanguage)
+            throws InterruptedException {
         var previousSteps = memory.getPreviousSteps();
         if (previousSteps == null || previousSteps.size() == 0) {
             return Collections.emptyList();
@@ -190,7 +301,26 @@ public class InputParserTask implements ILifecycleTask {
             }
         }
 
-        return quickReplies.isEmpty() ? Collections.emptyList() : convertQuickReplies(quickReplies, expressionProvider);
+        if (quickReplies.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // A click sends the quick reply's value as input, and the input is
+        // normalized before it is parsed — so the value has to be normalized the
+        // same way, or it is not what the parser compares it with. With the
+        // punctuation normalizer, "Yes, please!" arrived as "Yes , please !" and no
+        // longer matched the quick reply it came from.
+        List<QuickReply> normalized = new ArrayList<>(quickReplies.size());
+        for (QuickReply quickReply : quickReplies) {
+            String value = parser.normalize(quickReply.getValue(), userLanguage);
+            if (value == null) {
+                value = quickReply.getValue();
+            }
+            if (!isNullOrEmpty(value)) {
+                normalized.add(new QuickReply(value, quickReply.getExpressions(), quickReply.getIsDefault()));
+            }
+        }
+        return normalized.isEmpty() ? Collections.emptyList() : convertQuickReplies(normalized, expressionProvider);
     }
 
     /**
@@ -233,9 +363,14 @@ public class InputParserTask implements ILifecycleTask {
         return quickReplies;
     }
 
-    private static String generateExpression(String value) {
-        var sanitized = NON_ALPHANUMERIC.matcher(value).replaceAll("");
-        return sanitized.trim().replaceAll("\\s+", "_").toLowerCase();
+    static String generateExpression(String value) {
+        String sanitized = NOT_LETTER_OR_DIGIT.matcher(value).replaceAll("").trim();
+        if (sanitized.isEmpty()) {
+            // nothing but symbols ("👍", "?!"): keep them, minus the characters the
+            // expression notation itself uses, rather than generating nothing
+            sanitized = EXPRESSION_SYNTAX.matcher(value.trim()).replaceAll(" ").trim();
+        }
+        return WHITESPACE.matcher(sanitized).replaceAll("_").toLowerCase(Locale.ROOT);
     }
 
     private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput) {
@@ -246,13 +381,8 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
-    private void storeResultInMemory(IWritableConversationStep currentStep, List<RawSolution> parsedSolutions, IInputParser.Config parserConfig) {
-        if (parsedSolutions.isEmpty()) {
-            return;
-        }
-
-        Solution solution = extractExpressions(parsedSolutions, parserConfig.isIncludeUnused(), parserConfig.isIncludeUnknown()).getFirst();
-
+    private void storeResultInMemory(IWritableConversationStep currentStep, Solution solution, List<Solution> solutions,
+                                     IInputParser.Config parserConfig) {
         Expressions newExpressions = solution.getExpressions();
         if (newExpressions.isEmpty()) {
             return;
@@ -269,6 +399,13 @@ public class InputParserTask implements ILifecycleTask {
                 currentExpressions.addAll(newExpressions);
                 newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
             }
+        } else {
+            // This result replaces an earlier parser's on this step: its diagnostics
+            // must not survive next to it (they are only rewritten when this one has
+            // its own).
+            currentStep.removeData(EXPRESSIONS_MATCHES.key());
+            currentStep.removeData(EXPRESSIONS_CONFIDENCE.key());
+            currentStep.removeData(EXPRESSIONS_ALTERNATIVES.key());
         }
 
         String expressionString = joinStrings(", ", newExpressions);
@@ -286,6 +423,20 @@ public class InputParserTask implements ILifecycleTask {
         List<String> matchDetails = solution.getMatchDetails();
         if (!matchDetails.isEmpty()) {
             currentStep.storeData(new Data<>(EXPRESSIONS_MATCHES.key(), matchDetails));
+        }
+
+        if (solution.getConfidence() != null) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_CONFIDENCE.key(), solution.getConfidence()));
+        }
+
+        if (parserConfig.getMaxAlternatives() > 0) {
+            String chosen = joinStrings(", ", solution.getExpressions());
+            List<String> alternatives = solutions.stream().skip(1).filter(Solution::hasMeaningfulExpressions)
+                    .map(alternative -> joinStrings(", ", alternative.getExpressions())).filter(alternative -> !alternative.equals(chosen)).distinct()
+                    .limit(parserConfig.getMaxAlternatives()).toList();
+            if (!alternatives.isEmpty()) {
+                currentStep.storeData(new Data<>(EXPRESSIONS_ALTERNATIVES.key(), alternatives));
+            }
         }
     }
 
@@ -316,6 +467,15 @@ public class InputParserTask implements ILifecycleTask {
             config.setIncludeUnknown(Boolean.parseBoolean(includeUnknown.toString()));
         }
 
+        Object matchPartialPhrases = configuration.get(CONFIG_MATCH_PARTIAL_PHRASES);
+        if (!isNullOrEmpty(matchPartialPhrases)) {
+            config.setMatchPartialPhrases(Boolean.parseBoolean(matchPartialPhrases.toString()));
+        }
+        config.setMinPartialPhraseCoverage(
+                parseFraction(configuration.get(CONFIG_MIN_PARTIAL_PHRASE_COVERAGE), IInputParser.Config.DEFAULT_MIN_PARTIAL_PHRASE_COVERAGE, false));
+        config.setMinMatchingAccuracy(parseFraction(configuration.get(CONFIG_MIN_MATCHING_ACCURACY), 0.0, true));
+        config.setMaxAlternatives(parseAlternatives(configuration.get(CONFIG_MAX_ALTERNATIVES)));
+
         var limits = new Limits(parsePositiveInt(configuration.get(CONFIG_MAX_INPUT_TOKENS), Limits.DEFAULT.maxInputTokens()),
                 parsePositiveInt(configuration.get(CONFIG_MAX_SUGGESTIONS), Limits.DEFAULT.maxSuggestions()),
                 parsePositiveInt(configuration.get(CONFIG_MAX_SOLUTIONS), Limits.DEFAULT.maxSolutions()));
@@ -341,7 +501,162 @@ public class InputParserTask implements ILifecycleTask {
             }
         }
 
-        return new InputParser(normalizers, dictionaries, corrections, config, limits);
+        SemanticFallback semanticFallback = buildSemanticFallback(configuration.get(CONFIG_SEMANTIC_FALLBACK), dictionaries);
+
+        return new InputParser(normalizers, dictionaries, corrections, config, limits, semanticFallback);
+    }
+
+    /**
+     * The {@code semanticFallback} block of the parser configuration, or
+     * {@code null} when there is none. Everything that can be checked without
+     * calling the provider is checked here, so a broken block fails the deployment
+     * instead of a conversation.
+     */
+    private SemanticFallback buildSemanticFallback(Object fallbackConfig, List<IDictionary> dictionaries)
+            throws IllegalExtensionConfigurationException {
+        if (isNullOrEmpty(fallbackConfig)) {
+            return null;
+        }
+        SemanticFallbackConfiguration fallback;
+        try {
+            fallback = objectMapper.convertValue(fallbackConfig, SemanticFallbackConfiguration.class);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback' is malformed: " + e.getMessage(), e);
+        }
+        if (fallback == null || isNullOrEmpty(fallback.embeddingProvider())) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback' needs an 'embeddingProvider'.");
+        }
+        // The model is built lazily, so a misspelt provider would otherwise deploy and
+        // only ever answer "no match".
+        if (!RagConfiguration.SUPPORTED_EMBEDDING_PROVIDERS.contains(fallback.embeddingProvider().trim())) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback.embeddingProvider' '" + fallback.embeddingProvider()
+                    + "' is not supported (supported: " + RagConfiguration.SUPPORTED_EMBEDDING_PROVIDERS.stream().sorted().toList() + ").");
+        }
+        if (embeddingModelFactory == null) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback' is not available in this runtime (no embedding models).");
+        }
+        double minScore = fallback.minScore() == null ? DEFAULT_SEMANTIC_MIN_SCORE : fallback.minScore();
+        if (!(minScore > 0.0 && minScore <= 1.0)) {
+            throw new IllegalExtensionConfigurationException("Parser 'semanticFallback.minScore' must be above 0 and at most 1, but was " + minScore);
+        }
+
+        List<SemanticFallback.Example> examples = new ArrayList<>();
+        if (fallback.examples() != null) {
+            for (var example : fallback.examples()) {
+                if (example == null || isNullOrEmpty(example.text()) || isNullOrEmpty(example.expressions())) {
+                    throw new IllegalExtensionConfigurationException("Every 'semanticFallback.examples' entry needs a 'text' and 'expressions'.");
+                }
+                Expressions parsed;
+                try {
+                    parsed = expressionProvider.parseExpressions(example.expressions());
+                } catch (RuntimeException e) {
+                    throw new IllegalExtensionConfigurationException(
+                            "Parser 'semanticFallback' example '" + example.text() + "' has unparseable expressions: " + e.getMessage(), e);
+                }
+                if (parsed == null || parsed.isEmpty()) {
+                    throw new IllegalExtensionConfigurationException(
+                            "Parser 'semanticFallback' example '" + example.text() + "' has no expressions.");
+                }
+                examples.add(new SemanticFallback.Example(example.text().trim(), example.expressions(), example.lang()));
+            }
+        }
+        boolean includePhrases = fallback.includeDictionaryPhrases() == null || fallback.includeDictionaryPhrases();
+        boolean includeWords = Boolean.TRUE.equals(fallback.includeDictionaryWords());
+        for (IDictionary dictionary : dictionaries) {
+            if (includePhrases) {
+                dictionary.getPhrases().stream().filter(phrase -> hasMeaningfulExpression(phrase.getExpressions()))
+                        .forEach(phrase -> examples.add(
+                                new SemanticFallback.Example(phrase.getValue(), phrase.getExpressions().toString(), dictionary.getLanguageCode())));
+            }
+            if (includeWords) {
+                dictionary.getWords().stream().filter(word -> !word.isPartOfPhrase() && hasMeaningfulExpression(word.getExpressions()))
+                        .forEach(word -> examples.add(
+                                new SemanticFallback.Example(word.getValue(), word.getExpressions().toString(), dictionary.getLanguageCode())));
+            }
+        }
+        if (examples.isEmpty()) {
+            throw new IllegalExtensionConfigurationException(
+                    "Parser 'semanticFallback' has no examples: add 'examples', or dictionaries with phrases that carry expressions.");
+        }
+        List<SemanticFallback.Example> distinct = examples.stream().distinct().toList();
+        if (distinct.size() > SemanticFallback.MAX_EXAMPLES) {
+            log.warnf("Parser 'semanticFallback' has %d examples; only the first %d are used.", distinct.size(), SemanticFallback.MAX_EXAMPLES);
+            distinct = distinct.subList(0, SemanticFallback.MAX_EXAMPLES);
+        }
+
+        var ragConfiguration = new RagConfiguration();
+        ragConfiguration.setEmbeddingProvider(fallback.embeddingProvider().trim());
+        ragConfiguration.setEmbeddingParameters(fallback.embeddingParameters() == null ? Map.of() : fallback.embeddingParameters());
+        // A symmetric task: the input and the examples are the same kind of text, so
+        // both are embedded in the query role.
+        return new SemanticFallback(() -> embeddingModelFactory.getOrCreate(ragConfiguration, EmbeddingInputType.QUERY), distinct, minScore);
+    }
+
+    private static boolean hasMeaningfulExpression(Expressions expressions) {
+        return expressions != null && expressions.stream().anyMatch(DictionaryUtilities::isMeaningful);
+    }
+
+    /**
+     * The {@code semanticFallback} block of a parser configuration.
+     *
+     * @param embeddingProvider
+     *            as for a knowledge base: openai, azure-openai, ollama, mistral,
+     *            bedrock, cohere, gemini, vertex
+     * @param embeddingParameters
+     *            the provider's parameters (model name, API key as a vault
+     *            reference, base URL), as for a knowledge base
+     * @param minScore
+     *            least cosine similarity that counts as a match; default 0.8
+     * @param includeDictionaryPhrases
+     *            use the parser's dictionary phrases as examples; default true
+     * @param includeDictionaryWords
+     *            use its single dictionary words as examples too; default false
+     * @param examples
+     *            further example sentences
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record SemanticFallbackConfiguration(String embeddingProvider, Map<String, String> embeddingParameters, Double minScore,
+            Boolean includeDictionaryPhrases, Boolean includeDictionaryWords, List<ExampleConfiguration> examples) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record ExampleConfiguration(String text, String expressions, String lang) {
+    }
+
+    /**
+     * Reads an optional number in 0..1. Missing, unparseable or out-of-range values
+     * fall back to the default, so a typo cannot switch matching off outright.
+     */
+    private static double parseFraction(Object value, double defaultValue, boolean allowZero) {
+        if (isNullOrEmpty(value)) {
+            return defaultValue;
+        }
+        try {
+            double parsed = Double.parseDouble(value.toString().trim());
+            if (Double.isNaN(parsed) || parsed < 0.0 || parsed > 1.0 || (!allowZero && parsed == 0.0)) {
+                log.warnf("Parser fraction must be %s 0 and at most 1, but was %s. Falling back to %s.", allowZero ? "at least" : "above", value,
+                        defaultValue);
+                return defaultValue;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            log.warnf("Parser fraction '%s' is not a number. Falling back to %s.", value, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    /** {@code maxAlternatives}, clamped to 0..{@link #MAX_ALTERNATIVES_LIMIT}. */
+    private static int parseAlternatives(Object value) {
+        if (isNullOrEmpty(value)) {
+            return 0;
+        }
+        try {
+            int parsed = Integer.parseInt(value.toString().trim());
+            return Math.max(0, Math.min(MAX_ALTERNATIVES_LIMIT, parsed));
+        } catch (NumberFormatException e) {
+            log.warnf("Parser 'maxAlternatives' value '%s' is not a number. Storing no alternatives.", value);
+            return 0;
+        }
     }
 
     /**
@@ -483,6 +798,11 @@ public class InputParserTask implements ILifecycleTask {
         extensionConfigs.put(CONFIG_MAX_INPUT_TOKENS, new ConfigValue("Max Input Tokens", INT, true, Limits.DEFAULT.maxInputTokens()));
         extensionConfigs.put(CONFIG_MAX_SUGGESTIONS, new ConfigValue("Max Suggestions Evaluated", INT, true, Limits.DEFAULT.maxSuggestions()));
         extensionConfigs.put(CONFIG_MAX_SOLUTIONS, new ConfigValue("Max Solutions Collected", INT, true, Limits.DEFAULT.maxSolutions()));
+        extensionConfigs.put(CONFIG_MATCH_PARTIAL_PHRASES, new ConfigValue("Match Partial Phrases", BOOLEAN, true, false));
+        extensionConfigs.put(CONFIG_MIN_PARTIAL_PHRASE_COVERAGE,
+                new ConfigValue("Min Partial Phrase Coverage", DOUBLE, true, IInputParser.Config.DEFAULT_MIN_PARTIAL_PHRASE_COVERAGE));
+        extensionConfigs.put(CONFIG_MIN_MATCHING_ACCURACY, new ConfigValue("Min Matching Accuracy", DOUBLE, true, 0.0));
+        extensionConfigs.put(CONFIG_MAX_ALTERNATIVES, new ConfigValue("Max Alternatives Stored", INT, true, 0));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;
