@@ -52,11 +52,11 @@ import java.util.concurrent.TimeUnit;
  * {@code onRequest} / {@code onResponse} / {@code onError} around
  * {@code doChat}, and it does so for <em>every</em> provider, because the
  * dispatch lives on the interface rather than in each binding. Hanging
- * telemetry off that hook means one implementation covers all eleven providers
- * and both the sync and streaming decorators, instead of eleven partial ones.
- * The catch is that the dispatch only happens if something calls the default
- * {@code chat} — see {@link ObservableChatModel}, which had to stop overriding
- * it for this to work at all.
+ * telemetry off that hook means one implementation covers every provider
+ * binding and both the sync and streaming decorators, instead of one partial
+ * implementation per binding. The catch is that the dispatch only happens if
+ * something calls the default {@code chat} — see {@link ObservableChatModel},
+ * which had to stop overriding it for this to work at all.
  *
  * <h2>Semantic conventions</h2>
  *

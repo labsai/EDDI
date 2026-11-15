@@ -37,7 +37,7 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > `scope: "secret"` property setter then fails the whole turn. Nothing in the
 > startup log mentions the variable you set.
 >
-> To check what actually bound, read the value back from the Dev UI at `/q/dev`,
+> To check what actually bound, read the value back from the Dev UI at `/q/dev-ui`,
 > or compare against the spellings already used in `docker-compose.yml`,
 > `.env.example` and `k8s/`.
 
