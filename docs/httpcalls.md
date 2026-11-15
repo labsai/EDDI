@@ -433,6 +433,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.request.path                                                       | (`String`) path in the `targetServer` of the `httpCall` (e.g /`books`)                                                                                                                                                           |
 | httpCall.request.headers                                                    | (`Array`:\<key, value> ) for each `httpCall HTTP header`                                                                                                                                                                         |
 | httpCall.request.queryParams                                                | (`Array`: \<key, value>) for each `httpCall` query parameter                                                                                                                                                                     |
+| httpCall.request.optionalQueryParams                                        | (`List<String>`, default none) keys of `queryParams` that are left off the request when their value renders empty, instead of being sent as `?name=`. Set by tools generated from an OpenAPI spec for query parameters it does not mark required; without it every query parameter is sent. |
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
@@ -468,8 +469,12 @@ An httpcall used as an LLM tool can declare the JSON Schema of its arguments in 
 Agents generated from an OpenAPI spec get one per operation: the path and query parameters (typed
 `integer`, `number`, `boolean` or `string`, with their `enum`; an array or object path/query parameter
 stays a string), and the request-body variable with the body's schema, every component `$ref`
-resolved. Every top-level parameter stays required, as before; requiredness inside the body is the
-spec's own. `readOnly` body fields are left out.
+resolved. Path parameters and the body variable are required; a query parameter is required only
+when the spec marks it `required`, and requiredness inside the body is the spec's own. A query
+parameter the model may leave out is also listed in `request.optionalQueryParams`, so an omitted one
+is not sent at all and the server applies its own default. `readOnly` body fields are left out.
+Tools are named after their `operationId`; when a spec repeats one, the later operation is named by
+its method and path (`get_groups_groupid_outcomes`), so no tool is lost to a name collision.
 
 ```json
 {

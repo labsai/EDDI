@@ -216,7 +216,7 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 ```
 
 Nothing is published until every gate above `docker` has passed. Its `needs` list is
-`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]`, so a failing
+`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]`, so a failing
 CVE scan, a secret leak, a CodeQL finding, a coverage shortfall or a failing end-to-end tier each block the push on their
 own. The diagram below shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
 job that runs the JaCoCo 90/80 coverage gate.
@@ -225,13 +225,13 @@ job that runs the JaCoCo 90/80 coverage gate.
 
 | Job | Runs on | Condition | Duration |
 |---|---|---|---|
-| **build-and-test** | Every push/PR/tag | When changed paths match the `code` filter (`src/**`, `pom.xml`, `.github/workflows/**`, `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`, `k8s/**`, `helm/**`, `mvnw*`, `.mvn/**`); always on tags | ~3-5 min |
-| **integration-test** | Same as build-and-test | Runs `mvnw verify -DskipITs=false`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
-| **codeql** | Every push/PR/tag on the `code` filter | SAST build + analysis; blocks `docker` | ~8-12 min |
-| **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
-| **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
-| **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate and ui-gate | ~3-4 min |
+| **build-and-test** | Every push/PR/tag | On a push, when changed paths match the `code` filter (`detect-changes` in `ci.yml`: `src/**`, `pom.xml`, `.github/workflows/**`, Dockerfiles, compose files, `ui/**`, `k8s/**`, `helm/**`, `keycloak/**`, the Maven wrapper, the style configs and more); on a PR, when they match the `backend` filter (the same minus `ui/**`) or the operator docs the tests read (`README.md`, `docs/kubernetes.md`, `docs/security.md`, `docs/monitoring/**`, `docs/metrics.md`); always on tags | ~3-5 min |
+| **integration-test** | `code` filter (and `backend` on a PR) | Runs `mvnw verify -DskipITs=false -DskipUTs=true`; the only job that enforces the JaCoCo 90/80 gate | ~10-15 min |
+| **codeql** | Every push/PR/tag | SAST build + analysis of the Java backend (`codeql-ui` covers the UIs, when `ui/**` changed); blocks `docker` | ~8-12 min |
+| **trivy-scan** | `code` filter | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
+| **gitleaks** | Every push/PR/tag | Secret scanning; blocks `docker` | ~1 min |
+| **sbom** | Pushes on the `code` filter | CycloneDX SBOM; does not block `docker` | ~2 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate and ui-gate | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
 

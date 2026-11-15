@@ -216,6 +216,7 @@ Every PR runs through these automated gates:
 | **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
 | **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
+| **Operator Activation E2E** | The same image beside a deterministic model stub: the Platform Operator is activated through the shipped Manager (spec check, `setup-api` with the real prompt, gate read-back, both canaries, one real tool call) | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Import rules (unused/redundant imports) fail the build; length rules are advisory | ✅ Yes (imports) |
