@@ -506,8 +506,8 @@ public class McpConversationTools {
         }
     }
 
-    @Tool(name = "get_agent", description = "Get an agent's full configuration including its packages, name, and description. "
-            + "Returns the AgentConfiguration JSON with all package references.")
+    @Tool(name = "get_agent", description = "Get an agent's full configuration including its workflows, name, and description. "
+            + "Returns the AgentConfiguration JSON with all workflow references.")
     public String getAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                            @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);

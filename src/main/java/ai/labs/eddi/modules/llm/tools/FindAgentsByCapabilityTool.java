@@ -19,7 +19,7 @@ import java.util.stream.Collectors;
 /**
  * LLM tool for discovering agents by capability using the
  * {@link CapabilityRegistryService}. Constructed per-invocation by
- * {@code AgentOrchestrator}.
+ * {@code DynamicAgentToolsProvider}.
  *
  * <p>
  * The LLM can call this tool to find agents that have registered a specific
@@ -27,7 +27,8 @@ import java.util.stream.Collectors;
  *
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by DynamicAgentToolsProvider — must NOT be a CDI
+        // bean
 public class FindAgentsByCapabilityTool {
 
     private static final Logger LOGGER = Logger.getLogger(FindAgentsByCapabilityTool.class);
