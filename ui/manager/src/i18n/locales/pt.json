@@ -539,6 +539,32 @@
       "noticePlaceholder": "As conversas com este agente podem ser lidas pelas pessoas que o mantêm, para melhorá-lo.",
       "versionNote": "Abrange conversas na versão criada por esta alteração e nas posteriores — nunca o que foi dito antes. Slack, Teams e clientes da API não conseguem exibir o aviso; se as pessoas usarem este agente por esses meios, mencione isso na saudação."
     },
+    "presentation": {
+      "title": "Apresentação e títulos",
+      "description": "Como as janelas de chat mostram este agente. Tudo é opcional; campos vazios mantêm os padrões.",
+      "displayName": "Nome exibido",
+      "accentColor": "Cor de destaque (#rrggbb)",
+      "avatar": "Avatar (URL https ou URI data:image pequena)",
+      "starters": "Sugestões de conversa (uma por linha, até {{count}})",
+      "controls": "Controles do chat",
+      "control": {
+        "undo": "Desfazer",
+        "redo": "Refazer",
+        "attachments": "Anexos",
+        "rating": "Avaliação",
+        "quickReplies": "Respostas rápidas",
+        "streaming": "Streaming",
+        "rawHtml": "Renderizar HTML nas respostas"
+      },
+      "rawHtmlNote": "Desativado por padrão. O widget de chat só aplica esta configuração a partir da versão cujo widget lê os controles de conversa; até lá, ele renderiza HTML para todos os agentes. Ative agora para um agente cujas respostas devam conter HTML.",
+      "titles": "Títulos das conversas",
+      "titlesEnable": "Deixar um modelo escrever os títulos das conversas",
+      "titlesNote": "Caso contrário, a conversa recebe a primeira mensagem como título. O modelo é executado uma vez por conversa, em segundo plano, e cobrado do orçamento de custos. Um título definido pelo usuário nunca é substituído.",
+      "titlesProvider": "Provedor",
+      "titlesModel": "Modelo",
+      "titlesMaxLength": "Título mais longo",
+      "titlesCredentials": "As credenciais ficam em titleGeneration.parameters do documento do agente (por exemplo, uma apiKey que referencia um segredo do cofre); veja a documentação de configuração do agente."
+    },
     "copyUrl": "Copiar URL",
     "liveElsewhere": "Ativa: v{{live}} · A ver v{{viewing}} (não implantada)",
     "removeWorkflow": "Remover o fluxo de trabalho do agente",
@@ -1000,7 +1026,11 @@
       "errDisabled": "Esta versão do agente não pede avaliações.",
       "errOwner": "Somente a pessoa que teve esta conversa pode avaliá-la.",
       "errGeneric": "Não foi possível salvar a avaliação."
-    }
+    },
+    "toolArgs": "Argumentos",
+    "toolResult": "Resultado",
+    "toolArgsShowFields": "Campos",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -1776,9 +1806,18 @@
     "grModeReplace": "Usar apenas os padrões extras",
     "grPiiKinds": "Tipos a detectar",
     "grPiiEmail": "Endereços de e-mail",
-    "grPiiSsn": "Números de seguro social dos EUA",
     "grPiiCard": "Números de cartão de pagamento (verificados com Luhn)",
     "grPiiPhone": "Números de telefone",
+    "grPiiIban": "IBANs (soma de verificação validada)",
+    "grPiiDateOfBirth": "Datas de nascimento (junto a uma palavra-chave como “nascido”)",
+    "grPiiIpAddress": "Endereços IP (IPv4 e IPv6)",
+    "grPiiPassportMrz": "Zonas de leitura ótica de passaportes (qualquer país)",
+    "grPiiCountries": "Identificadores nacionais",
+    "grPiiCountriesHint": "Marque um país para encontrar todos os seus identificadores, ou marque identificadores individuais. Cada um é verificado pelo seu formato e dígito de controlo; alguns exigem ainda uma palavra-chave como «PESEL» ou «NHS» logo antes do número.",
+    "grPiiRegionEurope": "Europa",
+    "grPiiRegionAmericas": "Américas",
+    "grPiiRegionAsiaPacific": "Ásia-Pacífico",
+    "grPiiRegionAfrica": "África",
     "grReplacement": "Substituição",
     "grPiiReplacementHint": "Padrão [REDACTED:<kind>]. Um valor personalizado pode conter {kind}, que é substituído pelo tipo detectado.",
     "grPatterns": "Padrões",
@@ -4628,7 +4667,12 @@
     "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes.",
     "conversationColumn": "Conversa",
     "groupReviewLoadError": "Não foi possível carregar a discussão.",
-    "groupReviewNoEntries": "Ainda não foi dito nada."
+    "groupReviewNoEntries": "Ainda não foi dito nada.",
+    "argsViewLabel": "Mostrar argumentos como",
+    "argsViewFields": "Campos",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Bruto",
+    "amendRedactedMarker": "Os argumentos alterados ainda contêm <REDACTED>. Substitua pelo valor real ou aprove sem alterar: uma alteração é enviada exatamente como escrita."
   },
   "hitlReview": {
     "approveEdited": "Aprovar com alterações",
@@ -6179,13 +6223,15 @@
       "static": "Chave de API",
       "basic": "Usuário e senha",
       "clientCredentials": "Conta de serviço OAuth",
-      "authorizationCode": "Login de usuário OAuth"
+      "authorizationCode": "Login de usuário OAuth",
+      "jwtBearer": "Conta de serviço com chave de assinatura"
     },
     "choice": {
       "staticBody": "Um cabeçalho fixo, igual para todos — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. O {{productName}} faz a codificação, então a senha continua sendo uma entrada separada do cofre, que você pode trocar sozinha.",
       "clientCredentialsBody": "O agente se identifica como ele mesmo. Um token de acesso compartilhado por todos, renovado automaticamente.",
-      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre."
+      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre.",
+      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos."
     },
     "binding": {
       "perUser": "Por pessoa",
@@ -6219,7 +6265,7 @@
     "clientId": "ID do cliente",
     "clientSecret": "Segredo do cliente",
     "clientAuthMethod": "Autenticação do cliente",
-    "clientAuthMethodHint": "Como o segredo do cliente chega ao endpoint do token. Errar aqui parece exatamente um segredo errado, por isso é um ajuste e não um chute.",
+    "clientAuthMethodHint": "Como o cliente se identifica no endpoint de token: com o segredo do cliente via Basic ou no corpo, ou com private_key_jwt — uma asserção assinada com uma chave privada guardada no cofre, para um aplicativo registrado com certificado. Escolher errado parece exatamente um segredo incorreto, por isso é uma configuração e não uma alternativa automática.",
     "discoveryUrl": "URL de descoberta (opcional)",
     "pkceAlwaysOn": "O PKCE (S256) é sempre aplicado a um login de usuário e não pode ser desligado — o destino do redirecionamento é um caminho público.",
     "scopes": "Escopos",
@@ -6305,7 +6351,9 @@
       "paramReserved": "Um destes parâmetros é definido pelo próprio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Substituí-lo quebraria o fluxo.",
       "paramValueReference": "Os valores dos parâmetros são enviados exatamente como escritos — uma referência ${…} aqui não é resolvida e colocaria um ponteiro do cofre num URL. Use apenas valores de protocolo simples.",
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
-      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui."
+      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
+      "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url.",
+      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -6328,7 +6376,30 @@
     "confirmAuthChangeDesc": "As contas ligadas através desta ligação deixarão de se resolver — uma concessão pertence ao fluxo que a produziu. O {{productName}} recusa a alteração enquanto alguma conta continuar ligada e diz quantas; desligue-as primeiro, ou crie uma nova ligação e deixe as pessoas ligarem essa.",
     "confirmAuthChangeAccept": "Alterar",
     "deleted": "Conexão \"{{name}}\" excluída",
-    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?"
+    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?",
+    "privateKey": "Chave privada",
+    "privateKeyHint": "Uma entrada do cofre com uma chave RSA PKCS#8 PEM não criptografada (BEGIN PRIVATE KEY), ou o arquivo de chave JSON completo de uma conta de serviço do Google. A chave nunca sai do {{productName}}; só uma asserção assinada de curta duração é enviada.",
+    "certificateThumbprint": "Impressão digital do certificado",
+    "certificateThumbprintHint": "Do certificado enviado ao provedor de identidade — em hexadecimal como o portal mostra, ou em base64url. Pública, não é um segredo.",
+    "certificateThumbprintHeader": "Cabeçalho da impressão digital",
+    "thumbprintS256": "x5t#S256 — SHA-256 (padrão do Entra)",
+    "thumbprintSha1": "x5t — impressão SHA-1",
+    "serviceAccountEmail": "Conta de serviço (emissor)",
+    "serviceAccountEmailHint": "ex.: agent@project.iam.gserviceaccount.com. Opcional quando a chave privada é um arquivo de chave JSON, que indica a própria conta.",
+    "audience": "Público da asserção (opcional)",
+    "audienceHint": "A claim aud da asserção assinada. Deixe em branco para usar a URL do token, que é o que o Google espera.",
+    "preset": "Começar de um modelo",
+    "presetNone": "Nenhum — preencher todos os campos",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Aplicação do Microsoft Entra com certificado",
+        "description": "Um registo de aplicação do Entra que se autentica com um certificado em vez de um segredo de cliente (private_key_jwt). Substitua <tenant-id> no URL do token, preencha o ID da aplicação (cliente) e a impressão digital do certificado e guarde a chave privada do certificado no cofre como PEM PKCS#8 não encriptado. Adicione https://login.microsoftonline.com à lista de permissões de endpoints de credenciais."
+      },
+      "google-service-account": {
+        "label": "Conta de serviço do Google (chave JSON)",
+        "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",
@@ -6336,7 +6407,6 @@
     "rules": "Regras",
     "property": "Definidor de propriedades",
     "apicalls": "Chamadas à API",
-    "httpcallsLegacy": "Chamadas à API (legado)",
     "llm": "LLM",
     "output": "Saída",
     "templating": "Modelos",

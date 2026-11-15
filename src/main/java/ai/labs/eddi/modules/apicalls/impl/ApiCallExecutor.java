@@ -27,6 +27,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretEncodings;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedFanOut;
@@ -427,14 +428,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(),
+                                SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
                         LOGGER.warn("Error Msg:" + httpCodeMessage);
 
                         // A server that rejects a credential routinely echoes it ("invalid
                         // api key sk-…"). The executor knows exactly which plaintexts it
                         // sent, so those are removed by value before the body goes
                         // anywhere — memory, template data, the tool result or a log.
-                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), resolvedSecrets);
+                        String errorBody = redactErrorBody(response.getContentAsString(), resolvedSecrets);
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -531,9 +533,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
                     // so that ordering survives serialization.
                     //
-                    // The tool result is truncated from the FRONT
-                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
-                    // so whatever serializes first is what survives. With a plain
+                    // The tool result is kept from the FRONT (ToolResponseTruncator's
+                    // `truncate` strategy cuts `result.substring(0, maxChars)`; the
+                    // default `headTail` keeps the start and the end and drops the
+                    // middle), so whatever serializes first is what survives. With a plain
                     // HashMap "headers" hashed ahead of "body" on both the success and
                     // the error path regardless of insertion order — so a per-tool
                     // limit, or the always-on tool-context budget, would spend the
@@ -937,7 +940,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             error = "the call returned http " + code;
             if (saveResponse) {
-                String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), secrets);
+                String errorBody = redactErrorBody(response.getContentAsString(), secrets);
                 if (errorBody != null && !errorBody.isBlank()) {
                     body = SecretRedactionFilter.redact(errorBody.length() > MAX_ITEM_ERROR_BODY_CHARS
                             ? errorBody.substring(0, MAX_ITEM_ERROR_BODY_CHARS)
@@ -1483,6 +1486,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
+     * The plaintexts substituted into one request (the set every redaction reads)
+     * plus the references they came from, which the destination check needs after
+     * the target URL is known.
+     */
+    static final class ResolvedSecrets extends HashSet<String> {
+        private final Set<String> vaultReferences = new LinkedHashSet<>();
+
+        Set<String> vaultReferences() {
+            return vaultReferences;
+        }
+    }
+
+    /**
      * A request ready to send, together with the names of the headers a connection
      * filled.
      * <p>
@@ -1500,20 +1516,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * @param connectionOwnedHeaders
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
+     * @param resolvedSecrets
+     *            the secret plaintexts substituted into this request, which every
+     *            redaction of its debug record, errors and response masks
      */
-    /**
-     * The plaintexts substituted into one request (the set every redaction reads)
-     * plus the references they came from, which the destination check needs after
-     * the target URL is known.
-     */
-    static final class ResolvedSecrets extends HashSet<String> {
-        private final Set<String> vaultReferences = new LinkedHashSet<>();
-
-        Set<String> vaultReferences() {
-            return vaultReferences;
-        }
-    }
-
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
@@ -1592,6 +1598,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MIN_SUCCESS_BODY_REDACTION_LENGTH = 8;
 
     /**
+     * A non-2xx body, redacted the same way for a single call and for every forEach
+     * item: each resolved secret verbatim, plus the encoded forms of those long
+     * enough to be unambiguous (a Basic-auth header echoed as base64, a key echoed
+     * URL-encoded). Both paths call this so they cannot diverge again.
+     */
+    static String redactErrorBody(String body, Set<String> resolvedSecrets) {
+        return RequestRedactor.redactResolvedSecrets(body, SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
+    }
+
+    /**
      * A success body treated as text: only secrets long enough to be unambiguous.
      */
     static String redactSuccessText(String body, Set<String> resolvedSecrets) {
@@ -1611,7 +1627,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         shortOnes.removeAll(longOnes);
         Object cleaned = longOnes.isEmpty() ? null : SecretValueScrubber.scrubDeep(tree, longOnes, RequestRedactor.REDACTED);
         Object current = cleaned != null ? cleaned : tree;
-        Object exactCleaned = shortOnes.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, shortOnes, RequestRedactor.REDACTED);
+        Object exactCleaned = shortOnes.isEmpty()
+                ? null
+                : SecretValueScrubber.scrubDeepExact(current,
+                        SecretEncodings.withEncodedForms(shortOnes, SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH), RequestRedactor.REDACTED);
         return exactCleaned != null ? exactCleaned : current;
     }
 
@@ -1625,7 +1644,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 longOnes.add(secret);
             }
         }
-        return longOnes;
+        return SecretEncodings.withEncodedForms(longOnes, MIN_SUCCESS_BODY_REDACTION_LENGTH);
     }
 
     /**
@@ -1667,7 +1686,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return headers;
         }
         var redacted = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        Set<String> needles = SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH);
+        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, needles)));
         return redacted;
     }
 
@@ -1867,8 +1887,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setFollowRedirects(false);
         }
         Map<String, String> queryParams = requestConfig.getQueryParams();
+        List<String> optionalQueryParams = requestConfig.getOptionalQueryParams() != null ? requestConfig.getOptionalQueryParams() : List.of();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            // An optional parameter the caller left out: send nothing, so the server
+            // applies its own default (see Request#getOptionalQueryParams). Judged on
+            // the rendered template, before any reference resolution, so a value that
+            // is a reference is never dropped.
+            if (optionalQueryParams.contains(queryParam) && (qpValue == null || qpValue.isEmpty())) {
+                continue;
+            }
             // Resolve global variable references, then vault references in query params
             qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
                     templateDataObjects, conversationProperties);

@@ -27,7 +27,7 @@ class BrandedOpenApiRouteTest {
                 "title" : "EDDI API",
                 "version" : "6.6.0",
                 "description" : "Enterprise-grade conversational AI platform.",
-                "contact" : { "name" : "LABS.AI", "email" : "contact@labs.ai", "url" : "https://eddi.labs.ai" },
+                "contact" : { "name" : "LABS.AI", "email" : "contact@labs.ai", "url" : "https://eddi.technology" },
                 "license" : { "name" : "Apache 2.0" }
               },
               "paths" : { "/agentstore/agents" : { "get" : { "operationId" : "readAgentDescriptors" } } }

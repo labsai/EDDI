@@ -6,9 +6,12 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.memory.ContestedMemoryMarker;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
@@ -18,7 +21,9 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,5 +109,24 @@ class ContextualToolsProviderTurnBudgetTest {
         assertTrue(assemble().rememberFact("b", "2", "fact", "self").contains("✅ Remembered"),
                 "the budget is per turn, not per conversation");
         verify(store, times(2)).upsert(any());
+    }
+
+    /**
+     * The tool writes the store directly, so end-of-turn persistence never sees its
+     * writes; the assembled tool lifts the key from the conversation's
+     * contestedMemories marker itself.
+     */
+    @Test
+    @DisplayName("a rememberFact write lifts its key from the contestedMemories marker")
+    void aToolWriteLiftsTheContestedMarker() throws Exception {
+        Map<String, Object> contested = new LinkedHashMap<>();
+        contested.put("lang", true);
+        contested.put("city", true);
+        memory.getConversationProperties().put(ContestedMemoryMarker.KEY,
+                new Property(ContestedMemoryMarker.KEY, contested, Scope.conversation));
+
+        assertTrue(assemble().rememberFact("lang", "German", "fact", "self").contains("✅ Remembered"));
+
+        assertEquals(Map.of("city", true), memory.getConversationProperties().get(ContestedMemoryMarker.KEY).getValueObject());
     }
 }

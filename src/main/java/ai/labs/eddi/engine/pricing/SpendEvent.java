@@ -55,6 +55,11 @@ public record SpendEvent(String tenantId, String conversationId, String agentId,
         /** A Dream consolidation run. */
         DREAM,
         /** A group conversation's own machinery (window and stance summaries). */
-        GROUP_SYSTEM
+        GROUP_SYSTEM,
+        /**
+         * A model-written conversation title ({@code titleGeneration}), charged after
+         * the turn it titles.
+         */
+        CONVERSATION_TITLE
     }
 }
