@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.ParameterizedTest;
 
 import java.net.URI;
 import java.util.List;
@@ -210,6 +212,56 @@ class WorkflowTraversalTest {
             when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
 
             var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls",
+                    String.class, agentStore, workflowStore, resourceClientLibrary);
+
+            assertTrue(result.isEmpty());
+        }
+
+        @ParameterizedTest(name = "a step typed {0} is found when asking for {1}")
+        @CsvSource({"eddi://ai.labs.apicalls, eddi://ai.labs.httpcalls", "eddi://ai.labs.httpcalls, eddi://ai.labs.apicalls",
+                "eddi://ai.labs.langchain, eddi://ai.labs.llm"})
+        @DisplayName("should discover a step typed with a registered alias of the wanted type")
+        void discoversAliasTypedSteps(String stepType, String wantedType) throws Exception {
+            when(memory.getAgentId()).thenReturn("agent-1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
+
+            var wfConfig = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create(stepType));
+            step.setConfig(Map.of("uri", "eddi://ai.labs.apicalls/apicallstore/apicalls/hc-1?version=1"));
+            wfConfig.setWorkflowSteps(List.of(step));
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+            when(resourceClientLibrary.getResource(any(URI.class), eq(String.class)))
+                    .thenReturn("mockConfig");
+
+            var result = WorkflowTraversal.discoverConfigs(memory, wantedType,
+                    String.class, agentStore, workflowStore, resourceClientLibrary);
+
+            assertEquals(1, result.size(), "an alias-typed step runs in the pipeline, so it must be discovered too");
+        }
+
+        @Test
+        @DisplayName("an alias never matches a different canonical type")
+        void aliasDoesNotLeakAcrossTypes() throws Exception {
+            when(memory.getAgentId()).thenReturn("agent-1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
+            when(agentStore.read("agent-1", 1)).thenReturn(agentConfig);
+
+            var wfConfig = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.apicalls"));
+            step.setConfig(Map.of("uri", "eddi://ai.labs.apicalls/apicallstore/apicalls/hc-1?version=1"));
+            wfConfig.setWorkflowSteps(List.of(step));
+            when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+
+            var result = WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.mcpcalls",
                     String.class, agentStore, workflowStore, resourceClientLibrary);
 
             assertTrue(result.isEmpty());

@@ -69,6 +69,29 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<List<String>> EXPRESSIONS_MATCHES = MemoryKey.of("expressions:matches");
 
+    /**
+     * How sure the parser is of {@link #EXPRESSIONS_PARSED}: the accuracy of the
+     * least accurate match that contributed an expression, 0..1 (1 = every
+     * contributing word matched as typed; a typo correction, a case mismatch or a
+     * phrase fragment lowers it; for a semantic-fallback match it is the similarity
+     * score). Absent when nothing was understood. Written by InputParserTask.
+     */
+    public static final MemoryKey<Double> EXPRESSIONS_CONFIDENCE = MemoryKey.of("expressions:confidence");
+
+    /**
+     * Other readings of the input, best first, each as an expression string —
+     * stored only when the parser's {@code maxAlternatives} is above 0. Written by
+     * InputParserTask.
+     */
+    public static final MemoryKey<List<String>> EXPRESSIONS_ALTERNATIVES = MemoryKey.of("expressions:alternatives");
+
+    /**
+     * {@code true} when the input had more tokens than the parser's
+     * {@code maxInputTokens} and only the first ones were parsed. Absent otherwise.
+     * Written by InputParserTask.
+     */
+    public static final MemoryKey<Boolean> EXPRESSIONS_INPUT_TRUNCATED = MemoryKey.of("expressions:inputTruncated");
+
     /** Extracted intent names. Written by InputParserTask. */
     public static final MemoryKey<List<String>> INTENTS = MemoryKey.ofPublic("intents");
 

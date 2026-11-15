@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -52,7 +53,7 @@ class VaultGrantCheckerAgentRestrictedTest {
         when(globalVariableResolver.resolveValue(anyString(), anyString())).thenAnswer(i -> i.getArgument(0));
         agentStore = mock(IAgentStore.class);
         checker = new VaultGrantChecker(secretProvider, agentStore, mock(IWorkflowStore.class), mock(ILlmStore.class),
-                mock(IApiCallsStore.class), mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IConnectionStore.class),
+                mock(IApiCallsStore.class), mock(IMcpCallsStore.class), mock(IRagStore.class), mock(IParserStore.class), mock(IConnectionStore.class),
                 globalVariableResolver);
     }
 

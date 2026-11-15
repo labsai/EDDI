@@ -58,6 +58,10 @@ ${vault:tenantId/keyName}
 | **LangChain** (`langchain.json`)      | The provider's credential parameters only — see below |
 | **RAG** (`rag.json`)                  | `embeddingParameters.apiKey`; `storeParameters` |
 | **Property Setter** (`property.json`) | Values with `scope: secret` auto-vault |
+| **MCP Calls** (`mcpcalls.json`) | `apiKey` |
+| **A2A peers** (`a2aAgents` in `langchain.json`) | `apiKey` |
+| **RAG** (`rag.json`) | Embedding-model and vector-store parameters |
+| **Channel integrations** | Slack `botToken` and signing secrets |
 
 ### Model parameters: credentials only
 
@@ -259,6 +263,8 @@ Blocking at resolution would fail in the middle of a live conversation, after th
 
 The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 
+What it scans: the agent document, the inline `config` and `extensions` of every workflow step, and the documents the steps name — LLM, httpcalls, MCP-calls, RAG and parser configurations (a parser's [`semanticFallback`](semantic-parser.md#semantic-fallback) names an embedding model and its key) — together with the connections and global variables those name. A step's inline configuration and parser documents used not to be read, so a reference placed there was used without being checked.
+
 One path uses an agent's configuration without deploying it: a scheduled **Dream** consolidation reads the stored agent version (a pinned, never-deployed one included) and hands `userMemoryConfig.dream.parameters` to the model. It runs the same check against that exact version before the cycle starts, and refuses the cycle in `enforce` mode.
 
 ### Knowledge bases run outside an agent
@@ -455,7 +461,7 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use. A cached chat model whose parameters reach a secret through a `${vars:…}` variable cannot be matched to the secret, so every variable-bearing chat model is evicted along with it.
 - **A provider's default endpoint is checked too.** An LLM or embedding configuration with *no* endpoint parameter sends to the provider's own default host — and the editor chooses the provider `type`, so a key restricted to `api.openai.com` could otherwise go to `api.anthropic.com` by switching the type and leaving `baseUrl` out. The default is checked like a configured endpoint: `api.openai.com` (`openai`; `azure-openai` whenever `nonAzureApiKey` is set, which sends there even with an `endpoint`, and without an `endpoint`), `api.anthropic.com`, `generativelanguage.googleapis.com` (`gemini`), `api.mistral.ai`, `router.huggingface.co` (`huggingface`), `huggingface.co` (`jlama`'s model download, which `authToken` authenticates), `bedrock-runtime.<region>.amazonaws.com` (`us-east-1` when no `region`), `<location>-aiplatform.googleapis.com` (`gemini-vertex`), `localhost:11434` (`ollama`); for embeddings also `api.cohere.ai` and Vertex's `us-central1` default. An OpenAI-compatible preset is checked against the URL its `region` selects — also when the configuration carries an `endpoint`-style key the preset does not read. A secret **without** `allowedHosts` is unaffected.
 - **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
-- **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
+- **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls, parser and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
 
 ### Required on a create
 
@@ -823,7 +829,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination`, `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`; the list endpoint adds `unrestrictedDestination` and `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -1136,6 +1142,8 @@ The vault emits metrics under the `eddi.vault.*` namespace for Grafana/Prometheu
 | `eddi.vault.errors.count`    | Counter | Total error count (persistence + crypto)   |
 | `eddi.vault.resolve.duration`| Timer   | Duration of resolve operations             |
 | `eddi.vault.store.duration`  | Timer   | Duration of store operations               |
+| `eddi.vault.legacy.unbound.opened.count` | Counter | Values that opened only through the no-AAD legacy fallback — see [Retiring the fallback](#envelope-encryption) |
+| `eddi.vault.reseal.failures` | Counter | Rows a DEK-rotation sweep could not open, tagged `participant` (`connection-grants` for OAuth grants) |
 
 ## Manager — Secrets Admin Page
 

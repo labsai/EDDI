@@ -17,10 +17,12 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.SummaryCitations;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -49,8 +51,10 @@ import java.util.stream.Collectors;
  * <ol>
  * <li><b>Prune stale</b> — remove entries not accessed in N days (zero LLM
  * cost)</li>
- * <li><b>Detect contradictions</b> — find conflicting entries (future:
- * LLM-driven)</li>
+ * <li><b>Detect contradictions</b> — find conflicting entries and, as
+ * {@code contradictionResolution} says, flag them {@code CONTESTED} or retire
+ * the older as {@code SUPERSEDED} — never deleting one (see
+ * {@link UserMemoryContradictions})</li>
  * <li><b>Summarize interactions</b> — compress related entries via LLM
  * consolidation</li>
  * </ol>
@@ -156,6 +160,9 @@ public class DreamService {
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
     private Counter contradictionsFoundCounter;
+    private Counter contradictionsContestedCounter;
+    private Counter contradictionsSupersededCounter;
+    private Counter contradictionsClearedCounter;
     private Counter entriesSummarizedCounter;
     private Counter cyclesFailedCounter;
     private Counter summarizationFailedCounter;
@@ -180,6 +187,9 @@ public class DreamService {
         usersProcessedCounter = meterRegistry.counter("eddi.dream.users.processed");
         entriesPrunedCounter = meterRegistry.counter("eddi.dream.entries.pruned");
         contradictionsFoundCounter = meterRegistry.counter("eddi.dream.contradictions.found");
+        contradictionsContestedCounter = meterRegistry.counter("eddi.dream.contradictions.contested");
+        contradictionsSupersededCounter = meterRegistry.counter("eddi.dream.contradictions.superseded");
+        contradictionsClearedCounter = meterRegistry.counter("eddi.dream.contradictions.cleared");
         entriesSummarizedCounter = meterRegistry.counter("eddi.dream.entries.summarized");
         cyclesFailedCounter = meterRegistry.counter("eddi.dream.cycles.failed");
         summarizationFailedCounter = meterRegistry.counter("eddi.dream.summarization.failed");
@@ -370,20 +380,28 @@ public class DreamService {
             }
             List<UserMemoryEntry> currentEntries = pruned > 0 ? scopeToOwningAgent(userEntries, agentId, dreamConfig) : allEntries;
 
-            // 2. Detect contradictions (read-only — does not modify entries). Unlike
-            // pruning and summarization, detection may look past this agent's own
-            // entries: the contradiction that matters most is the one the docs lead
-            // with — agent A stored "English", agent B stored "German" — and the
-            // ownership scope made it undetectable by default. Reading is safe here
-            // because nothing is changed and no foreign value is logged or sent
-            // anywhere; only keys this agent itself holds are considered.
+            // 2. Detect contradictions. Unlike pruning and summarization, detection may
+            // look past this agent's own entries: the contradiction that matters most
+            // is the one the docs lead with — agent A stored "English", agent B stored
+            // "German" — and the ownership scope made it undetectable by default.
+            // Reading is safe because no foreign value is logged or sent anywhere, and
+            // only keys this agent itself holds are considered. Resolution WRITES only
+            // inside the agent-scoped set, exactly like pruning.
             if (dreamConfig.isDetectContradictions()) {
-                contradictions = detectContradictions(userId, userEntries, agentId, dreamConfig.isCrossAgentMaintenance());
+                var outcome = resolveContradictions(userId, userEntries, currentEntries, agentId, dreamConfig, conflicts);
+                contradictions = outcome.found();
+                if (outcome.written() > 0) {
+                    userEntries = userMemoryStore.getAllEntries(userId);
+                    currentEntries = scopeToOwningAgent(userEntries, agentId, dreamConfig);
+                }
             }
 
-            // 3. Summarize interactions (LLM-driven consolidation)
+            // 3. Summarize interactions (LLM-driven consolidation). Contested and
+            // superseded entries are held back: merging a disputed value into a summary
+            // would pick a winner after all, and consolidating a superseded one would
+            // bring the retired value back.
             if (dreamConfig.isSummarizeInteractions()) {
-                var outcome = summarizeInteractions(userId, currentEntries, dreamConfig, conflicts);
+                var outcome = summarizeInteractions(userId, acceptedOnly(currentEntries), dreamConfig, conflicts);
                 summarized = outcome.entriesReduced();
                 estimatedCost = outcome.estimatedCostUsd();
                 summarizationError = outcome.error();
@@ -452,45 +470,99 @@ public class DreamService {
     }
 
     /**
-     * Detect contradictory entries: the same key holding different values. V1 is
-     * key-based; semantic (LLM) detection is future work.
+     * Outcome of the contradiction phase.
+     *
+     * @param found
+     *            contradictions detected (adjacent same-key pairs that disagree)
+     * @param written
+     *            assessments this cycle wrote — non-zero means the entries changed
+     *            and later phases must re-read them
+     */
+    record ContradictionOutcome(int found, int written) {
+    }
+
+    /**
+     * Detect contradictory entries — the same key holding different values — and
+     * resolve them as {@code contradictionResolution} says. Key-based; semantic
+     * (LLM) detection is future work.
      * <p>
      * Only keys the firing agent itself holds are considered unless
-     * {@code crossAgent} — so agent A's cycle reports A's "language" disagreeing
-     * with B's, but never a disagreement between B and C that A has no stake in.
-     * Values are logged at DEBUG only: another agent's {@code self} memory is not
-     * this cycle's to write into an INFO log.
+     * {@code crossAgentMaintenance} — so agent A's cycle reports A's "language"
+     * disagreeing with B's, but never a disagreement between B and C that A has no
+     * stake in. Assessments are written only onto {@code writable}, the same
+     * agent-scoped set pruning works on: by default A flags its own entry, not B's.
+     * Each write is a compare-and-set on {@code updatedAt}; one that loses to a
+     * concurrent write counts as a conflict. Values are logged at DEBUG only:
+     * another agent's {@code self} memory is not this cycle's to write into an INFO
+     * log.
      */
-    private int detectContradictions(String userId, List<UserMemoryEntry> entries, String agentId, boolean crossAgent) {
-        Map<String, List<UserMemoryEntry>> byKey = entries.stream()
-                .filter(e -> e.key() != null)
-                .collect(Collectors.groupingBy(UserMemoryEntry::key, LinkedHashMap::new, Collectors.toList()));
-        int contradictions = 0;
+    private ContradictionOutcome resolveContradictions(String userId, List<UserMemoryEntry> entries, List<UserMemoryEntry> writable,
+                                                       String agentId, AgentConfiguration.DreamConfig dreamConfig, AtomicInteger conflicts) {
+        var resolution = contradictionResolution(dreamConfig, agentId);
+        Set<String> writableIds = writable.stream().map(UserMemoryEntry::id).filter(Objects::nonNull).collect(Collectors.toSet());
+        var plan = UserMemoryContradictions.plan(entries, writableIds, agentId, dreamConfig.isCrossAgentMaintenance(), resolution);
 
-        for (var keyGroup : byKey.entrySet()) {
-            List<UserMemoryEntry> sameKey = keyGroup.getValue();
-            if (sameKey.size() < 2) {
-                continue;
-            }
-            if (!crossAgent && sameKey.stream().noneMatch(e -> agentId != null && agentId.equals(e.sourceAgentId()))) {
-                continue;
-            }
-            UserMemoryEntry previous = null;
-            for (UserMemoryEntry entry : sameKey) {
-                if (previous != null && !Objects.equals(previous.value(), entry.value())) {
-                    contradictions++;
-                    contradictionsFoundCounter.increment();
-                    LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s' between agents '%s' (%s) and '%s' (%s)",
-                            LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(previous.sourceAgentId()),
-                            previous.visibility(), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility());
-                    LOGGER.debugf("[DREAM] Contradiction values for key='%s': '%s' vs '%s'", LogSanitizer.sanitize(entry.key()), previous.value(),
-                            entry.value());
+        for (var contradiction : plan.contradictions()) {
+            UserMemoryEntry previous = contradiction.previous();
+            UserMemoryEntry entry = contradiction.entry();
+            contradictionsFoundCounter.increment();
+            LOGGER.infof("[DREAM] Contradiction found for user='%s', key='%s' between agents '%s' (%s) and '%s' (%s)",
+                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.key()), LogSanitizer.sanitize(previous.sourceAgentId()),
+                    previous.visibility(), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility());
+            LOGGER.debugf("[DREAM] Contradiction values for key='%s': '%s' vs '%s'", LogSanitizer.sanitize(entry.key()), previous.value(),
+                    entry.value());
+        }
+
+        int written = 0;
+        for (var change : plan.changes()) {
+            UserMemoryEntry entry = change.entry();
+            try {
+                if (!userMemoryStore.setAssessmentIfUnchanged(entry.id(), change.assessment(), change.supersededBy(), entry.updatedAt())) {
+                    recordConflict(conflicts, userId, "entry '" + LogSanitizer.sanitize(entry.key())
+                            + "' was written after this cycle read it; not marked " + change.assessment());
+                    continue;
                 }
-                previous = entry;
+                written++;
+                switch (change.assessment()) {
+                    case CONTESTED -> contradictionsContestedCounter.increment();
+                    case SUPERSEDED -> contradictionsSupersededCounter.increment();
+                    case ACCEPTED -> contradictionsClearedCounter.increment();
+                }
+                LOGGER.infof("[DREAM] Memory '%s' of user='%s' (agent '%s', %s) is now %s%s", LogSanitizer.sanitize(entry.key()),
+                        LogSanitizer.sanitize(userId), LogSanitizer.sanitize(entry.sourceAgentId()), entry.visibility(), change.assessment(),
+                        change.supersededBy() != null ? " (superseded by entry '" + LogSanitizer.sanitize(change.supersededBy()) + "')" : "");
+            } catch (Exception e) {
+                LOGGER.warnf("[DREAM] Failed to mark memory '%s' of user '%s' %s: %s", LogSanitizer.sanitize(entry.key()),
+                        LogSanitizer.sanitize(userId), change.assessment(), e.getMessage());
             }
         }
 
-        return contradictions;
+        return new ContradictionOutcome(plan.contradictions().size(), written);
+    }
+
+    /**
+     * The configured strategy; an unknown value is warned about and treated as the
+     * default, {@code keep_newest} — a typo must not start rewriting memories under
+     * a strategy nobody chose, and must not stop detection either.
+     */
+    private static UserMemoryContradictions.Resolution contradictionResolution(AgentConfiguration.DreamConfig dreamConfig, String agentId) {
+        String configured = dreamConfig.getContradictionResolution();
+        var resolution = UserMemoryContradictions.Resolution.fromConfig(configured);
+        if (resolution == null) {
+            LOGGER.warnf("[DREAM] Agent '%s' sets userMemoryConfig.dream.contradictionResolution='%s', which is not one of [%s]; "
+                    + "using '%s' (detect and log only).", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(configured),
+                    UserMemoryContradictions.Resolution.allowedValues(), UserMemoryContradictions.Resolution.KEEP_NEWEST.configValue());
+            return UserMemoryContradictions.Resolution.KEEP_NEWEST;
+        }
+        return resolution;
+    }
+
+    /** The entries no contradiction holds back from consolidation. */
+    private static List<UserMemoryEntry> acceptedOnly(List<UserMemoryEntry> entries) {
+        if (entries.stream().allMatch(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED)) {
+            return entries;
+        }
+        return entries.stream().filter(e -> e.assessment() == UserMemoryEntry.Assessment.ACCEPTED).toList();
     }
 
     /**
@@ -584,8 +656,11 @@ public class DreamService {
                 break;
             }
 
-            // 2. Build content: JSON array of entries
-            String content = buildEntriesJson(groupEntries);
+            // 2. Build content: JSON array of entries. With citeSources each entry is
+            // numbered ("ref") and the model is asked to cite those numbers.
+            boolean cite = config.isCiteSources();
+            String content = cite ? buildCitedEntriesJson(groupEntries) : buildEntriesJson(groupEntries);
+            String instructions = consolidationInstructions(config, groupEntries.size()) + (cite ? CITATION_INSTRUCTIONS : "");
 
             // 3. Call LLM. Dream is a background job with no parent LLM task to
             // inherit credentials from, so the model parameters come from the
@@ -607,7 +682,7 @@ public class DreamService {
             SummarizationService.SummarizationResult llmResult;
             try {
                 llmResult = summarizationService.summarizeWithUsage(
-                        content, consolidationInstructions(config, groupEntries.size()),
+                        content, instructions,
                         config.getLlmProvider(), config.getLlmModel(),
                         config.getParameters());
             } catch (Exception e) {
@@ -638,13 +713,69 @@ public class DreamService {
             // 4. Parse response (handles markdown fences, validates output). Two
             // consolidated entries with the same key would upsert onto the same
             // document, the second silently overwriting the first — so they are
-            // merged here, never dropped.
-            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(parseConsolidatedEntries(llmResult.summary()));
+            // merged here, never dropped. With citeSources the citation check reads the
+            // objects as the model wrote them, BEFORE the merge: merging unions their
+            // sources, so an object citing nothing (or the wrong entry) would
+            // otherwise borrow a sibling's citations and pass.
+            List<ConsolidatedEntry> parsed = cite
+                    ? parseCitedConsolidatedEntries(llmResult.summary())
+                    : parseConsolidatedEntries(llmResult.summary());
+            List<ConsolidatedEntry> consolidated = mergeDuplicateKeys(parsed);
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
                         "user='%s', group='%s'. Preserving original entries.", LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()));
                 continue;
+            }
+
+            // 4b. citeSources: every consolidated entry must cite the originals it came
+            // from, and every number it states must appear in them verbatim. The
+            // originals are deleted below, so by default a failing group is skipped.
+            if (cite) {
+                SummaryCitations.Result check = checkCitations(parsed, groupEntries);
+                String outcome = SummaryCitations.OUTCOME_PASSED;
+                if (!check.valid()) {
+                    var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(),
+                            SummaryCitations.OnValidationFailure.fallback_to_previous);
+                    LOGGER.warnf("[DREAM] Consolidation of group '%s' for user='%s' failed the citation check (%d problem(s)); "
+                            + "onValidationFailure=%s", LogSanitizer.sanitize(group.getKey()), LogSanitizer.sanitize(userId),
+                            check.problems().size(), policy);
+                    // The problems quote the model's text and the user's memory keys: content,
+                    // so DEBUG only, sanitised and capped.
+                    LOGGER.debugf("[DREAM] Citation problems for group '%s': %s", LogSanitizer.sanitize(group.getKey()),
+                            LogSanitizer.sanitize(check.describe()));
+                    outcome = policy == SummaryCitations.OnValidationFailure.keep ? SummaryCitations.OUTCOME_KEPT : SummaryCitations.OUTCOME_FALLBACK;
+                    // A retry is a consolidation call like any other: bounded by the same
+                    // three ceilings, and its cost counts toward maxCostPerRun.
+                    if (policy == SummaryCitations.OnValidationFailure.retry_once && estimatedCostAccumulated < config.getMaxCostPerRun()
+                            && !(config.isMaxSummarizationCallsSet() && llmCallsMade >= config.getMaxSummarizationCalls())
+                            && !tenantBudgetSpent(userId)) {
+                        try {
+                            var second = summarizationService.summarizeWithUsage(content, instructions + citationRetryFeedback(check),
+                                    config.getLlmProvider(), config.getLlmModel(), config.getParameters());
+                            llmCallsMade++;
+                            estimatedCostAccumulated += estimateCost(second, content.length(), config.getInputPricePer1M(),
+                                    config.getOutputPricePer1M());
+                            meterTenantCost(second, content.length(), config);
+                            List<ConsolidatedEntry> retriedParsed = parseCitedConsolidatedEntries(second.summary());
+                            List<ConsolidatedEntry> retried = mergeDuplicateKeys(retriedParsed);
+                            if (!retried.isEmpty() && checkCitations(retriedParsed, groupEntries).valid()) {
+                                consolidated = retried;
+                                outcome = SummaryCitations.OUTCOME_RETRIED;
+                            }
+                        } catch (Exception e) {
+                            // The first call of this group succeeded, so this is no configuration
+                            // fault to abort the phase over: the group is skipped, as on any failure.
+                            summarizationFailedCounter.increment();
+                            LOGGER.warnf("[DREAM] Citation retry for user='%s', group='%s' failed (%s). Original entries are preserved.",
+                                    LogSanitizer.sanitize(userId), LogSanitizer.sanitize(group.getKey()), e.getClass().getSimpleName());
+                        }
+                    }
+                }
+                SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_DREAM, outcome);
+                if (SummaryCitations.OUTCOME_FALLBACK.equals(outcome)) {
+                    continue;
+                }
             }
 
             // 5. Validate: consolidated must be fewer than originals
@@ -771,12 +902,13 @@ public class DreamService {
             Set<String> overwrittenOriginalIds = new LinkedHashSet<>();
             try {
                 for (var entry : consolidated) {
-                    var toWrite = new UserMemoryEntry(
+                    var consolidatedEntry = new UserMemoryEntry(
                             null, userId, entry.key(), entry.value(),
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
                             earliestCreated, Instant.now());
+                    var toWrite = cite ? consolidatedEntry.withSourceEntryIds(sourceEntryIds(entry, groupEntries)) : consolidatedEntry;
                     // An entry that reuses an original is meant to overwrite it. Any other
                     // entry must be new: the collision check above ran before this write,
                     // so a memory a conversation, REST or MCP created with this key in the
@@ -1216,7 +1348,164 @@ public class DreamService {
      * Parse the LLM consolidation response into structured entries. Handles
      * markdown fences ({@code ```json ... ```}) and extracts the JSON array.
      */
-    record ConsolidatedEntry(String key, String value) {
+    record ConsolidatedEntry(String key, String value, List<Integer> sources) {
+
+        /**
+         * {@code sources} are the refs the entry cites ({@code citeSources} only); an
+         * element the model wrote that is no ref is kept as {@code null}, so the check
+         * can name it.
+         */
+        ConsolidatedEntry {
+            sources = sources == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(sources));
+        }
+
+        ConsolidatedEntry(String key, String value) {
+            this(key, value, List.of());
+        }
+    }
+
+    /**
+     * Appended to the consolidation instructions when {@code citeSources} is on.
+     */
+    static final String CITATION_INSTRUCTIONS = "\n\nEvery input entry has a numeric \"ref\". Every object in your answer must also "
+            + "carry \"sources\": the refs of the input entries it consolidates, for example "
+            + "[{\"key\": \"...\", \"value\": \"...\", \"sources\": [0, 2]}]. "
+            + "Copy every number exactly as it appears in its sources: the same digits, separators, sign and percent sign. "
+            + "Do not round, convert, add up or otherwise compute numbers. "
+            + "Where the sources are ambiguous or do not say, write \"unclear in source\" instead of guessing.";
+
+    /**
+     * Appended to the instructions of a {@code retry_once} consolidation call. It
+     * restates the Dream answer contract: the rolling summary's feedback asks for
+     * cited bullet points, which a model can follow with prose that this parser
+     * rejects, wasting the paid retry.
+     */
+    static String citationRetryFeedback(SummaryCitations.Result result) {
+        return "\n\nYour previous answer failed the citation check:\n" + result.describe()
+                + "Answer again with only the JSON array: [{\"key\": \"...\", \"value\": \"...\", \"sources\": [0, 2]}]. "
+                + "Every object must carry \"sources\" with the refs of the input entries it consolidates, and every number in "
+                + "\"value\" must appear exactly as written in the entries it cites. Do not add any text outside the JSON array.";
+    }
+
+    /**
+     * The {@code citeSources} check of a group's answer: each consolidated entry
+     * against the originals it cites, by ref. A source's text is its key and value,
+     * as the model was given them.
+     * <p>
+     * Pass the parsed answer, not {@link #mergeDuplicateKeys}' output: each object
+     * must be backed by its own sources. Once two objects sharing a key are merged,
+     * either one's numbers are checked against the union of both citation lists.
+     * Checking every object on its own also covers the merged entry, whose values
+     * and sources are just the two objects' values and sources combined.
+     */
+    static SummaryCitations.Result checkCitations(List<ConsolidatedEntry> consolidated, List<UserMemoryEntry> originals) {
+        List<String> sourceTexts = originals.stream().map(o -> o.key() + ": " + o.value()).toList();
+        List<String> problems = new ArrayList<>();
+        for (ConsolidatedEntry entry : consolidated) {
+            problems.addAll(SummaryCitations.checkConsolidatedEntry(entry.key(), entry.value(), entry.sources(), sourceTexts).problems());
+        }
+        return new SummaryCitations.Result(problems);
+    }
+
+    /**
+     * The ids a consolidated entry records: those of the originals it cites, refs
+     * that exist only; every original of the group when that leaves none (an answer
+     * kept under {@code onValidationFailure: keep}) — the group is still where the
+     * entry came from.
+     */
+    static List<String> sourceEntryIds(ConsolidatedEntry entry, List<UserMemoryEntry> originals) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Integer ref : entry.sources()) {
+            if (ref != null && ref >= 0 && ref < originals.size() && originals.get(ref).id() != null) {
+                ids.add(originals.get(ref).id());
+            }
+        }
+        if (ids.isEmpty()) {
+            originals.stream().map(UserMemoryEntry::id).filter(Objects::nonNull).forEach(ids::add);
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /**
+     * {@link #parseConsolidatedEntries} for a {@code citeSources} answer, which
+     * carries a {@code sources} array the plain parser (a list of string maps)
+     * would reject. Key and value are read as the plain parser reads them — scalars
+     * as text, and any object or array there rejects the whole answer. Other fields
+     * are ignored.
+     */
+    List<ConsolidatedEntry> parseCitedConsolidatedEntries(String llmResponse) {
+        String array = jsonArrayOf(llmResponse);
+        if (array == null) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(array);
+            if (root == null || !root.isArray()) {
+                return List.of();
+            }
+            List<ConsolidatedEntry> result = new ArrayList<>();
+            for (JsonNode node : root) {
+                if (!node.isObject() || node.path("key").isContainerNode() || node.path("value").isContainerNode()) {
+                    return List.of();
+                }
+                String key = scalarText(node.get("key"));
+                String value = scalarText(node.get("value"));
+                if (key == null || key.isBlank() || value == null || value.isBlank()) {
+                    continue;
+                }
+                result.add(new ConsolidatedEntry(truncate(key.strip(), MAX_KEY_LENGTH), value.strip(), refs(node.get("sources"))));
+            }
+            return result;
+        } catch (Exception e) {
+            // The parser's message quotes the model's answer, i.e. user content: DEBUG
+            // only.
+            LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Parse failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
+            return List.of();
+        }
+    }
+
+    private static String scalarText(JsonNode node) {
+        return node == null || node.isNull() ? null : node.asText();
+    }
+
+    /**
+     * The cited refs; an element that is not a small non-negative integer is null.
+     */
+    private static List<Integer> refs(JsonNode sources) {
+        if (sources == null || sources.isNull()) {
+            return List.of();
+        }
+        List<Integer> refs = new ArrayList<>();
+        Iterable<JsonNode> items = sources.isArray() ? sources : List.of(sources);
+        for (JsonNode ref : items) {
+            if (ref.isIntegralNumber() && ref.canConvertToInt()) {
+                refs.add(ref.intValue());
+            } else if (ref.isTextual() && ref.textValue().strip().matches("\\d{1,9}")) {
+                refs.add(Integer.parseInt(ref.textValue().strip()));
+            } else {
+                refs.add(null);
+            }
+        }
+        return refs;
+    }
+
+    /** The JSON array in a model answer, fences and surrounding text removed. */
+    private static String jsonArrayOf(String llmResponse) {
+        if (llmResponse == null || llmResponse.isBlank()) {
+            return null;
+        }
+        String cleaned = llmResponse.strip();
+        if (cleaned.startsWith("```")) {
+            int firstNewline = cleaned.indexOf('\n');
+            int lastFence = cleaned.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                cleaned = cleaned.substring(firstNewline + 1, lastFence).strip();
+            }
+        }
+        int start = cleaned.indexOf('[');
+        int end = cleaned.lastIndexOf(']');
+        return start < 0 || end <= start ? null : cleaned.substring(start, end + 1);
     }
 
     List<ConsolidatedEntry> parseConsolidatedEntries(String llmResponse) {
@@ -1313,6 +1602,7 @@ public class DreamService {
         // by string concatenation copied the whole prefix per duplicate (quadratic in
         // a response full of repeated keys) and only checked the cap at the end.
         Map<String, StringBuilder> byKey = new LinkedHashMap<>();
+        Map<String, LinkedHashSet<Integer>> sourcesByKey = new HashMap<>();
         for (ConsolidatedEntry entry : entries) {
             String value = entry.value() == null ? "" : entry.value();
             StringBuilder merged = byKey.get(entry.key());
@@ -1322,13 +1612,15 @@ public class DreamService {
             } else if (!value.contentEquals(merged)) {
                 merged.append("; ").append(value);
             }
+            sourcesByKey.computeIfAbsent(entry.key(), k -> new LinkedHashSet<>()).addAll(entry.sources());
             if (merged.length() > MAX_VALUE_LENGTH) {
                 LOGGER.warnf("[DREAM] A consolidated value exceeds %d characters; keeping the originals rather than cutting it.",
                         MAX_VALUE_LENGTH);
                 return List.of();
             }
         }
-        return byKey.entrySet().stream().map(e -> new ConsolidatedEntry(e.getKey(), e.getValue().toString())).toList();
+        return byKey.entrySet().stream()
+                .map(e -> new ConsolidatedEntry(e.getKey(), e.getValue().toString(), new ArrayList<>(sourcesByKey.get(e.getKey())))).toList();
     }
 
     /**
@@ -1444,6 +1736,38 @@ public class DreamService {
      * Build a JSON array string from memory entries for the LLM prompt. Uses the
      * injected {@link ObjectMapper} for proper serialization.
      */
+    /**
+     * {@link #buildEntriesJson} with each entry numbered by its position — the ref
+     * a {@code citeSources} answer cites. Small integers rather than the stored
+     * ids: a model copies {@code 2} reliably, an ObjectId much less so.
+     */
+    private String buildCitedEntriesJson(List<UserMemoryEntry> entries) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("ref", i);
+            item.put("key", entries.get(i).key());
+            item.put("value", String.valueOf(entries.get(i).value()));
+            list.add(item);
+        }
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(list);
+        } catch (Exception e) {
+            LOGGER.warnf("[DREAM] Failed to serialize entries to JSON (%s)", e.getClass().getSimpleName());
+            LOGGER.debugf("[DREAM] Serialization failure detail: %s", LogSanitizer.sanitize(cap(e.getMessage())));
+            var sb = new StringBuilder("[");
+            for (int i = 0; i < entries.size(); i++) {
+                var entry = entries.get(i);
+                sb.append("{\"ref\": ").append(i).append(", \"key\": \"").append(escapeJson(entry.key())).append("\", \"value\": \"")
+                        .append(escapeJson(String.valueOf(entry.value()))).append("\"}");
+                if (i < entries.size() - 1)
+                    sb.append(",");
+            }
+            sb.append("]");
+            return sb.toString();
+        }
+    }
+
     private String buildEntriesJson(List<UserMemoryEntry> entries) {
         var list = entries.stream()
                 .map(e -> Map.of("key", e.key(), "value", String.valueOf(e.value())))
@@ -1537,5 +1861,10 @@ public class DreamService {
         public boolean isSuccess() {
             return error == null;
         }
+    }
+
+    /** At most 300 characters of a diagnostic message, null-safe. */
+    private static String cap(String message) {
+        return message != null && message.length() > 300 ? message.substring(0, 300) + "…" : message;
     }
 }
