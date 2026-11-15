@@ -238,22 +238,30 @@ class ConversationContinuationsTest {
         @Test
         @DisplayName("booked by an administrator in their own conversation: the schedule records it")
         void adminBookingIsRecorded() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            ConversationContinuations.recordBookingCaller(memory, new CallerIdentity(null, "user-1", null, Map.of(), true));
+            assertEquals(Boolean.TRUE, bookedMarker(memory));
+        }
+
+        @Test
+        @DisplayName("the arm reads the recorded booking, never the caller bound when it runs")
+        void armIgnoresTheLiveBinding() throws Exception {
             var context = new CallerIdentityContext(null, null);
-            continuations.callerIdentityContext = context;
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
             context.bind(new CallerIdentity(null, "user-1", null, Map.of(), true));
             try {
-                assertEquals(Boolean.TRUE, bookedMarker(memory));
+                assertEquals(Boolean.FALSE, bookedMarker(memory), "nothing was recorded while the turn ran");
             } finally {
                 context.clear();
             }
         }
 
         @Test
-        @DisplayName("booked by anyone else: recorded as not an administrator's")
+        @DisplayName("booked by anyone else, or an admin in somebody else's conversation: recorded as not an administrator's")
         void ordinaryBookingIsRecordedAsSuch() throws Exception {
-            continuations.callerIdentityContext = new CallerIdentityContext(null, null);
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            ConversationContinuations.recordBookingCaller(memory, new CallerIdentity(null, "user-1", null, Map.of(), false));
+            ConversationContinuations.recordBookingCaller(memory, new CallerIdentity(null, "someone-else", null, Map.of(), true));
             assertEquals(Boolean.FALSE, bookedMarker(memory));
         }
 

@@ -240,8 +240,9 @@ public class ContinuationFireHandler {
 
     /**
      * The owner's team subjects at their last sign-in, or {@code null} when the
-     * directory has no record of them. Only consulted under enforced workspaces
-     * (with them off {@code checkPrincipalUse} admits everything first).
+     * directory has no record of them. A directory store failure propagates. Only
+     * consulted under enforced workspaces (with them off {@code checkPrincipalUse}
+     * admits everything first).
      */
     private List<String> ownerTeams(String owner) {
         if (!resourceAccessGuard.settings().isEnforcing()) {
@@ -250,8 +251,9 @@ public class ContinuationFireHandler {
         if (userDirectory == null || !userDirectory.isActive()) {
             return null;
         }
-        DirectoryUser seen = userDirectory.lookup(List.of(owner)).get(owner);
-        return seen != null ? seen.teams() : null;
+        // Read through, not the label cache: a directory that cannot answer throws, and
+        // the fire fails and is retried rather than running unchecked.
+        return userDirectory.findForAccessCheck(owner).map(DirectoryUser::teams).orElse(null);
     }
 
     private Result refusalForState(String conversationId, ConversationState state) {

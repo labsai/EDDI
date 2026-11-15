@@ -1252,16 +1252,30 @@ public class ClusterAdminService implements ClusterStartable {
             return null;
         }));
         replayCompletions.execute(task);
+        // Waits for the submission's outcome even when interrupted. Interrupting get()
+        // does not stop the dispatched task: giving up here would report REJECTED and
+        // release the claim while the task can still submit the turn, whose settlement
+        // could then no longer remove the dead letter — and a retry would run the turn
+        // again. The interrupt is restored once the outcome is known.
+        boolean interrupted = false;
         try {
-            task.get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw e;
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof Exception cause) {
-                throw cause;
+            while (true) {
+                try {
+                    task.get();
+                    return;
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    if (e.getCause() instanceof Exception cause) {
+                        throw cause;
+                    }
+                    throw e;
+                }
             }
-            throw e;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

@@ -71,7 +71,13 @@ replay and self-continuation.
   live caller (an admin in their own conversation) and hands it from link to link through the turn;
   the fire-time `USE` re-check treats it like a schedule's `creatorAdmin`. A chain booked before the
   marker existed carries none and is not re-checked.
-- `ClusterAdminService` uses the injected `CallerIdentityContext` instead of a private instance.
+- `ClusterAdminService` uses the injected `CallerIdentityContext` instead of a private instance, and a
+  replay whose waiting thread is interrupted keeps waiting for the submission (then restores the
+  interrupt) instead of reporting REJECTED and releasing the claim while the turn may still be submitted.
+- The continuation `bookedByAdmin` status is recorded on the step while the turn's caller is bound (say,
+  rerun and CONVERSATION_START), because the arm runs from the completion callback after the binding
+  ended; and a directory store failure during the owner's `USE` re-check fails the fire for a retry
+  (`UserDirectory.findForAccessCheck` reads through) instead of skipping the check.
 - The Slack/email approval card says when a call's arguments are longer than the card shows and points
   to the full view (Manager approval inbox, `approval-status`).
 - Manager: `ToolApprovalsConfig` gains the three fields (the editor already preserves them — it commits

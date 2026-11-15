@@ -34,6 +34,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -294,7 +295,7 @@ class ContinuationFireHandlerTest {
             when(guard.checkPrincipalUse(eq("agent-1"), eq("owner"), any(), eq(false))).thenReturn(answer);
             var directory = mock(UserDirectory.class);
             when(directory.isActive()).thenReturn(true);
-            when(directory.lookup(List.of("owner"))).thenReturn(Map.of("owner",
+            when(directory.findForAccessCheck("owner")).thenReturn(Optional.of(
                     new DirectoryUser("owner", "sub", "owner", null, false, null, List.of("team:ops"), null, null)));
             handler.resourceAccessGuard = guard;
             handler.userDirectory = directory;
@@ -338,6 +339,17 @@ class ContinuationFireHandlerTest {
         void unverifiableAccessIsRetried() throws Exception {
             ownedOnAgent();
             enforcingGuard(ResourceAccessGuard.UseCheck.UNKNOWN);
+
+            assertEquals(FireStatus.FAILED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("a directory that cannot answer fails the fire for a retry instead of skipping the owner's USE check")
+        void directoryOutageFailsClosed() throws Exception {
+            ownedOnAgent();
+            enforcingGuard(ResourceAccessGuard.UseCheck.DENIED);
+            when(handler.userDirectory.findForAccessCheck("owner")).thenThrow(new IllegalStateException("directory down"));
 
             assertEquals(FireStatus.FAILED.name(), handler.fire(booked(1, false), "owner", "", TIMEOUT).status());
             verifyNoInteractions(conversationService);

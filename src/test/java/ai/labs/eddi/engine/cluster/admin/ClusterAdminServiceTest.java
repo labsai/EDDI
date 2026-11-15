@@ -640,6 +640,35 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("an interrupted wait still waits for the submission: REPLAYED, claim kept for the settlement, interrupt restored")
+        void interruptedWaitKeepsTheReplay() throws Exception {
+            when(coordinator.getDeadLetter("i1")).thenReturn(Optional.of(entry("i1", "failed", "n1", turn("a1", "hi"))));
+            CountDownLatch submitted = new CountDownLatch(1);
+            doAnswer(i -> {
+                Thread.sleep(300); // still submitting while the admin's thread is interrupted
+                ConversationResponseHandler handler = i.getArgument(6);
+                handler.onComplete(new SimpleConversationMemorySnapshot());
+                submitted.countDown();
+                return null;
+            }).when(conversationService).say(eq("conv-i1"), any(), any(), any(), any(), anyBoolean(), any());
+            ExecutorService pool = Executors.newSingleThreadExecutor();
+            service.replayCompletions = pool;
+            ItemOutcome outcome;
+            boolean stillInterrupted;
+            try {
+                Thread.currentThread().interrupt();
+                outcome = service.replayOne("i1");
+                stillInterrupted = Thread.interrupted(); // also clears it for the rest of the test
+            } finally {
+                pool.shutdownNow();
+            }
+
+            assertEquals("REPLAYED", outcome.outcome(), "an interrupt must not report REJECTED while the turn may still be submitted");
+            assertTrue(stillInterrupted, "the interrupt is restored once the outcome is known");
+            assertEquals(0, submitted.getCount());
+        }
+
+        @Test
         @DisplayName("a replay refused at submission is still reported synchronously")
         void replayRefusalIsReportedThroughTheDispatch() throws Exception {
             when(coordinator.getDeadLetter("x")).thenReturn(Optional.of(entry("x", "failed", "n1", turn("a1", "hi"))));

@@ -21,7 +21,6 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentity;
-import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -174,14 +173,6 @@ public class ConversationContinuations {
     private final IScheduleStore scheduleStore;
     private final MeterRegistry meterRegistry;
     private final Clock clock;
-
-    /**
-     * The caller bound to the booking turn, read by {@link #bookedByAdmin}.
-     * Field-injected so the tests that construct this class keep working; null
-     * there, where no booking counts as an administrator's.
-     */
-    @Inject
-    CallerIdentityContext callerIdentityContext;
 
     @Inject
     public ConversationContinuations(IScheduleStore scheduleStore, MeterRegistry meterRegistry) {
@@ -385,7 +376,7 @@ public class ConversationContinuations {
             schedule.setEnabled(true);
             schedule.setCreatedAt(now);
             Map<String, Object> metadata = metadata(conversationId, number.intValue(), policy.maxContinuations());
-            Boolean bookedByAdmin = bookedByAdmin(memory, step);
+            Boolean bookedByAdmin = bookedByAdmin(step);
             if (bookedByAdmin != null) {
                 metadata.put(METADATA_BOOKED_BY_ADMIN_KEY, bookedByAdmin);
             }
@@ -447,28 +438,45 @@ public class ConversationContinuations {
     }
 
     /**
+     * Records on the turn's step that an administrator acting in their own
+     * conversation drove it — read later by {@link #bookedByAdmin} when the turn's
+     * continuation is armed.
+     * <p>
+     * Called while the turn's caller is still bound: the arm runs from the
+     * pipeline's completion callback, after {@code CallerIdentityContext} has
+     * restored the previous binding (or on another thread), so reading the live
+     * caller there recorded every administrator's booking as an ordinary one. A
+     * {@code null} or non-admin caller records nothing.
+     */
+    public static void recordBookingCaller(IConversationMemory memory, CallerIdentity caller) {
+        IWritableConversationStep step = memory != null ? memory.getCurrentStep() : null;
+        if (step == null || caller == null || !caller.isAdminActingAs(memory.getUserId())) {
+            return;
+        }
+        var marker = new Data<Object>(STEP_BOOKED_BY_ADMIN, Boolean.TRUE);
+        marker.setPublic(false);
+        step.storeData(marker);
+    }
+
+    /**
      * Whether the chain this continuation belongs to was booked by an administrator
      * acting in their own conversation — the continuation's equivalent of a
      * schedule's {@code creatorAdmin}, which the fire-time {@code USE} re-check
      * honours ({@code ContinuationFireHandler}).
      * <p>
-     * A turn a person drove answers from the live caller bound to it. A
-     * continuation turn has no caller, so it carries on what the schedule that
-     * started it recorded ({@value #STEP_BOOKED_BY_ADMIN}, set from the schedule by
-     * the fire). {@code null} — no marker is written — for a continuation of a
-     * chain booked before the marker existed, which is therefore not re-checked, as
-     * before.
+     * Read from the step, never from the live caller: a turn a person drove carries
+     * {@value #STEP_BOOKED_BY_ADMIN} when {@link #recordBookingCaller} saw an
+     * administrator, and a continuation turn carries what the schedule that started
+     * it recorded (set from the schedule by the fire). {@code null} — no marker is
+     * written — for a continuation of a chain booked before the marker existed,
+     * which is therefore not re-checked, as before.
      */
-    Boolean bookedByAdmin(IConversationMemory memory, IConversationStep step) {
-        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
-        if (caller != null && caller.isAdminActingAs(memory.getUserId())) {
-            return Boolean.TRUE;
+    static Boolean bookedByAdmin(IConversationStep step) {
+        IData<Object> recorded = step.getData(STEP_BOOKED_BY_ADMIN);
+        if (recorded != null && recorded.getResult() instanceof Boolean b) {
+            return b;
         }
-        if (step.getData(STEP_NUMBER) != null) {
-            IData<Object> inherited = step.getData(STEP_BOOKED_BY_ADMIN);
-            return inherited != null && inherited.getResult() instanceof Boolean b ? b : null;
-        }
-        return Boolean.FALSE;
+        return step.getData(STEP_NUMBER) != null ? null : Boolean.FALSE;
     }
 
     public static Map<String, Object> metadata(String conversationId, int number, int max) {
