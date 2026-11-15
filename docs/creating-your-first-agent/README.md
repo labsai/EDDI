@@ -119,7 +119,7 @@ Location: eddi://ai.labs.output/outputstore/outputsets/<OUTPUT_ID>?version=1
 | Field | Meaning |
 | --- | --- |
 | `outputSet[].action` | The action this entry answers |
-| `outputSet[].timesOccurred` | Which occurrence of the action this entry is for: `0` the first time, `1` the second, … The highest entry not above the current count is used, so the last one repeats |
+| `outputSet[].timesOccurred` | Which occurrence of the action this entry is for: `0` the first time, `1` the second, … The entry matching the current count is used; when none does, the entry with the highest `timesOccurred` (even one above the count), so the last one repeats — number the entries consecutively from `0` |
 | `outputs[]` | One element per message bubble, sent in order |
 | `outputs[].valueAlternatives[]` | Interchangeable variants of that bubble; one is picked at random each time |
 | `valueAlternatives[].type` | `text`, `image`, `quickReply`, `inputField`, `applicationLink`, `button`, `agentFace` or `other` — see [Output Configuration](../output-configuration.md) |
@@ -275,7 +275,7 @@ curl -i -X POST $EDDI/dictionarystore/dictionaries \
 | `phrases[].expressions` | As for words |
 
 Anything the parser cannot match comes out as `unknown(<word>)`. See
-[Semantic Parser](../semantic-parser.md) for corrections (typos, stemming) and the
+[Semantic Parser](../semantic-parser.md) for corrections (typos, phonetic matches, merged words) and the
 built-in dictionaries (numbers, e-mail addresses, times, …).
 
 ### 7. Create the behavior rules
@@ -369,8 +369,9 @@ What this rule set does:
   often the named rule has fired in this conversation; `maxTimesOccurred: "0"`
   means "never before".
 - `"occurrence": "currentStep"` on an `inputmatcher` restricts it to this turn's
-  input. Without it, the matcher looks at the whole conversation, and a greeting
-  from three turns ago would keep matching.
+  input. That is also the default when `occurrence` is omitted; `anyStep` would
+  look at the whole conversation, so a greeting from three turns ago would keep
+  matching.
 - A `negation` inverts its nested `conditions` (they are AND-ed first, then
   inverted). "Thanks without goodbye" fires on *thanks* only when the same input
   does not also say *bye* — "thanks, bye" gets only the goodbye.
@@ -385,7 +386,7 @@ What this rule set does:
 | `behaviorRules[].actions` | Actions emitted when the rule matches |
 | `behaviorRules[].conditions[].type` | `inputmatcher`, `actionmatcher`, `contextmatcher`, `occurrence`, `negation`, `connector`, `dependency`, `dynamicvaluematcher`, `sizematcher`, `contentTypeMatcher`, … |
 | `conditions[].configs` | The condition's parameters, a map of strings — for `inputmatcher`: `expressions` and `occurrence` (`currentStep`, `lastStep`, `anyStep`, `never`) |
-| `conditions[].conditions` | Nested conditions, for `negation`, `connector` and `dependency` |
+| `conditions[].conditions` | Nested conditions, for `negation` and `connector` (`dependency` names another rule in its `reference` config instead) |
 
 The full condition reference is in [Behavior Rules](../behavior-rules.md).
 

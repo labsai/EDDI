@@ -1156,8 +1156,21 @@ public class AgentConfiguration {
         private String schedule = "0 3 * * *";
         private boolean detectContradictions = true;
         /**
-         * Contradiction resolution strategy. Reserved for future use — the current V1
-         * detector only counts and logs contradictions without resolving them.
+         * What a dream cycle does with a contradiction (one key, different values),
+         * when {@link #detectContradictions} is on. No strategy deletes an entry:
+         * <ul>
+         * <li>{@code keep_newest} (default) — count and log only, change nothing; the
+         * loader's own precedence (most specific scope, then newest) decides what an
+         * agent sees. Today's behaviour.</li>
+         * <li>{@code mark_contested} — flag every entry of the disputed key
+         * {@code CONTESTED} and keep them all; agents see a
+         * {@code properties.contestedMemories} marker.</li>
+         * <li>{@code supersede_older} — retire each older disagreeing entry as
+         * {@code SUPERSEDED} (pointing at the newest) where the newest reaches all of
+         * its readers; whatever still disagrees is marked {@code CONTESTED}.</li>
+         * </ul>
+         * Writes stay inside the agent-scoped set (see {@link #crossAgentMaintenance}).
+         * An unknown value is logged as a warning and treated as {@code keep_newest}.
          */
         private String contradictionResolution = "keep_newest";
         private int pruneStaleAfterDays = 90;

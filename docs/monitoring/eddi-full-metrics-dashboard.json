@@ -10670,12 +10670,12 @@
         {
           "id": 83,
           "type": "timeseries",
-          "title": "Contradictions found",
+          "title": "Contradictions",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_dream_contradictions_found_total` — conflicting memory entries detected.",
+          "description": "`eddi_dream_contradictions_found_total` — conflicting memory entries detected; `_contested_total`, `_superseded_total` and `_cleared_total` — assessments Dream wrote under `contradictionResolution` (zero under the default `keep_newest`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -10691,7 +10691,41 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "found"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_dream_contradictions_contested_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "marked contested"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(eddi_dream_contradictions_superseded_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "marked superseded"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_dream_contradictions_cleared_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "cleared"
             }
           ],
           "fieldConfig": {
@@ -10731,9 +10765,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
