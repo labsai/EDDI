@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -219,6 +220,43 @@ class BoundedListingMcpTransportTest {
         }
         assertTrue(pending.isCancelled(), "the transport's request is cancelled");
         assertEquals(1, exceeded.get());
+    }
+
+    @Test
+    @DisplayName("a continuation arriving exactly at the deadline is refused, unsent — reached counts as passed")
+    void continuationExactlyAtTheDeadlineIsRefused() {
+        var clock = new AtomicLong();
+        var sent = new AtomicInteger();
+        var transport = new BoundedListingMcpTransport(answering(page(1, "next"), sent),
+                new BoundedListingMcpTransport.Limits(100, 1000, Duration.ofSeconds(30)), null, clock::get, (nanos, task) -> {
+                });
+
+        transport.sendRequest(list(null)).join();
+        clock.addAndGet(Duration.ofSeconds(30).toNanos());
+
+        var failure = assertThrows(ExecutionException.class, () -> transport.sendRequest(list("next")).get(5, TimeUnit.SECONDS));
+        assertInstanceOf(BoundedListingMcpTransport.ListingLimitExceededException.class, failure.getCause());
+        assertEquals(1, sent.get(), "no time was left, so nothing is sent");
+    }
+
+    @Test
+    @DisplayName("a page that completes before its deadline fires does not tell the owner: the client is not evicted after a success")
+    void deadlineFiringAfterCompletionDoesNotNotify() throws Exception {
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        McpTransport delegate = mock(McpTransport.class);
+        when(delegate.sendRequest(any(McpCallContext.class))).thenReturn(pending);
+        var exceeded = new AtomicInteger();
+        var timers = new ArrayList<Runnable>();
+        var transport = new BoundedListingMcpTransport(delegate, LIMITS, exceeded::incrementAndGet, System::nanoTime,
+                (nanos, task) -> timers.add(task));
+
+        CompletableFuture<String> result = transport.sendRequest(list(null));
+        pending.complete(page(1, null));
+        timers.forEach(Runnable::run);
+
+        assertEquals(page(1, null), result.get(5, TimeUnit.SECONDS));
+        assertEquals(0, exceeded.get(), "the timeout lost, so it must not drop the client");
+        assertFalse(pending.isCancelled());
     }
 
     @Test

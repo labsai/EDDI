@@ -25,6 +25,8 @@ A remote MCP server is untrusted, and an editor can point the `discover-tools` p
 - The agent-store oversight check resolves `version=0` before reading the stored agent and refuses when that read fails, even for a body without an oversight block; an upgrade checks an agent `CONFLICT` only when the caller selects the agent, matching `resolveConflict`.
 
 - Second review round: a client whose construction fails (the initialize handshake times out, the connection is refused) has its transport closed; the listing deadline also bounds a page that is still pending, the first one included, failing it and cancelling the request; the agent-store update resolves `version=0` once and uses it for both the oversight check and the write; an upgrade whose target version cannot be established is refused by the oversight check; decoded screening replaces a container nested past its depth limit with `[redacted]` instead of leaving it unscreened.
+- A container test against a real PostgreSQL proves the store refuses a stale update (`ResourceModifiedException`) and leaves the newer version and its content unchanged — the store-level half of the version-0 race fix in `RestAgentStore`.
+- The listing deadline counts as passed once reached, so a continuation starting exactly at it is refused rather than run with no limit, and the owner is told (the client dropped) only when the timeout actually wins over the page.
 
 ### Upgrade note
 

@@ -87,6 +87,7 @@ final class BoundedListingMcpTransport implements McpTransport {
     private final Limits limits;
     private final Runnable onExceeded;
     private final LongSupplier nanoClock;
+    private final DeadlineScheduler deadlineScheduler;
     private final ThreadLocal<Map<McpClientMethod, Listing>> listings = ThreadLocal.withInitial(() -> new EnumMap<>(McpClientMethod.class));
 
     BoundedListingMcpTransport(McpTransport delegate, Limits limits, Runnable onExceeded) {
@@ -94,11 +95,27 @@ final class BoundedListingMcpTransport implements McpTransport {
     }
 
     BoundedListingMcpTransport(McpTransport delegate, Limits limits, Runnable onExceeded, LongSupplier nanoClock) {
+        this(delegate, limits, onExceeded, nanoClock,
+                (nanos, task) -> CompletableFuture.delayedExecutor(nanos, TimeUnit.NANOSECONDS).execute(task));
+    }
+
+    BoundedListingMcpTransport(McpTransport delegate, Limits limits, Runnable onExceeded, LongSupplier nanoClock,
+            DeadlineScheduler deadlineScheduler) {
         this.delegate = delegate;
         this.limits = limits;
         this.onExceeded = onExceeded != null ? onExceeded : () -> {
         };
         this.nanoClock = nanoClock;
+        this.deadlineScheduler = deadlineScheduler;
+    }
+
+    /**
+     * Runs a task once {@code nanos} have passed. A seam, so a test can fire the
+     * deadline itself.
+     */
+    @FunctionalInterface
+    interface DeadlineScheduler {
+        void schedule(long nanos, Runnable task);
     }
 
     /** The wrapped transport (tests). */
@@ -149,7 +166,9 @@ final class BoundedListingMcpTransport implements McpTransport {
             String breach = null;
             if (listing.pages > limits.maxPages()) {
                 breach = "more than " + limits.maxPages() + " pages";
-            } else if (Duration.ofNanos(now - listing.startedNanos).compareTo(limits.deadline()) > 0) {
+            } else if (Duration.ofNanos(now - listing.startedNanos).compareTo(limits.deadline()) >= 0) {
+                // Reached counts as passed: a request starting exactly at the deadline has no
+                // time left, and would otherwise run with no limit at all.
                 breach = "longer than " + limits.deadline().toMillis() + " ms";
             }
             if (breach != null) {
@@ -179,22 +198,33 @@ final class BoundedListingMcpTransport implements McpTransport {
         // because no next request comes to be checked. What is left of the deadline
         // fails the page, drops the client and cancels the transport's request.
         long remainingNanos = limits.deadline().toNanos() - (now - current.startedNanos);
-        if (remainingNanos > 0) {
-            CompletableFuture.delayedExecutor(remainingNanos, TimeUnit.NANOSECONDS).execute(() -> {
-                if (!mapped.isDone() && mapped.completeExceptionally(exceeded(method, "longer than " + limits.deadline().toMillis() + " ms"))) {
-                    source.cancel(true);
-                }
-            });
-        }
+        // remainingNanos is positive here: a continuation at or past the deadline was
+        // refused above, and a first page starts with the whole of it. The owner is
+        // told
+        // only when the timeout wins — a page that completed first evicts nothing.
+        deadlineScheduler.schedule(Math.max(remainingNanos, 1L), () -> {
+            if (mapped.completeExceptionally(limitException(method, "longer than " + limits.deadline().toMillis() + " ms"))) {
+                notifyExceeded();
+                source.cancel(true);
+            }
+        });
         return mapped;
     }
 
     private ListingLimitExceededException exceeded(McpClientMethod method, String breach) {
+        notifyExceeded();
+        return limitException(method, breach);
+    }
+
+    private void notifyExceeded() {
         try {
             onExceeded.run();
         } catch (RuntimeException ignored) {
             // dropping the client is best effort; the request fails regardless
         }
+    }
+
+    private static ListingLimitExceededException limitException(McpClientMethod method, String breach) {
         return new ListingLimitExceededException("MCP " + methodName(method) + " stopped: the server's listing ran " + breach
                 + " (eddi.mcp.list.max-pages / max-items / deadline-ms)");
     }
