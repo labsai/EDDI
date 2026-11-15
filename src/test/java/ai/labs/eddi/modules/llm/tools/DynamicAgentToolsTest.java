@@ -189,7 +189,7 @@ class DynamicAgentToolsTest {
             gc.setId("gc-7");
             int[] next = {0};
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
-                    .thenAnswer(inv -> new SetupResult("created", "sub-" + (++next[0]), "p/x", "anthropic", "claude-sonnet-4-6", true,
+                    .thenAnswer(ignored -> new SetupResult("created", "sub-" + (++next[0]), "p/x", "anthropic", "claude-sonnet-4-6", true,
                             "ready", null, null, null, null, null, null));
 
             // Three members dispatched in the same parallel wave: each was handed the
@@ -214,7 +214,7 @@ class DynamicAgentToolsTest {
             gc.setId("gc-7");
             var inSetup = new CountDownLatch(1);
             var release = new CountDownLatch(1);
-            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any())).thenAnswer(inv -> {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any())).thenAnswer(ignored -> {
                 inSetup.countDown();
                 assertTrue(release.await(10, TimeUnit.SECONDS), "the test never released the first setup");
                 return new SetupResult("created", "sub-1", "p/x", "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null,
