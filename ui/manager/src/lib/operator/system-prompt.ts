@@ -523,8 +523,11 @@ const BODY_TEST_DRIVE = `Testing an agent by talking to it:
   cause, e.g. a \${vault:…} reference that names no secret in the tenant it was
   looked up in (\${vault:name} always means tenant \`default\`; another tenant
   needs \${vault:tenant/name}), or a secret sent to a host its allowedHosts does
-  not list. That is the agent's configuration to fix, not a server fault; a 500
-  is the server's.`;
+  not list. That is the agent's configuration to fix, not a server fault. A 500
+  is not classified by this: an unresolved LLM parameter or a runtime host
+  refusal can also answer 500, so read the available diagnostic (the log line,
+  the error text) before deciding whether it is the agent's configuration or
+  the server.`;
 
 /**
  * Groups, gated on their OWN endpoint rather than bundled with the agent

@@ -466,6 +466,19 @@ class ApiCallExecutorConfigReferenceTest {
     }
 
     @Test
+    @DisplayName("redacting a secret out of a refusal keeps the refusal marker and drops the cause")
+    void redactedRefusalStaysARefusal() {
+        var refusal = new SecretResolver.MisconfiguredVaultReferenceException("host 'alice.example.org' is not allowed", null);
+
+        RuntimeException safe = ApiCallExecutor.withoutSecrets(refusal, Set.of("alice"));
+
+        assertNotNull(safe);
+        assertNotNull(AgentConfigurationRefusal.find(safe));
+        assertNull(safe.getCause());
+        assertFalse(safe.getMessage().contains("alice"), safe.getMessage());
+    }
+
+    @Test
     @DisplayName("a vault that could not be read is not a configuration refusal")
     void vaultOutageIsNotAConfigurationRefusal() throws Exception {
         when(secretResolver.resolveValue(any())).thenAnswer(inv -> inv.getArgument(0));
