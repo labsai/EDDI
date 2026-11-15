@@ -565,7 +565,7 @@ class ToolLoopResumer {
         }
 
         List<ChatMessage> base = orchestrator.conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, logSizeLimit,
-                includeFirstAgentMessage, null, 0, ConversationHistoryBuilder.resolveEmptyInputPrompt(emptyInputPrompt));
+                includeFirstAgentMessage, null, 0, emptyInputPrompt);
 
         List<ChatMessage> messages = new ArrayList<>(base);
         List<ToolExecutionRequest> requests = new ArrayList<>();

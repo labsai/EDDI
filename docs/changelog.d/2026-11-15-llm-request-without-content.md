@@ -11,7 +11,7 @@ The greeting fires at `CONVERSATION_START`, where step 0 has no user input. `Con
 ### What changed
 
 - [`ConversationHistoryBuilder`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationHistoryBuilder.java): both the step-count and the token-aware builder append one user turn when the list holds no `UserMessage` or `AiMessage`. A list with content is untouched; a completely empty list still means "skip the call". The turn is request-only and never written to memory.
-- New task parameter `emptyInputPrompt` (default `(The conversation has just started. Greet the user.)`; blank uses the default). It is a default, not a switch. Passed by `LlmTask` (first call, halved-window rebuild) and by `ToolLoopResumer` (degraded HITL rebuild); the tool loop, cascade steps, streaming and format re-asks all derive from the same list. Documented in [`langchain.md`](../langchain.md).
+- New task parameter `emptyInputPrompt` (templated). Unset or blank: `(The conversation has just started. Greet the user.)` at the conversation opening, `(Continue the conversation.)` afterwards (for example `logSizeLimit: 0` without a prompt). It is a default, not a switch; the text is English, so multilingual agents should set it in their language or as `{context.language}`. Passed by `LlmTask` (first call, halved-window rebuild) and by `ToolLoopResumer` (degraded HITL rebuild); the tool loop, cascade steps, streaming and format re-asks all derive from the same list. Documented in [`langchain.md`](../langchain.md).
 
 ### Not changed
 

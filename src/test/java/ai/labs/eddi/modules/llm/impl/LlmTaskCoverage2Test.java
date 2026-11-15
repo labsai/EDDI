@@ -576,7 +576,7 @@ class LlmTaskCoverage2Test {
         // empty-input turn that keeps a content-less request from reaching the
         // provider.
         assertEquals(1, messages.size(), "summary_through_step=3 must skip the single stored turn out of the history window");
-        assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ((UserMessage) messages.getFirst()).singleText());
+        assertEquals(ConversationHistoryBuilder.DEFAULT_CONTINUE_PROMPT, ((UserMessage) messages.getFirst()).singleText());
 
         // …and the summary-enabled path still ran end-to-end, with inheritance applied.
         var effective = capturedSummaryConfig();

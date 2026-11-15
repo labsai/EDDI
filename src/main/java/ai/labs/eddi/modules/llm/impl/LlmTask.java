@@ -673,12 +673,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps,
-                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
+                    processedParams.get(KEY_EMPTY_INPUT_PROMPT));
         } else {
             // Legacy step-count windowing
             messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
                     includeFirstAgentMessage, summaryPrefix, skipSteps,
-                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
+                    processedParams.get(KEY_EMPTY_INPUT_PROMPT));
         }
 
         // Where the user's typed text sits in the current message, taken before the
@@ -1514,7 +1514,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolveModelNameOf(processedParams, resolvedType));
             smaller = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, prompt, half, anchorFirstSteps,
                     includeFirstAgentMessage, estimator, summaryPrefix, skipSteps,
-                    ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
+                    processedParams.get(KEY_EMPTY_INPUT_PROMPT));
         } else {
             if (logSizeLimit == 0) {
                 return null; // the prompt carried no history: nothing to halve
@@ -1525,7 +1525,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 return null;
             }
             smaller = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, half, includeFirstAgentMessage, summaryPrefix,
-                    skipSteps, ConversationHistoryBuilder.resolveEmptyInputPrompt(processedParams.get(KEY_EMPTY_INPUT_PROMPT)));
+                    skipSteps, processedParams.get(KEY_EMPTY_INPUT_PROMPT));
         }
         forwardAttachments(smaller, memory, task, resolvedType, processedParams, true);
         return smaller;

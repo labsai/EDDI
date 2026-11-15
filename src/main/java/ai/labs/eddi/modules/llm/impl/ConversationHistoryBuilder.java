@@ -44,18 +44,43 @@ class ConversationHistoryBuilder {
 
     /**
      * The user turn sent when a request would otherwise hold no user or assistant
-     * message at all (see {@link #withConversationalContent}). A default for the
-     * task's {@code emptyInputPrompt} parameter, not a switch: the turn is always
-     * added when the request needs it.
+     * message at the opening of a conversation (the greeting step). A default for
+     * the task's {@code emptyInputPrompt} parameter, not a switch.
      */
     static final String DEFAULT_EMPTY_INPUT_PROMPT = "(The conversation has just started. Greet the user.)";
 
     /**
-     * The configured {@code emptyInputPrompt}, or
-     * {@link #DEFAULT_EMPTY_INPUT_PROMPT} when it is unset or blank.
+     * The default when the conversation is already under way (for example a task
+     * with {@code logSizeLimit: 0} and no {@code prompt}), where greeting would be
+     * wrong.
      */
-    static String resolveEmptyInputPrompt(String configured) {
-        return isNullOrEmpty(configured) || configured.isBlank() ? DEFAULT_EMPTY_INPUT_PROMPT : configured;
+    static final String DEFAULT_CONTINUE_PROMPT = "(Continue the conversation.)";
+
+    /**
+     * Whether this is the opening of the conversation: a single step that carries
+     * no user input yet. That is the greeting that runs at CONVERSATION_START.
+     */
+    static boolean isConversationOpening(IConversationMemory memory) {
+        var outputs = memory.getConversationOutputs();
+        if (outputs == null || outputs.isEmpty()) {
+            return true;
+        }
+        if (outputs.size() > 1) {
+            return false;
+        }
+        return isNullOrEmpty(outputs.getFirst().get("input", String.class));
+    }
+
+    /**
+     * The turn to add: the configured {@code emptyInputPrompt} when set and not
+     * blank, otherwise the opening default at the start of the conversation and the
+     * neutral continue default afterwards.
+     */
+    static String resolveEmptyInputPrompt(String configured, IConversationMemory memory) {
+        if (!isNullOrEmpty(configured) && !configured.isBlank()) {
+            return configured;
+        }
+        return isConversationOpening(memory) ? DEFAULT_EMPTY_INPUT_PROMPT : DEFAULT_CONTINUE_PROMPT;
     }
 
     /**
@@ -67,13 +92,13 @@ class ConversationHistoryBuilder {
      * no user input, so history is empty and only the system message remains.
      * <p>
      * When the list holds system messages but no {@link UserMessage} or
-     * {@link AiMessage}, a user turn with {@code emptyInputPrompt} is appended. A
-     * list that already has content, a completely empty list (the caller skips the
-     * call), and a null prompt are left unchanged. The turn exists only in the
-     * request: it is never written to conversation memory.
+     * {@link AiMessage}, a user turn is appended (see
+     * {@link #resolveEmptyInputPrompt}). A list that already has content and a
+     * completely empty list (the caller skips the call) are left unchanged. The
+     * turn exists only in the request: it is never written to conversation memory.
      */
-    static void withConversationalContent(List<ChatMessage> messages, String emptyInputPrompt) {
-        if (emptyInputPrompt == null || messages.isEmpty()) {
+    static void withConversationalContent(List<ChatMessage> messages, IConversationMemory memory, String configuredPrompt) {
+        if (messages.isEmpty()) {
             return;
         }
         for (ChatMessage message : messages) {
@@ -81,8 +106,8 @@ class ConversationHistoryBuilder {
                 return;
             }
         }
-        LOGGER.debug("Request has no user or assistant message; adding the emptyInputPrompt turn (request-only)");
-        messages.add(UserMessage.from(emptyInputPrompt));
+        LOGGER.debug("Request has no user or assistant message; adding the empty-input turn (request-only)");
+        messages.add(UserMessage.from(resolveEmptyInputPrompt(configuredPrompt, memory)));
     }
 
     /**
@@ -164,15 +189,26 @@ class ConversationHistoryBuilder {
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
                                     boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps) {
-        return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, summaryPrefix, skipSteps, null);
+        return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, summaryPrefix, skipSteps, false, null);
     }
 
     /**
-     * As above, plus the {@code emptyInputPrompt} turn added when the request would
-     * otherwise carry no user/assistant message ({@code null} = never add).
+     * As above, plus the request-only turn added when the request would otherwise
+     * carry no user/assistant message.
+     *
+     * @param emptyInputPrompt
+     *            the task's configured {@code emptyInputPrompt} (null or blank =
+     *            the situation-dependent default)
      */
     List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
                                     boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps, String emptyInputPrompt) {
+        return buildMessages(memory, systemMessage, prompt, logSizeLimit, includeFirstAgentMessage, summaryPrefix, skipSteps, true,
+                emptyInputPrompt);
+    }
+
+    private List<ChatMessage> buildMessages(IConversationMemory memory, String systemMessage, String prompt, int logSizeLimit,
+                                            boolean includeFirstAgentMessage, String summaryPrefix, int skipSteps, boolean ensureContent,
+                                            String emptyInputPrompt) {
 
         systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
@@ -197,7 +233,9 @@ class ConversationHistoryBuilder {
             messages.add(new SystemMessage(systemMessage));
         }
         messages.addAll(chatMessages);
-        withConversationalContent(messages, emptyInputPrompt);
+        if (ensureContent) {
+            withConversationalContent(messages, memory, emptyInputPrompt);
+        }
 
         return messages;
     }
@@ -271,16 +309,24 @@ class ConversationHistoryBuilder {
                                               int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
                                               String summaryPrefix, int skipSteps) {
         return buildTokenAwareMessages(memory, systemMessage, prompt, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage, estimator,
-                summaryPrefix, skipSteps, null);
+                summaryPrefix, skipSteps, false, null);
     }
 
     /**
-     * As above, plus the {@code emptyInputPrompt} turn added when the request would
-     * otherwise carry no user/assistant message ({@code null} = never add).
+     * As above, plus the request-only turn added when the request would otherwise
+     * carry no user/assistant message ({@code emptyInputPrompt}: the configured
+     * text, null or blank = the situation-dependent default).
      */
     List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
                                               int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
                                               String summaryPrefix, int skipSteps, String emptyInputPrompt) {
+        return buildTokenAwareMessages(memory, systemMessage, prompt, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage, estimator,
+                summaryPrefix, skipSteps, true, emptyInputPrompt);
+    }
+
+    private List<ChatMessage> buildTokenAwareMessages(IConversationMemory memory, String systemMessage, String prompt, int maxContextTokens,
+                                                      int anchorFirstSteps, boolean includeFirstAgentMessage, TokenCountEstimator estimator,
+                                                      String summaryPrefix, int skipSteps, boolean ensureContent, String emptyInputPrompt) {
 
         systemMessage = composeSystemMessage(systemMessage, summaryPrefix);
 
@@ -307,7 +353,9 @@ class ConversationHistoryBuilder {
                 messages.add(new SystemMessage(systemMessage));
             }
             messages.addAll(allMessages);
-            withConversationalContent(messages, emptyInputPrompt);
+            if (ensureContent) {
+                withConversationalContent(messages, memory, emptyInputPrompt);
+            }
             return messages;
         }
 
@@ -418,7 +466,9 @@ class ConversationHistoryBuilder {
         }
 
         messages.addAll(recentMessages);
-        withConversationalContent(messages, emptyInputPrompt);
+        if (ensureContent) {
+            withConversationalContent(messages, memory, emptyInputPrompt);
+        }
 
         return messages;
     }

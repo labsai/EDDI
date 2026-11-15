@@ -1118,18 +1118,56 @@ class ConversationHistoryBuilderTest {
         }
 
         @Test
-        @DisplayName("a completely empty list stays empty (the caller skips the call), and null disables")
-        void emptyAndNullAreLeftAlone() {
+        @DisplayName("a completely empty list stays empty (the caller skips the call)")
+        void emptyListIsLeftAlone() {
             assertTrue(builder.buildMessages(openingMemory(), null, null, -1, true, null, 0, "Greet.").isEmpty());
-            assertEquals(1, builder.buildMessages(openingMemory(), "System", null, -1, true, null, 0, null).size());
         }
 
         @Test
-        @DisplayName("resolveEmptyInputPrompt: configured text wins, unset or blank gives the default")
+        @DisplayName("unset prompt at the conversation opening: the greeting default")
+        void openingDefault() {
+            List<ChatMessage> messages = builder.buildMessages(openingMemory(), "System", null, -1, true, null, 0, null);
+
+            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ((UserMessage) messages.getLast()).singleText());
+        }
+
+        private IConversationMemory midConversationMemory() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            var opening = new ConversationOutput();
+            var turn = new ConversationOutput();
+            turn.put("input", "a question");
+            when(memory.getConversationOutputs()).thenReturn(List.of(opening, turn));
+            return memory;
+        }
+
+        @Test
+        @DisplayName("unset prompt mid-conversation (logSizeLimit 0, no prompt): the neutral continue default, not a greeting")
+        void midConversationDefault() {
+            List<ChatMessage> messages = builder.buildMessages(midConversationMemory(), "System", null, 0, true, null, 0, null);
+
+            assertEquals(2, messages.size());
+            assertEquals(ConversationHistoryBuilder.DEFAULT_CONTINUE_PROMPT, ((UserMessage) messages.getLast()).singleText());
+        }
+
+        @Test
+        @DisplayName("a configured prompt overrides both defaults")
+        void configuredOverridesBoth() {
+            assertEquals("Hallo.", ((UserMessage) builder.buildMessages(openingMemory(), "System", null, -1, true, null, 0, "Hallo.").getLast())
+                    .singleText());
+            assertEquals("Hallo.", ((UserMessage) builder.buildMessages(midConversationMemory(), "System", null, 0, true, null, 0, "Hallo.")
+                    .getLast()).singleText());
+        }
+
+        @Test
+        @DisplayName("resolveEmptyInputPrompt: configured text wins, unset or blank gives the situation's default")
         void resolve() {
-            assertEquals("Hello.", ConversationHistoryBuilder.resolveEmptyInputPrompt("Hello."));
-            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt(null));
-            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt("   "));
+            var opening = openingMemory();
+            var mid = midConversationMemory();
+            assertEquals("Hello.", ConversationHistoryBuilder.resolveEmptyInputPrompt("Hello.", opening));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt(null, opening));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_EMPTY_INPUT_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt("   ", opening));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_CONTINUE_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt(null, mid));
+            assertEquals(ConversationHistoryBuilder.DEFAULT_CONTINUE_PROMPT, ConversationHistoryBuilder.resolveEmptyInputPrompt("", mid));
         }
     }
 }

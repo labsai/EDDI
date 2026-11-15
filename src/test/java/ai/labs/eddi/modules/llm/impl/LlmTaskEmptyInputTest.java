@@ -29,6 +29,11 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,6 +57,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
+import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
 
 /**
@@ -202,6 +208,56 @@ class LlmTaskEmptyInputTest {
         run(task);
 
         assertEquals(DEFAULT_TURN, lastUserText(model.requests().getFirst().messages()));
+    }
+
+    @Test
+    @DisplayName("emptyInputPrompt goes through the template engine like every other parameter ({context.language})")
+    void promptIsTemplated() throws Exception {
+        var model = liveModel();
+        when(templatingEngine.processTemplate(anyString(), any()))
+                .thenAnswer(inv -> ((String) inv.getArgument(0)).replace("{context.language}", "German"));
+        var task = greetingTask();
+        task.getParameters().put("emptyInputPrompt", "Greet the user in {context.language}.");
+
+        run(task);
+
+        assertEquals("Greet the user in German.", lastUserText(model.requests().getFirst().messages()));
+    }
+
+    @Test
+    @DisplayName("mid-conversation, nothing else to send: the neutral continue turn, not a greeting")
+    void midConversationGetsNeutralTurn() throws Exception {
+        var model = liveModel();
+        var turn = new ConversationOutput();
+        turn.put("input", "a question");
+        lenient().when(memory.getConversationOutputs()).thenReturn(List.of(openingOutput, turn));
+        var task = greetingTask();
+        task.setConversationHistoryLimit(0);
+
+        run(task);
+
+        assertEquals(ConversationHistoryBuilder.DEFAULT_CONTINUE_PROMPT, lastUserText(model.requests().getFirst().messages()));
+    }
+
+    @Test
+    @DisplayName("streaming path: the streamed request carries the turn too")
+    void streamingGreetingHasContent() throws Exception {
+        liveModel();
+        List<ChatRequest> streamed = new ArrayList<>();
+        lenient().when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(new StreamingChatModel() {
+            @Override
+            public void chat(ChatRequest request, StreamingChatResponseHandler handler) {
+                streamed.add(request);
+                handler.onPartialResponse("Hi");
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hi")).build());
+            }
+        });
+        lenient().when(memory.getEventSink()).thenReturn(mock(ConversationEventSink.class));
+
+        run(greetingTask());
+
+        assertEquals(1, streamed.size(), "the precondition: the request really went through the streaming model");
+        assertEquals(DEFAULT_TURN, lastUserText(streamed.getFirst().messages()));
     }
 
     @Test
