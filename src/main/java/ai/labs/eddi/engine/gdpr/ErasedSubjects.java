@@ -13,9 +13,9 @@ import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashSet;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * Who GDPR erasure has erased, and since when — for projections that are
@@ -38,24 +38,37 @@ import java.util.Set;
  * — never the raw id. Rows are kept indefinitely: they are a few bytes each and
  * the ledger they guard is kept for years.
  * <p>
- * <b>Cache.</b> Lookups are cached per node, bounded in size and for
- * {@value #CACHE_TTL_SECONDS} seconds. This node's own erasures invalidate its
- * entry at once; another node's erasure is seen at most that long later, and
- * erasure itself pseudonymises the rows already stored after recording here.
+ * <b>Cache.</b> Only positive answers are cached (per node, bounded): an
+ * erasure time only ever grows, so a cached one can be trusted for what it
+ * covers. A "not erased" answer is never cached, and a cached time that does
+ * not cover the record is re-read, so a stale answer can never let a raw id be
+ * stored after another node's erasure.
+ * <p>
+ * <b>Ordering against erasure.</b> The projector checks an identity before it
+ * inserts and, for a row it inserted with an identity kept, again after (a
+ * fresh read), scrubbing the row if the second check covers it. Erasure records
+ * the person before its participants pseudonymise the stored rows. So either
+ * the second check ran before the record, and then so did the insert and the
+ * participants' pass reaches the row, or it ran after and sees the record.
+ * <p>
+ * <b>Precision.</b> The stores keep milliseconds; a record's time is truncated
+ * to milliseconds before it is compared, so a decision in the same millisecond
+ * as the erasure is covered.
  *
  * @since 6.7.0
  */
 @ApplicationScoped
 public class ErasedSubjects {
 
-    static final long CACHE_TTL_SECONDS = 30;
+    static final long CACHE_TTL_MINUTES = 10;
     static final long CACHE_SIZE = 10_000;
 
     private final IErasedSubjectStore store;
     private final GdprPseudonymizer pseudonymizer;
     private final AuditLedgerService ledger;
-    private final Cache<String, Optional<Instant>> cache = Caffeine.newBuilder().maximumSize(CACHE_SIZE)
-            .expireAfterWrite(Duration.ofSeconds(CACHE_TTL_SECONDS)).build();
+    /** Positive answers only: identity -> latest erasure time seen. */
+    private final Cache<String, Instant> erased = Caffeine.newBuilder().maximumSize(CACHE_SIZE)
+            .expireAfterWrite(Duration.ofMinutes(CACHE_TTL_MINUTES)).build();
 
     @Inject
     public ErasedSubjects(IErasedSubjectStore store, GdprPseudonymizer pseudonymizer, AuditLedgerService ledger) {
@@ -77,33 +90,54 @@ public class ErasedSubjects {
             return;
         }
         store.record(pseudonymizer.stableTokenFor(userId), erasedAt);
-        cache.invalidate(userId);
+        erased.invalidate(userId);
     }
 
     /**
-     * When {@code identity} was last erased, or empty when never. Identities that
-     * cannot be a person (null, {@code unknown}, {@code anonymous},
-     * {@code system:*}) or are already a pseudonym are answered without a lookup.
+     * When {@code identity} was last erased, or empty when never, always read from
+     * the store. Identities that cannot be a person (null, {@code unknown},
+     * {@code anonymous}, {@code system:*}) or are already a pseudonym are answered
+     * without a read.
      *
      * @throws RuntimeException
-     *             the store could not be read: the answer is unknown, not "no"
+     *             the store or the token could not be read: the answer is unknown,
+     *             not "no"
      */
     public Optional<Instant> erasedAt(String identity) {
         if (!isPersonalIdentity(identity)) {
             return Optional.empty();
         }
-        return cache.get(identity, this::lookup);
+        Optional<Instant> fresh = store.erasedAt(List.of(pseudonymizer.stableTokenFor(identity)));
+        fresh.ifPresent(at -> erased.put(identity, at));
+        return fresh;
     }
 
     /**
      * Whether a record about {@code identity} made at {@code at} falls under an
-     * erasure of that identity — true when they were erased at or after {@code at},
-     * or {@code at} is unknown. A record made after the erasure is new data of a
-     * returning user and is not touched.
+     * erasure of that identity: true when they were erased at or after {@code at}
+     * (compared in milliseconds), or {@code at} is unknown. A record made after the
+     * erasure is new data of a returning user and is not touched. Answered from the
+     * cache only when the cached erasure covers {@code at}; otherwise read from the
+     * store.
+     *
+     * @throws RuntimeException
+     *             the store or the token could not be read
      */
     public boolean covers(String identity, Instant at) {
-        Optional<Instant> erased = erasedAt(identity);
-        return erased.isPresent() && (at == null || !at.isAfter(erased.get()));
+        if (!isPersonalIdentity(identity)) {
+            return false;
+        }
+        Instant when = at != null ? at.truncatedTo(ChronoUnit.MILLIS) : null;
+        Instant cached = erased.getIfPresent(identity);
+        if (cached != null && covered(when, cached)) {
+            return true;
+        }
+        Optional<Instant> fresh = erasedAt(identity);
+        return fresh.isPresent() && covered(when, fresh.get());
+    }
+
+    private static boolean covered(Instant at, Instant erasedAt) {
+        return at == null || !at.isAfter(erasedAt);
     }
 
     /**
@@ -113,14 +147,6 @@ public class ErasedSubjects {
      */
     public String pseudonymOf(String userId) {
         return ledger.pseudonymOf(userId);
-    }
-
-    private Optional<Instant> lookup(String identity) {
-        Set<String> tokens = new LinkedHashSet<>();
-        tokens.add(pseudonymizer.stableTokenFor(identity));
-        // Written instead of the salted token when the salt was unavailable.
-        tokens.add(AuditHmac.pseudonymFor(identity));
-        return store.erasedAt(tokens);
     }
 
     static boolean isPersonalIdentity(String identity) {

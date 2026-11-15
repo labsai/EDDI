@@ -37,6 +37,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * erasure does not rewrite, rows naming a decider who had been erased. When the
  * record cannot be read the unit is not stored (counted as a failed projection)
  * rather than stored with an identity that may be erased.
+ * <p>
+ * The check runs again, with a fresh read, after a row was inserted with an
+ * identity kept; if an erasure was recorded in between, the row is scrubbed
+ * with {@link IApprovalDecisionStore#eraseUser}. Erasure records the person
+ * before it pseudonymises the stored rows, so a row inserted in that window is
+ * reached by one side or the other (see {@link ErasedSubjects}).
  *
  * @since 6.7.0
  */
@@ -91,6 +97,7 @@ public class ApprovalDecisionProjector {
             try {
                 ApprovalDecision row = withoutErasedIdentities(ApprovalDecision.of(unit, i));
                 if (store.insertIfAbsent(row)) {
+                    row = scrubIfErasedSinceCheck(row);
                     inserted.add(row);
                     metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
                 }
@@ -131,5 +138,33 @@ public class ApprovalDecisionProjector {
             changed = true;
         }
         return changed ? row.withPersonalFields(userId, decidedBy) : row;
+    }
+
+    /**
+     * The second check of an inserted row: an identity it kept that is now covered
+     * by an erasure recorded after the first check is erased from the store.
+     *
+     * @return the row as now stored
+     */
+    private ApprovalDecision scrubIfErasedSinceCheck(ApprovalDecision row) {
+        if (erasedSubjects == null || row.userId() == null && row.decidedBy() == null) {
+            return row;
+        }
+        ApprovalDecision now;
+        try {
+            now = withoutErasedIdentities(row);
+        } catch (RuntimeException e) {
+            metrics.projectionFailed();
+            LOGGER.errorf("Approval decision %s was stored, but the erased-subject record could not be re-read; if its user was erased "
+                    + "concurrently, re-run the erasure: %s", sanitize(row.id()), e.getMessage());
+            return row;
+        }
+        if (row.userId() != null && now.userId() == null) {
+            store.eraseUser(row.userId(), erasedSubjects.pseudonymOf(row.userId()));
+        }
+        if (row.decidedBy() != null && !row.decidedBy().equals(now.decidedBy())) {
+            store.eraseUser(row.decidedBy(), now.decidedBy());
+        }
+        return now;
     }
 }

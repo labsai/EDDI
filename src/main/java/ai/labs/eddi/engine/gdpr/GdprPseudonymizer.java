@@ -100,18 +100,28 @@ public class GdprPseudonymizer {
      * signing key rotates: always the per-deployment salt
      * ({@code gdpr-erased:s1:…}), never the ledger's keyed pseudonym.
      * {@link ErasedSubjects} keys its durable record by it, which must still find a
-     * person years and key rotations later. Falls back to the unsalted hash, like
-     * {@link #pseudonymFor}, only when the metadata store cannot provide the salt.
+     * person years and key rotations later.
+     * <p>
+     * Unlike {@link #pseudonymFor} it has <em>no</em> unsalted fallback: a record
+     * looked up under a different token than it was written under answers "not
+     * erased", which would let a projection store an erased id. When the salt
+     * cannot be read this fails, and the caller fails closed (the erasure reports
+     * the step incomplete; the projection skips the row).
      *
      * @throws IllegalArgumentException
      *             if {@code userId} is null
+     * @throws IllegalStateException
+     *             if the per-deployment salt cannot be read or created
      */
     public String stableTokenFor(String userId) {
         if (userId == null) {
             throw new IllegalArgumentException("userId must not be null when deriving a GDPR token");
         }
         byte[] deploymentSalt = deploymentSalt();
-        return deploymentSalt != null ? AuditHmac.saltedPseudonymFor(userId, deploymentSalt) : AuditHmac.pseudonymFor(userId);
+        if (deploymentSalt == null) {
+            throw new IllegalStateException("The GDPR pseudonym salt is unavailable; the erased-subject token cannot be derived");
+        }
+        return AuditHmac.saltedPseudonymFor(userId, deploymentSalt);
     }
 
     /**

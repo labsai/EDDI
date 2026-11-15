@@ -2050,7 +2050,7 @@ class GdprComplianceServiceTest {
     class ErasedSubjectRecord {
 
         @Test
-        @DisplayName("erasure records the user before any participant runs, and again at the end")
+        @DisplayName("erasure records the user at the start and again just before the participants pseudonymise the stored rows")
         void recordedBeforeParticipants() throws Exception {
             var erasedSubjects = mock(ErasedSubjects.class);
             service.erasedSubjects = erasedSubjects;
@@ -2068,9 +2068,9 @@ class GdprComplianceServiceTest {
             GdprDeletionResult result = service.deleteUserData("alice");
 
             var order = inOrder(erasedSubjects, participant);
-            order.verify(erasedSubjects).record(eq("alice"), any(Instant.class));
+            order.verify(erasedSubjects, times(2)).record(eq("alice"), any(Instant.class));
             order.verify(participant).erase("alice");
-            order.verify(erasedSubjects).record(eq("alice"), any(Instant.class));
+            verify(erasedSubjects, times(2)).record(anyString(), any());
             assertTrue(result.complete(), result.failedSteps().toString());
         }
 

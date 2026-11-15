@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
-import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,12 +11,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,18 +36,24 @@ import static org.mockito.Mockito.when;
 @DisplayName("ErasedSubjects")
 class ErasedSubjectsTest {
 
-    private static final Instant AT = Instant.parse("2026-11-15T10:00:00Z");
+    private static final Instant AT = Instant.parse("2026-11-15T10:00:00.123Z");
 
     private IErasedSubjectStore store;
+    private GdprPseudonymizer pseudonymizer;
+    private AuditLedgerService ledger;
     private ErasedSubjects subjects;
+
+    private static String token(String userId) {
+        return "gdpr-erased:s1:" + userId.hashCode();
+    }
 
     @BeforeEach
     void setUp() {
         store = mock(IErasedSubjectStore.class);
         when(store.erasedAt(any())).thenReturn(Optional.empty());
-        GdprPseudonymizer pseudonymizer = mock(GdprPseudonymizer.class);
-        when(pseudonymizer.stableTokenFor(anyString())).thenAnswer(inv -> "gdpr-erased:s1:" + inv.getArgument(0).hashCode());
-        AuditLedgerService ledger = mock(AuditLedgerService.class);
+        pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.stableTokenFor(anyString())).thenAnswer(inv -> token(inv.getArgument(0)));
+        ledger = mock(AuditLedgerService.class);
         when(ledger.pseudonymOf("bob")).thenReturn("gdpr-erased:k1:bob");
         subjects = new ErasedSubjects(store, pseudonymizer, ledger);
     }
@@ -56,33 +63,55 @@ class ErasedSubjectsTest {
     void recordsToken() {
         subjects.record("bob", AT);
 
-        verify(store).record("gdpr-erased:s1:" + "bob".hashCode(), AT);
+        verify(store).record(token("bob"), AT);
         verify(store, never()).record(eq("bob"), any());
     }
 
     @Test
-    @DisplayName("looks up the salted and the unsalted token in one read, and caches the answer")
-    @SuppressWarnings("unchecked")
-    void lookupAndCache() {
+    @DisplayName("looks up the stable token only, and caches a positive answer that covers the record")
+    void lookupAndCachePositive() {
         when(store.erasedAt(any())).thenReturn(Optional.of(AT));
 
-        assertEquals(Optional.of(AT), subjects.erasedAt("bob"));
-        assertEquals(Optional.of(AT), subjects.erasedAt("bob"));
+        assertTrue(subjects.covers("bob", AT.minusSeconds(10)));
+        assertTrue(subjects.covers("bob", AT));
 
-        var captor = ArgumentCaptor.forClass(Collection.class);
-        verify(store, times(1)).erasedAt(captor.capture());
-        assertEquals(Set.of("gdpr-erased:s1:" + "bob".hashCode(), AuditHmac.pseudonymFor("bob")), Set.copyOf(captor.getValue()));
+        verify(store, times(1)).erasedAt(List.of(token("bob")));
     }
 
     @Test
-    @DisplayName("recording on this node invalidates its cached \"not erased\" at once")
-    void recordInvalidatesCache() {
-        assertFalse(subjects.covers("bob", AT));
+    @DisplayName("a \"not erased\" answer is never cached: another node's erasure is seen on the very next check")
+    void negativeNotCached() {
+        IErasedSubjectStore shared = new MapStore();
+        var nodeA = new ErasedSubjects(shared, pseudonymizer, ledger);
+        var nodeB = new ErasedSubjects(shared, pseudonymizer, ledger);
+
+        assertFalse(nodeB.covers("bob", AT));
+        nodeA.record("bob", AT);
+
+        assertTrue(nodeB.covers("bob", AT), "a stale negative must not let a raw id be stored");
+    }
+
+    @Test
+    @DisplayName("a cached erasure time that does not cover the record is re-read, so a later erasure on another node counts")
+    void cachedPositiveNotCoveringIsReread() {
+        IErasedSubjectStore shared = new MapStore();
+        var nodeA = new ErasedSubjects(shared, pseudonymizer, ledger);
+        var nodeB = new ErasedSubjects(shared, pseudonymizer, ledger);
+        nodeA.record("bob", AT);
+        assertTrue(nodeB.covers("bob", AT));
+
+        nodeA.record("bob", AT.plusSeconds(3600));
+
+        assertTrue(nodeB.covers("bob", AT.plusSeconds(1800)));
+    }
+
+    @Test
+    @DisplayName("a decision in the same millisecond as the erasure is covered (the stores keep milliseconds)")
+    void sameMillisecond() {
         when(store.erasedAt(any())).thenReturn(Optional.of(AT));
 
-        subjects.record("bob", AT);
-
-        assertTrue(subjects.covers("bob", AT));
+        assertTrue(subjects.covers("bob", AT.plusNanos(400_000)));
+        assertFalse(subjects.covers("bob", AT.plusMillis(1)));
     }
 
     @Test
@@ -102,6 +131,7 @@ class ErasedSubjectsTest {
     @DisplayName("identities that cannot be a person are answered without a read")
     void nonPersonal(String identity) {
         assertEquals(Optional.empty(), subjects.erasedAt(identity));
+        assertFalse(subjects.covers(identity, AT));
         verify(store, never()).erasedAt(any());
     }
 
@@ -110,8 +140,18 @@ class ErasedSubjectsTest {
     void readFailure() {
         when(store.erasedAt(any())).thenThrow(new IllegalStateException("down")).thenReturn(Optional.of(AT));
 
-        assertThrows(IllegalStateException.class, () -> subjects.erasedAt("bob"));
-        assertEquals(Optional.of(AT), subjects.erasedAt("bob"));
+        assertThrows(IllegalStateException.class, () -> subjects.covers("bob", AT));
+        assertTrue(subjects.covers("bob", AT));
+    }
+
+    @Test
+    @DisplayName("a token that cannot be derived (no salt) propagates instead of answering \"not erased\"")
+    void tokenFailure() {
+        when(pseudonymizer.stableTokenFor(anyString())).thenThrow(new IllegalStateException("no salt"));
+
+        assertThrows(IllegalStateException.class, () -> subjects.covers("bob", AT));
+        assertThrows(IllegalStateException.class, () -> subjects.record("bob", AT));
+        verify(store, never()).erasedAt(any());
     }
 
     @Test
@@ -121,5 +161,20 @@ class ErasedSubjectsTest {
         subjects.record("bob", null);
         verify(store, never()).record(anyString(), any());
         assertEquals("gdpr-erased:k1:bob", subjects.pseudonymOf("bob"));
+    }
+
+    /** A store shared by two "nodes", with the max-time upsert of the real ones. */
+    private static final class MapStore implements IErasedSubjectStore {
+        private final Map<String, Instant> rows = new HashMap<>();
+
+        @Override
+        public void record(String token, Instant erasedAt) {
+            rows.merge(token, erasedAt, (a, b) -> a.isAfter(b) ? a : b);
+        }
+
+        @Override
+        public Optional<Instant> erasedAt(Collection<String> tokens) {
+            return tokens.stream().map(rows::get).filter(Objects::nonNull).max(Instant::compareTo);
+        }
     }
 }

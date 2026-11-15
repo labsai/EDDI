@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -227,16 +226,64 @@ class ApprovalRebuildAfterErasureTest {
         backfill.rebuild(null, null);
 
         assertEquals(2, decisions.rows.size());
-        assertEquals(1, erasedStore.reads.get(), "only the owner was looked up (and cached)");
+        assertTrue(erasedStore.queried.stream().allMatch("gdpr-erased:s1:token(alice)"::equals), erasedStore.queried.toString());
+        assertTrue(!erasedStore.queried.isEmpty(), "the owner was looked up");
+    }
+
+    @Test
+    @DisplayName("an erasure landing between the check and the insert: the row is scrubbed by the re-check after the insert")
+    void erasureBetweenCheckAndInsert() {
+        ledger.add(entry("d1", "alice", "bob", DECIDED));
+        ledger.add(entry("d2", "bob", "carol", DECIDED));
+        // The erasure runs completely (record + participant pass) after the projector
+        // checked and before it inserted, so the participant pass finds nothing to
+        // scrub.
+        decisions.beforeInsert = () -> {
+            if (erasedStore.rows.isEmpty()) {
+                erase("bob", ERASED);
+            }
+        };
+
+        backfill.rebuild(null, null);
+
+        assertTrue(!anyRowNames("bob"), "no row keeps the identity erased in the window: " + decisions.rows.values());
+        assertEquals(pseudonym("bob"), decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy());
+        assertNull(decisions.rows.get(ApprovalDecision.idOf("d2", 0)).userId());
+        assertEquals("alice", decisions.rows.get(ApprovalDecision.idOf("d1", 0)).userId());
+        assertEquals("carol", decisions.rows.get(ApprovalDecision.idOf("d2", 0)).decidedBy());
+    }
+
+    @Test
+    @DisplayName("a node that answered \"not erased\" before another node's erasure does not store the raw id afterwards")
+    void otherNodesErasureSeenAtOnce() {
+        ledger.add(entry("d1", "alice", "bob", DECIDED));
+        backfill.rebuild(null, null);
+        assertEquals("bob", decisions.rows.get(ApprovalDecision.idOf("d1", 0)).decidedBy(), "not erased yet");
+
+        // Another node erases bob: it records him and pseudonymises the stored rows.
+        // This node's ErasedSubjects instance is not told.
+        erasedStore.record("gdpr-erased:s1:token(bob)", ERASED);
+        participant.erase("bob");
+        decisions.rows.clear();
+        backfill.rebuild(null, null);
+
+        assertTrue(!anyRowNames("bob"), decisions.rows.values().toString());
     }
 
     /** The approval-decision store, with the erasure semantics of the real ones. */
     static final class InMemoryDecisions implements IApprovalDecisionStore {
         final Map<String, ApprovalDecision> rows = new LinkedHashMap<>();
+        Runnable beforeInsert = () -> {
+        };
 
         @Override
         public boolean insertIfAbsent(ApprovalDecision decision) {
-            return rows.putIfAbsent(decision.id(), decision) == null;
+            if (rows.containsKey(decision.id())) {
+                return false;
+            }
+            beforeInsert.run();
+            rows.put(decision.id(), decision);
+            return true;
         }
 
         @Override
@@ -278,7 +325,7 @@ class ApprovalRebuildAfterErasureTest {
     /** The erased-subject store, with the max-time upsert of the real ones. */
     static final class InMemoryErasedSubjects implements IErasedSubjectStore {
         final Map<String, Instant> rows = new LinkedHashMap<>();
-        final AtomicInteger reads = new AtomicInteger();
+        final List<String> queried = new ArrayList<>();
         boolean failReads;
 
         @Override
@@ -288,7 +335,7 @@ class ApprovalRebuildAfterErasureTest {
 
         @Override
         public Optional<Instant> erasedAt(Collection<String> tokens) {
-            reads.incrementAndGet();
+            queried.addAll(tokens);
             if (failReads) {
                 throw new IllegalStateException("store down");
             }

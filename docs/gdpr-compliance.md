@@ -185,7 +185,8 @@ principal, not a user: erasing or exporting it is refused with 400.
     conversations and keeps their approval-decision facts without them ([HITL Oversight](hitl-oversight.md#gdpr)).
     Before any of the steps above, erasure records the person in **`gdpr_erased_subjects`** (MongoDB collection or
     PostgreSQL table): a keyed one-way token (HMAC under the per-deployment pseudonym salt, never the raw id) and the
-    time of the latest erasure, written again when the cascade ends. Projections rebuilt from the audit ledger consult
+    time of the latest erasure, written again just before the participants run. Without the salt the step fails
+    closed rather than falling back to the unsalted hash. Projections rebuilt from the audit ledger consult
     it, so a rebuild of approval analytics cannot re-insert a row naming an erased decider from a ledger entry filed
     under someone else. The write is idempotent; a failure reports the step `erasedSubjectRecord` and the erasure as
     incomplete. Rows are kept indefinitely — a few bytes each, no content
