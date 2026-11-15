@@ -150,7 +150,9 @@ Contact: [DPO / PRIVACY CONTACT]
 ## 6. Prevention
 
 - Enable Keycloak authentication in production
-- Use RBAC (`eddi-admin`, `eddi-viewer`) for all administrative operations
+- Use RBAC: grant `eddi-admin` only to administrators and the narrower roles
+  (`eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer`) to everyone else —
+  roles are enumerated per endpoint, with no hierarchy
 - Review audit trail regularly for anomalies
 - Keep EDDI updated to the latest version
 - Use self-hosted LLM providers for sensitive deployments

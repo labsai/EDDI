@@ -333,7 +333,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
 
         try {
-            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientSecret(connection), code, oauthState.getCodeVerifier(),
+            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientCredential(connection), code, oauthState.getCodeVerifier(),
                     oauthState.getRedirectUri());
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
@@ -640,10 +640,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return name;
     }
 
-    private String resolveClientSecret(ConnectionConfiguration connection) {
-        // Checked against the token endpoint, where the client secret is sent.
-        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+    private String resolveClientCredential(ConnectionConfiguration connection) {
+        // Checked against the token endpoint, where the client secret — or an
+        // assertion signed by the private key — is sent.
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().clientCredentialReference(connection.getAuthType()),
+                connection.getOauth().getTokenUrl(), connection.getName(),
+                connection.getOauth().clientCredentialDescription(connection.getAuthType()));
     }
 
     /**
@@ -787,10 +789,10 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * work has one place to change. Until {@code TenantContext} lands this is the
      * default tenant, which is also what every connection document defaults to.
      * <p>
-     * It does not move alone. {@link #requireConnection} looks the connection up
-     * under the same default and must take its tenant from the same source;
-     * {@code ConnectionConfiguration.tenantId} has to be populated from the tenant
-     * context rather than from the stored document; and
+     * It does not move alone. {@link #requireCurrentConnection} looks the
+     * connection up under the same default and must take its tenant from the same
+     * source; {@code ConnectionConfiguration.tenantId} has to be populated from the
+     * tenant context rather than from the stored document; and
      * {@code RestConnectionStore.requireDefaultTenant()}, which today refuses any
      * other tenant at the write boundary precisely because this method cannot see
      * one, comes out at that point. Changing any one of the four on its own files a
