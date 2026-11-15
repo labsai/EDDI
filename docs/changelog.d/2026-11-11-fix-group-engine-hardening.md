@@ -137,6 +137,10 @@ docs: [`group-conversations.md`](../group-conversations.md), [`passing-context-i
   the title, so `1. Research (assignedTo: agent-2) — find references` keeps its
   assignee. `main` mis-split this input the same way; it is a fix, not a
   regression repair.
+- **Platform Operator:** the system prompt states the `onUnparseableVerdict`
+  option and that a nested child is closed and cannot be continued or followed
+  up; operator revision **64** (renumbered on each merge with `main`, which took
+  61–63 meanwhile).
 - **Quoting:** the bid prompt puts each task's subject (on one line) and
   description in one fenced block; `parseBids` matches on the same one-line form.
   The window summarizer fences the previous rolling summary.

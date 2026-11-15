@@ -81,11 +81,11 @@ public class GroupContextBuilder {
      * @param allMembers
      *            the full group roster, used only by {@code ARGUE}/{@code
      *            REBUTTAL} to resolve which transcript entries came from the
-     *            opposing team rather than merely "not me" (see
-     *            {@link #opposingArguments}). {@code null} or empty falls back to
-     *            the not-me filter, which is only correct for a 2-member debate —
-     *            existing callers that never reach those two phase types are
-     *            unaffected either way.
+     *            opposing team rather than merely "not me" (see the
+     *            {@code opposingArguments} template key). {@code null} or empty
+     *            falls back to the not-me filter, which is only correct for a
+     *            2-member debate — existing callers that never reach those two
+     *            phase types are unaffected either way.
      * @param window
      *            I9 transcript windowing, applied to the FULL/ANONYMOUS
      *            scope-filtered context only. {@code null} disables windowing
@@ -324,20 +324,6 @@ public class GroupContextBuilder {
     }
 
     /**
-     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
-     * flags them on every run; removing them breaks the build. Characterization
-     * tests reach this method through
-     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
-     * which resolves by exact parameter types, so a narrower signature is not
-     * findable — and those tests are the regression net this whole refactor leans
-     * on.
-     * <p>
-     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
-     * needs the speaker and the roster to decide, and a method that can only see
-     * the transcript would have to guess at both. See {@link #isDebateJudgment},
-     * which {@link #buildPhaseInput} consults first.
-     */
-    /**
      * The latest response of every peer except {@code speaker}, for a CRITIQUE
      * phase without {@code targetEachPeer}. Peers come from the roster when it is
      * known, otherwise from who has spoken; a peer with no response yet is left
@@ -371,6 +357,20 @@ public class GroupContextBuilder {
         return peers;
     }
 
+    /**
+     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
+     * flags them on every run; removing them breaks the build. Characterization
+     * tests reach this method through
+     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
+     * which resolves by exact parameter types, so a narrower signature is not
+     * findable — and those tests are the regression net this whole refactor leans
+     * on.
+     * <p>
+     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
+     * needs the speaker and the roster to decide, and a method that can only see
+     * the transcript would have to guess at both. See {@link #isDebateJudgment},
+     * which {@link #buildPhaseInput} consults first.
+     */
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
             // Use independent template if no context, or context template if

@@ -84,13 +84,21 @@ public final class UserMemoryWriteRules {
         return null;
     }
 
-    /** The entry with an absent category set to {@code fact}. */
+    /**
+     * The entry with an absent category set to {@code fact}, as a new statement of
+     * its fact ({@link UserMemoryEntry#asStatement()}): a client that read a
+     * contested entry and writes it back edited must not keep the old verdict. The
+     * stores apply the same rule; doing it here too keeps the contract visible at
+     * the external boundary.
+     */
     public static UserMemoryEntry withDefaults(UserMemoryEntry entry) {
-        if (entry.category() != null) {
-            return entry;
+        UserMemoryEntry statement = entry.asStatement();
+        if (statement.category() != null) {
+            return statement;
         }
-        return new UserMemoryEntry(entry.id(), entry.userId(), entry.key(), entry.value(), "fact", entry.visibility(), entry.sourceAgentId(),
-                entry.groupIds(), entry.sourceConversationId(), entry.conflicted(), entry.accessCount(), entry.createdAt(), entry.updatedAt());
+        return new UserMemoryEntry(statement.id(), statement.userId(), statement.key(), statement.value(), "fact", statement.visibility(),
+                statement.sourceAgentId(), statement.groupIds(), statement.sourceConversationId(), false, statement.accessCount(),
+                statement.createdAt(), statement.updatedAt());
     }
 
     private static int valueLength(Object value) {
