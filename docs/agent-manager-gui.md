@@ -24,8 +24,9 @@ The Manager talks to the backend that served it; there is nothing to configure i
 For work on the Manager itself, run the Vite dev server instead of rebuilding the jar:
 
 ```bash
-cd ui/manager
-npm ci
+cd ui
+npm ci            # once: ui/ is an npm workspace, one lockfile for the Manager and the Chat UI
+cd manager
 npm run dev
 ```
 

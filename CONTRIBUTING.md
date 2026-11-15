@@ -104,8 +104,9 @@ docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .
 ```
 
 The Manager (`ui/manager`) and the Chat UI (`ui/chat`) are part of this repository and have their own
-contributor notes in `ui/manager/AGENTS.md` and `ui/chat/AGENTS.md`. Frontend work runs from those
-directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
+contributor notes in `ui/manager/AGENTS.md` and `ui/chat/AGENTS.md`. `ui/` is an npm workspaces root
+with one lockfile: run `npm ci` once in `ui/`, then `npm run dev` (or `test`, `build`) in the app's own
+directory; Maven builds both into the jar.
 
 ## Code Style
 

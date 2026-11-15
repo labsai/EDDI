@@ -22,6 +22,9 @@ describe("parseChatPath", () => {
     // Literals match case-insensitively, params keep their case.
     ["/Chat/MANAGED/Sales/Bob", { intent: "Sales", userId: "Bob" }],
     ["/chat/Production/Agent-1", { environment: "Production", agentId: "Agent-1" }],
+    // Literals are percent-decoded before they are compared, as the router did.
+    ["/%63hat/production/agent-1", { environment: "production", agentId: "agent-1" }],
+    ["/chat/%6danaged/support/user-7", { intent: "support", userId: "user-7" }],
     // Trailing slashes are ignored.
     ["/chat/production/agent-1/", { environment: "production", agentId: "agent-1" }],
     ["/chat/managed/support/user-7//", { intent: "support", userId: "user-7" }],
