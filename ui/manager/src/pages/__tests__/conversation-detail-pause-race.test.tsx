@@ -87,7 +87,10 @@ describe("conversation-detail while the stored pause catches up", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
     const summary = await screen.findByTestId("approval-decision-summary");
     expect(summary).toHaveAttribute("data-verdict", "APPROVED");
-    expect(screen.getByTestId("approval-decision-summary-call-call-1")).toHaveTextContent("setupAgent");
+    // The receipt reads the call's name in words and keeps the exact identifier as the tooltip.
+    const call = screen.getByTestId("approval-decision-summary-call-call-1");
+    expect(call).toHaveTextContent("Setup agent");
+    expect(call.querySelector('[title="setupAgent"]')).not.toBeNull();
   });
 
   it("re-reads for a few seconds when opened from a pause link before the pause is stored", async () => {

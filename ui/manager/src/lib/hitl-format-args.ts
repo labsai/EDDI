@@ -88,3 +88,41 @@ export function formatToolArguments(args: string, truncated?: boolean): string {
     return args;
   }
 }
+
+/**
+ * The arguments as a value with nested JSON strings expanded — what the
+ * label/value view renders — or undefined when that cannot be done honestly
+ * (truncated, not JSON, or not losslessly JSON). Display only, like the rest
+ * of this module.
+ */
+export function parseToolArgumentsForDisplay(args: string | null | undefined, truncated?: boolean): unknown {
+  if (!args || truncated) return undefined;
+  const parsed = parseLossless(args);
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  return unwrap(parsed, 0);
+}
+
+/**
+ * Starting text for editing a call's arguments before approving: the arguments
+ * pretty-printed AS SENT. Nested JSON strings are NOT expanded here: the edit
+ * goes back as the call's arguments, and expanding a string parameter into an
+ * object would change its type. Text that is not losslessly JSON is returned
+ * as written.
+ */
+export function argumentsForEditing(args: string): string {
+  const parsed = parseLossless(args);
+  return typeof parsed === "object" && parsed !== null ? JSON.stringify(parsed, null, 2) : args;
+}
+
+/** True when two JSON texts differ only in insignificant whitespace. */
+export function sameJsonText(a: string, b: string): boolean {
+  return minifyJson(a.trim()) === minifyJson(b.trim());
+}
+
+/**
+ * The marker `SecretRedactionFilter` writes in place of a secret. Approver
+ * surfaces only ever see redacted arguments, and the REST resume uses
+ * `amendedArguments` verbatim (unlike Slack, which merges server-side), so an
+ * amendment still carrying it would run with the literal marker as the value.
+ */
+export const REDACTION_MARKER = "<REDACTED>";
