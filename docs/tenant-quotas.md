@@ -78,8 +78,10 @@ calls are reported at deploy time, per step and as `eddi.llm.calls.unpriced`, an
 Bedrock cache tokens and Gemini thinking tokens are counted — see
 [What the providers report](model-pricing.md#what-the-providers-report).
 
-Group transcript window summaries and stance summaries are charged to the tenant too, and are
-skipped (plain truncation, an extracted stance) once the budget is spent. If the quota store is
+Group transcript window summaries, stance summaries and the
+[SERVICE convergence judge](group-service-judge.md) are charged to the tenant too. Once the budget is
+spent the summaries are skipped (plain truncation, an extracted stance) and the judge is not run — that
+check counts as "not converged" and the discussion goes on. If the quota store is
 unreadable when one is charged, the amount is carried to the next group system charge on that node
 and its spend event is withheld until the tenant counter takes it; a carried amount is held in memory,
 so a node that restarts before the store recovers loses it.
@@ -183,8 +185,8 @@ call whose real prompt tokenizes worse than that estimate can cost more than it 
 
 **What is *not* reserved.** The mode bounds the model phase of each LLM task and priced tool calls.
 The smaller paid side calls — a same-model re-ask, a cascade judge, a guardrail classifier, a rolling
-summary, group transcript summaries, Dream — still go through the ordinary read-only gate and are
-charged at settle, so they can add a little on top of the reservation; the reserved amount of the
+summary, group transcript and stance summaries, the SERVICE convergence judge, Dream — still go
+through the ordinary read-only gate and are charged at settle, so they can add a little on top of the reservation; the reserved amount of the
 task they belong to normally already covers them. Embeddings are not priced. The limit is therefore a
 hard ceiling for the calls that carry the cost, not a bit-exact one.
 

@@ -22,11 +22,17 @@ import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.CostUpdatedEvent;
+import ai.labs.eddi.engine.pricing.SpendEvent;
+import ai.labs.eddi.engine.pricing.SpendSinks;
+import ai.labs.eddi.engine.pricing.SystemSpendMeter;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.llm.impl.SummarizationService.SummarizationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -34,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -47,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -373,6 +381,115 @@ class ServiceConvergenceJudgeTest {
                     new ServiceJudgeConfig("p", "m", null, null, null, 0).timeoutMs());
             assertNotNull(new ServiceJudgeConfig(null, " ", null, null, null, null).parameters());
             assertFalse(new ServiceJudgeConfig("p", " ", null, null, null, null).isConfigured());
+        }
+    }
+
+    @Nested
+    @DisplayName("tenant charge")
+    class TenantCharge {
+
+        private static final String GC_ID = "6a1f0c2b9d4e7f8a01b2c3d4";
+        private static final String GROUP_ID = "6a1f0c2b9d4e7f8a01b2c3e5";
+
+        private final List<SpendEvent> spend = new ArrayList<>();
+        private TenantQuotaService quota;
+
+        @BeforeEach
+        void installMeter() {
+            quota = mock(TenantQuotaService.class);
+            when(quota.getDefaultTenantId()).thenReturn("default");
+            when(quota.checkCostBudget(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK);
+            when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK);
+            SystemSpendMeter.install(new SystemSpendMeter(quota, new SpendSinks(List.of(spend::add))));
+            gc.setId(GC_ID);
+            gc.setGroupId(GROUP_ID);
+            gc.setRound(3);
+        }
+
+        @AfterEach
+        void removeMeter() {
+            SystemSpendMeter.install(null);
+        }
+
+        @Test
+        @DisplayName("charges the tenant the judge's cost, attributed to the round/phase/repeat key, and keeps the ledger booking")
+        void chargesTheTenant() {
+            judgeReplies("{\"agreementScore\":0.2}", 1_000_000, 500_000);
+
+            check(serviceConvergence(SERVICE), 2, null);
+
+            verify(quota).recordCost(eq("default"), eq(4.0));
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:3:0:2"), 1e-9, "the group ledger still holds the charge");
+            assertEquals(1, spend.size());
+            SpendEvent event = spend.getFirst();
+            assertEquals(SpendEvent.Kind.GROUP_SYSTEM, event.kind());
+            assertEquals("system:judge:3:0:2", event.detail());
+            assertEquals(GROUP_ID, event.groupId());
+            assertEquals(GC_ID, event.groupConversationId());
+            assertEquals(4.0, event.usd(), 1e-9);
+            assertEquals(1_000_000, event.inputTokens());
+            assertEquals(500_000, event.outputTokens());
+        }
+
+        @Test
+        @DisplayName("a re-run of the same check charges the tenant once, and a new repeat adds")
+        void reRunChargesOnce() {
+            judgeReplies("{\"agreementScore\":0.2}", 1_000_000, 500_000);
+
+            check(serviceConvergence(SERVICE), 1, null);
+            check(serviceConvergence(SERVICE), 1, null);
+            check(serviceConvergence(SERVICE), 2, null);
+
+            verify(quota, times(2)).recordCost(eq("default"), eq(4.0));
+            assertEquals(2, spend.size());
+        }
+
+        @Test
+        @DisplayName("a spent tenant budget refuses the call: outcome=error, not converged, nothing billed, the discussion goes on")
+        void spentBudgetRefuses() {
+            when(quota.checkCostBudget(anyString(), anyDouble())).thenReturn(QuotaCheckResult.denied("monthly cost budget reached"));
+            judgeReplies("{\"agreementScore\":0.95,\"converged\":true}", 1_000_000, 500_000);
+
+            PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
+
+            assertTrue(outcome.isContinue(), "a refused judge is not converged");
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            verify(quota, never()).recordCost(anyString(), anyDouble());
+            assertTrue(gc.getMemberCosts().isEmpty());
+            assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
+        }
+
+        @Test
+        @DisplayName("a budget that cannot be read fails closed, as for the summaries")
+        void unreadableBudgetFailsClosed() {
+            when(quota.checkCostBudget(anyString(), anyDouble())).thenThrow(new IllegalStateException("store down"));
+            judgeReplies("{\"agreementScore\":0.95,\"converged\":true}", 1_000_000, 500_000);
+
+            PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
+
+            assertTrue(outcome.isContinue());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
+        }
+
+        @Test
+        @DisplayName("accounting unavailable at charge time: the verdict stands, the ledger keeps it, and the next charge carries it")
+        void unavailableAccountingIsCarried() {
+            when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("store down"), QuotaCheckResult.OK);
+            judgeReplies("{\"agreementScore\":0.95,\"converged\":true,\"summary\":\"agreed\"}", 1_000_000, 500_000);
+
+            PhaseOutcome first = check(serviceConvergence(SERVICE), 1, null);
+
+            assertFalse(first.isContinue(), "an accounting outage does not fail the judge");
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:3:0:1"), 1e-9);
+            assertTrue(spend.isEmpty(), "the tenant counter did not take it, so no sink sees it");
+
+            check(serviceConvergence(SERVICE), 2, null);
+
+            verify(quota).recordCost(eq("default"), eq(8.0));
+            assertEquals(2, spend.size(), "the carried charge and the new one");
+            assertEquals("system:judge:3:0:1", spend.get(0).detail());
+            assertEquals("system:judge:3:0:2", spend.get(1).detail());
         }
     }
 

@@ -12,7 +12,10 @@ import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.internal.groups.ConvergenceDetector.ConvergenceVerdict;
+import ai.labs.eddi.engine.pricing.SystemSpendMeter;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -37,9 +40,11 @@ import java.util.function.Supplier;
  * Stateless, like {@code StanceSummaryEngine}: everything a call needs arrives
  * as arguments, and the only fields are the collaborators. It reuses the path
  * the group's own summarizers already take — a provider-agnostic call through
- * {@code ChatModelRegistry}, priced by {@link JudgeCallPricing} and booked with
- * {@link GroupCostLedger#recordSystemCost} — rather than the guardrail model
- * client, which is bound to an LLM task's context that a group does not have.
+ * {@code ChatModelRegistry}, priced by {@link JudgeCallPricing}, admitted by
+ * and charged through {@link SystemSpendMeter} — so the call is booked on the
+ * group ledger <i>and</i> charged to the tenant's monthly budget, exactly like
+ * the window and stance summaries — rather than the guardrail model client,
+ * which is bound to an LLM task's context that a group does not have.
  * <p>
  * <b>Never ends a phase on doubt.</b> A failure, a timeout or an unreadable
  * reply is "not converged", matching the moderator judge. The provider's error
@@ -62,6 +67,9 @@ public class ServiceConvergenceJudge {
     static final String OUTCOME_ERROR = "error";
     static final String OUTCOME_FALLBACK = "fallback_moderator";
     static final String FAILED_SUMMARY = "Convergence judge (service) failed";
+
+    /** The {@code site} tag of a strict-pricing refusal of the judge call. */
+    static final String SITE = "group_judge";
 
     /** The display name the cost event carries for the judge's spend. */
     static final String DISPLAY_NAME = "Convergence Judge";
@@ -162,6 +170,17 @@ public class ServiceConvergenceJudge {
                 return Optional.of(ConvergenceVerdict.notConverged(FAILED_SUMMARY));
             }
         }
+        // The tenant gate the group summaries pass: a spent monthly budget (or one that
+        // cannot be read — admit() fails closed) or an unpriced model under strict
+        // pricing refuses the call. Like a narrowed grant, a refusal fails this judge
+        // (outcome=error, not converged), never the discussion.
+        if (!SystemSpendMeter.admit() || UnpricedCallPolicy.check(priceOverride(service), service.llmProvider(), service.llmModel(), null,
+                false, SITE) != null) {
+            LOGGER.warnf("Group %s phase '%s': the service convergence judge is not run — the tenant cost budget is reached or the "
+                    + "judge model is unpriced under strict pricing", LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phaseName(phase)));
+            record(mode, OUTCOME_ERROR, System.nanoTime() - start);
+            return Optional.of(ConvergenceVerdict.notConverged(FAILED_SUMMARY));
+        }
         SummarizationService.SummarizationResult result;
         try {
             result = callWithin(summarizer, input, service);
@@ -173,10 +192,12 @@ public class ServiceConvergenceJudge {
         }
 
         // Book the spend before parsing: a reply we cannot read was still paid for.
-        double cost = JudgeCallPricing.cost(service.llmProvider(), service.llmModel(), service.inputPricePer1M(),
-                service.outputPricePer1M(), result.inputTokens(), result.outputTokens());
+        // The meter records it on the group ledger (by replacement) and charges the
+        // tenant the increase; a quota store that cannot take the charge carries it to
+        // the next group system charge rather than failing the judge.
         String costKey = costKey(gc.getRound(), phaseIdx, repeat);
-        GroupCostLedger.recordSystemCost(gc, costKey, cost);
+        SystemSpendMeter.charge(gc, costKey, priceOverride(service),
+                JudgeCallPricing.usage(service.llmProvider(), service.llmModel(), result.inputTokens(), result.outputTokens()), costKey);
         // After the ledger write returned — announceCost's contract.
         MemberTurnExecutor.announceCost(gc, costKey, DISPLAY_NAME, listener);
 
@@ -237,6 +258,10 @@ public class ServiceConvergenceJudge {
         var params = new HashMap<>(service.parameters());
         params.put("timeout", Integer.toString(service.timeoutMs()));
         return params;
+    }
+
+    private static PriceOverride priceOverride(ServiceJudgeConfig service) {
+        return PriceOverride.of(service.inputPricePer1M(), service.outputPricePer1M());
     }
 
     private void record(String mode, String outcome, long nanos) {

@@ -27,11 +27,12 @@ import java.util.Map;
 
 /**
  * Meters model spend that a group conversation's own machinery incurs — the
- * context-window summary and the stance summaries — the way a member turn's
- * spend is metered: priced through {@link ModelPriceResolver}, recorded in the
- * group's cost ledger, <b>charged to the tenant</b>, and delivered to every
- * {@link ISpendSink}. Before this, that spend reached the group ledger only: no
- * tenant budget saw it and no gate admitted it.
+ * context-window summary, the stance summaries and the SERVICE convergence
+ * judge — the way a member turn's spend is metered: priced through
+ * {@link ModelPriceResolver}, recorded in the group's cost ledger, <b>charged
+ * to the tenant</b>, and delivered to every {@link ISpendSink}. Before this,
+ * that spend reached the group ledger only: no tenant budget saw it and no gate
+ * admitted it.
  * <p>
  * The group engines are static and built with {@code new}, so the meter is
  * reached statically ({@link #admit()}, {@link #charge}); this bean registers
@@ -72,8 +73,11 @@ public class SystemSpendMeter {
         }
     }
 
-    /** Installs {@code meter} as the static instance (tests); null removes it. */
-    static void install(SystemSpendMeter meter) {
+    /**
+     * Installs {@code meter} as the static instance; null removes it. A test seam:
+     * public so that tests of the callers in other packages can install a meter.
+     */
+    public static void install(SystemSpendMeter meter) {
         instance = meter;
     }
 
