@@ -12,7 +12,7 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image** with the **Manager dashboard and Chat UI built in**. Selected as a **UNIDO Trusted Partner** for Industrial AI. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), the **OpenAI Chat Completions API**, **Slack**, **OpenAPI**, and **OAuth 2.0**.
 
-[Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+[Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
@@ -102,7 +102,7 @@ eddi update
 
 This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
 
-> **Upgrading across releases?** Read the upgrade guide first: [Upgrading from 6.4](docs/upgrading-from-6.4.md) lists what an existing deployment must change, because several defaults now fail closed (a Keycloak realm imported from 6.1–6.4 needs a repair that re-running the installer applies and `eddi update` does not). A database that comes from EDDI 5 starts with [Upgrading from 5.x](docs/upgrading-from-5x.md).
+> **Upgrading across releases?** Read the upgrade guide first: [Upgrading from 6.5](docs/upgrading-from-6.5.md) covers a 6.5 deployment moving to 6.6 or 6.7, and [Upgrading from 6.4](docs/upgrading-from-6.4.md) lists what an existing deployment must change, because several defaults now fail closed (a Keycloak realm imported from 6.1–6.4 needs a repair that re-running the installer applies and `eddi update` does not). A database that comes from EDDI 5 starts with [Upgrading from 5.x](docs/upgrading-from-5x.md).
 
 > **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
 >
@@ -332,7 +332,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (96 tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). On an authenticated instance `/mcp` is an OAuth protected resource, so clients [sign themselves in](docs/mcp-server.md#the-client-signs-itself-in-preferred). Connect agents to external [MCP tool servers](docs/mcp-client.md) |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (108 tools) + Client   | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). On an authenticated instance `/mcp` is an OAuth protected resource, so clients [sign themselves in](docs/mcp-server.md#the-client-signs-itself-in-preferred). Connect agents to external [MCP tool servers](docs/mcp-client.md) |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation. Outbound, [connections](docs/connections.md) give agents per-user OAuth grants to external systems |
@@ -510,7 +510,7 @@ Both UIs live in this repository (`ui/manager`, `ui/chat`) and are built into th
 | **[Agent Config Authoring](docs/agent-config-authoring.md)** | Rules and pitfalls for writing agent JSON          |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge bases, crawled and uploaded sources, retrieval |
-| **[MCP Server](docs/mcp-server.md)**                         | 96 tools for AI-assisted agent management         |
+| **[MCP Server](docs/mcp-server.md)**                         | 108 tools for AI-assisted agent management        |
 | **[MCP Client](docs/mcp-client.md)**                         | Connecting agents to external MCP servers          |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
 | **[OpenAI-Compatible API](docs/open-webui-integration.md)**  | Agents as OpenAI models for Open WebUI & SDKs      |
@@ -539,6 +539,7 @@ Both UIs live in this repository (`ui/manager`, `ui/chat`) and are built into th
 | **[Configuration Reference](docs/configuration-reference.md)** | Every `eddi.*` property, its default and env var |
 | **[Upgrading from 5.x](docs/upgrading-from-5x.md)**          | First boot of an EDDI 5 database on 6.x            |
 | **[Upgrading from 6.4](docs/upgrading-from-6.4.md)**         | What an existing 6.4 deployment must change for 6.5 |
+| **[Upgrading from 6.5](docs/upgrading-from-6.5.md)**         | What a 6.5 deployment notices on 6.6 and 6.7       |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
@@ -589,7 +590,7 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 `-Djvm.args` hands the forked dev JVM the same `--add-modules=jdk.incubator.vector` flag the container image sets. Only `jlama` (in-process) agents need it — without it Jlama silently falls back to scalar tensor operations and answers far too slowly — so you may drop it if you never run one. `mise run dev` passes it for you.
 
-Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
+Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev-ui](http://localhost:7070/q/dev-ui).
 
 > **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
 
@@ -612,7 +613,7 @@ Dev mode also enables:
 > echo "EDDI_VAULT_MASTER_KEY=my-dev-passphrase" > .env
 > ```
 >
-> Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development. See [Secrets Vault](docs/secrets-vault.md) for production setup.
+> Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development, where a weak one only logs a warning; a production boot refuses a key shorter than 16 characters or a known placeholder. See [Secrets Vault](docs/secrets-vault.md) for production setup.
 
 ### Maven Command Reference
 
@@ -628,7 +629,7 @@ Dev mode also enables:
 | `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
 | `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter — the fix for a `formatter:validate` failure |
 | `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
-| `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
+| `./mvnw clean package -DskipTests` then `docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .` | Build the app **+ Docker image** (the same Dockerfile CI builds) |
 | `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
 | `./mvnw quarkus:dev -Dsuspend '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode and **wait for debugger** on port 5005 |
 | `./mvnw quarkus:dev -Ddebug=false '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode **without** the debug agent |
@@ -662,8 +663,9 @@ target/site/jacoco/index.html
 ### Build & Docker
 
 ```bash
-# Build app + Docker image
-./mvnw clean package '-Dquarkus.container-image.build=true'
+# Build app + Docker image (the Dockerfile CI builds; it copies target/quarkus-app)
+./mvnw clean package -DskipTests
+docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .
 
 # Build without container (for install.sh --local)
 ./mvnw package -DskipTests
@@ -723,12 +725,12 @@ EDDI ships with security-by-default for production deployments:
 - **SSRF protection** — EDDI's own outbound HTTP (LLM tools, the crawler, OAuth, A2A, remote sync) goes through one facade, `OutboundHttp`, with private IP blocking, per-hop redirect validation, scheme enforcement and in-flight body caps
 - **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy` configured out of the box
 - **Loopback by default** — The Docker Compose files publish EDDI, Keycloak and the datastores on `127.0.0.1`, and the Helm chart and Kustomize overlays ship no default credentials
-- **CI/CD security gates** — Every push/PR is scanned by:
-  - **CodeQL** — Semantic SAST analysis with `security-extended` queries
-  - **Trivy** — CVE scanning for both filesystem dependencies and Docker images (blocking on CRITICAL/HIGH)
+- **CI/CD security gates** — CI scans the code with:
+  - **CodeQL** — Semantic SAST analysis with `security-extended` queries, for the Java backend and the UIs
+  - **Trivy** — CVE scanning of filesystem dependencies on code changes, and of the Docker image before it is published (both blocking on CRITICAL/HIGH)
   - **Gitleaks** — Git history scanning to prevent secret/credential leakage
-  - **CycloneDX** — SBOM generation for supply chain transparency
-  - **Jazzer** — Coverage-guided fuzz testing for security-critical parsers (PathNavigator, MatchingUtilities)
+  - **CycloneDX** — SBOM generation for supply chain transparency, on pushes to `main` and release tags
+  - **Jazzer** — Coverage-guided fuzz testing (ClusterFuzzLite) for security-critical parsers (PathNavigator, MatchingUtilities, SafeJsonExpression), on PRs that touch Java sources and weekly
   - All actions SHA-pinned to prevent supply-chain attacks
 
 For vulnerability reports, see our [Security Policy](SECURITY.md). For architecture details, see [Security Architecture](docs/security.md).

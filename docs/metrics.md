@@ -6,13 +6,13 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 E.D.D.I ships three dashboards that the Kubernetes monitoring component and
 `docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
-`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 36 panels, NATS cluster mode; see
 [Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 240 panels, 28 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -87,7 +87,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
-`Conversation Ratings` · `Alerts`
+`Model Pricing` · `Team Budgets` · `Conversation Ratings` · `Alerts`
 
 ---
 
@@ -489,7 +489,7 @@ eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
 backlog: work is arriving faster than it drains. Both coordinators register the
-same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+same seven meters (from their shared base class); `dead_letters > 0` means a turn failed and is waiting for an
 operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
 
 `dead_lettered_total` counts turns that failed after they had started (alert
@@ -1051,6 +1051,9 @@ eddi_dream_users_processed_total            # Users a dream cycle worked through
 eddi_dream_entries_pruned_total             # Stale memory entries removed
 eddi_dream_entries_summarized_total         # Entries folded into a consolidation
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
+eddi_dream_contradictions_contested_total   # Entries marked CONTESTED (mark_contested / supersede_older)
+eddi_dream_contradictions_superseded_total  # Older entries marked SUPERSEDED (supersede_older)
+eddi_dream_contradictions_cleared_total     # Contests lifted and superseded entries restored once the disagreement was gone
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
 eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
@@ -1075,7 +1078,17 @@ the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user
 did **not** make because the memory was written after the cycle read it — every Dream write is a
 compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
 on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
-a quieter hour helps.
+a quieter hour helps. An assessment Dream could not write for the same reason
+(`contradictionResolution`) counts here too.
+
+`contested` and `superseded` stay at zero under the default
+`contradictionResolution: keep_newest`, which only detects. With `mark_contested` or
+`supersede_older`, they count entries newly marked — an entry already marked is not counted
+again. `cleared` counts entries returned to `ACCEPTED` because the other side of the
+disagreement was rewritten, deleted or retired, and it is **not** limited to those two
+strategies: a stale verdict is lifted under every strategy, `keep_newest` included, so after
+switching back to the default `cleared` still rises while the next cycles lift the flags the
+earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolution).
 
 ### Conversation Summarization Metrics
 
@@ -1242,7 +1255,7 @@ They cover availability (`EddiDown`, `EddiMetricsAbsent`, `EddiRestartLoop`),
 the 5xx ratio, the coordinator backlog and dead letters, pipeline task errors,
 executor saturation, LLM error ratio and p95 latency, the tool failure ratio, the
 vault, the Platform Operator gate and canary, audit drops, queue fill and chain
-collisions, quota-store failures, schedule and NATS dead letters, and heap after
+collisions, quota-store failures, schedule dead letters, and heap after
 GC. Every rule has a runbook in
 [monitoring-guide.md → Alert runbooks](monitoring/monitoring-guide.md#alert-runbooks),
 linked from its `runbook_url` annotation; `promtool test rules` cases in
