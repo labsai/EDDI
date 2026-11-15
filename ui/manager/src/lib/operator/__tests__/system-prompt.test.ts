@@ -1356,7 +1356,7 @@ describe("Qute namespaces in the prompt", () => {
 
   it.each(["read_only", "read_write"] as const)("the %s prompt names no namespace the backend cannot resolve", (scope) => {
     const prompt = buildOperatorSystemPrompt(defaultOperatorPromptBody(scope), scope, "Acme Assist");
-    const namespaces = [...prompt.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)].map((m) => m[1]);
+    const namespaces = [...prompt.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)].map((m) => m[1] ?? "");
     expect(namespaces.filter((ns) => !PASS_THROUGH.has(ns))).toEqual([]);
   });
 });
