@@ -189,6 +189,10 @@ policy applies to your deployment, this is the setting that enforces it for the
 logs. (Earlier releases described this retention as configurable without any
 code that applied it.)
 
+The `exception` field is personal data in the same way as the message: an exception message can name the person (`user not found: someone@example.com`), and erasure leaves it exactly as it leaves the message. Any erasure of log entries that rewrites or removes `message` must cover `exception` as well.
+
+Each persisted entry can now carry up to 8 KB of exception text on top of its message, and with `eddi.logs.db-retention-days=-1` (the default) WARN+ entries are kept forever. On a deployment that logs many errors, lower `eddi.logs.exception-max-frames` and set `eddi.logs.db-retention-days`.
+
 ---
 
 ## Architecture

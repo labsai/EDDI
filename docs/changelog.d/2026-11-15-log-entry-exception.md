@@ -8,6 +8,7 @@ Branch `fix/log-entry-exception`, backend and Manager.
 - Manager (`ui/manager`): `LogEntry`/`DatabaseLogEntry` gain `exception`; `LogRow` shows it behind the existing collapsed stacktrace toggle and the row copy/export includes it.
 - Docs: [`log-administration.md`](../log-administration.md), [`configuration-reference.md`](../configuration-reference.md).
 - Overlap: open PR #1405 also edits `BoundedLogStore` (GDPR erasure marks, `flushToDb`). This change touches `capture`, the constructors and the factories only.
+- GDPR follow-up for whichever lands second: open PR #1405 (log-buffer erasure) pseudonymises the user id only and leaves `message` as it is, so it leaves `exception` too, which can carry the same personal data (an address in `user not found: x@y`). Any erasure of log entries that rewrites or removes `message` must cover `exception` as well. Storage: each persisted entry can carry up to 8 KB more; see `eddi.logs.exception-max-frames` and `eddi.logs.db-retention-days`.
 
 ```decision-log
 | 2026-11-15 | Log entries carry the throwable as a bounded, redacted string (`eddi.logs.exception-max-frames`, default 10 frames per throwable, 8 KB total) | The in-app log dropped every cause, and the correlation-id error hardening makes it the only place an operator can find one | Keeping the live `Throwable` in the entry: it would pin stack traces in the ring buffer and the 1000-record pre-start buffer, and cross two databases unredacted |
