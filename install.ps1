@@ -853,12 +853,33 @@ function Step-Ports {
 # skipped. eddi-fetch.ps1 embeds this function, so `eddi update` reads the same way.
 function Get-MonitoringAssets([string]$ComposePath) {
     $found = [System.Collections.Generic.SortedSet[string]]::new()
-    foreach ($match in [regex]::Matches((Get-Content -LiteralPath $ComposePath -Raw), '\./(docs/monitoring/[A-Za-z0-9._/-]+\.(?:json|ya?ml))')) {
+    $optional = [System.Collections.Generic.SortedSet[string]]::new()
+    $text = Get-Content -LiteralPath $ComposePath -Raw
+    foreach ($match in [regex]::Matches($text, '\./(docs/monitoring/[A-Za-z0-9._/-]+\.(?:json|ya?ml))')) {
         $rel = $match.Groups[1].Value
         if ($rel -match '(^|/)\.\.(/|$)' -or $rel.StartsWith('/')) { continue }
         [void]$found.Add($rel)
     }
-    return @($found)
+    # A DIRECTORY mount (./docs/monitoring/grafana-provisioning/dashboards:/...) holds files
+    # the compose text never names, and raw.githubusercontent.com has no directory listing
+    # (the GitHub API would be one more rate-limited network dependency), so the files under
+    # each known provisioning directory come from this fixed table and are returned with a
+    # leading "?" = OPTIONAL: a release that does not carry one is skipped with a note.
+    # Without them Grafana starts with no dashboards and no datasource. A test fails when a
+    # file under a mounted provisioning directory is missing from the table (install.sh has
+    # the same table in monitoring_assets).
+    $directoryFiles = @{
+        'docs/monitoring/grafana-provisioning/dashboards'  = @('dashboards.yml')
+        'docs/monitoring/grafana-provisioning/datasources' = @('datasources.yml')
+    }
+    foreach ($match in [regex]::Matches($text, '\./(docs/monitoring/[A-Za-z0-9_/-]+):')) {
+        $dir = $match.Groups[1].Value
+        if ($dir -match '(^|/)\.\.(/|$)' -or $dir.StartsWith('/')) { continue }
+        if ($directoryFiles.ContainsKey($dir)) {
+            foreach ($file in $directoryFiles[$dir]) { [void]$optional.Add("?$dir/$file") }
+        }
+    }
+    return @(@($found) + @($optional))
 }
 
 # -- Release checksums ------------------------------------
@@ -1072,6 +1093,8 @@ function Get-ComposeFiles {
             Write-Fail "docker-compose.monitoring.yml from '$EddiBranch' mounts no monitoring files, which cannot be right. Not continuing with a half-configured monitoring stack."
         }
         foreach ($mf in $monitoringAssets) {
+            $mfOptional = $mf.StartsWith('?')
+            if ($mfOptional) { $mf = $mf.Substring(1) }
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
             $mfLocalFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $mf } else { "" }
             $mfDir = Split-Path -Path $mfTarget -Parent
@@ -1088,6 +1111,13 @@ function Get-ComposeFiles {
                     Write-Information -MessageData "✅"
                 }
                 catch {
+                    # A provisioning file of a directory mount that this ref does not carry
+                    # is skipped with a note; a checksum mismatch is never skipped.
+                    if ($mfOptional -and $_.Exception.Message -notmatch 'Checksum mismatch') {
+                        Remove-Item -Path $mfTarget -Force -ErrorAction SilentlyContinue
+                        Write-Information -MessageData "  not in $EddiBranch, skipped"
+                        continue
+                    }
                     # Bind-mounted as a FILE by docker-compose.monitoring.yml, so a
                     # missing one is worse than it sounds: Docker creates a
                     # *directory* at the mount path and the Grafana container then
@@ -1098,7 +1128,9 @@ function Get-ComposeFiles {
                     # below.
                     #
                     # The list is read from the selected ref's docker-compose.monitoring.yml,
-                    # so it is by construction every file-type bind mount of that release.
+                    # so it is by construction every FILE bind mount of that release; the
+                    # files inside its DIRECTORY mounts come from the fixed table in
+                    # Get-MonitoringAssets and are optional (handled above).
                     # Only the EMPTY directory Docker leaves behind after a failed
                     # bind mount is removed, and only non-recursively: the installer
                     # does not own a directory with contents, and an existing FILE is
@@ -2202,12 +2234,18 @@ try {
             $derived = Get-MonitoringAssets $monCompose
             if ($derived.Count -eq 0) { throw "the monitoring compose file mounts no files" }
             foreach ($rel in $derived) {
-                [void]$list.Add($rel + '|' + (Join-Path -Path $monDir -ChildPath ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))
+                # "?" marks an optional provisioning file (see Get-MonitoringAssets); it stays
+                # in front of the entry so the loop below can tell.
+                $optionalMark = if ($rel.StartsWith('?')) { '?' } else { '' }
+                $rel = $rel.TrimStart('?')
+                [void]$list.Add($optionalMark + $rel + '|' + (Join-Path -Path $monDir -ChildPath ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))
             }
             $inAssets = $true
             continue
         }
         $rel, $target = $entry -split '\|', 2
+        $entryOptional = $false
+        if ($rel -and $rel.StartsWith('?')) { $entryOptional = $true; $rel = $rel.Substring(1) }
         if (-not $rel -or -not $target) { continue }
         $Assets = $inAssets
         if ($Assets) {
@@ -2235,6 +2273,12 @@ try {
             }
             # Every other item is REQUIRED: keeping an old file while the new ref is recorded
             # would run the new image with old files. Nothing is replaced or recorded.
+            if ($entryOptional) {
+                # Provisioning file of a directory mount: a ref that predates it has none; the
+                # installed copy (if any) stays.
+                Write-Host "  $rel : not in this ref, skipped"
+                continue
+            }
             Write-Host "  $rel : FAILED, could not be downloaded"
             $missing += $rel
         }

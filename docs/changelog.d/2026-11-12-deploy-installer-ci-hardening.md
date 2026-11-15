@@ -119,6 +119,18 @@ its own `eddi.cmd` message) while a `<name>.eddi-old` from a failed rollback exi
 no longer overwrite the preserved original. In `eddi update` (bash) a directory at an asset path
 is removed before the first replacement.
 
+Sixth round: the files inside the Grafana provisioning DIRECTORY mounts
+(`grafana-provisioning/dashboards/dashboards.yml`, `.../datasources/datasources.yml`) are
+downloaded again. Deriving the required assets from the compose file's mounts (round 4) had
+dropped them, because a directory mount does not name its files, and Grafana then started
+without dashboards or a datasource. Each reader (install.sh installer, the generated `eddi
+update`, `Get-MonitoringAssets` / `eddi-fetch.ps1`) now adds a small fixed table of the files
+per known provisioning directory (no directory listing exists on raw.githubusercontent.com and
+the GitHub API would be one more rate-limited dependency); they are optional, so a release that
+predates one skips it with a note. `DeploymentHardeningTest` fails when a file under a mounted
+provisioning directory is missing from the tables, and its ordering checks now fail when a
+marker is missing instead of passing on `indexOf` = -1.
+
 ### Not changed
 
 `io.opentelemetry:opentelemetry-api` resolves to 1.62.0 through the Quarkus platform

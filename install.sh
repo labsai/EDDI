@@ -1096,6 +1096,32 @@ verify_download() {
   fi
 }
 
+# monitoring_assets <docker-compose.monitoring.yml>: the files to fetch for the monitoring
+# overlay of THIS ref, one repository-relative path per line.
+#   - every regular file the compose mounts (./docs/monitoring/x.json:/...) is REQUIRED
+#     and printed as is;
+#   - a DIRECTORY mount (./docs/monitoring/grafana-provisioning/dashboards:/...) holds
+#     files the compose text never names, and raw.githubusercontent.com has no directory
+#     listing (the GitHub API would be one more rate-limited network dependency), so the
+#     files under each known provisioning directory come from the fixed table below and
+#     are printed with a leading "?" = OPTIONAL: a release that does not carry one is
+#     skipped with a note instead of failing the download. Without these Grafana starts
+#     with no dashboards and no datasource. DeploymentHardeningTest fails when a file
+#     under a mounted provisioning directory is missing from this table.
+# Read with grep/sed only (no eval, no word splitting of file content); `..` and
+# absolute paths are dropped.
+monitoring_assets() {
+  local compose="$1" dir
+  { grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$compose" || true; } | sed 's|^\./||' | sort -u
+  { grep -oE '\./docs/monitoring/[A-Za-z0-9_/-]+:' "$compose" || true; } | sed 's|^\./||; s|:$||' | sort -u | while IFS= read -r dir; do
+    case "$dir" in *..*|/*) continue ;; esac
+    case "$dir" in
+      docs/monitoring/grafana-provisioning/dashboards) echo "?${dir}/dashboards.yml" ;;
+      docs/monitoring/grafana-provisioning/datasources) echo "?${dir}/datasources.yml" ;;
+    esac
+  done
+}
+
 resolve_compose_files() {
   mkdir -p "$EDDI_DIR"
   load_release_checksums
@@ -1168,17 +1194,24 @@ resolve_compose_files() {
     # file DOES mount stays required. Read with grep/sed only (no eval, no word
     # splitting of file content); a path with `..` is refused, and the pattern
     # cannot produce an absolute one.
+    # Files inside the directory mounts (the Grafana provisioning config) come from a
+    # fixed table and are optional: see monitoring_assets.
     local monitoring_files=() mf_line
     while IFS= read -r mf_line; do
       case "$mf_line" in
         ""|*..*|/*) continue ;;
       esac
       monitoring_files+=("$mf_line")
-    done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$EDDI_DIR/docker-compose.monitoring.yml" | sed 's|^\./||' | sort -u)
+    done < <(monitoring_assets "$EDDI_DIR/docker-compose.monitoring.yml")
     if [[ ${#monitoring_files[@]} -eq 0 ]]; then
       fail "docker-compose.monitoring.yml from '${EDDI_BRANCH}' mounts no monitoring files, which cannot be right.\n     Not continuing with a half-configured monitoring stack."
     fi
     for mf in "${monitoring_files[@]}"; do
+      local mf_optional=false
+      if [[ "$mf" == \?* ]]; then
+        mf_optional=true
+        mf="${mf#\?}"
+      fi
       local mf_target="$EDDI_DIR/$mf"
       local mf_dir
       mf_dir=$(dirname "$mf_target")
@@ -1192,6 +1225,10 @@ resolve_compose_files() {
         if curl -fsSL "${mf_url}" -o "$mf_target"; then
           verify_download "$mf" "$mf_target"
           echo -e "${GREEN}✅${RESET}"
+        elif [[ "$mf_optional" == "true" ]]; then
+          # Provisioning file of a directory mount: a release that predates it has none.
+          rm -f "$mf_target"
+          echo -e "${YELLOW}not in ${EDDI_BRANCH}, skipped${RESET}"
         else
           # Every one of these is bind-mounted as a FILE by
           # docker-compose.monitoring.yml, so a missing one is worse than it
@@ -1208,7 +1245,9 @@ resolve_compose_files() {
           # is not better than a refusal to build one.
           #
           # The list is read from the selected ref's docker-compose.monitoring.yml, so
-          # it is by construction every file-type bind mount of that release.
+          # it is by construction every FILE bind mount of that release. The files
+          # inside its DIRECTORY mounts (the Grafana provisioning config) are not named
+          # there: they come from the fixed table in monitoring_assets and are optional.
           # -rf, not -f: the thing in the way is most likely a DIRECTORY that a
           # previous run's failed mount left behind, and `rm -f` cannot remove
           # one. Under `set -e` that turns this cleanup into the script's exit
@@ -2658,6 +2697,32 @@ _release_is_signed() {
   (( a > x || (a == x && (b > y || (b == y && c >= z))) ))
 }
 _is_release_tag() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; }
+# _monitoring_assets <docker-compose.monitoring.yml>: the files to fetch for the monitoring
+# overlay of THIS ref, one repository-relative path per line.
+#   - every regular file the compose mounts (./docs/monitoring/x.json:/...) is REQUIRED
+#     and printed as is;
+#   - a DIRECTORY mount (./docs/monitoring/grafana-provisioning/dashboards:/...) holds
+#     files the compose text never names, and raw.githubusercontent.com has no directory
+#     listing (the GitHub API would be one more rate-limited network dependency), so the
+#     files under each known provisioning directory come from the fixed table below and
+#     are printed with a leading "?" = OPTIONAL: a release that does not carry one is
+#     skipped with a note instead of failing the download. Without these Grafana starts
+#     with no dashboards and no datasource. DeploymentHardeningTest fails when a file
+#     under a mounted provisioning directory is missing from this table.
+# Read with grep/sed only (no eval, no word splitting of file content); `..` and
+# absolute paths are dropped.
+_monitoring_assets() {
+  local compose="$1" dir
+  { grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$compose" || true; } | sed 's|^\./||' | sort -u
+  { grep -oE '\./docs/monitoring/[A-Za-z0-9_/-]+:' "$compose" || true; } | sed 's|^\./||; s|:$||' | sort -u | while IFS= read -r dir; do
+    case "$dir" in *..*|/*) continue ;; esac
+    case "$dir" in
+      docs/monitoring/grafana-provisioning/dashboards) echo "?${dir}/dashboards.yml" ;;
+      docs/monitoring/grafana-provisioning/datasources) echo "?${dir}/datasources.yml" ;;
+    esac
+  done
+}
+
 # _load_release_checksums: fetches and (with cosign) verifies the SHA256SUMS of
 # EDDI_BRANCH into RELEASE_CHECKSUMS. Exits when a release that must carry a
 # signed list does not, or when the signature does not verify.
@@ -2917,8 +2982,9 @@ case "${1:-help}" in
     # what the grafana-data volume already holds, so any monitoring asset added
     # upstream has to be on disk BEFORE `up -d`. The list is read out of the NEW
     # (staged) monitoring compose file, so the next asset added to
-    # docker-compose.monitoring.yml needs no change to this wrapper. Only file-type
-    # mounts are fetched; the grafana-provisioning/* mounts are directories.
+    # docker-compose.monitoring.yml needs no change to this wrapper. File mounts are
+    # fetched and required; the files inside the grafana-provisioning/* DIRECTORY
+    # mounts come from a fixed table (see _monitoring_assets) and are optional.
     monitoring_compose=""
     for f in "${COMPOSE_FILE_LIST[@]}"; do
       if [[ "$(basename "$f")" == "docker-compose.monitoring.yml" ]]; then
@@ -2938,6 +3004,12 @@ case "${1:-help}" in
       missing_assets=""
       while read -r rel_path; do
         [[ -n "$rel_path" ]] || continue
+        asset_optional=false
+        if [[ "$rel_path" == \?* ]]; then
+          asset_optional=true
+          rel_path="${rel_path#\?}"
+        fi
+        case "$rel_path" in *..*|/*) continue ;; esac
         asset="${rel_path#./}"
         target="${compose_dir}/${asset}"
         mkdir -p "$(dirname "$target")"
@@ -2952,6 +3024,11 @@ case "${1:-help}" in
             exit 1
           fi
           echo "✅"
+        elif [[ "$asset_optional" == "true" ]]; then
+          # Provisioning file of a directory mount: a release that predates it has none;
+          # the installed copy (if any) stays.
+          rm -f "$tmp_asset"
+          echo "not in ${EDDI_BRANCH}, skipped"
         else
           # Required too, even when an older copy is on disk: the new compose file
           # may mount a changed asset, and the recorded version must match the files.
@@ -2959,7 +3036,7 @@ case "${1:-help}" in
           echo "❌"
           missing_assets="${missing_assets} ${asset}"
         fi
-      done < <(grep -oE '\./docs/monitoring/[A-Za-z0-9._/-]+\.(json|ya?ml)' "$asset_source" | sort -u || true)
+      done < <(_monitoring_assets "$asset_source")
 
       if [[ -n "$missing_assets" ]]; then
         _discard_staged

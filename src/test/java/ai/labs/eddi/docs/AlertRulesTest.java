@@ -242,7 +242,7 @@ class AlertRulesTest {
         assertTrue(derived.contains("docs/monitoring/eddi-alerts.yml"),
                 "the derivation must pick the rules file up from the compose mounts: " + derived);
         assertTrue(read(repoRoot().resolve("install.sh")).contains("[A-Za-z0-9._/-]+\\.(json|ya?ml)")
-                && read(repoRoot().resolve("install.sh")).contains("docker-compose.monitoring.yml\" | sed 's|^\\./||'"),
+                && read(repoRoot().resolve("install.sh")).contains("monitoring_assets \"$EDDI_DIR/docker-compose.monitoring.yml\""),
                 "install.sh must derive the monitoring downloads from the compose file's mounts");
         assertTrue(read(repoRoot().resolve("install.ps1")).contains("[A-Za-z0-9._/-]+\\.(?:json|ya?ml)")
                 && read(repoRoot().resolve("install.ps1")).contains("Get-MonitoringAssets $monitoringComposePath"),

@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,6 +63,18 @@ class DeploymentHardeningTest {
 
     private static String read(String file) throws IOException {
         return Files.readString(Path.of(file), StandardCharsets.UTF_8).replace("\r\n", "\n");
+    }
+
+    /**
+     * Both markers must exist, and {@code first} must come before {@code second}: a
+     * missing marker is a failure, never a pass.
+     */
+    private static void assertBefore(String text, String first, String second, String message) {
+        int firstAt = text.indexOf(first);
+        int secondAt = text.indexOf(second);
+        assertTrue(firstAt >= 0, "missing marker: " + first);
+        assertTrue(secondAt >= 0, "missing marker: " + second);
+        assertTrue(firstAt < secondAt, message);
     }
 
     /** The text between {@code from} and the first {@code to} after it. */
@@ -191,9 +204,9 @@ class DeploymentHardeningTest {
             int assetCheck = assets.indexOf("_verify_download \"$asset\"");
             assertTrue(assetCheck > 0 && assetCheck < assets.indexOf("mv -f \"${s}.tmp\" \"$s\""),
                     "compose files may only be replaced after the monitoring assets were verified too");
-            assertTrue(assets.indexOf("mv -f \"${s}.tmp\" \"$s\"") < assets.indexOf("_set_kv EDDI_VERSION"),
+            assertBefore(assets, "mv -f \"${s}.tmp\" \"$s\"", "_set_kv EDDI_VERSION",
                     "the recorded tag may only change after the files are in place");
-            assertTrue(assets.indexOf("mv -f \"${s}.tmp\" \"$s\"") < assets.indexOf("_set_kv EDDI_BRANCH \"$EDDI_BRANCH\""),
+            assertBefore(assets, "mv -f \"${s}.tmp\" \"$s\"", "_set_kv EDDI_BRANCH \"$EDDI_BRANCH\"",
                     "the recorded ref may only change after the files are in place");
             String beforeFiles = sh.substring(sh.indexOf("  update)\n"), sh.indexOf("    # Same checks as a fresh install:"));
             assertFalse(beforeFiles.contains("_set_kv EDDI_VERSION \"$NEW_VERSION\""), "persisted before verification");
@@ -208,7 +221,7 @@ class DeploymentHardeningTest {
             assertTrue(fallback.contains("\"$EDDI_BRANCH_SOURCE\" == \"version\""));
             assertTrue(fallback.contains("_is_release_tag \"$EDDI_BRANCH\""));
             assertTrue(fallback.contains("exit 1"));
-            assertTrue(fallback.indexOf("exit 1") < fallback.indexOf("EDDI_BRANCH=\"main\""), "the refusal comes before the fallback");
+            assertBefore(fallback, "exit 1", "EDDI_BRANCH=\"main\"", "the refusal comes before the fallback");
         }
 
         @Test
@@ -229,7 +242,8 @@ class DeploymentHardeningTest {
             // here; the behaviour was also run by hand against a locked file).
             assertTrue(helper.contains(".eddi-old") && helper.contains("Move-Item -LiteralPath $m[1] -Destination $m[0] -Force"),
                     "a failure after the first move must restore what was already replaced");
-            assertTrue(helper.indexOf("[Array]::Reverse($moved)") > helper.indexOf("Move-Item -LiteralPath $s[0] -Destination $s[1] -Force"));
+            assertBefore(helper, "Move-Item -LiteralPath $s[0] -Destination $s[1] -Force", "[Array]::Reverse($moved)",
+                    "ordering: " + "Move-Item -LiteralPath $s[0] -Destination $s[1] -Force" + " must come before " + "[Array]::Reverse($moved)");
             assertTrue(ps.contains("set \"EDDI_BRANCH=main\" ^& eddi update"), "the printed cmd form must be quoted");
             assertFalse(ps.contains("run: set EDDI_BRANCH=main"));
             assertTrue(read("docs/security.md").contains("set \"EDDI_BRANCH=main\" & eddi update & set \"EDDI_BRANCH=\""));
@@ -242,7 +256,8 @@ class DeploymentHardeningTest {
             String sh = read("install.sh");
             String cli = between(sh, "_load_release_checksums() {", "local sums bundle");
             assertTrue(cli.contains("if _release_is_signed \"$EDDI_BRANCH\"; then"));
-            assertTrue(cli.indexOf("exit 1") < cli.indexOf("downloaded files are not checksum-verified"));
+            assertBefore(cli, "exit 1", "downloaded files are not checksum-verified",
+                    "ordering: " + "exit 1" + " must come before " + "downloaded files are not checksum-verified");
             String installer = between(sh, "if ! sha256_of /dev/null &>/dev/null; then", "local sums\n");
             assertTrue(installer.contains("release_is_signed \"$EDDI_BRANCH\"") && installer.contains("fail \""));
         }
@@ -267,13 +282,14 @@ class DeploymentHardeningTest {
             // succeeded.
             assertTrue(cmd.contains("\"::monitoring::"), "the assets are read by the same helper call as the compose files");
             assertFalse(cmd.contains("-Assets"), "a second helper call would replace the compose files before the assets pass");
-            assertTrue(cmd.indexOf("eddi-fetch.ps1\" -Ref") < cmd.indexOf("if defined PERSIST_REF ("),
-                    "the recorded ref may only change after the files are in place");
-            assertTrue(cmd.indexOf("set \"PERSIST_REF=1\"") < cmd.indexOf("if defined PERSIST_REF ("));
+            assertBefore(cmd, "eddi-fetch.ps1\" -Ref", "if defined PERSIST_REF (", "the recorded ref may only change after the files are in place");
+            assertBefore(cmd, "set \"PERSIST_REF=1\"", "if defined PERSIST_REF (",
+                    "ordering: " + "set \"PERSIST_REF=1\"" + " must come before " + "if defined PERSIST_REF (");
             assertFalse(cmd.substring(0, cmd.indexOf("eddi-fetch.ps1\" -Ref")).contains("echo EDDI_BRANCH=!EDDI_BRANCH!"),
                     ".eddi-config must not be rewritten before the fetch");
             assertTrue(cmd.contains("if defined PINNED ("), "a release-pinned install must not fall back to main");
-            assertTrue(cmd.indexOf("if defined PINNED (") < cmd.indexOf("set \"EDDI_BRANCH=main\"\n"));
+            assertBefore(cmd, "if defined PINNED (", "set \"EDDI_BRANCH=main\"\n",
+                    "ordering: " + "if defined PINNED (" + " must come before " + "set \"EDDI_BRANCH=main\"\n");
 
             // The helper embeds the installer's own verification, so the two cannot drift.
             assertTrue(ps.contains("'Confirm-ReleaseChecksumsSignature', 'Initialize-ReleaseChecksums', 'Confirm-DownloadChecksum'"));
@@ -283,7 +299,7 @@ class DeploymentHardeningTest {
             // verification.
             String helper = between(ps, "$fetchMain = @'", "'@\n    $fetchFunctions");
             assertFalse(helper.contains("-Recurse"), "a directory at an asset path may hold content");
-            assertTrue(helper.indexOf("Remove-Item -LiteralPath $s[1] -Force") > helper.indexOf("if ($missing.Count -gt 0) { throw"),
+            assertBefore(helper, "if ($missing.Count -gt 0) { throw", "Remove-Item -LiteralPath $s[1] -Force",
                     "an empty directory is removed only once every item passed");
         }
 
@@ -309,7 +325,7 @@ class DeploymentHardeningTest {
             int existing = initialise.indexOf("Test-Path -LiteralPath $SecurePath -PathType Leaf");
             assertTrue(existing > 0 && existing < initialise.indexOf("& install -m 600"), "the re-run branch comes first");
             String rerun = initialise.substring(existing, initialise.indexOf("return", existing));
-            assertTrue(rerun.indexOf("Protect-SensitiveFile $SecurePath") < rerun.indexOf("WriteAllBytes"),
+            assertBefore(rerun, "Protect-SensitiveFile $SecurePath", "WriteAllBytes",
                     "protect first, empty second: a failed ACL change must leave the old content");
         }
 
@@ -323,7 +339,8 @@ class DeploymentHardeningTest {
                     "a fixed list would require a file an older release does not have");
             assertFalse(ps.contains("$script:MonitoringFiles"));
             assertFalse(ps.contains("$monAssets"));
-            assertTrue(sh.contains("\"$EDDI_DIR/docker-compose.monitoring.yml\" | sed 's|^\\./||' | sort -u"));
+            assertTrue(sh.contains("done < <(monitoring_assets \"$EDDI_DIR/docker-compose.monitoring.yml\")"));
+            assertTrue(sh.contains("done < <(_monitoring_assets \"$asset_source\")"), "the update reader is the same function");
             assertTrue(ps.contains("function Get-MonitoringAssets"));
             assertTrue(ps.contains("'Get-MonitoringAssets')"), "eddi-fetch.ps1 must embed the same reader");
             assertTrue(ps.contains("\"::monitoring::!MON_DIR!\""));
@@ -369,12 +386,48 @@ class DeploymentHardeningTest {
 
             String sh = read("install.sh");
             String update = between(sh, "    # Every group passed. FIRST clear what is in the way", "    # Record the version and ref");
-            assertTrue(update.indexOf("rm -rf \"$t\"") < update.indexOf("mv -f \"${s}.tmp\" \"$s\""),
+            assertBefore(update, "rm -rf \"$t\"", "mv -f \"${s}.tmp\" \"$s\"",
                     "a directory at an asset path is removed before the first replacement");
             // The PowerShell twin already removes (empty) directories before its first
             // Move-Item.
             assertTrue(helper.indexOf("Remove-Item -LiteralPath $s[1] -Force") < helper
                     .indexOf("Move-Item -LiteralPath $s[1] -Destination $backup -Force"));
+        }
+
+        @Test
+        @DisplayName("every file under a mounted Grafana provisioning directory is in the fixed download table of all three readers")
+        void provisioningDirectoryFilesAreInTheFixedTable() throws IOException {
+            // A directory mount's files are not named in the compose text and
+            // raw.githubusercontent.com
+            // has no directory listing, so each reader carries a small fixed table. A file
+            // added under a
+            // mounted directory without a table entry would never be downloaded (Grafana
+            // would start
+            // without it), so this walks the real directories.
+            String compose = read("docker-compose.monitoring.yml");
+            Matcher mount = Pattern.compile("\\./(docs/monitoring/[A-Za-z0-9_/-]+):").matcher(compose);
+            Set<String> directories = new TreeSet<>();
+            while (mount.find()) {
+                directories.add(mount.group(1));
+            }
+            assertFalse(directories.isEmpty(), "the monitoring compose file mounts provisioning directories");
+            String sh = read("install.sh");
+            String ps = read("install.ps1");
+            for (String directory : directories) {
+                Path onDisk = Path.of(directory);
+                assertTrue(Files.isDirectory(onDisk), "mounted directory missing on disk: " + directory);
+                try (Stream<Path> files = Files.walk(onDisk)) {
+                    for (Path file : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+                        String relative = onDisk.relativize(file).toString().replace('\\', '/');
+                        assertFalse(relative.contains("/"), "nested provisioning files need a table that walks subdirectories: " + file);
+                        String entry = directory + ") echo \"?${dir}/" + relative + "\"";
+                        assertEquals(2, sh.split(Pattern.quote(entry), -1).length - 1,
+                                directory + "/" + relative + " must be in install.sh's installer table AND the generated CLI's");
+                        assertTrue(ps.lines().anyMatch(line -> line.contains("'" + directory + "'") && line.contains("'" + relative + "'")),
+                                directory + "/" + relative + " must be in Get-MonitoringAssets' table in install.ps1");
+                    }
+                }
+            }
         }
 
         @Test
@@ -384,7 +437,8 @@ class DeploymentHardeningTest {
             String update = between(sh, "    # Same checks as a fresh install:", "Pulling images...");
             assertTrue(update.contains("\"$local_name\" == \"docker-compose.local.yml\" && -s \"$f\""));
             assertEquals(1, update.split("kept the checkout copy", -1).length - 1);
-            assertTrue(update.indexOf("kept the checkout copy") < update.indexOf("could not be downloaded from ${EDDI_BRANCH}"));
+            assertBefore(update, "kept the checkout copy", "could not be downloaded from ${EDDI_BRANCH}",
+                    "ordering: " + "kept the checkout copy" + " must come before " + "could not be downloaded from ${EDDI_BRANCH}");
             String ps = read("install.ps1");
             assertTrue(ps.contains("$rel -eq 'docker-compose.local.yml' -and (Test-Path -LiteralPath $target -PathType Leaf)"));
         }
@@ -422,8 +476,10 @@ class DeploymentHardeningTest {
             assertTrue(ps.contains("function Initialize-SensitiveFile"));
             assertTrue(ps.contains("& install -m 600 /dev/null $SecurePath"));
             assertTrue(ps.indexOf("Initialize-SensitiveFile $envPath") > 0);
-            assertTrue(ps.indexOf("Initialize-SensitiveFile $envPath") < ps.indexOf("$envContent | Set-Content -Path $envPath"));
-            assertTrue(ps.indexOf("Initialize-SensitiveFile $configPath") < ps.indexOf("COMPOSE_FILES=$($ComposeFiles -join"));
+            assertBefore(ps, "Initialize-SensitiveFile $envPath", "$envContent | Set-Content -Path $envPath",
+                    "ordering: " + "Initialize-SensitiveFile $envPath" + " must come before " + "$envContent | Set-Content -Path $envPath");
+            assertBefore(ps, "Initialize-SensitiveFile $configPath", "COMPOSE_FILES=$($ComposeFiles -join",
+                    "ordering: " + "Initialize-SensitiveFile $configPath" + " must come before " + "COMPOSE_FILES=$($ComposeFiles -join");
             assertFalse(ps.contains("Set-Content -Path $secretsFile -Value $null"));
         }
     }
@@ -438,7 +494,8 @@ class DeploymentHardeningTest {
             String sh = read("gcp/provision-vm.sh");
             String firewall = between(sh, "setup_firewall_rules() {", "# No rule for Keycloak");
             assertTrue(firewall.contains("if [[ \"$SETUP_HTTPS\" != \"true\" ]]; then"));
-            assertTrue(firewall.indexOf("if [[ \"$SETUP_HTTPS\" != \"true\" ]]") < firewall.indexOf("ensure_firewall_rule \"$FIREWALL_RULE_HTTP\""));
+            assertBefore(firewall, "if [[ \"$SETUP_HTTPS\" != \"true\" ]]", "ensure_firewall_rule \"$FIREWALL_RULE_HTTP\"",
+                    "ordering: " + "if [[ \"$SETUP_HTTPS\" != \"true\" ]]" + " must come before " + "ensure_firewall_rule \"$FIREWALL_RULE_HTTP\"");
             assertTrue(sh.contains("export EDDI_BIND=\"127.0.0.1\""));
             assertFalse(sh.contains("Direct HTTP (always available)"), "the banner must not advertise a plain-http URL");
             assertTrue(sh.contains("proxy_pass         http://127.0.0.1:__EDDI_PORT__;"));
@@ -464,7 +521,8 @@ class DeploymentHardeningTest {
             assertFalse(sh.contains("| bash -s -- ${p_flags}"), "piping the download straight into bash skips the check");
             String block = between(sh, "INSTALL_DIR=", "rm -rf \"\\${INSTALL_DIR}\"");
             assertTrue(block.contains("SHA256SUMS"));
-            assertTrue(block.indexOf("ACTUAL_SHA") < block.indexOf("bash \"\\${INSTALL_SH}\""));
+            assertBefore(block, "ACTUAL_SHA", "bash \"\\${INSTALL_SH}\"",
+                    "ordering: " + "ACTUAL_SHA" + " must come before " + "bash \"\\${INSTALL_SH}\"");
             assertTrue(read(".github/workflows/ci.yml").contains("'docs/monitoring' 'install.sh'"),
                     "the release job must list install.sh in SHA256SUMS");
         }
