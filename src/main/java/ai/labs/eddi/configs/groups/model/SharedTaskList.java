@@ -540,6 +540,11 @@ public class SharedTaskList {
      * transition to FAILED.
      */
     public synchronized TaskItem failTask(String taskId, String reason) {
+        return failTaskAt(taskId, reason, Instant.now());
+    }
+
+    /** As {@link #failTask}, stamping {@code when} as the task's update time. */
+    private TaskItem failTaskAt(String taskId, String reason, Instant when) {
         TaskItem existing = requireTask(taskId);
         if (existing.status() == TaskStatus.VERIFIED || existing.status() == TaskStatus.FAILED) {
             throw new IllegalStateException(
@@ -551,7 +556,7 @@ public class SharedTaskList {
                 TaskStatus.FAILED, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 reason, false,
-                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId(), existing.bet());
+                existing.priority(), existing.createdAt(), when, existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -990,6 +995,11 @@ public class SharedTaskList {
      * write of a document in a terminal state, which covers every way a discussion
      * ends — crash recovery and a cancel stored by another pod included — on
      * MongoDB and PostgreSQL alike.
+     * <p>
+     * An OUTCOME_UNKNOWN record is a failure for its {@code onFailure} policy, as
+     * on the live leg: under {@code FAIL_TASK} (the default) a task still COMPLETED
+     * is failed with the record's summary; {@code KEEP_COMPLETED} leaves it.
+     * NOT_SENT fails nothing — nothing was attempted, like SKIPPED.
      *
      * @param ended
      *            the finish time to stamp — the discussion's own end time, so a
@@ -1009,13 +1019,56 @@ public class SharedTaskList {
                 entry.setValue(record.finished(ApprovedActionStatus.NOT_SENT, now, null, null, reason));
                 settled.add(entry.getKey());
             } else if (record.status() == ApprovedActionStatus.RUNNING) {
-                entry.setValue(record.finished(ApprovedActionStatus.OUTCOME_UNKNOWN, now, null, null,
+                ApprovedActionRecord unknown = record.finished(ApprovedActionStatus.OUTCOME_UNKNOWN, now, null, null,
                         "The discussion ended while this call was in flight and its outcome was never recorded — "
-                                + "check the target; it is not sent again"));
+                                + "check the target; it is not sent again");
+                entry.setValue(unknown);
                 settled.add(entry.getKey());
+                applyFailurePolicy(entry.getKey(), unknown, now);
             }
         }
         return settled;
+    }
+
+    /**
+     * Fails a still-COMPLETED task whose action ended FAILED or OUTCOME_UNKNOWN,
+     * unless its policy is {@code KEEP_COMPLETED}. The one definition the live leg
+     * and terminal settlement share.
+     *
+     * @param when
+     *            the task's update time — a read that settles without persisting
+     *            must stamp the same time every time
+     * @return whether the task was failed
+     */
+    public synchronized boolean applyFailurePolicy(String taskId, ApprovedActionRecord outcome, Instant when) {
+        if (outcome == null || outcome.onFailure() == AgentGroupConfiguration.ApprovedActionFailurePolicy.KEEP_COMPLETED
+                || (outcome.status() != ApprovedActionStatus.FAILED && outcome.status() != ApprovedActionStatus.OUTCOME_UNKNOWN)) {
+            return false;
+        }
+        TaskItem task = findById(taskId);
+        if (task == null || task.status() != TaskStatus.COMPLETED) {
+            return false;
+        }
+        failTaskAt(taskId, "Approved-result action " + outcome.status() + ": " + outcome.summary(), when);
+        return true;
+    }
+
+    /**
+     * A token that changes with every write of an action record by the leg that
+     * runs it (claim and outcome). A write that settles owed records because the
+     * discussion ended is conditional on it, so a writer that read the document
+     * before a claim landed — a cancel on another pod — cannot overwrite that claim
+     * with the stale PENDING record and settle it NOT_SENT. {@code null} on a
+     * document whose actions were never run.
+     */
+    private String approvedActionsRevision;
+
+    public String getApprovedActionsRevision() {
+        return approvedActionsRevision;
+    }
+
+    public void setApprovedActionsRevision(String approvedActionsRevision) {
+        this.approvedActionsRevision = approvedActionsRevision;
     }
 
     /** Replaces the action record of a task that already has one. */

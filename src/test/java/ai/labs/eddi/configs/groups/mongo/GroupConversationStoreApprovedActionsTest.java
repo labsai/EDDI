@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionRecord;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionStatus;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -19,6 +21,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -212,5 +216,106 @@ class GroupConversationStoreApprovedActionsTest {
         assertFalse(ApprovedActionStatus.OUTCOME_UNKNOWN.allowsNewAttempt());
         assertFalse(ApprovedActionStatus.PENDING.allowsNewAttempt());
         assertFalse(ApprovedActionStatus.RUNNING.allowsNewAttempt());
+    }
+    /** An ended discussion whose one completed task's action was left RUNNING. */
+    private static GroupConversation endedWithRunningClaim(ApprovedActionFailurePolicy onFailure) {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setLastModified(ENDED_AT);
+        var list = new SharedTaskList();
+        var task = new TaskItem("Reply", "reply", 0);
+        list.addTask(task);
+        list.assignTask(task.id(), "writer", "Writer");
+        list.startTask(task.id());
+        list.submitForApproval(task.id(), "draft");
+        list.approveTask(task.id());
+        var running = new ApprovedActionRecord(ApprovedActionStatus.RUNNING, "Draft", 0, "uri#post", onFailure, "alice", false, "key",
+                APPROVED_AT, APPROVED_AT, null, null, null, null);
+        list.setApprovedActions(Map.of(task.id(), running));
+        gc.setTaskList(list);
+        return gc;
+    }
+
+    @Test
+    void terminalSettlement_ofACrashLostOutcome_appliesFailTask() throws Exception {
+        GroupConversation gc = readBack(endedWithRunningClaim(ApprovedActionFailurePolicy.FAIL_TASK));
+
+        TaskItem task = gc.getTaskList().getTasks().getFirst();
+        assertEquals(ApprovedActionStatus.OUTCOME_UNKNOWN, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        assertEquals(TaskStatus.FAILED, task.status(), "OUTCOME_UNKNOWN is a failure for onFailure, as on the live leg");
+        assertTrue(task.verificationNote() != null && task.verificationNote().contains("OUTCOME_UNKNOWN"), task.verificationNote());
+    }
+
+    @Test
+    void terminalSettlement_ofACrashLostOutcome_failsTheTaskByDefault() throws Exception {
+        GroupConversation gc = readBack(endedWithRunningClaim(null));
+
+        assertEquals(TaskStatus.FAILED, gc.getTaskList().getTasks().getFirst().status(), "FAIL_TASK is the default");
+    }
+
+    @Test
+    void terminalSettlement_ofACrashLostOutcome_keepsTheTaskUnderKeepCompleted() throws Exception {
+        GroupConversation gc = readBack(endedWithRunningClaim(ApprovedActionFailurePolicy.KEEP_COMPLETED));
+
+        TaskItem task = gc.getTaskList().getTasks().getFirst();
+        assertEquals(ApprovedActionStatus.OUTCOME_UNKNOWN, gc.getTaskList().getApprovedActions().get(task.id()).status());
+        assertEquals(TaskStatus.COMPLETED, task.status());
+    }
+
+    @Test
+    void terminalSettlement_failsTheTaskWithTheSameTime_onEveryRead() throws Exception {
+        storedAs(() -> endedWithRunningClaim(ApprovedActionFailurePolicy.FAIL_TASK));
+
+        TaskItem first = store.read("gc-1").getTaskList().getTasks().getFirst();
+        TaskItem second = store.read("gc-1").getTaskList().getTasks().getFirst();
+
+        assertEquals(TaskStatus.FAILED, first.status());
+        assertEquals(ENDED_AT, first.completedAt(), "stamped with the discussion's end — a read settles without writing");
+        assertEquals(first.completedAt(), second.completedAt());
+    }
+
+    @Test
+    void aSettlingConditionalWrite_isBoundToTheRevisionItRead() throws Exception {
+        var gc = gcWith(GroupConversationState.CANCELLED);
+        gc.getTaskList().setApprovedActionsRevision("rev-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenReturn(resource);
+
+        store.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+
+        Map<String, String> expected = new LinkedHashMap<>();
+        expected.put("state", "IN_PROGRESS");
+        expected.put("taskList.approvedActionsRevision", "rev-1");
+        verify(storage).storeIfFieldsEqual(same(resource), eq(expected));
+        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+    }
+
+    @Test
+    void aSettlingPauseBoundWrite_isBoundToTheRevisionToo_absentWhenNeverRun() throws Exception {
+        var gc = gcWith(GroupConversationState.CANCELLED);
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenReturn(resource);
+
+        store.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, "pause-1");
+
+        Map<String, String> expected = new HashMap<>();
+        expected.put("state", "AWAITING_APPROVAL");
+        expected.put("pauseId", "pause-1");
+        expected.put("taskList.approvedActionsRevision", null);
+        verify(storage).storeIfFieldsEqual(same(resource), eq(expected));
+    }
+
+    @Test
+    void aTerminalWriteThatSettlesNothing_keepsThePlainStateCompareAndSet() throws Exception {
+        var gc = gcWith(GroupConversationState.COMPLETED);
+        gc.getTaskList().setApprovedActions(Map.of("done", record(ApprovedActionStatus.SUCCEEDED)));
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(eq("gc-1"), eq(1), same(gc))).thenReturn(resource);
+
+        store.updateIfState(gc, GroupConversationState.IN_PROGRESS);
+
+        verify(storage).storeIfFieldEquals(same(resource), eq("state"), eq("IN_PROGRESS"));
+        verify(storage, never()).storeIfFieldsEqual(any(), anyMap());
     }
 }

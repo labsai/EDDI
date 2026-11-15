@@ -1641,7 +1641,14 @@ your tool schemas do not cover it, not as a routine first step:
   owed (PENDING) when the discussion ends — completed, failed, cancelled,
   crash recovery included — reads NOT_SENT and was not sent (no audit entry,
   no metric for it). A claim that cannot be written sends nothing and is
-  settled FAILED, or SKIPPED when the discussion was cancelled. A task is
+  settled FAILED, or SKIPPED when the discussion was cancelled. A TASK-pause
+  approval that would approve a task is refused (500, nothing applied, the
+  pause and its tasks unchanged) when the group configuration cannot be read,
+  because the action it may owe is unknown: tell the admin to retry once the
+  store answers (a timeout's AUTO_APPROVE retries by itself). A cancel of a
+  running discussion can answer 409 when the leg claimed an action meanwhile;
+  retry it. An OUTCOME_UNKNOWN action counts as a failure for onFailure, at the
+  end of the discussion too. A task is
   approved once per discussion: RETRY resets only a task rejected while
   awaiting approval (it has no action yet), and VERIFY rework is not applied
   when the EXECUTE phase gates tasks, so a task whose action FAILED stays

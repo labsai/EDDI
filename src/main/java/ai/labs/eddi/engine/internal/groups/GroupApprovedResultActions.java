@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedAction;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionFailurePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ApprovedActionType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -287,9 +286,15 @@ public class GroupApprovedResultActions {
         }
         ApprovedActionRecord claimed = pending.running(Instant.now());
         taskList.updateApprovedAction(taskId, claimed);
+        // A new revision with the claim: a writer that read the document before it
+        // (a cancel on another pod) holds the old one, and the store refuses that
+        // writer's settling write instead of letting it replace RUNNING with its
+        // stale PENDING record and settle that NOT_SENT while this pod sends.
+        String revisionBefore = bumpRevision(taskList);
         if (!persist(gc, store)) {
             // Not sent, so still owed: a later leg of this discussion sends it.
             taskList.updateApprovedAction(taskId, pending);
+            taskList.setApprovedActionsRevision(revisionBefore);
             LOGGER.warnf("Approved-result action of task %s in group conversation %s not sent: its claim could not be persisted",
                     LogSanitizer.sanitize(taskId), LogSanitizer.sanitize(gc.getId()));
             return false;
@@ -360,14 +365,12 @@ public class GroupApprovedResultActions {
     private void settle(GroupConversation gc, IGroupConversationStore store, String taskId, ApprovedActionRecord outcome, long durationMs) {
         SharedTaskList taskList = gc.getTaskList();
         taskList.updateApprovedAction(taskId, outcome);
-        boolean failed = outcome.status() == ApprovedActionStatus.FAILED || outcome.status() == ApprovedActionStatus.OUTCOME_UNKNOWN;
-        if (failed && outcome.onFailure() != ApprovedActionFailurePolicy.KEEP_COMPLETED) {
-            TaskItem task = taskList.findById(taskId);
-            if (task != null && task.status() == TaskStatus.COMPLETED) {
-                taskList.failTask(taskId, "Approved-result action " + outcome.status() + ": " + outcome.summary());
-            }
-        }
+        taskList.applyFailurePolicy(taskId, outcome, Instant.now());
+        String revisionBefore = bumpRevision(taskList);
         if (!persist(gc, store)) {
+            // The stored document keeps the revision it had: this pod's next write
+            // carries the outcome, and must still match what the store holds.
+            taskList.setApprovedActionsRevision(revisionBefore);
             LOGGER.warnf("Outcome %s of the approved-result action of task %s in group conversation %s could not be persisted now; "
                     + "the discussion's next write carries it", outcome.status(), LogSanitizer.sanitize(taskId), LogSanitizer.sanitize(gc.getId()));
         }
@@ -391,6 +394,13 @@ public class GroupApprovedResultActions {
                     e.getMessage());
             return false;
         }
+    }
+
+    /** Gives the task list's action records a new revision; returns the old one. */
+    private static String bumpRevision(SharedTaskList taskList) {
+        String before = taskList.getApprovedActionsRevision();
+        taskList.setApprovedActionsRevision(UUID.randomUUID().toString());
+        return before;
     }
 
     private static boolean persist(GroupConversation gc, IGroupConversationStore store) {

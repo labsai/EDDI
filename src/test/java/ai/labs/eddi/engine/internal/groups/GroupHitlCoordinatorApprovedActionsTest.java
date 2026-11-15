@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -183,5 +184,54 @@ class GroupHitlCoordinatorApprovedActionsTest {
 
         assertTrue(gc.getTaskList().getApprovedActions().isEmpty());
         assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
+    }
+    @Test
+    void anUnreadableGroupConfig_refusesATaskApproval_andLeavesThePauseAsItWas() throws Exception {
+        // The config read fails, so the phase's onApproved is unknown. A decision with
+        // the matching plan passes plan binding even under the strict fallback; it must
+        // still not complete the task, or the approval would be consumed without the
+        // action record it owes.
+        when(groupStore.read(GROUP_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+        var real = new GroupApprovedResultActions(null, null, null, null, new SimpleMeterRegistry());
+        coordinator.setApprovedResultActions(real);
+        var request = approvedByAlice();
+        request.getDecision().setPlanHash(HitlPlanHash.forGroup(gc));
+        request.setTaskApprovals(Map.of(task.id(), "APPROVED"));
+
+        var refused = assertThrows(IResourceStore.ResourceStoreException.class, () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertTrue(refused.getMessage().contains("retry"), refused.getMessage());
+        assertEquals(SharedTaskList.TaskStatus.AWAITING_APPROVAL, gc.getTaskList().findById(task.id()).status(),
+                "the task still awaits a decision");
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+        assertTrue(gc.getTaskList().getApprovedActions().isEmpty());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+        verify(conversationStore, never()).updateIfState(any(), any());
+        verify(executorService, never()).submit(any(Runnable.class));
+    }
+
+    @Test
+    void anUnreadableGroupConfig_refusesTheApproveAllShortcutToo() throws Exception {
+        when(groupStore.read(GROUP_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+        var request = approvedByAlice();
+        request.getDecision().setPlanHash(HitlPlanHash.forGroup(gc));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertEquals(SharedTaskList.TaskStatus.AWAITING_APPROVAL, gc.getTaskList().findById(task.id()).status());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+    }
+
+    @Test
+    void anUnreadableGroupConfig_stillAppliesATaskRejection_whichOwesNoAction() throws Exception {
+        when(groupStore.read(GROUP_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));
+        var request = approvedByAlice();
+        request.getDecision().setPlanHash(HitlPlanHash.forGroup(gc));
+        request.setTaskApprovals(Map.of(task.id(), "REJECTED"));
+
+        coordinator.resumeDiscussion(GC_ID, request, null);
+
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), anyString());
     }
 }

@@ -157,15 +157,28 @@ states `runAs: group:<groupId>`.
    `PENDING` for a leg that may never come. The metric always counts that
    outcome; an audit entry carries it only when the audit ledger is enabled and
    its submission succeeds; the stored record shows it only if the follow-up
-   write succeeds. When that write fails too — and a cancelled discussion
-   always refuses it, since it requires `IN_PROGRESS` — the stored discussion
-   is already ended, and rule 3 settles the record.
+   write succeeds. When that write fails too, it depends on why. A cancelled
+   discussion always refuses it, since it requires `IN_PROGRESS`; the stored
+   discussion is then already ended, and rule 3 settles the record. A store
+   outage is different: the stored discussion is still `IN_PROGRESS` with the
+   record `PENDING`, and the leg's next successful write carries the `FAILED`
+   outcome. If the pod stops before any write lands, the record stays `PENDING`
+   until the discussion ends — on a single node, startup crash recovery cancels
+   it and rule 3 settles the record `NOT_SENT`; in a NATS cluster it waits for a
+   manual cancel (see [Restarts](group-conversations.md#restarts)). Either way
+   nothing was sent, so posting it by hand cannot duplicate it.
 3. **Settled when the discussion ends.** Whenever a discussion is in a terminal
    state (`COMPLETED`, `FAILED`, `REJECTED`, `CANCELLED`, `CLOSED`), the
    discussion store settles every record it still owes — on each read and each
    write of the document, MongoDB and PostgreSQL alike: `PENDING` becomes
    `NOT_SENT` (summary: the state it ended in, and "post it by hand if it is
-   still wanted"), and an orphaned `RUNNING` claim becomes `OUTCOME_UNKNOWN`.
+   still wanted"), and an orphaned `RUNNING` claim becomes `OUTCOME_UNKNOWN` —
+   a failure for `onFailure`, so under `FAIL_TASK` its task is failed here too.
+   A write that settles records is bound to the revision of the action records
+   it read, which the leg changes with every claim and outcome: a cancel on
+   another pod that read the discussion before a claim landed loses its
+   compare-and-set (`409`) rather than overwriting the `RUNNING` claim with its
+   stale `PENDING` record and recording a request that was sent as `NOT_SENT`.
    Nothing is sent after the fact: an approval whose run a crash interrupted is
    not acted on later, behind the approver's back.
 
@@ -346,7 +359,9 @@ with that text; the record carries the comment's `html_url`. A rejection under
 
 - **Editing in the Manager.** The phase editor does not show `onApproved`; it
   carries the field through unchanged when you save other edits. Set it in the
-  group JSON — `POST`/`PUT /groupstore/groups`, or the MCP `update_group` tool
+  group JSON — create a group with `POST /groupstore/groups`, update one with
+  `PUT /groupstore/groups/{id}?version={version}` (`version` is the current
+  one), or use the MCP `update_group` tool
   with the full configuration (`create_group` builds a group from a style and
   takes no phase JSON).
 - **MCP-tool actions.** Only `HTTPCALL`; the `type` field leaves room for an MCP

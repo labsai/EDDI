@@ -741,6 +741,18 @@ public class GroupHitlCoordinator {
                                     : "paused without a task list")
                             + "); omit taskApprovals to approve the phase");
         }
+        // A task approval may owe an approved-result action (phase.onApproved), which
+        // only the group configuration names. When it could not be read, applying the
+        // approval would complete the task and persist the decision with no action
+        // record — the action would silently never run. Refuse before anything is
+        // mutated: the pause and its awaiting tasks stay as they are, and the caller
+        // (or the timeout schedule, which retries) decides again once the store
+        // answers.
+        if (groupConfigReadFailed && approvesAwaitingTasks(gc, request, hasTaskApprovals, awaitingBeforeDecision)) {
+            throw new IResourceStore.ResourceStoreException("The group configuration of " + LogSanitizer.sanitize(groupConversationId)
+                    + " could not be read, so the approved-result actions this approval may owe are unknown — the approval was "
+                    + "not applied; retry it");
+        }
         if (hasTaskApprovals && gc.getTaskList() != null) {
             // #13: validate the WHOLE map up front — unknown taskIds, tasks not
             // awaiting approval, and unknown decision VALUES must fail as a
@@ -1130,6 +1142,24 @@ public class GroupHitlCoordinator {
                     groupConversationId, e.getMessage());
             return gc;
         }
+    }
+
+    /**
+     * Whether this decision would complete at least one task now awaiting approval
+     * on a TASK pause — an explicit {@code APPROVED} entry, or an approve verdict
+     * without task approvals (the approve-all shortcut and a timeout's
+     * AUTO_APPROVE).
+     */
+    static boolean approvesAwaitingTasks(GroupConversation gc, GroupApprovalRequest request, boolean hasTaskApprovals,
+                                         Set<String> awaiting) {
+        if (gc.getTaskList() == null || gc.getHitlPauseType() != HitlPauseType.TASK || awaiting.isEmpty()) {
+            return false;
+        }
+        if (hasTaskApprovals) {
+            return request.getTaskApprovals().entrySet().stream()
+                    .anyMatch(e -> awaiting.contains(e.getKey()) && "APPROVED".equalsIgnoreCase(e.getValue()));
+        }
+        return request.getDecision() != null && request.getDecision().getVerdict() == HitlDecision.HitlVerdict.APPROVED;
     }
 
     /**

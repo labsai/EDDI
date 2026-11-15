@@ -38,6 +38,8 @@ import java.util.regex.Pattern;
 public class GroupConversationStore implements IGroupConversationStore {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationStore.class);
+    /** The stored path of {@code SharedTaskList.approvedActionsRevision}. */
+    static final String APPROVED_ACTIONS_REVISION_FIELD = "taskList.approvedActionsRevision";
     private static final int SINGLE_VERSION = 1;
 
     /**
@@ -185,10 +187,20 @@ public class GroupConversationStore implements IGroupConversationStore {
     @Override
     public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
-        settleOwedApprovedActionsIfEnded(gc, true);
+        // The revision is captured before settling, which never changes it: it is
+        // the one this writer read.
+        String readRevision = gc.getTaskList() != null ? gc.getTaskList().getApprovedActionsRevision() : null;
+        boolean settled = settleOwedApprovedActionsIfEnded(gc, true);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
-            storage.storeIfFieldEquals(resource, "state", expectedState.name());
+            if (settled) {
+                Map<String, String> fields = new LinkedHashMap<>();
+                fields.put("state", expectedState.name());
+                fields.put(APPROVED_ACTIONS_REVISION_FIELD, readRevision);
+                storage.storeIfFieldsEqual(resource, fields);
+            } else {
+                storage.storeIfFieldEquals(resource, "state", expectedState.name());
+            }
         } catch (IResourceStore.ResourceNotFoundException e) {
             // deleted-vs-mismatch distinction from the storage CAS: surface the
             // deletion as its own (unchecked) type so callers can answer 404
@@ -207,17 +219,18 @@ public class GroupConversationStore implements IGroupConversationStore {
             updateIfState(gc, expectedState);
             return;
         }
-        settleOwedApprovedActionsIfEnded(gc, true);
+        String readRevision = gc.getTaskList() != null ? gc.getTaskList().getApprovedActionsRevision() : null;
+        boolean settled = settleOwedApprovedActionsIfEnded(gc, true);
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             try {
-                storage.storeIfFieldsEqual(resource, pauseBinding(expectedState, expectedPauseId));
+                storage.storeIfFieldsEqual(resource, fenced(pauseBinding(expectedState, expectedPauseId), settled, readRevision));
             } catch (IResourceStore.ResourceModifiedException e) {
                 // A document written before pauseId existed has no stored id: match it
                 // as absent (still state-bound, still atomic). A newer pause on such a
                 // document would already have stamped the field, so a stale writer
                 // cannot take this branch.
-                storage.storeIfFieldsEqual(resource, pauseBinding(expectedState, null));
+                storage.storeIfFieldsEqual(resource, fenced(pauseBinding(expectedState, null), settled, readRevision));
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new GroupConversationGoneException(
@@ -243,19 +256,31 @@ public class GroupConversationStore implements IGroupConversationStore {
      * the same time. A read logs at DEBUG (the Manager polls); a write, which
      * settles once, logs at INFO.
      *
+     * <p>
+     * <b>Fenced.</b> A conditional write ({@link #updateIfState},
+     * {@link #updateIfStateAndPause}) that settles anything is additionally bound
+     * to the task list's {@code approvedActionsRevision} as this writer read it.
+     * The leg that runs an action changes that revision with its claim, so a writer
+     * that read the running discussion before the claim landed — a cancel on
+     * another pod, whose state and pause binding the claim leaves untouched — loses
+     * its compare-and-set instead of replacing the RUNNING claim with its stale
+     * PENDING record and settling it NOT_SENT while the call is sent. It re-reads
+     * and decides again (a cancel answers 409, as for any lost race).
+     *
      * @param persisting
      *            whether the caller is about to write the document
+     * @return whether any record was settled
      */
-    static void settleOwedApprovedActionsIfEnded(GroupConversation gc, boolean persisting) {
+    static boolean settleOwedApprovedActionsIfEnded(GroupConversation gc, boolean persisting) {
         if (gc == null || gc.getTaskList() == null || gc.getTaskList().getApprovedActions().isEmpty() || !isEnded(gc.getState())) {
-            return;
+            return false;
         }
         List<String> settled = gc.getTaskList().settleOwedApprovedActions(
                 "Not sent: the discussion ended (" + gc.getState() + ") before the action ran — post it by hand if it is still "
                         + "wanted",
                 gc.getLastModified());
         if (settled.isEmpty()) {
-            return;
+            return false;
         }
         if (persisting) {
             LOGGER.infof("Group conversation %s ended (%s) owing %d approved-result action(s); settled them without sending",
@@ -264,6 +289,18 @@ public class GroupConversationStore implements IGroupConversationStore {
             LOGGER.debugf("Group conversation %s ended (%s) owing %d approved-result action(s); read them as settled (not persisted)",
                     LogSanitizer.sanitize(gc.getId()), gc.getState(), settled.size());
         }
+        return true;
+    }
+
+    /**
+     * {@code fields} plus the approved-actions revision this writer read, when its
+     * write settles owed records ({@code null}: the field must be absent).
+     */
+    private static Map<String, String> fenced(Map<String, String> fields, boolean settled, String readRevision) {
+        if (settled) {
+            fields.put(APPROVED_ACTIONS_REVISION_FIELD, readRevision);
+        }
+        return fields;
     }
 
     private static boolean isEnded(GroupConversation.GroupConversationState state) {
