@@ -7,6 +7,7 @@ import { ProviderSelect } from "@/components/shared/provider-select";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { NumberInput } from "../number-input";
 import { modelParamSpec } from "./model-params";
+import { PiiKindsPicker } from "./pii-kinds-picker";
 import {
   DEFAULT_REPROMPT_RETRIES,
   DISCLOSURE_ACTION,
@@ -17,11 +18,9 @@ import {
   JUDGE_MAX_ISSUES,
   MAX_REPROMPT_RETRIES,
   ON_EXHAUSTED,
-  PII_KINDS,
   actionsForPhase,
   classifierNeedsSafeLabel,
   effectiveAction,
-  enabledPiiKinds,
   expressionProblems,
   isKnownGuardrailType,
   judgeIssuesProblem,
@@ -35,7 +34,6 @@ import {
   withMaxRetries,
   withOnExhausted,
   withParameter,
-  withPiiKinds,
   withText,
   withType,
   type ExpressionProblem,
@@ -443,38 +441,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly, extr
 
           {value.type === "pii-redaction" && (
             <>
-              <fieldset>
-                <legend className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("llmEditor.grPiiKinds", "Kinds to find")}
-                </legend>
-                <div className="space-y-1">
-                  {PII_KINDS.map((kind) => {
-                    const enabled = enabledPiiKinds(value);
-                    const checked = enabled.includes(kind);
-                    return (
-                      <label key={kind} className="flex items-center gap-2 text-xs text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          // The last kind stays on: an empty list is the default, which is every kind.
-                          disabled={readOnly || (checked && enabled.length === 1)}
-                          onChange={(e) =>
-                            onChange(
-                              withPiiKinds(value, e.target.checked ? [...enabled, kind] : enabled.filter((k) => k !== kind)),
-                            )
-                          }
-                          className="h-3.5 w-3.5 rounded border-input accent-primary"
-                          data-testid={`guardrail-pii-${kind}`}
-                        />
-                        {kind === "email" && t("llmEditor.grPiiEmail", "E-mail addresses")}
-                        {kind === "ssn" && t("llmEditor.grPiiSsn", "US social security numbers")}
-                        {kind === "creditcard" && t("llmEditor.grPiiCard", "Payment card numbers (Luhn-checked)")}
-                        {kind === "phone" && t("llmEditor.grPiiPhone", "Phone numbers")}
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
+              <PiiKindsPicker value={value} onChange={onChange} readOnly={!!readOnly} />
               <Field
                 label={t("llmEditor.grReplacement", "Replacement")}
                 htmlFor={id("replacement")}
