@@ -86,6 +86,18 @@ describe("the operator system prompt", () => {
     for (const span of findQuteExpressions(body)) expect(unwrapped).toContain(span);
   });
 
+  it("an edited body is literal text: template namespaces are NOT evaluated, only the context block is", () => {
+    // Pins a decision. Nothing documents or suggests template expressions in the operator
+    // instructions (the editor hint says the text is sent as written), so every namespace
+    // expression an admin types is escaped rather than silently evaluated to nothing.
+    const body = "Hi {properties.x} {snippets.s} {vars.v} {userInfo.userId} {conversationInfo.agentId} {memory.current.input}";
+    const prompt = buildOperatorSystemPrompt(body, "read_only");
+    expect(findQuteExpressions(prompt)).toEqual([]);
+    for (const span of body.match(/\{[^}]+\}/g) ?? []) expect(prompt).toContain(`{|${span}|}`);
+    const live = buildOperatorSystemPrompt("Screen {context.screen}", "read_only");
+    expect(live).toContain("Screen {context.screen}");
+  });
+
   it("an edited body with a stray opener cannot break the render", () => {
     const prompt = buildOperatorSystemPrompt("Use the {forEach object", "read_only");
     expect(findQuteExpressions(prompt)).toEqual([]);

@@ -5640,7 +5640,7 @@
       "safetyPreamble": "Safety rules (not editable)",
       "safetyPreambleHint": "Always prepended. It tells the operator to treat everything its tools return as untrusted data.",
       "promptBody": "Operator instructions",
-      "promptBodyHint": "Edit how the operator introduces itself and how it works.",
+      "promptBodyHint": "Edit how the operator introduces itself and how it works. The text is sent as written: curly braces are literal, and only the screen-context block is filled in.",
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
       "callerIdentityNote": "{{productName}} substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",

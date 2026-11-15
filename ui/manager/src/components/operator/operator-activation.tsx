@@ -581,7 +581,7 @@ export function OperatorActivation({
 
             <Field
               label={t("operator.activation.promptBody", "Operator instructions")}
-              hint={t("operator.activation.promptBodyHint", "Edit how the operator introduces itself and how it works.")}
+              hint={t("operator.activation.promptBodyHint", "Edit how the operator introduces itself and how it works. The text is sent as written: curly braces are literal, and only the screen-context block is filled in.")}
               htmlFor="operator-prompt-body"
             >
               <textarea
