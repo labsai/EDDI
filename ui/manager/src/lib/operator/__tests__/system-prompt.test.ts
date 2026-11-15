@@ -1356,7 +1356,7 @@ describe("Qute namespace safety of the whole prompt body", () => {
   ])("opens no brace with an unknown `name:` namespace (%s)", (_label, endpoints) => {
     const body = buildOperatorPromptBody(endpoints);
     const unknown = [...body.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)]
-      .map((m) => m[1])
+      .map((m) => m[1] ?? "")
       .filter((ns) => !KNOWN_NAMESPACES.has(ns));
     expect(unknown).toEqual([]);
   });
