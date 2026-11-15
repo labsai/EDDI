@@ -14,17 +14,17 @@ EDDI is a multi-agent orchestration middleware. Its security boundary includes:
 
 ## Automated Security Tooling (Continuous)
 
-The following tools run **on every push and PR** via [GitHub Actions CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml):
+The following tools run in GitHub Actions — in [`ci.yml`](https://github.com/labsai/EDDI/actions/workflows/ci.yml) unless the row names another workflow:
 
 | Tool | Type | Scope | Frequency |
 |------|------|-------|-----------|
-| **CodeQL** | SAST | Java source code — injection, XSS, hardcoded creds, unsafe deserialization | Every push + PR |
-| **Trivy** | Container + FS scanning | Filesystem scan (every push + PR), Docker image scan (every push to `main`) | Every CI run |
-| **Gitleaks** | Secret scanning | Git history + staged files for leaked credentials | Every push + PR |
-| **Dependency Review** | SCA | New dependency license + vulnerability check on PRs | Every PR |
-| **ClusterFuzzLite** | Fuzz testing | `PathNavigator`, `MatchingUtilities`, `SafeJsonExpression` via Jazzer | PRs touching `src/` + weekly batch |
+| **CodeQL** | SAST | Java source (`CodeQL Analysis`) and the two UIs' JavaScript/TypeScript (`CodeQL Analysis (UI)`) — injection, XSS, hardcoded creds, unsafe deserialization; `codeql.yml` adds a weekly rescan | Every push to `main` + PR |
+| **Trivy** | Container + FS scanning | Filesystem scan (`Trivy Filesystem Scan`, blocking), Docker image scan before publishing (every push to `main` + tags) | Every CI run that changes code |
+| **Gitleaks** | Secret scanning | The commits a push or PR adds, for leaked credentials (`Secret Scanning`) | Every push to `main` + PR |
+| **Dependency Review** | SCA | New dependency license + vulnerability check on PRs, failing on `high` (`dependency-review.yml`) | Every PR into `main` |
+| **ClusterFuzzLite** | Fuzz testing | `PathNavigator`, `MatchingUtilities`, `SafeJsonExpression` via Jazzer (`clusterfuzzlite.yml`) | PRs touching `src/main/java` or the fuzz targets + weekly batch |
 | **Cosign** | Supply chain | Keyless OIDC signing of Docker images | Every push to `main` + tags |
-| **CycloneDX** | SBOM | Software Bill of Materials generation | Every push to `main` |
+| **CycloneDX** | SBOM | Software Bill of Materials for the Maven build and both UIs, kept as the `sbom-cyclonedx` workflow artifact (90 days) | Every push to `main` + tags |
 | **SLSA Provenance** | Attestation | Build provenance attestation (Level 1) | Every push to `main` + tags |
 
 > **DAST:** the pipeline currently runs no dynamic scan. A ZAP API scan was removed rather than kept as non-blocking, unauthenticated, post-publish coverage; re-introducing it as a gating, authenticated scan is tracked (see the `Job 4b: DAST` note in `.github/workflows/ci.yml`).
