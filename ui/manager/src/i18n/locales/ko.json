@@ -4824,6 +4824,7 @@
   },
   "quotas": {
     "apiCallsMinute": "API 호출 / 분",
+    "refreshFailedSaveBlocked": "할당량을 새로 고치지 못해 저장이 일시 중지되었습니다. 다시 시도해 현재 한도를 먼저 불러오세요.",
     "configuration": "구성",
     "conversationsToday": "오늘의 대화",
     "description": "테넌트별 속도 제한, 사용량 상한, 비용 예산을 구성합니다.",

@@ -4824,6 +4824,7 @@
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
+    "refreshFailedSaveBlocked": "无法刷新配额，因此已暂停保存。请先重试以加载当前限额。",
     "configuration": "配置",
     "conversationsToday": "今日对话",
     "description": "为每个租户配置速率限制、用量上限和成本预算。",

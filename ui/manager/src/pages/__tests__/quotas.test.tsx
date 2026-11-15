@@ -491,6 +491,42 @@ describe("QuotasPage", () => {
     }
   });
 
+  it("blocks Save when the refresh after an approval fails, until a refetch succeeds", async () => {
+    seedSpendControlMock([{ ...sampleSpendControlChange, id: "q-2", kind: "TENANT_QUOTA", tenantId: "default" }]);
+    let putCalled = false;
+    try {
+      const user = userEvent.setup();
+      renderQuotas();
+      fireEvent.click(await screen.findByTestId("spend-change-approve-q-2"));
+
+      // The post-approval refresh of the quota fails.
+      server.use(
+        http.get("*/administration/quotas/:tenantId", () => new HttpResponse(null, { status: 500 })),
+        http.put("*/administration/quotas/:tenantId", () => {
+          putCalled = true;
+          return HttpResponse.json({});
+        }),
+      );
+      fireEvent.click(screen.getByTestId("alert-dialog-confirm"));
+      await screen.findByTestId("refetch-error-notice");
+
+      // An unrelated edit must not be savable over the (unseen) approved limits.
+      const input = await screen.findByTestId("quota-max-conversations");
+      await user.clear(input);
+      await user.type(input, "123");
+      expect(screen.getByTestId("quotas-save")).toBeDisabled();
+      expect(putCalled).toBe(false);
+
+      // Once a refetch succeeds the notice goes away and Save works again.
+      server.resetHandlers();
+      fireEvent.click(within(screen.getByTestId("refetch-error-notice")).getByRole("button"));
+      await waitFor(() => expect(screen.queryByTestId("refetch-error-notice")).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeEnabled());
+    } finally {
+      seedSpendControlMock();
+    }
+  });
+
   it("does not crash on server error (non-404)", async () => {
     server.use(
       http.get("*/administration/quotas/:tenantId", () => {

@@ -4875,6 +4875,7 @@
   },
   "quotas": {
     "apiCallsMinute": "Llamadas API / minuto",
+    "refreshFailedSaveBlocked": "No se pudo actualizar la cuota, así que el guardado está en pausa. Reintenta para cargar primero los límites actuales.",
     "configuration": "Configuración",
     "conversationsToday": "Conversaciones de hoy",
     "description": "Configure límites de tasa, topes de uso y presupuestos de coste por inquilino.",

@@ -4824,6 +4824,7 @@
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",
+    "refreshFailedSaveBlocked": "Das Kontingent konnte nicht aktualisiert werden, daher ist das Speichern pausiert. Versuchen Sie es erneut, um zuerst die aktuellen Limits zu laden.",
     "configuration": "Konfiguration",
     "conversationsToday": "Gespräche heute",
     "description": "Konfigurieren Sie Ratenlimits, Nutzungsobergrenzen und Kostenbudgets pro Mandant.",

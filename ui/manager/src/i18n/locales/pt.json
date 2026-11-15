@@ -4875,6 +4875,7 @@
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
+    "refreshFailedSaveBlocked": "Não foi possível atualizar a quota, por isso a gravação está em pausa. Tente novamente para carregar primeiro os limites atuais.",
     "configuration": "Configuração",
     "conversationsToday": "Conversas hoje",
     "description": "Configure limites de taxa, limites de uso e orçamentos de custo por locatário.",

@@ -97,8 +97,12 @@ export function QuotasPage() {
   );
   const hasInvalidField = invalidFields.size > 0;
 
+  // The newest read failed: what the form shows may predate an approved change, and the
+  // quota PUT carries no version, so saving it could overwrite the approved limits.
+  const staleQuota = quotaError && !!quota;
+
   const handleSave = useCallback(() => {
-    if (!form || hasInvalidField) return;
+    if (!form || hasInvalidField || staleQuota) return;
     const sentAt = editCount.current;
     updateMutation.mutate(
       { tenantId: DEFAULT_TENANT, quota: form },
@@ -117,7 +121,7 @@ export function QuotasPage() {
         onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
-  }, [form, hasInvalidField, updateMutation, t]);
+  }, [form, hasInvalidField, staleQuota, updateMutation, t]);
 
   const handleReset = useCallback(() => {
     resetMutation.mutate(DEFAULT_TENANT, {
@@ -157,7 +161,7 @@ export function QuotasPage() {
           <button
             data-testid="quotas-save"
             onClick={handleSave}
-            disabled={!dirty || hasInvalidField || updateMutation.isPending}
+            disabled={!dirty || hasInvalidField || staleQuota || updateMutation.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-sidebar-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-sidebar-accent/90 disabled:opacity-50"
           >
             <Save className="h-4 w-4" />
@@ -171,8 +175,14 @@ export function QuotasPage() {
       ) : (
         <>
           {/* Policy loaded, but the newest read failed — keep the form usable. */}
-          {quotaError && quota && (
-            <RefetchErrorNotice onRetry={() => refetchQuota()} />
+          {staleQuota && (
+            <RefetchErrorNotice
+              onRetry={() => refetchQuota()}
+              message={t(
+                "quotas.refreshFailedSaveBlocked",
+                "Could not refresh the quota, so saving is paused. Retry to load the current limits first.",
+              )}
+            />
           )}
 
           {/* The form stops following the server while it is dirty, and Save sends the
