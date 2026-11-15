@@ -1,0 +1,596 @@
+{
+  "revision": 0,
+  "unpricedPolicy": "ALLOW",
+  "updatedAt": "2026-11-02",
+  "updatedBy": "EDDI reference prices",
+  "entries": [
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-1*",
+      "inputPricePer1M": 10,
+      "outputPricePer1M": 50,
+      "cacheReadPricePer1M": 0.25,
+      "cacheWritePricePer1M": 12.5,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5*",
+      "inputPricePer1M": 10,
+      "outputPricePer1M": 50,
+      "cacheReadPricePer1M": 1,
+      "cacheWritePricePer1M": 12.5,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5*",
+      "inputPricePer1M": 4,
+      "outputPricePer1M": 20,
+      "cacheReadPricePer1M": 0.2,
+      "cacheWritePricePer1M": 5,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5*",
+      "inputPricePer1M": 5,
+      "outputPricePer1M": 25,
+      "cacheReadPricePer1M": 0.5,
+      "cacheWritePricePer1M": 6.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8*",
+      "inputPricePer1M": 5,
+      "outputPricePer1M": 25,
+      "cacheReadPricePer1M": 0.5,
+      "cacheWritePricePer1M": 6.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7*",
+      "inputPricePer1M": 5,
+      "outputPricePer1M": 25,
+      "cacheReadPricePer1M": 0.5,
+      "cacheWritePricePer1M": 6.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6*",
+      "inputPricePer1M": 5,
+      "outputPricePer1M": 25,
+      "cacheReadPricePer1M": 0.5,
+      "cacheWritePricePer1M": 6.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5*",
+      "inputPricePer1M": 5,
+      "outputPricePer1M": 25,
+      "cacheReadPricePer1M": 0.5,
+      "cacheWritePricePer1M": 6.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5*",
+      "inputPricePer1M": 2,
+      "outputPricePer1M": 10,
+      "cacheReadPricePer1M": 0.1,
+      "cacheWritePricePer1M": 2.5,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5*",
+      "inputPricePer1M": 2,
+      "outputPricePer1M": 10,
+      "cacheReadPricePer1M": 0.2,
+      "cacheWritePricePer1M": 2.5,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6*",
+      "inputPricePer1M": 3,
+      "outputPricePer1M": 15,
+      "cacheReadPricePer1M": 0.3,
+      "cacheWritePricePer1M": 3.75,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5*",
+      "inputPricePer1M": 3,
+      "outputPricePer1M": 15,
+      "cacheReadPricePer1M": 0.3,
+      "cacheWritePricePer1M": 3.75,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5*",
+      "inputPricePer1M": 1,
+      "outputPricePer1M": 5,
+      "cacheReadPricePer1M": 0.1,
+      "cacheWritePricePer1M": 1.25,
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5*",
+      "inputPricePer1M": 0.1,
+      "outputPricePer1M": 0.5,
+      "cacheReadPricePer1M": 0.01,
+      "cacheWritePricePer1M": 0.125,
+      "longContext": {
+        "thresholdTokens": 100000,
+        "inputPricePer1M": 0.5,
+        "outputPricePer1M": 2.5,
+        "cacheReadPricePer1M": 0.05,
+        "cacheWritePricePer1M": 0.625
+      },
+      "asOf": "2026-11-02",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour; prompts over 100,000 tokens (cache included) pay the long-context prices"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "inputPricePer1M": 10.0,
+      "outputPricePer1M": 50.0,
+      "cacheReadPricePer1M": 1.0,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 20.0,
+        "cacheReadPricePer1M": 2.0,
+        "outputPricePer1M": 75.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-sol",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 0.1,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 4.0,
+        "cacheReadPricePer1M": 0.2,
+        "outputPricePer1M": 15.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-terra",
+      "inputPricePer1M": 1.0,
+      "outputPricePer1M": 5.0,
+      "cacheReadPricePer1M": 0.05,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 2.0,
+        "cacheReadPricePer1M": 0.1,
+        "outputPricePer1M": 7.5
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "inputPricePer1M": 0.1,
+      "outputPricePer1M": 0.5,
+      "cacheReadPricePer1M": 0.01,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 0.2,
+        "cacheReadPricePer1M": 0.02,
+        "outputPricePer1M": 0.75
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-sol",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 0.2,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 4.0,
+        "cacheReadPricePer1M": 0.4,
+        "outputPricePer1M": 15.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 12.0,
+      "cacheReadPricePer1M": 0.2,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 4.0,
+        "cacheReadPricePer1M": 0.4,
+        "outputPricePer1M": 18.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "inputPricePer1M": 0.2,
+      "outputPricePer1M": 1.2,
+      "cacheReadPricePer1M": 0.02,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 0.4,
+        "cacheReadPricePer1M": 0.04,
+        "outputPricePer1M": 1.8
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5",
+      "inputPricePer1M": 5.0,
+      "outputPricePer1M": 30.0,
+      "cacheReadPricePer1M": 0.5,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 10.0,
+        "cacheReadPricePer1M": 1.0,
+        "outputPricePer1M": 45.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.5-pro",
+      "inputPricePer1M": 30.0,
+      "outputPricePer1M": 180.0,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 60.0,
+        "outputPricePer1M": 270.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4",
+      "inputPricePer1M": 2.5,
+      "outputPricePer1M": 15.0,
+      "cacheReadPricePer1M": 0.25,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 5.0,
+        "cacheReadPricePer1M": 0.5,
+        "outputPricePer1M": 22.5
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-pro",
+      "inputPricePer1M": 30.0,
+      "outputPricePer1M": 180.0,
+      "longContext": {
+        "thresholdTokens": 272000,
+        "inputPricePer1M": 60.0,
+        "outputPricePer1M": 270.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "inputPricePer1M": 0.75,
+      "outputPricePer1M": 4.5,
+      "cacheReadPricePer1M": 0.075,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.4-nano",
+      "inputPricePer1M": 0.2,
+      "outputPricePer1M": 1.25,
+      "cacheReadPricePer1M": 0.02,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "inputPricePer1M": 1.75,
+      "outputPricePer1M": 14.0,
+      "cacheReadPricePer1M": 0.175,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2-pro",
+      "inputPricePer1M": 21.0,
+      "outputPricePer1M": 168.0,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.1",
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 0.125,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5",
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 0.125,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "inputPricePer1M": 0.25,
+      "outputPricePer1M": 2.0,
+      "cacheReadPricePer1M": 0.025,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "inputPricePer1M": 0.05,
+      "outputPricePer1M": 0.4,
+      "cacheReadPricePer1M": 0.005,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-pro",
+      "inputPricePer1M": 15.0,
+      "outputPricePer1M": 120.0,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 8.0,
+      "cacheReadPricePer1M": 0.5,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "inputPricePer1M": 0.4,
+      "outputPricePer1M": 1.6,
+      "cacheReadPricePer1M": 0.1,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-nano",
+      "inputPricePer1M": 0.1,
+      "outputPricePer1M": 0.4,
+      "cacheReadPricePer1M": 0.025,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "inputPricePer1M": 2.5,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 1.25,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-2024-05-13",
+      "inputPricePer1M": 5.0,
+      "outputPricePer1M": 15.0,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "inputPricePer1M": 0.15,
+      "outputPricePer1M": 0.6,
+      "cacheReadPricePer1M": 0.075,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o1",
+      "inputPricePer1M": 15.0,
+      "outputPricePer1M": 60.0,
+      "cacheReadPricePer1M": 7.5,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o1-pro",
+      "inputPricePer1M": 150.0,
+      "outputPricePer1M": 600.0,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o3-pro",
+      "inputPricePer1M": 20.0,
+      "outputPricePer1M": 80.0,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o3",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 8.0,
+      "cacheReadPricePer1M": 0.5,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o4-mini",
+      "inputPricePer1M": 1.1,
+      "outputPricePer1M": 4.4,
+      "cacheReadPricePer1M": 0.275,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "o3-mini",
+      "inputPricePer1M": 1.1,
+      "outputPricePer1M": 4.4,
+      "cacheReadPricePer1M": 0.55,
+      "asOf": "2026-11-02",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.1-pro-preview*",
+      "inputPricePer1M": 2.0,
+      "outputPricePer1M": 12.0,
+      "cacheReadPricePer1M": 0.2,
+      "longContext": {
+        "thresholdTokens": 200000,
+        "inputPricePer1M": 4.0,
+        "cacheReadPricePer1M": 0.4,
+        "outputPricePer1M": 18.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 10.0,
+      "cacheReadPricePer1M": 0.125,
+      "longContext": {
+        "thresholdTokens": 200000,
+        "inputPricePer1M": 2.5,
+        "cacheReadPricePer1M": 0.25,
+        "outputPricePer1M": 15.0
+      },
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "inputPricePer1M": 0.3,
+      "outputPricePer1M": 2.5,
+      "cacheReadPricePer1M": 0.03,
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "inputPricePer1M": 0.25,
+      "outputPricePer1M": 1.5,
+      "cacheReadPricePer1M": 0.025,
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-3-flash-preview",
+      "inputPricePer1M": 0.5,
+      "outputPricePer1M": 3.0,
+      "cacheReadPricePer1M": 0.05,
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "inputPricePer1M": 0.3,
+      "outputPricePer1M": 2.5,
+      "cacheReadPricePer1M": 0.03,
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-lite",
+      "inputPricePer1M": 0.1,
+      "outputPricePer1M": 0.4,
+      "cacheReadPricePer1M": 0.01,
+      "asOf": "2026-11-02",
+      "source": "https://aistudio.google.com/docs/pricing",
+      "note": "text input price; context-cache storage per hour is not modelled"
+    }
+  ]
+}

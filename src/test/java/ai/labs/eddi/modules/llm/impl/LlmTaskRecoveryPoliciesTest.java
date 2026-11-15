@@ -301,6 +301,26 @@ class LlmTaskRecoveryPoliciesTest {
     }
 
     @Test
+    @DisplayName("streaming: onInvalidJson=wrap buffers too, so broken JSON that cannot be wrapped is never streamed before the fallback")
+    void wrapIsBuffered() throws Exception {
+        var sink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(sink);
+        String broken = "{\"answer\": \"cut o";
+        var model = FaultInjectingChatModel.script(Step.text(broken));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task(v -> {
+            v.setOnInvalidJson("wrap");
+            v.setWrapField("answer");
+        });
+        task.getParameters().put("addToOutput", "true");
+
+        run(task);
+
+        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+        verify(sink, never()).onToken(broken);
+    }
+
+    @Test
     @DisplayName("streaming: an attempt that may be retried is buffered, never streamed; the final answer is emitted once")
     void streamingIsBuffered() throws Exception {
         var sink = mock(ConversationEventSink.class);

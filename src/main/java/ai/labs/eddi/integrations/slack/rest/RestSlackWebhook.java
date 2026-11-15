@@ -336,6 +336,15 @@ public class RestSlackWebhook {
                     .build();
         }
 
+        // Step 3b (6.7): a modal submission must be answered synchronously when it is
+        // refused — Slack shows the errors in the modal and keeps it open. The check
+        // is the same authorization plus a dry run of the decision; nothing is
+        // consumed here.
+        Map<String, String> submissionErrors = interactivityHandler.validateSubmission(payloadJson);
+        if (submissionErrors != null && !submissionErrors.isEmpty()) {
+            return Response.ok(Map.of("response_action", "errors", "errors", submissionErrors), MediaType.APPLICATION_JSON).build();
+        }
+
         // Step 4: Process async (Slack's 3-second requirement) and ack immediately.
         interactivityHandler.handlePayloadAsync(payloadJson);
         return Response.ok().build();

@@ -218,4 +218,4 @@ Here is an example of a `JSON` object of the input data:
 }
 ```
 
-> You can also test context parameters in the **EDDI Manager** chat panel at `http://localhost:7070`.
+> You can also test context parameters in the **EDDI Manager** chat panel at `http://localhost:7070/manage`.

@@ -550,7 +550,7 @@ class LlmTaskAuditLedgerTest {
     }
 
     @Test
-    @DisplayName("no audit collector → the token counts (the /v1 usage block) and the cost are still recorded, nothing else")
+    @DisplayName("no audit collector → the token counts (the /v1 usage block), the cost and its pricing are still recorded, nothing else")
     void noAuditCollectorStillRecordsTokenUsage() throws Exception {
         when(memory.getAuditCollector()).thenReturn(null);
         agentReturns("done", List.of(Map.of("type", "tool_call")),
@@ -562,7 +562,9 @@ class LlmTaskAuditLedgerTest {
         assertNotNull(tokenUsage, "the caller's usage must not depend on the audit ledger: " + stored.keySet());
         assertEquals(15L, tokenUsage.get("totalTokens"));
         assertTrue(stored.keySet().stream().filter(k -> k.startsWith("audit:"))
-                .allMatch(k -> MemoryKeys.AUDIT_TOKEN_USAGE.equals(k) || MemoryKeys.AUDIT_COST.equals(k)),
-                "only the token counts and the cost may bypass the collector gate: " + stored.keySet());
+                .allMatch(k -> MemoryKeys.AUDIT_TOKEN_USAGE.equals(k) || MemoryKeys.AUDIT_COST.equals(k) || MemoryKeys.AUDIT_PRICING.equals(k)),
+                "only the token counts, the cost and how it was priced may bypass the collector gate: " + stored.keySet());
+        // how the spend was priced travels with the spend: unpriced calls are counted
+        assertEquals(1L, auditMap(MemoryKeys.AUDIT_PRICING).get("unpricedCalls"));
     }
 }

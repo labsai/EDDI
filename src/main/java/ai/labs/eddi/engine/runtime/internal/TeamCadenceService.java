@@ -15,7 +15,9 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.runtime.internal.handoff.HandoffLineage;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -111,6 +113,10 @@ public class TeamCadenceService {
     private final ITemplatingEngine templatingEngine;
     private final MeterRegistry meterRegistry;
     private final Duration claimTtl;
+
+    /** F6; field-injected so direct construction in tests runs unbudgeted. */
+    @Inject
+    TeamBudgetService teamBudgetService;
 
     private Counter cadenceRunsStarted;
     private Counter cadenceRunsSkipped;
@@ -232,6 +238,21 @@ public class TeamCadenceService {
                         "Cadence " + cadenceId + " no longer exists on the workspace — delete its schedule");
             }
 
+            // F6: a team with no budget left this month does not start a run. A skip is a
+            // success (not retried, the backlog is untouched); an unreadable budget is a
+            // failure, so the poller's retry and dead-letter machinery makes it visible.
+            if (teamBudgetService != null) {
+                TeamBudgetService.Decision budget = teamBudgetService.decide(groupId);
+                if (!budget.allowed()) {
+                    teamBudgetService.countRefusal(TeamBudgetService.Surface.CADENCE, budget.reason());
+                    if ("unavailable".equals(budget.reason())) {
+                        return CadenceResult.failed(groupId, cadenceId, budget.message());
+                    }
+                    cadenceRunsSkipped.increment();
+                    return CadenceResult.skipped(groupId, cadenceId, budget.message());
+                }
+            }
+
             // 2. Pull: top-N executable backlog tasks, highest priority first.
             List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
                     .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
@@ -257,6 +278,7 @@ public class TeamCadenceService {
             GroupConversationService.CadenceDiscussion prepared = groupConversationService.prepareCadenceDiscussion(
                     groupId, question, userId, toTaskDefinitions(pulled), cadence.maxCostPerRun(), null);
             GroupConversation gc = prepared.conversation();
+            HandoffLineage.stamp(gc, pulled, workspace);
 
             // 4. Claim: a revision-checked write (H14c), retried against a fresh read
             // while the workspace is still idle and every pulled task still waits.
@@ -461,7 +483,7 @@ public class TeamCadenceService {
                         backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now()));
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
                 workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
                 if (outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
@@ -474,7 +496,8 @@ public class TeamCadenceService {
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
-                        backlogTask.priority(), backlogTask.createdAt(), null));
+                        backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
+                        backlogTask.bet()));
                 if (outcome != null && outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
@@ -576,7 +599,7 @@ public class TeamCadenceService {
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
         return new TaskItem(task.id(), task.subject(), task.description(), status, task.assignedAgentId(),
                 task.assignedDisplayName(), task.dependsOnIds(), task.result(), task.verificationNote(),
-                task.verified(), task.priority(), task.createdAt(), task.completedAt());
+                task.verified(), task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
     }
 
     /**
@@ -601,7 +624,7 @@ public class TeamCadenceService {
     private String renderQuestion(Cadence cadence, GroupWorkspace workspace, List<TaskItem> pulled) {
         StringBuilder summary = new StringBuilder("Work the following backlog tasks:\n");
         for (TaskItem task : pulled) {
-            summary.append("- ").append(task.subject());
+            summary.append("- ").append(HandoffLineage.promptPrefix(task, workspace)).append(task.subject());
             if (task.description() != null && !task.description().isBlank()) {
                 summary.append(": ").append(task.description());
             }

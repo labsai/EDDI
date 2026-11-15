@@ -126,7 +126,12 @@ final class SwaggerUiBranding {
 
     private static String replacement(Matcher amber, String accent, boolean darkRule) {
         if (amber.group(1) != null) {
-            double alpha = Double.parseDouble(amber.group(1));
+            double alpha;
+            try {
+                alpha = Double.parseDouble(amber.group(1));
+            } catch (NumberFormatException malformed) {
+                return amber.group();
+            }
             String percent = String.format(Locale.ROOT, "%.0f%%", Math.clamp(alpha, 0.0, 1.0) * 100);
             return "color-mix(in srgb, " + accent + " " + percent + ", transparent)";
         }

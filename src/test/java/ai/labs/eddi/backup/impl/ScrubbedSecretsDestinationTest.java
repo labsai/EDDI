@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
 
 import java.util.ArrayList;
@@ -128,5 +130,67 @@ class ScrubbedSecretsDestinationTest {
         assertTrue(merged.contains("\"name\":\"call7\",\"headers\":{\"Authorization\":\"Bearer t7\"}")
                 || merged.contains("\"headers\":{\"Authorization\":\"Bearer t7\"},\"name\":\"call7\""), "each call keeps its own token");
         assertFalse(merged.contains(ScrubbedSecrets.PLACEHOLDER), "every call has a counterpart");
+    }
+
+    @Test
+    @DisplayName("a source that drops the target's endpoint goes to the provider default, and keeps the placeholder")
+    void removedEndpoint() throws Exception {
+        String target = """
+                {"tasks":[{"id":"support","parameters":{"baseUrl":"https://gateway.internal.example.com","apiKey":"live-gateway-key"}}]}""";
+        String source = """
+                {"tasks":[{"id":"support","parameters":{"apiKey":"${vault:REDACTED}"}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertFalse(merged.contains("live-gateway-key"), merged);
+        assertTrue(merged.contains(ScrubbedSecrets.PLACEHOLDER), merged);
+    }
+
+    @Test
+    @DisplayName("a destination that is not a string is compared too, not skipped")
+    void nonStringHost() throws Exception {
+        String target = """
+                {"store":{"host":"qdrant.internal.example.com","apiKey":"live-qdrant-key"}}""";
+        String source = """
+                {"store":{"host":167772161,"apiKey":"${vault:REDACTED}"}}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertFalse(merged.contains("live-qdrant-key"), merged);
+    }
+
+    /**
+     * Every key a model builder or embedding provider reads an endpoint from —
+     * Vertex's {@code apiEndpoint}, the {@code apiBase} spellings the embedding
+     * check refuses — is a destination here too. This list used to be its own, and
+     * knew none of those three.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"apiEndpoint", "apiBase", "api_base", "API_BASE", "baseUrl", "baseURL", "base_url", "serverUrl", "apiUrl",
+            "url", "uri", "endpoint", "host", "hostname"})
+    @DisplayName("every endpoint parameter is a destination: changing it keeps the placeholder")
+    void everyEndpointParameterIsADestination(String key) throws Exception {
+        String target = """
+                {"parameters":{"apiKey":"live-provider-key","%s":"https://good.example.com"}}""".formatted(key);
+        String source = """
+                {"parameters":{"apiKey":"${vault:REDACTED}","%s":"https://evil.example.net"}}""".formatted(key);
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertFalse(merged.contains("live-provider-key"), key + ": " + merged);
+        assertTrue(merged.contains(ScrubbedSecrets.PLACEHOLDER), key + ": " + merged);
+    }
+
+    @Test
+    @DisplayName("a parameter that names no endpoint is not a destination")
+    void ordinaryParameterIsNotADestination() throws Exception {
+        String target = """
+                {"parameters":{"apiKey":"live-provider-key","modelName":"gpt-a","apiVersion":"2024-01"}}""";
+        String source = """
+                {"parameters":{"apiKey":"${vault:REDACTED}","modelName":"gpt-b","apiVersion":"2025-01"}}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertTrue(merged.contains("live-provider-key"), merged);
     }
 }

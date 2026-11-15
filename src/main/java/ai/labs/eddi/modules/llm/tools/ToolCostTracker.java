@@ -276,6 +276,20 @@ public class ToolCostTracker {
     }
 
     /**
+     * What one call of the tool costs: the operator-supplied price clamped at zero
+     * (a negative double would *credit* the conversation and let
+     * maxBudgetPerConversation be evaded outright), else the built-in default. A
+     * non-finite override (NaN, Infinity) is ignored for the default price. The
+     * price {@link #trackToolCall} charges and the tenant cost reservation holds.
+     */
+    public static double priceOf(ToolInvocation invocation) {
+        Double priceOverride = invocation.priceOverride();
+        return priceOverride != null && Double.isFinite(priceOverride)
+                ? Math.max(0.0, priceOverride)
+                : DEFAULT_TOOL_PRICES.getOrDefault(invocation.canonicalName(), 0.0);
+    }
+
+    /**
      * Track cost for a tool call.
      *
      * <p>
@@ -305,9 +319,7 @@ public class ToolCostTracker {
         // price: Math.max(0, NaN) is NaN, and one NaN added to a DoubleAdder makes
         // every later total NaN — and "NaN <= maxBudget" is false, so the
         // conversation (and the process-wide gauge) could never be judged again.
-        double cost = priceOverride != null && Double.isFinite(priceOverride)
-                ? Math.max(0.0, priceOverride)
-                : DEFAULT_TOOL_PRICES.getOrDefault(invocation.canonicalName(), 0.0);
+        double cost = priceOf(invocation);
         if (priceOverride != null && !Double.isFinite(priceOverride)) {
             LOGGER.warnf("Tool '%s' has a non-finite price override (%s); charging the default price instead", sanitize(toolName),
                     priceOverride);

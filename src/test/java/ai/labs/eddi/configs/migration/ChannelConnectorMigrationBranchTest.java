@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -59,7 +60,7 @@ class ChannelConnectorMigrationBranchTest {
         @DisplayName("already applied — skips migration")
         void alreadyApplied() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString()))
-                    .thenReturn(new MigrationLog("channel-connector-migration-complete"));
+                    .thenReturn(new MigrationLog("channel-connector-migration-v2-complete"));
 
             migration.runIfNeeded();
 
@@ -267,9 +268,15 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
 
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
+
             migration.runIfNeeded();
 
             verify(channelStore).create(any(ChannelIntegrationConfiguration.class));
+            verify(descriptorStore).createDescriptor(eq("aabbccddeeff112233445566"), eq(1), any(DocumentDescriptor.class));
             verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
         }
 
@@ -398,14 +405,19 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
 
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
+
             migration.runIfNeeded();
 
             verify(channelStore).create(any(ChannelIntegrationConfiguration.class));
         }
 
         @Test
-        @DisplayName("lookupAgentName returns null when descriptor not found")
-        void lookupAgentNameNotFound() throws Exception {
+        @DisplayName("agent without a descriptor still gets its channel migrated")
+        void agentDescriptorNotFound() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var deployInfo = new DeploymentInfo();
@@ -426,10 +438,15 @@ class ChannelConnectorMigrationBranchTest {
             when(agentStore.read("agent1", 1)).thenReturn(agentConfig);
 
             when(descriptorStore.readDescriptor("agent1", 1))
-                    .thenThrow(new RuntimeException("not found"));
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
@@ -437,8 +454,8 @@ class ChannelConnectorMigrationBranchTest {
         }
 
         @Test
-        @DisplayName("lookupAgentName returns null when name is blank")
-        void lookupAgentNameBlank() throws Exception {
+        @DisplayName("agent descriptor with a blank name still gets its channel migrated")
+        void agentDescriptorNameBlank() throws Exception {
             when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
 
             var deployInfo = new DeploymentInfo();
@@ -464,6 +481,11 @@ class ChannelConnectorMigrationBranchTest {
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
@@ -499,6 +521,11 @@ class ChannelConnectorMigrationBranchTest {
 
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 
@@ -547,6 +574,11 @@ class ChannelConnectorMigrationBranchTest {
             when(descriptorStore.readDescriptor(anyString(), anyInt())).thenReturn(null);
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
+
+            var createdId = mock(IResourceStore.IResourceId.class);
+            when(createdId.getId()).thenReturn("aabbccddeeff112233445566");
+            when(createdId.getVersion()).thenReturn(1);
+            when(channelStore.create(any(ChannelIntegrationConfiguration.class))).thenReturn(createdId);
 
             migration.runIfNeeded();
 

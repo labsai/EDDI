@@ -200,6 +200,44 @@ describe("QuotasPage", () => {
     });
   });
 
+  it("keeps an edit made while the save was in flight, and stays dirty", async () => {
+    // The success handler used to replace the form with the server's reply and
+    // clear the dirty flag, so a value typed during the PUT vanished silently
+    // and the unsaved-changes guard stopped protecting it.
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        await held;
+        return HttpResponse.json(body);
+      }),
+    );
+    renderQuotas();
+    const conversations = await screen.findByTestId("quota-max-conversations");
+    await user.clear(conversations);
+    await user.type(conversations, "1000");
+    await user.click(screen.getByTestId("quotas-save"));
+    await waitFor(() => expect(body).not.toBeNull());
+
+    const agents = screen.getByTestId("quota-max-agents");
+    await user.clear(agents);
+    await user.type(agents, "42");
+    release();
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Quota saved"));
+    expect(body!.maxConversationsPerDay).toBe(1000);
+    expect(body!.maxAgentsPerTenant).toBe(100);
+    expect(agents).toHaveValue(42);
+    expect(conversations).toHaveValue(1000);
+    expect(screen.getByTestId("quotas-dirty-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("quotas-save")).toBeEnabled();
+  });
+
   it("treats a cleared limit as unlimited (-1), not as a limit of 0", async () => {
     const user = userEvent.setup();
     let body: Record<string, unknown> | null = null;
@@ -613,6 +651,45 @@ describe("QuotasPage", () => {
     // The usage card agrees with the status line rather than rounding to $0.01.
     expect(screen.getByTestId("usage-cost")).toHaveTextContent("$0.006");
     expect(screen.getByTestId("usage-cost")).toHaveTextContent("/ $0.01");
+  });
+
+  it("shows the budget that running turns hold (hard-ceiling mode), and nothing when none is held", async () => {
+    const usage = (reservedUsd?: number) =>
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 1,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 2,
+          ...(reservedUsd === undefined ? {} : { reservedUsd }),
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      );
+    const quota = http.get("*/administration/quotas/:tenantId", () =>
+      HttpResponse.json({
+        tenantId: "default",
+        maxConversationsPerDay: -1,
+        maxAgentsPerTenant: -1,
+        maxApiCallsPerMinute: -1,
+        maxMonthlyCostUsd: 10,
+        enabled: true,
+      }),
+    );
+    server.use(quota, usage(1.5));
+    const first = renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("usage-cost-held")).toHaveTextContent("$1.50"));
+    expect(screen.getByTestId("usage-cost-held-bar")).toBeInTheDocument();
+    // what is left for a new call is the limit minus spend AND holds: 10 - 2 - 1.5
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$1.50 held by running turns");
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$6.50 left for new calls");
+    first.unmount();
+
+    // An older server sends no field; 0 means the mode is off. Neither shows anything.
+    server.use(quota, usage(0));
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("usage-cost")).toBeInTheDocument());
+    expect(screen.queryByTestId("usage-cost-held")).toBeNull();
   });
 
   it("never shows a tiny positive budget as $0.00, and still shows zero spend as $0.00", async () => {

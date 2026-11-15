@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.lifecycle.model;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
+import ai.labs.eddi.engine.hitl.audit.HitlChannel;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -66,6 +68,20 @@ public class HitlDecision {
      */
     private String pauseId;
     /**
+     * Optional: the {@code planHash} of the pause this decision was made for, as
+     * reported by {@code approval-status}. It binds the decision to the exact plan
+     * the reviewer saw — for a tool pause the tool names and canonicalized
+     * arguments of every pending call, for a rule pause the pending actions — and a
+     * decision whose hash differs from the pause's is refused with a conflict
+     * before anything runs. Omitted, the decision is accepted as before unless
+     * strict plan binding is on (agent {@code hitlConfig.requirePlanHash}, group
+     * {@code hitlConfig.requirePlanHash}, or {@code eddi.hitl.plan-hash.strict}),
+     * in which case it is refused with a 400.
+     *
+     * @since 6.8.0
+     */
+    private String planHash;
+    /**
      * Optional secret context for the resumed turn only — the same shape as a say
      * request's {@code context}. A client whose paused turn carried a credential as
      * a {@code "secret": true} context entry (replaced by a placeholder when the
@@ -82,6 +98,59 @@ public class HitlDecision {
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private Map<String, Context> context;
+    /**
+     * Optional, APPROVED only: the final answer the approver wrote in place of the
+     * model's draft. Regular conversations: RULE pauses of an agent with
+     * {@code hitlConfig.review.allowAnswerEdits}. Groups: a PHASE pause of a
+     * SYNTHESIS phase with {@code review.allowResultEdits}. Data, never template
+     * source. Validated before the pause is consumed.
+     *
+     * @since 6.7.0
+     */
+    private String editedAnswer;
+    /**
+     * Optional reason code explaining a rejection or an edit (see
+     * {@code review.reasonCodes}). Refused on a plain approval.
+     *
+     * @since 6.7.0
+     */
+    private String reasonCode;
+    /**
+     * Where the decision was made, as the REST layer declared it (the
+     * {@code X-EDDI-Client} header). Server-side only, never read from a body; a
+     * {@code decidedBy} prefix ({@code slack:}, {@code mcp:}, {@code system:*})
+     * wins over it in the audit.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private HitlChannel channel;
+    /**
+     * Id of the {@code hitl.approval} audit entry of this decision, assigned
+     * server-side before the resume runs, so an edit the engine refuses can be
+     * recorded against it ({@code hitl.edit.refused}). Never read from a body.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private String decisionId;
+    /**
+     * The plan hash the pause was committed with, as the resume admitted it —
+     * recorded in the decision's audit entry whether or not the decision carried
+     * it. Server-side only, never read from a body.
+     *
+     * @since 6.8.0
+     */
+    @JsonIgnore
+    private String committedPlanHash;
+    /**
+     * How the decision related to the pause's plan ({@code HitlPlanBinding.Outcome}
+     * name), for the audit entry. Server-side only.
+     *
+     * @since 6.8.0
+     */
+    @JsonIgnore
+    private String planBinding;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -150,11 +219,78 @@ public class HitlDecision {
         this.pauseId = pauseId;
     }
 
+    public String getPlanHash() {
+        return planHash;
+    }
+
+    public void setPlanHash(String planHash) {
+        this.planHash = planHash;
+    }
+
+    /** Whether this decision names a plan hash. */
+    @JsonIgnore
+    public boolean namesPlan() {
+        return planHash != null && !planHash.isBlank();
+    }
+
     public Map<String, Context> getContext() {
         return context;
     }
 
     public void setContext(Map<String, Context> context) {
         this.context = context;
+    }
+
+    public String getEditedAnswer() {
+        return editedAnswer;
+    }
+
+    public void setEditedAnswer(String editedAnswer) {
+        this.editedAnswer = editedAnswer;
+    }
+
+    public String getReasonCode() {
+        return reasonCode;
+    }
+
+    public void setReasonCode(String reasonCode) {
+        this.reasonCode = reasonCode;
+    }
+
+    @JsonIgnore
+    public HitlChannel getChannel() {
+        return channel;
+    }
+
+    @JsonIgnore
+    public void setChannel(HitlChannel channel) {
+        this.channel = channel;
+    }
+
+    @JsonIgnore
+    public String getDecisionId() {
+        return decisionId;
+    }
+
+    @JsonIgnore
+    public void setDecisionId(String decisionId) {
+        this.decisionId = decisionId;
+    }
+
+    @JsonIgnore
+    public String getCommittedPlanHash() {
+        return committedPlanHash;
+    }
+
+    @JsonIgnore
+    public String getPlanBinding() {
+        return planBinding;
+    }
+
+    /** Records how this decision was bound to its pause's plan (server-side). */
+    @JsonIgnore
+    public void bindPlan(String committedPlanHash, String planBinding) {
+        this.committedPlanHash = committedPlanHash;
+        this.planBinding = planBinding;
     }
 }

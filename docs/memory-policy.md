@@ -4,7 +4,7 @@
 
 Memory Policy controls what happens when a lifecycle task fails during a conversation turn. By default, failed task output (stack traces, HTTP error bodies, raw error messages) is written to conversation memory and becomes visible to the LLM on subsequent turns. This pollutes the LLM's context with noise it can't act on.
 
-**Strict Write Discipline** solves this by marking failed task output as **uncommitted** — excluded from the LLM's view — and injecting a concise **error digest** that the LLM can understand and react to.
+**Strict Write Discipline** solves this by marking failed task output as **uncommitted** — excluded from the LLM's view — and recording a concise **error digest** for the caller, plus a `task_failed_<taskId>` action that behavior rules can react to.
 
 ## Configuration
 
@@ -33,7 +33,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 
 | Mode | Behavior |
 |------|----------|
-| `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is injected so the LLM knows what failed and can adapt. **Recommended.** |
+| `digest` | Default mode — failed task output is marked uncommitted (hidden from LLM). A concise error digest is recorded for the caller (`taskErrors`) and as step data, and behavior rules can route on the `task_failed_<taskId>` action. **Recommended.** |
 | `exclude_all` | Failed task output is marked uncommitted. No error digest is injected. The LLM sees nothing about the failure. |
 | `keep_all` | Opt-in backwards-compatible mode — failed task output remains committed and visible to the LLM. The `task_failed_<taskId>` action is still emitted. |
 
@@ -56,12 +56,12 @@ Turn 1: User asks "What's the weather?"
 Turn 1: User asks "What's the weather?"
   → The httpcalls task (the weather API call) fails with HTTP 503
   → Raw error is marked as UNCOMMITTED (hidden from LLM)
-  → Error digest injected: {"type": "errorDigest", "taskId": "ai.labs.httpcalls", "taskType": "httpCalls",
-                            "text": "Task 'eddi://ai.labs.httpcalls' failed: ..."}
+  → Error digest stored under the `taskErrors` output key (for the caller), e.g.
+    {"type": "errorDigest", "taskId": "ai.labs.httpcalls", "taskType": "httpCalls",
+     "text": "Task 'eddi://ai.labs.httpcalls' failed: ..."}
   → Action emitted: "task_failed_ai.labs.httpcalls"
-  → LLM sees concise digest on next turn
-  → LLM can respond: "I'm sorry, I couldn't check the weather right now."
-  → Behavior rules can react to "task_failed_ai.labs.httpcalls" action
+  → Behavior rules can react to "task_failed_ai.labs.httpcalls", for example by
+    selecting an output such as "I'm sorry, I couldn't check the weather right now."
 ```
 
 ## Commit Flags
@@ -90,9 +90,15 @@ The error digest is stored as a special output type:
   "type": "errorDigest",
   "taskId": "ai.labs.httpcalls",
   "taskType": "httpCalls",
+  "errorType": "<classification>",
+  "code": "<machine-readable code>",
+  "retryable": false,
+  "message": "<reason>",
   "text": "Task 'eddi://ai.labs.httpcalls' failed: <reason>"
 }
 ```
+
+`errorType` (`timeout`, `transport`, `rate_limit`, `content_filter`, `stack_overflow` or `unknown`), `code`, `retryable` and `message` (plus `retryAfterMs` when the provider asked callers to wait) are the machine-readable half that also feeds the `error` object of the REST response.
 
 `text` is always `Task '<eddi:// task id>' failed: ` followed by the reason. The reason is kept short
 on purpose: HTTP(S) URLs are replaced with `[url]` (other schemes, such as a `mongodb://` URL, are not), stack frames and fully-qualified exception class names are
@@ -103,7 +109,7 @@ only — the `Task '…' failed: ` prefix comes on top of it. A failing model ca
 
 The same text is also stored as step data under `taskError:eddi://<taskId>`.
 
-The UI can render error digests with distinct styling (warning icon, collapsible panel). The LLM receives the concise `text` summary rather than raw error noise.
+The UI can render error digests with distinct styling (warning icon, collapsible panel). The digest is deliberately kept out of the conversation output the model is shown: `taskErrors` is not part of the history the LLM sees, so it does not see the failure unless an author puts it into a prompt themselves. To make the model aware of a failure, react to the `task_failed_<taskId>` action with a behavior rule.
 
 ### A failed turn always tells the caller why
 
@@ -139,7 +145,7 @@ With `continueOnFailure: true` the remaining tasks keep running after the failur
 turn can answer for itself:
 
 - an output set keyed on `task_failed_<taskId>` renders a fallback message in the same turn;
-- an LLM task placed after a failed HTTP call sees the digest and can explain what went wrong.
+- a behavior rule that matches `task_failed_<taskId>` can emit actions that trigger a later task (for example an LLM task that explains the problem). Only tasks after the failing one still run, so the rule must sit in a second behavior-rules step placed after the failing task and before the fallback task; the first behavior step has already run by then.
 
 ```json
 {
@@ -187,7 +193,7 @@ When a task fails with strict write discipline enabled, the action `task_failed_
 
 1. **Enable `digest` mode for production agents** — It prevents LLM context pollution while preserving observability
 2. **Use behavior rules for graceful degradation** — React to `task_failed_*` actions to provide fallback responses
-3. **Monitor error digests** — They appear in conversation memory for debugging even though the LLM only sees the summary
+3. **Monitor error digests** — They appear in conversation memory for debugging; the LLM sees neither the raw failure nor the digest
 4. **Set `keep_all` for development** — Full error output is useful during agent development and debugging
 
 ## See Also

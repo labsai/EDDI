@@ -619,6 +619,28 @@ describe("gateLooksInstalled", () => {
     expect(result.reason).toContain(narrow);
   });
 
+  it.each(["deployAgent", "deploy*", "createAgent", "http:*", "http:deployAgent"])(
+    "rejects an exempt entry that cannot be shown to be read-only: %s",
+    (bare) => {
+      // ToolApprovalGate matches bare and source-qualified tool names as well as
+      // `http.<method>:<path>`; the config alone cannot say what such a tool does.
+      const result = gateLooksInstalled(
+        agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: [bare] } }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(bare);
+    },
+  );
+
+  it("rejects an AUTO_APPROVE rule that names a tool by its bare name", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: { ...buildToolApprovals(), rules: [{ match: "deployAgent", timeoutPolicy: "AUTO_APPROVE" }] },
+      }),
+    );
+    expect(result.ok).toBe(false);
+  });
+
   it("still accepts the read exemption buildToolApprovals actually writes", () => {
     // Guards the fix above from over-reaching: `http.get:*` shares the `http.`
     // prefix with every gated write pattern and must not be swept up.

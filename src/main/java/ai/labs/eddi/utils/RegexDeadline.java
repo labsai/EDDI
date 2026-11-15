@@ -12,15 +12,15 @@ import java.util.regex.Pattern;
  * Puts a time budget on a {@link java.util.regex.Matcher} run.
  * <p>
  * {@code java.util.regex} has no timeout, and a pattern an agent designer wrote
- * — a dictionary {@code regEx}, a group's artifact validator, a guardrail's
- * {@code patterns} or {@code labelPattern} — can backtrack exponentially on an
- * input the designer never tried. An input cap bounds the text, not the work.
- * Backtracking re-reads characters, so a {@link CharSequence} whose
- * {@code charAt} checks the clock is hit constantly by exactly the pathological
- * patterns this exists to stop; the check is sampled to keep the fast path
- * cheap. Sub-sequences the engine takes carry the same deadline. A wrapper is
- * single-matcher use only — the sampling counter is not thread-safe, which is
- * also the Matcher's own contract.
+ * — a dictionary {@code regEx}, a guardrail's {@code patterns} or
+ * {@code labelPattern} — can backtrack exponentially on an input the designer
+ * never tried. An input cap bounds the text, not the work. Backtracking
+ * re-reads characters, so a {@link CharSequence} whose {@code charAt} checks
+ * the clock is hit constantly by exactly the pathological patterns this exists
+ * to stop; the check is sampled to keep the fast path cheap. Sub-sequences the
+ * engine takes carry the same deadline. A wrapper is single-matcher use only —
+ * the sampling counter is not thread-safe, which is also the Matcher's own
+ * contract.
  * <p>
  * What a timed-out match means is the caller's decision, never silently "no
  * match" where that would let something through: a guardrail reports it as

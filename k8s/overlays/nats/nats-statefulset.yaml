@@ -1,5 +1,8 @@
 # NATS JetStream — three nodes routed into one cluster, for EDDI cluster mode.
-# R3 streams and buckets keep working while any one node is down.
+# R3 streams and buckets keep working while any one node is down. Clients and
+# routes authenticate (nats-config.yaml, credentials from the `nats-auth`
+# Secret); TLS is not configured here — use the Helm chart's nats.tls, or patch
+# a tls {} block in, where the network itself is not trusted.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -36,33 +39,56 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # One NATS pod per node, so a node failure costs at most one of the three and
+      # R3 keeps quorum (a cluster with fewer than three nodes leaves a pod
+      # Pending: patch this to preferredDuringScheduling for a dev cluster), and
+      # spread over zones where there are any.
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                topologyKey: kubernetes.io/hostname
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: nats
-                    app.kubernetes.io/component: messaging
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: nats
+                  app.kubernetes.io/component: messaging
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+              app.kubernetes.io/component: messaging
       containers:
         - name: nats
-          image: nats:2.11-alpine
+          # A full patch version pinned by digest, like every third-party image
+          # the repository ships.
+          image: nats:2.11.17-alpine@sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            # Read by nats.conf ($NATS_EDDI_PASSWORD, $NATS_ROUTE_PASSWORD) and by the
+            # --routes argument below. A missing Secret keeps the pod from starting.
+            - name: NATS_EDDI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth
+                  key: eddi-password
+            - name: NATS_ROUTE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nats-auth
+                  key: route-password
+            # A soft heap limit below the 512Mi memory limit: the Go GC works harder
+            # before the kernel OOM-kills the pod.
+            - name: GOMEMLIMIT
+              value: "460MiB"
           args:
-            - "--name=$(POD_NAME)"
-            - "--jetstream"
-            - "--store_dir=/data"
-            - "-m"
-            - "8222"
-            - "--cluster_name=eddi"
-            - "--cluster=nats://0.0.0.0:6222"
-            - "--routes=nats://nats-0.nats:6222,nats://nats-1.nats:6222,nats://nats-2.nats:6222"
+            - "--config=/etc/nats/nats.conf"
+            # Outgoing routes carry the route credentials (hex, so URL-safe).
+            - "--routes=nats://route:$(NATS_ROUTE_PASSWORD)@nats-0.nats:6222,nats://route:$(NATS_ROUTE_PASSWORD)@nats-1.nats:6222,nats://route:$(NATS_ROUTE_PASSWORD)@nats-2.nats:6222"
           ports:
             - containerPort: 4222
               name: client
@@ -78,6 +104,9 @@ spec:
           volumeMounts:
             - name: nats-data
               mountPath: /data
+            - name: nats-config
+              mountPath: /etc/nats
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -106,6 +135,10 @@ spec:
               path: /healthz?js-server-only=true
               port: monitoring
             periodSeconds: 10
+      volumes:
+        - name: nats-config
+          configMap:
+            name: nats-config
   volumeClaimTemplates:
     - metadata:
         name: nats-data

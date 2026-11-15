@@ -29,7 +29,15 @@ create() {
 # one. A single "a model exists, exit 0" guard silently did nothing in exactly
 # that case — the user set their key, re-ran, and got no new model and no
 # explanation.
-MODELS_JSON=$(curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" || echo '')
+list_models() {
+    # The bearer key goes to curl as a config file on stdin (-K -), not as a -H argument:
+    # argv is visible in the process table, the key must not be. Control characters are
+    # dropped (a line break would end the config line and let the rest act as a curl option)
+    # and the two characters a quoted config value escapes are escaped.
+    key=$(printf '%s' "${EDDI_API_KEY:-}" | LC_ALL=C tr -d '\000-\037\177' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+    printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -sf -K - "$EDDI/v1/models" || echo ''
+}
+MODELS_JSON=$(list_models)
 
 # Model ids are <slugified-descriptor-name>-<last 6 of agentId>, so the slug of
 # the name set below is a stable prefix to look for.
@@ -352,7 +360,7 @@ fi
 echo "[seed] Waiting for the models to appear on /v1/models…"
 i=0
 while [ "$i" -lt 24 ]; do
-    MODELS=$(curl -sf -H "Authorization: Bearer ${EDDI_API_KEY:-}" "$EDDI/v1/models" || echo '')
+    MODELS=$(list_models)
     MISSING=0
     for PREFIX in $EXPECTED; do
         echo "$MODELS" | grep -q "\"$PREFIX" || MISSING=1

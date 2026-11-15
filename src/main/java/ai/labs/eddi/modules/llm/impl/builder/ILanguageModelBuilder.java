@@ -62,9 +62,9 @@ public interface ILanguageModelBuilder {
     }
 
     /**
-     * The endpoint this builder will send to when the configuration names none of
-     * {@code ChatModelRegistry.ENDPOINT_KEYS}, if an editor can still steer that
-     * destination through other parameters — or {@code null}.
+     * The endpoint this builder will send to when the configuration names no
+     * endpoint parameter ({@code EndpointParameters}), if an editor can still steer
+     * that destination through other parameters — or {@code null}.
      * <p>
      * A provider with one fixed vendor endpoint returns {@code null}: the editor
      * cannot choose where it goes, so a secret's {@code allowedHosts} has nothing

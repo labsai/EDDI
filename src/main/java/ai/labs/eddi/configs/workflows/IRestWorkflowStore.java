@@ -115,8 +115,8 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @DELETE
     @Path("/{id}")
     @Operation(summary = "Delete package", description = "Delete a workflow configuration. When cascade=true, also deletes extension "
-            + "resources referenced by this package: behavior sets, HTTP calls, output sets, "
-            + "LLM configs, property setters, and parser dictionaries. " + "Shared resources (used by other packages) are skipped. "
+            + "resources referenced by this package: every step's config uri (behavior sets, HTTP calls, MCP calls, "
+            + "output sets, LLM configs, property setters, ...) and parser dictionaries. " + "Shared resources (used by other packages) are skipped. "
             + "A step's reference is version-pinned and routinely names an older version than the one that exists; "
             + "the cascade resolves every reference to the resource's CURRENT version before deciding, and both the "
             + "'is anyone else using this?' check and the delete are made against that same version. "
@@ -141,8 +141,7 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
                     + "409. If false (default), soft-delete only. It never applies to cascaded resources — see cascade.")
             @QueryParam("permanent") @DefaultValue("false") Boolean permanent,
             @Parameter(description = "If true, also delete all extension resources "
-                    + "referenced by this package (behavior, httpcalls, "
-                    + "output, langchain, propertysetter, parser "
+                    + "referenced by this package (every step's config uri plus parser "
                     + "dictionaries), each at its own current version. Extensions still referenced by another workflow "
                     + "are skipped, and cascaded resources are always soft-deleted even when permanent=true, so an "
                     + "extension shared at a different pinned version can be recovered. See X-Cascade-Skipped.")

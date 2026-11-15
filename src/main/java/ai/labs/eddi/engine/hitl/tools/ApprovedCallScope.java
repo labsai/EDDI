@@ -6,9 +6,6 @@ package ai.labs.eddi.engine.hitl.tools;
 
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.Protection;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
@@ -131,22 +128,16 @@ public final class ApprovedCallScope {
 
     /**
      * Whether {@code candidate} (a URI, or raw tool arguments) names
-     * {@code conversationId}: case-insensitive containment, tolerating
-     * percent-encoding. A false positive costs one refused call, a false negative
-     * the boundary.
+     * {@code conversationId}: case-insensitive containment in the
+     * {@linkplain GuardText#haystack decoded text}, the same decoding
+     * {@link SelfUngatingGuard#refusalFromArguments} searches. Raw tool arguments
+     * are JSON, and the receiver decodes a backslash-u escape of {@code 0061} to
+     * {@code a}, so an id spelled with escapes or percent-encoding must not slip
+     * past a check on the undecoded text. A false positive costs one refused call,
+     * a false negative the boundary.
      */
     public static boolean targetsConversation(String candidate, String conversationId) {
-        if (candidate == null || conversationId == null || conversationId.isBlank()) {
-            return false;
-        }
-        String decoded = candidate;
-        try {
-            decoded = URLDecoder.decode(candidate, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // A malformed escape is not a reason to stop checking — fall back to the
-            // raw string rather than returning false and allowing the write.
-        }
-        return decoded.toLowerCase(Locale.ROOT).contains(conversationId.trim().toLowerCase(Locale.ROOT));
+        return GuardText.containsId(GuardText.haystack(candidate), conversationId);
     }
 
     private static void restore(Binding previous) {

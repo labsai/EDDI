@@ -23,6 +23,12 @@ services:
       # HighValueSurfaceGuard refuses to boot without these while OIDC is off.
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
+      # "Is a newer EDDI out?" check - ON by default: one anonymous request a day
+      # to api.github.com, and a notification for the administrators when there
+      # is one. Set EDDI_UPDATE_CHECK_ENABLED=false in .env to switch it off
+      # entirely, including the first check after the first boot; that also wins
+      # over the switch on the Manager's Updates page.
+      - "EDDI_UPDATE_CHECK_ENABLED=${EDDI_UPDATE_CHECK_ENABLED:-true}"
       # While authentication is off EDDI answers only requests addressed to
       # localhost, an IP address, host.docker.internal (and its Podman/gateway
       # siblings) or a host listed here (UnauthenticatedRequestGuard

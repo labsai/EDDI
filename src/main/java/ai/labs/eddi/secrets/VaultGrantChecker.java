@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -33,9 +34,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 
 /**
  * Checks, at deployment time, that every vault reference an agent's
@@ -102,8 +106,16 @@ public class VaultGrantChecker {
      */
     private static final ReferenceScanner VARS_REFERENCES = ReferenceScanner.of("vars");
 
-    /** A vault or variable reference that names its tenant explicitly. */
-    private static final ReferenceScanner TENANT_REFERENCES = ReferenceScanner.withTenant("vault", "eddivault", "vars");
+    /**
+     * A vault reference that names its tenant explicitly. Vault only, and variables
+     * are found with their own grammar
+     * ({@link GlobalVariableResolver#VARS_PATTERN}): one scanner for both let a
+     * malformed <code>${vars:a</code> opener swallow the
+     * <code>${vault:t.other…/key}</code> after it into one bogus tenant, while the
+     * runtime, which resolves each namespace with its own rules, still resolved the
+     * inner reference — and the space-membership check never saw its tenant.
+     */
+    private static final ReferenceScanner VAULT_TENANT_REFERENCES = ReferenceScanner.withTenant("vault", "eddivault");
 
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
@@ -112,13 +124,14 @@ public class VaultGrantChecker {
     private final IApiCallsStore apiCallsStore;
     private final IMcpCallsStore mcpCallsStore;
     private final IRagStore ragStore;
+    private final IParserStore parserStore;
     private final IConnectionStore connectionStore;
     private final GlobalVariableResolver globalVariableResolver;
 
     @Inject
     public VaultGrantChecker(ISecretProvider secretProvider, IAgentStore agentStore, IWorkflowStore workflowStore, ILlmStore llmStore,
-            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore, IConnectionStore connectionStore,
-            GlobalVariableResolver globalVariableResolver) {
+            IApiCallsStore apiCallsStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore, IParserStore parserStore,
+            IConnectionStore connectionStore, GlobalVariableResolver globalVariableResolver) {
         this.secretProvider = secretProvider;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
@@ -126,6 +139,7 @@ public class VaultGrantChecker {
         this.apiCallsStore = apiCallsStore;
         this.mcpCallsStore = mcpCallsStore;
         this.ragStore = ragStore;
+        this.parserStore = parserStore;
         this.connectionStore = connectionStore;
         this.globalVariableResolver = globalVariableResolver;
     }
@@ -158,7 +172,8 @@ public class VaultGrantChecker {
      * metadata cannot be read — vault disabled, secret absent, provider error — is
      * skipped: "could not determine the grant" is not "the grant is missing", and a
      * deployment gate that fires on a transient store failure is worse than the
-     * hole it closes.
+     * hole it closes. A provider error is logged at WARN, naming the agent and the
+     * reference, so a deploy that went through unchecked can be found.
      * <p>
      * An absent secret has no grant to check yet, and deploying before it exists is
      * a supported flow (agent sync promotes a workflow to an instance that does not
@@ -332,6 +347,10 @@ public class VaultGrantChecker {
                     continue;
                 }
                 for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                    Map<String, Object> inline = inlineConfiguration(step);
+                    if (!inline.isEmpty()) {
+                        collectTenants(inline, tenants, ConnectionReference.DEFAULT_TENANT, visitedConnections);
+                    }
                     Object configuredUri = step.getConfig() != null ? step.getConfig().get("uri") : null;
                     if (step.getType() == null || configuredUri == null) {
                         continue;
@@ -347,6 +366,22 @@ public class VaultGrantChecker {
                     }
                 }
             }
+        }
+        return tenants;
+    }
+
+    /**
+     * {@link #referencedTenants(String, Integer)} for one configuration document on
+     * its own — a knowledge base run through its standalone endpoints, outside any
+     * agent: the same scan, variables expanded twice over and connections followed.
+     *
+     * @throws UnverifiableReferencesException
+     *             when a variable or connection it names cannot be read
+     */
+    public Set<String> referencedTenantsOf(Object configuration) {
+        Set<String> tenants = new LinkedHashSet<>();
+        if (configuration != null) {
+            collectTenants(configuration, tenants, ConnectionReference.DEFAULT_TENANT, new LinkedHashSet<>());
         }
         return tenants;
     }
@@ -378,8 +413,16 @@ public class VaultGrantChecker {
         }
         List<ReferenceScanner.Match> connectionMatches = new ArrayList<>();
         for (String text : scanned) {
-            for (ReferenceScanner.Match match : TENANT_REFERENCES.findAll(text)) {
+            for (ReferenceScanner.Match match : VAULT_TENANT_REFERENCES.findAll(text)) {
                 sink.add(match.tenant());
+            }
+            // The resolver's own pattern: its classes exclude '$', '{' and '}', so an
+            // opener inside a malformed one is still found, as the runtime finds it.
+            Matcher variables = GlobalVariableResolver.VARS_PATTERN.matcher(text);
+            while (variables.find()) {
+                if (variables.group(1) != null) {
+                    sink.add(variables.group(1));
+                }
             }
             connectionMatches.addAll(ConnectionReference.findAll(text));
         }
@@ -427,15 +470,31 @@ public class VaultGrantChecker {
      * grant lists all allow — those are the shapes that mean "not restricted", and
      * the wizard writes the wildcard for every key it vaults. A secret that does
      * not exist, or whose grant cannot be read, is not a violation (see
-     * {@link #findUngrantedReferences(AgentConfiguration, String)}).
+     * {@link #findUngrantedReferences(AgentConfiguration, String)}) — but a grant
+     * that cannot be read is logged at WARN, since the check was skipped.
      */
     private boolean isGranted(String reference, String agentId) {
+        SecretReference secret;
+        try {
+            secret = SecretReference.parse(reference);
+        } catch (IllegalArgumentException e) {
+            // Resolves to nothing at runtime either, so it reaches no secret.
+            LOGGER.debugf("Ignoring unparseable vault reference %s in agent '%s'", sanitize(reference), sanitize(agentId));
+            return true;
+        }
         SecretMetadata metadata;
         try {
-            metadata = secretProvider.getMetadata(SecretReference.parse(reference));
+            metadata = secretProvider.getMetadata(secret);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            // Deploying before the secret exists is a supported flow; its grant is
+            // checked when it is created.
+            return true;
         } catch (Exception e) {
-            LOGGER.debugf("Could not read grant metadata for %s (%s) — not treating it as a violation",
-                    sanitize(reference), e.getClass().getSimpleName());
+            // Let through, as the class contract chooses, but not quietly: the resolver
+            // checks no grants, so a deploy is the one place a grant on this secret
+            // is enforced, and here it was not.
+            LOGGER.warnf("Could not verify the vault grant of %s for agent '%s' (%s); treating it as granted",
+                    sanitize(reference), sanitize(agentId), e.getClass().getSimpleName());
             return true;
         }
         if (metadata == null || metadata.allowedAgents() == null || metadata.allowedAgents().isEmpty()) {
@@ -474,6 +533,14 @@ public class VaultGrantChecker {
                 continue;
             }
             for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                // The step's own configuration first: a parser is usually configured
+                // inline in the workflow, semanticFallback credentials included, and only
+                // the document a config.uri names used to be scanned.
+                Map<String, Object> inline = inlineConfiguration(step);
+                if (!inline.isEmpty()) {
+                    scanForVaultReferences(inline, references, ConnectionReference.DEFAULT_TENANT, unreadableResources);
+                    scanReferencedConnections(inline, references, unreadableConnections, unreadableResources);
+                }
                 Object configuredUri = step.getConfig() != null ? step.getConfig().get("uri") : null;
                 if (step.getType() == null || configuredUri == null) {
                     continue;
@@ -490,6 +557,26 @@ public class VaultGrantChecker {
             }
         }
         return references;
+    }
+
+    /**
+     * What a workflow step configures in the workflow document itself: its
+     * {@code config} (without the {@code uri}, which names a document scanned on
+     * its own) and its {@code extensions}. Empty when it has neither.
+     */
+    private static Map<String, Object> inlineConfiguration(WorkflowConfiguration.WorkflowStep step) {
+        Map<String, Object> inline = new LinkedHashMap<>();
+        if (step.getConfig() != null && !step.getConfig().isEmpty()) {
+            Map<String, Object> config = new LinkedHashMap<>(step.getConfig());
+            config.remove("uri");
+            if (!config.isEmpty()) {
+                inline.put("config", config);
+            }
+        }
+        if (step.getExtensions() != null && !step.getExtensions().isEmpty()) {
+            inline.put("extensions", step.getExtensions());
+        }
+        return inline;
     }
 
     private WorkflowConfiguration readWorkflow(URI workflowUri, List<String> unreadableResources) {
@@ -588,6 +675,9 @@ public class VaultGrantChecker {
             // RagConfiguration carries embedding-model and vector-store credentials,
             // both resolved through SecretResolver at runtime.
             case "ai.labs.rag" -> ragStore;
+            // A parser's semanticFallback carries embedding-model credentials, resolved
+            // through SecretResolver by EmbeddingModelFactory.
+            case "ai.labs.parser" -> parserStore;
             default -> null;
         };
     }
@@ -731,7 +821,20 @@ public class VaultGrantChecker {
         }
         List<String> scanned = new ArrayList<>();
         scanned.add(value);
-        String inPlace = globalVariableResolver.resolveValue(value, tenantId);
+        String inPlace = null;
+        try {
+            inPlace = globalVariableResolver.resolveValue(value, tenantId);
+        } catch (GlobalVariableResolver.AssembledReferenceException e) {
+            // a verdict, reported as a violation by the caller
+            throw e;
+        } catch (Exception e) {
+            // A store failure here used to escape to findUngrantedReferences' catch-all,
+            // which answers "no violations" and lets the agent deploy unchecked. Skip the
+            // in-place expansion instead: the per-variable pass below asks the same store
+            // and records every ${vars:...} it cannot expand as unresolved, which fails the
+            // check closed.
+            LOGGER.debugf("Could not expand %s in place while checking vault grants: %s", sanitize(value), sanitize(e.getMessage()));
+        }
         if (inPlace != null && !inPlace.equals(value)) {
             scanned.add(inPlace);
         }

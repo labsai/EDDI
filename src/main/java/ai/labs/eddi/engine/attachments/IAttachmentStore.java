@@ -17,9 +17,9 @@ import java.util.List;
  * conversation that has been given an explicit {@linkplain #grantAccess grant}.
  * Grants are written only by trusted server code (e.g. group fan-out) — never
  * derived from client-supplied context. Deletion of a single blob
- * ({@link #delete}) is restricted to the owner. GDPR/conversation erasure
- * cascades via {@link #deleteByConversation(String)}, which also removes the
- * blob's grants.
+ * ({@link #delete}) is restricted to the owner (a blob that records no owner
+ * stays deletable). GDPR/conversation erasure cascades via
+ * {@link #deleteByConversation(String)}, which also removes the blob's grants.
  * <p>
  * This is the single blob-store abstraction for EDDI; the former
  * {@code IAttachmentStorage} was folded into it so uploads, LLM forwarding,

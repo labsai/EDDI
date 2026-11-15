@@ -26,7 +26,25 @@ public final class ToolQuotaRules {
     /** How long past its window's end a counter row is kept, before it is swept. */
     public static final Duration RETENTION_GRACE = Duration.ofHours(1);
 
+    /**
+     * The window value that scopes a counter to one run instead of a time span: see
+     * {@link ToolQuotaConfig#RUN_WINDOW}.
+     */
+    public static final String RUN_WINDOW = ToolQuotaConfig.RUN_WINDOW;
+
+    /**
+     * How long a per-run counter row is kept after its first call. A run has no
+     * natural end the store can see, so the row simply outlives any realistic run;
+     * a run still going after this long starts a fresh count.
+     */
+    public static final Duration RUN_RETENTION = MAX_WINDOW;
+
     private ToolQuotaRules() {
+    }
+
+    /** Whether {@code window} names the per-run scope (case-insensitive). */
+    public static boolean isRunWindow(String window) {
+        return window != null && RUN_WINDOW.equalsIgnoreCase(window.strip());
     }
 
     /**
@@ -53,7 +71,8 @@ public final class ToolQuotaRules {
         }
         Duration window;
         try {
-            window = parseWindow(rule.getWindow());
+            // null stands for the per-run scope: no time span, the counter is keyed by run
+            window = isRunWindow(rule.getWindow()) ? null : parseWindow(rule.getWindow());
         } catch (IllegalArgumentException e) {
             // Rejected at save time; a stored document from before that check, or one
             // edited around it, must not run unbounded. Treat it as unusable and let
@@ -118,8 +137,13 @@ public final class ToolQuotaRules {
      * @param limit
      *            calls permitted per window
      * @param window
-     *            the window length
+     *            the window length, or {@code null} for a per-run rule
      */
     public record Resolved(String ruleKey, String counter, int limit, Duration window) {
+
+        /** True when the rule counts per run rather than per time window. */
+        public boolean perRun() {
+            return window == null;
+        }
     }
 }

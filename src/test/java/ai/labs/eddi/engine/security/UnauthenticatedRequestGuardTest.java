@@ -239,6 +239,8 @@ class UnauthenticatedRequestGuardTest {
             assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "head", path, "localhost:7070", "https://evil.example", null));
             // Matrix parameters do not dodge the prefix — JAX-RS routes without them.
             assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", "/agents;x=1/managed/support/alice", "localhost:7070", null, "cross-site"));
+            // Nor does a quarkus.http.root-path in front of the route.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", "/eddi/agents/managed/support/alice", "localhost:7070", null, "cross-site"));
             // Its own origin, and non-browser clients, still pass.
             assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", path, "localhost:7070", "http://localhost:7070", "same-origin"));
             assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", path, "localhost:7070", null, null));

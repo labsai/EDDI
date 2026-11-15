@@ -22,15 +22,32 @@
 # from the base is all the load balancing it needs. Operator guide:
 # docs/clustering.md.
 #
-# Security: the NATS client port accepts the EDDI pods only (NetworkPolicy),
-# and the routes port only the other NATS pods. On a CNI that does not enforce
-# NetworkPolicy, or to add defence in depth, run NATS with authentication and
-# TLS — the Helm chart does both (nats.auth, nats.tls) — and set EDDI_NATS_USERNAME
-# / EDDI_NATS_PASSWORD (or EDDI_NATS_CREDS_FILE) in eddi-secrets.
+# Security: clients and routes authenticate. Create the credentials BEFORE you
+# apply (the NATS pods do not start without them), hex so that they are URL-safe:
+#
+#   EDDI_NATS_PW=$(openssl rand -hex 24)
+#   kubectl create secret generic nats-auth \
+#     --from-literal=eddi-password="$EDDI_NATS_PW" \
+#     --from-literal=route-password="$(openssl rand -hex 24)"
+#
+# and add the same EDDI password to eddi-secrets' application-secrets.properties:
+#
+#   eddi.nats.username=eddi
+#   eddi.nats.password=<EDDI_NATS_PW>
+#
+# The EDDI user may touch EDDI's subjects only and never delete a stream. The
+# NATS client port also accepts the EDDI pods only (NetworkPolicy), and the
+# routes port only the other NATS pods. TLS is not configured by this component:
+# the Helm chart does it (nats.tls), or patch a tls {} block into nats-config.
+#
+# Recommended for production, and set below: EDDI_CLUSTER_DEGRADED_TURNS=reject —
+# while NATS is unreachable a turn is answered 409 + Retry-After rather than run
+# unfenced (docs/clustering.md, "Degraded mode").
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
 resources:
+  - nats-config.yaml
   - nats-statefulset.yaml
   - nats-service.yaml
   - nats-networkpolicy.yaml
@@ -52,6 +69,11 @@ patches:
       - op: add
         path: /data/EDDI_NATS_REPLICAS
         value: "3"
+      # While NATS is unreachable, refuse turns (409 + Retry-After) rather than run
+      # them unfenced.
+      - op: add
+        path: /data/EDDI_CLUSTER_DEGRADED_TURNS
+        value: "reject"
       # A terminating pod lets its running turns finish (65 s), inside the
       # 75 s termination grace set below.
       - op: add
@@ -76,6 +98,15 @@ patches:
       - op: replace
         path: /spec/template/spec/terminationGracePeriodSeconds
         value: 75
+      # Requests the endpoint controller has not yet steered away are still
+      # served while the pod leaves the Service (5 s), then SIGTERM drains it:
+      # 5 s + 3 s readiness grace + 65 s drain fit the 75 s grace.
+      - op: add
+        path: /spec/template/spec/containers/0/lifecycle
+        value:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
       # Each replica's node id is its pod name: unique, and stable for the
       # pod's lifetime.
       - op: add

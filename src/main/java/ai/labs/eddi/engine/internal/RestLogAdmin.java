@@ -42,6 +42,9 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     private static final long HEARTBEAT_INTERVAL_MS = 15_000;
 
+    /** The history page size, as {@code IRestLogAdmin}'s {@code @DefaultValue}. */
+    static final int DEFAULT_HISTORY_LIMIT = 100;
+
     private final BoundedLogStore boundedLogStore;
     private final IDatabaseLogs databaseLogs;
     private final InstanceIdProducer instanceIdProducer;
@@ -78,7 +81,11 @@ public class RestLogAdmin implements IRestLogAdmin {
     public List<LogEntry> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
                                          String userId, String instanceId, Integer skip, Integer limit) {
         PageBounds.require(skip, limit);
-        return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
+        // Both log stores read a non-positive limit as "no limit" and collect every
+        // matching record into one list, so limit=0 loaded the whole history onto the
+        // heap. It gets the endpoint's default page instead.
+        int effectiveLimit = limit == null || limit < 1 ? DEFAULT_HISTORY_LIMIT : limit;
+        return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, effectiveLimit);
     }
 
     @Override

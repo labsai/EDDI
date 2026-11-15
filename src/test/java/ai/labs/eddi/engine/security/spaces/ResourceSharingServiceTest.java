@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -253,6 +254,19 @@ class ResourceSharingServiceTest {
                 .thenThrow(new IResourceStore.ResourceStoreException("connection pool exhausted"));
 
         assertThrows(ServiceUnavailableException.class, () -> service.describe(AGENT));
+    }
+
+    @Test
+    @DisplayName("the grant list follows the structural disclosure rule, not the synthetic OWN of non-enforcement")
+    void grantsFollowTheStructuralRule() {
+        descriptors.get(AGENT).setGrants(List.of(new ResourceGrant(Subjects.user("bob"), "VIEW", "alice", new Date(0))));
+        when(accessGuard.effectiveLevel(any())).thenReturn(AccessLevel.OWN);
+        when(accessGuard.mayReadGrants(any())).thenReturn(false);
+
+        assertTrue(service.describe(AGENT).grants().isEmpty());
+
+        when(accessGuard.mayReadGrants(any())).thenReturn(true);
+        assertEquals(1, service.describe(AGENT).grants().size());
     }
 
     @Test

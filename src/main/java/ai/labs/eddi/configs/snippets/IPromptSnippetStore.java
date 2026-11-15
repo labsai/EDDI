@@ -20,9 +20,9 @@ import java.util.List;
 public interface IPromptSnippetStore extends IResourceStore<PromptSnippet> {
 
     /**
-     * Read all non-deleted snippets (latest versions). Used by
-     * {@link ai.labs.eddi.modules.llm.impl.PromptSnippetService} to populate the
-     * template data map.
+     * Not supported by the shipped implementation, which throws
+     * {@code ResourceStoreException}. Enumerate snippets through
+     * {@link ai.labs.eddi.modules.llm.impl.PromptSnippetService}.
      */
     List<PromptSnippet> readAll() throws IResourceStore.ResourceStoreException;
 }

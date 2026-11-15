@@ -17,6 +17,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +27,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -51,6 +53,7 @@ class RestGroupWorkspaceTest {
     private IScheduleStore scheduleStore;
     private TeamCadenceService teamCadenceService;
     private RestGroupWorkspace rest;
+    private ResourceAccessGuard accessGuard;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -62,7 +65,8 @@ class RestGroupWorkspaceTest {
         var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn("pm@example.com");
         lenient().when(identity.getPrincipal()).thenReturn(principal);
-        rest = new RestGroupWorkspace(workspaceStore, groupStore, scheduleStore, teamCadenceService, identity, mock(ResourceAccessGuard.class));
+        accessGuard = mock(ResourceAccessGuard.class);
+        rest = new RestGroupWorkspace(workspaceStore, groupStore, scheduleStore, teamCadenceService, identity, accessGuard);
 
         var resourceId = mock(IResourceStore.IResourceId.class);
         lenient().when(resourceId.getVersion()).thenReturn(1);
@@ -88,6 +92,21 @@ class RestGroupWorkspaceTest {
 
         assertEquals(200, response.getStatus());
         verify(teamCadenceService).reconcile(workspace);
+    }
+
+    @Test
+    @DisplayName("a caller without access gets the guard's ForbiddenException (403), never a 500 from the generic catch")
+    void everyEndpoint_accessDenied_propagatesForbidden() throws Exception {
+        workspace();
+        doThrow(new ForbiddenException("Access denied")).when(accessGuard).requireAccess(anyString(), any(), anyString());
+
+        assertThrows(ForbiddenException.class, () -> rest.readWorkspace(GROUP_ID));
+        assertThrows(ForbiddenException.class, () -> rest.readBacklog(GROUP_ID));
+        assertThrows(ForbiddenException.class, () -> rest.addBacklogTask(GROUP_ID, new BacklogTaskRequest("s", null, 0)));
+        assertThrows(ForbiddenException.class,
+                () -> rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * *", null, null, 0, null)));
+        assertThrows(ForbiddenException.class, () -> rest.deleteCadence(GROUP_ID, "c-1"));
+        verify(workspaceStore, never()).casRevision(any());
     }
 
     @Test

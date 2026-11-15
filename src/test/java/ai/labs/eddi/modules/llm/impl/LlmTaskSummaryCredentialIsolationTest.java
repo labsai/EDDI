@@ -275,6 +275,20 @@ class LlmTaskSummaryCredentialIsolationTest {
     }
 
     @Test
+    @DisplayName("mismatched providers → every endpoint parameter is dropped, not only the keys today's builders read")
+    void mismatchedProviders_stripEveryEndpointParameter() {
+        Map<String, String> parentParams = new HashMap<>();
+        for (String endpointKey : List.of("apiBase", "api_base", "serverUrl", "BASEURL", "url", "uri", "host", "hostname")) {
+            parentParams.put(endpointKey, "https://parent.example");
+        }
+        parentParams.put("temperature", "0.4");
+
+        var resolved = LlmTask.resolveInheritedSummaryParameters(parentParams, "anthropic", "openai");
+
+        assertEquals(Map.of("temperature", "0.4"), resolved, "an endpoint never crosses a provider boundary");
+    }
+
+    @Test
     @DisplayName("mismatched providers → every model key is dropped; matching providers keep it")
     void mismatchedProviders_stripModelKeys() {
         Map<String, String> parentParams = new HashMap<>();

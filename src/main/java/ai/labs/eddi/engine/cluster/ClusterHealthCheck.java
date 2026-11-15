@@ -19,8 +19,12 @@ import ai.labs.eddi.engine.cluster.lease.NatsLeaseManager;
  * <p>
  * In-memory: always UP. Cluster mode: UP with the NATS connection state,
  * whether the node is degraded and since when, the node id and the member count
- * — and DOWN only when the operator opted in with
- * {@code eddi.cluster.readiness.require-nats=true} and the node is degraded.
+ * — and DOWN when the node has never connected to NATS since boot, when the
+ * connection fails for a reason retrying cannot heal (authentication, TLS,
+ * client options; see {@link NatsConnectionManager#readinessProblem()}), or
+ * when the operator opted in with
+ * {@code eddi.cluster.readiness.require-nats=true} and the node is degraded. An
+ * ordinary outage after a first connection keeps it UP.
  * <p>
  * The old NATS health check reported DOWN on any NATS blip. Since every replica
  * sees the same NATS outage at the same moment, that emptied the load balancer
@@ -82,7 +86,15 @@ public class ClusterHealthCheck implements HealthCheck {
             }
             builder.withData("draining", draining);
         }
-        boolean down = (degraded && config.readinessRequireNats()) || draining;
+        // Never connected since boot, or failing for a reason retrying cannot heal
+        // (auth,
+        // TLS, client options): such a node cannot take a single lease, and used to
+        // serve every turn unfenced while this check said UP.
+        var problem = manager.readinessProblem();
+        if (verbose && problem.isPresent()) {
+            builder.withData("problem", problem.get());
+        }
+        boolean down = (degraded && config.readinessRequireNats()) || draining || problem.isPresent();
         return (down ? builder.down() : builder.up()).build();
     }
 }

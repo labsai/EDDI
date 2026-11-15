@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.pricing.MeteredTokenUsage;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.listener.ChatModelErrorContext;
@@ -51,11 +52,11 @@ import java.util.concurrent.TimeUnit;
  * {@code onRequest} / {@code onResponse} / {@code onError} around
  * {@code doChat}, and it does so for <em>every</em> provider, because the
  * dispatch lives on the interface rather than in each binding. Hanging
- * telemetry off that hook means one implementation covers all eleven providers
- * and both the sync and streaming decorators, instead of eleven partial ones.
- * The catch is that the dispatch only happens if something calls the default
- * {@code chat} — see {@link ObservableChatModel}, which had to stop overriding
- * it for this to work at all.
+ * telemetry off that hook means one implementation covers every provider
+ * binding and both the sync and streaming decorators, instead of one partial
+ * implementation per binding. The catch is that the dispatch only happens if
+ * something calls the default {@code chat} — see {@link ObservableChatModel},
+ * which had to stop overriding it for this to work at all.
  *
  * <h2>Semantic conventions</h2>
  *
@@ -349,6 +350,22 @@ public class LlmTelemetryListener implements ChatModelListener {
         if (usage.outputTokenCount() != null) {
             meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", tag, "type", "output")
                     .increment(usage.outputTokenCount());
+        }
+        if (usage instanceof MeteredTokenUsage metered) {
+            incrementIfPositive("cache_read", provider, tag, metered.cacheReadTokens());
+            incrementIfPositive("cache_write", provider, tag, metered.cacheWriteTokens());
+            incrementIfPositive("reasoning", provider, tag, metered.reasoningTokens());
+        }
+    }
+
+    /**
+     * The normalized cache and thinking counts. {@code cache_read} and
+     * {@code cache_write} are subsets of {@code input}; {@code reasoning} is a
+     * subset of {@code output}.
+     */
+    private void incrementIfPositive(String type, String provider, String modelTag, int tokens) {
+        if (tokens > 0) {
+            meterRegistry.counter("eddi.llm.tokens", "provider", provider, "model", modelTag, "type", type).increment(tokens);
         }
     }
 

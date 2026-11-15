@@ -21,8 +21,8 @@
 
 When you export an agent, EDDI packages:
 
-- ✅ Agent configuration (package references)
-- ✅ All packages used by the agent
+- ✅ Agent configuration (workflow references)
+- ✅ All workflows used by the agent
 - ✅ All extensions (behavior rules, dictionaries, HTTP calls, outputs, etc.)
 - ✅ Version information
 - ✅ Configuration metadata
@@ -101,7 +101,7 @@ EDDI supports three import strategies:
 | -------------------- | --------------------------------------------------------------- | ----------------------------------- |
 | **Create** (default) | Always creates a new agent with new IDs                         | First-time import, creating copies  |
 | **Merge**            | Updates existing resources by matching origin IDs               | Syncing changes across environments |
-| **Upgrade**          | Updates existing agent by structural matching (no origin IDs needed) | Syncing independently created agents |
+| **Upgrade**          | Updates the agent named by `targetAgentId` (required) by structural matching (no origin IDs needed) | Syncing independently created agents |
 
 Merge and Upgrade write a new version over an existing agent. That version is a breaking
 change unless the request says `compatible=true`; a breaking version leaves the conversations
@@ -315,11 +315,11 @@ Send a **`POST`** request to export. The response `Location` header contains the
 | ------------ | ------------------------------------------------- |
 | HTTP Method  | `POST`                                            |
 | API Endpoint | `/backup/export/{agentId}?agentVersion={version}` |
+| `agentVersion` | Defaults to `1`, not to the latest version: always pass it |
+| Optional     | `selectedResources`, `selectedSnippets`, `selectedSchedules` (see [Selecting What to Export](#selecting-what-to-export)); `POST /backup/export/{agentId}/preview?agentVersion=N` returns the selectable tree |
 | Response     | `Location` header with ZIP download URL           |
 
-The filename is `{urlEncodedAgentName}-{agentId}-{agentVersion}.zip` whenever the agent's
-descriptor carries a name (it drops to `{agentId}-{agentVersion}.zip` only for a nameless
-agent), so read it from the `Location` header rather than constructing it.
+The filename is `{slug}--{agentId}-{agentVersion}-{token}.zip`, where `{slug}` is the slugified agent name and `{token}` is a random hex token (a nameless agent has no slug and no `--`). Read it from the `Location` header rather than constructing it.
 
 **Example:**
 
@@ -407,7 +407,8 @@ raw JSON of each side. The `sourceId` values are what `selectedResources` expect
 - `CREATE` — No matching local resource found; will be created
 - `UPDATE` — Matching local resource found; will be updated
 - `SKIP` — Resource is unchanged; will be skipped
-- `CONFLICT` — Match is ambiguous; must be resolved manually
+- `CONFLICT` — The target's copy was changed on this instance since the last sync (or import) wrote it, and the source changed it too. Written only when named explicitly in `selectedResources`
+- `REMOVE` — The target has it and the source no longer does (a workflow step, or a whole workflow). Sync and upgrade previews can emit it; see the [Agent Sync Guide](agent-sync-guide.md)
 
 ### Importing an Agent (Merge)
 
@@ -419,7 +420,7 @@ Update an existing agent by matching origin IDs.
 | API Endpoint | `/backup/import?strategy=merge`                            |
 | Content-Type | `application/zip`                                          |
 | Request Body | ZIP file binary                                            |
-| Query Params | `strategy=merge`, optional `selectedResources=id1,id2,...` |
+| Query Params | `strategy=merge`, optional `selectedResources=id1,id2,...`, optional `compatible=true` |
 | Response     | `Location` header with updated agent URI                   |
 
 **Example (merge all):**
@@ -462,11 +463,13 @@ curl -X POST -H "Content-Type: application/zip" \
   "http://localhost:7070/backup/import?strategy=upgrade&targetAgentId=local-agent-id"
 ```
 
+`targetAgentId` is required: an upgrade without it, or an unknown `strategy`, answers `400`. Optional parameters: `selectedResources` (as for merge), `workflowOrder` (a comma-separated list of the target's workflow ids giving the final order; unlisted workflows follow in their current order, and without it new workflows are appended) and `compatible`.
+
 The upgrade strategy matches resources by **structure** (workflow position, extension type, snippet name) rather than by origin ID. See [Agent Sync](agent-sync-guide.md) for details on how structural matching works.
 
 ### Upgrade response codes
 
-An upgrade (and every `/backup/sync` call, which shares the same executor) answers with one
+An upgrade (and every `/backup/import/sync` call, which shares the same executor) answers with one
 of three statuses. **All three are 2xx**, so a client must branch on the status code, not on
 `response.ok`:
 
@@ -542,6 +545,15 @@ what the rollback writes back. If the read fails, the merge stops there — befo
 that resource — and fails with `500` naming it, and everything it had already written is
 rolled back as above. Retry once the store is readable again.
 
+A store can also **refuse** an update: a dictionary whose regular expression does not compile,
+or httpcalls whose batch settings exceed this deployment's ceiling, is answered `400` with the
+reason. The merge then fails with that same status and body, rolled back as above, and the
+refused resource keeps its current version. It never creates a second copy instead: the import
+used to do that, storing the refused document unchecked next to the original, with the same
+origin, and pointing the workflow at it. The resource the store refused is named in a `WARN`
+line in the server log. A prompt snippet is the exception, as for every snippet failure: a
+refused snippet update costs that snippet, logged at `WARN`, and the agent is still imported.
+
 ### Archive limits
 
 An uploaded or synced archive is unpacked under three limits — entry count, bytes per entry,
@@ -566,6 +578,13 @@ would blame this server for the archive). Two kinds, with different guarantees:
 A **snippet or connection file** that is not valid JSON is *not* fatal: like any snippet or
 connection the importer cannot use, it is skipped with a warning in the log, and the rest of the
 archive is imported.
+
+**One document is one resource.** An archive file is named by resource id, so every reference
+to that id — the same workflow named twice in the agent, two spellings of one URI, or several
+versions of one extension — reads the same file, and the import (and a preview or sync) parses
+and writes it once; every reference then names the one resource written for it. A workflow
+directory holding **more than one** workflow document is a bad archive (`400`): only one of them
+could ever be the workflow the agent names.
 
 ## Live Sync (Without ZIP)
 

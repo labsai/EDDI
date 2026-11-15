@@ -40,6 +40,9 @@ class RetryConfigurationDeadlineTest {
         config.setBackoffDelayMs(backoffMs);
         config.setBackoffMultiplier(1.0);
         config.setMaxBackoffDelayMs(backoffMs);
+        // These tests do exact deadline arithmetic with the backoff. Jitter only ever
+        // shortens it, so a jittered 5000 ms backoff can fit where 5000 does not.
+        config.setJitterRatio(0.0);
         return config;
     }
 

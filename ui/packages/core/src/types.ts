@@ -18,7 +18,7 @@ export type ConversationState =
 
 /**
  * SSE event types emitted by POST /agents/{conversationId}/stream.
- * Mirrors RestAgentEngineStreaming — all ten.
+ * Mirrors RestAgentEngineStreaming — all eleven.
  *
  * Note: there is no "thinking" event. A UI once declared one and the backend
  * never emitted it, so the thinking indicator was only ever cleared by the
@@ -31,6 +31,8 @@ export type SSEEventType =
   | "task_complete"
   | "task_failed"
   | "tool_call"
+  /** EDDI 6.7: `{tool, callId, status, durationMs}` once per call, after it ran. */
+  | "tool_result"
   | "cascade_step_start"
   | "cascade_escalation"
   | "guardrail_triggered"

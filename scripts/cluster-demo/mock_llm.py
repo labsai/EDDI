@@ -134,7 +134,7 @@ def main():
         # Loopback by default. The nodes reach this process through host.docker.internal,
         # which on Linux is the docker0 bridge address, not loopback: demo.py binds there
         # (MOCK_LLM_BIND=<bridge gateway>) instead of exposing the mock on every interface.
-        Server((os.environ.get("MOCK_LLM_BIND", "127.0.0.1"), int(sys.argv[2])), Handler).serve_forever()
+        Server((os.environ.get("MOCK_LLM_BIND") or "127.0.0.1", int(sys.argv[2])), Handler).serve_forever()
 
 
 if __name__ == "__main__":

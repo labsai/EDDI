@@ -126,6 +126,24 @@ public class WebScraperTool {
 
     private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
 
+    /**
+     * jsoup pseudo-selectors whose evaluation walks the candidate's siblings — an
+     * index lookup or a same-type count, linear in the parent's width — once per
+     * candidate, which makes them quadratic in it.
+     */
+    private static final Pattern POSITIONAL_PSEUDO = Pattern
+            .compile("(?i):(nth-child|nth-last-child|nth-of-type|nth-last-of-type|first-of-type|last-of-type|only-of-type|only-child|eq|lt|gt)"
+                    + "(?![\\w-])");
+
+    /**
+     * Ceiling on {@link #siblingScanWork} for a selector with a positional pseudo:
+     * tens of milliseconds of sibling walking. A 3,000-row table is ~9 million; a
+     * page that puts hundreds of thousands of nodes under one parent, built to make
+     * the walk run for minutes on a parser worker no timeout can stop, is far
+     * above.
+     */
+    static final long MAX_POSITIONAL_SCAN_WORK = 50_000_000L;
+
     private final OutboundHttp http;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
     private final long maxResponseBytes;
@@ -274,7 +292,15 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting elements matching '%s' from %s", sanitize(cssSelector), sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Elements elements = parseBounded(() -> Jsoup.parse(page.html()).select(cssSelector));
+            boolean positional = usesPositionalPseudo(cssSelector);
+            Elements elements = parseBounded(() -> {
+                Document doc = Jsoup.parse(page.html());
+                return positional && siblingScanWork(doc) > MAX_POSITIONAL_SCAN_WORK ? null : doc.select(cssSelector);
+            });
+            if (elements == null) {
+                return "Error: this page is too wide for positional selectors (:eq, :lt, :gt, :nth-*, :*-of-type, :only-child). "
+                        + "Select by tag, class or attribute instead.";
+            }
 
             if (elements.isEmpty()) {
                 return "No elements found matching selector: " + cssSelector;
@@ -319,6 +345,24 @@ public class WebScraperTool {
             LOGGER.warnf("Selector extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
             throw new ToolFailureException("Error: Could not extract with selector - " + e.getMessage());
         }
+    }
+
+    /**
+     * An upper bound on the sibling walking a positional pseudo can cost on
+     * {@code doc}: the sum over every element of its child-node count squared —
+     * each child a candidate, each candidate walking its siblings once. One linear
+     * pass; package-private for tests.
+     */
+    static long siblingScanWork(Document doc) {
+        long work = 0;
+        for (Element element : doc.getAllElements()) {
+            long width = element.childNodeSize();
+            work += width * width;
+            if (work > MAX_POSITIONAL_SCAN_WORK) {
+                return work;
+            }
+        }
+        return work;
     }
 
     /** Whether an ancestor of {@code element} is already in the result. */
@@ -458,6 +502,41 @@ public class WebScraperTool {
             }
         }
         return false;
+    }
+
+    /**
+     * Whether {@code selector} uses one of the {@link #POSITIONAL_PSEUDO}s as
+     * selector syntax. The same text inside a quoted string, an attribute selector
+     * or a text pseudo's argument ({@code span:contains(:eq(1))}) is a literal
+     * jsoup never evaluates, so those spans are skipped — the spans
+     * {@link #hasSiblingCombinator} skips. An unterminated span fails closed (as if
+     * positional). Package-private for tests.
+     */
+    static boolean usesPositionalPseudo(String selector) {
+        StringBuilder syntax = new StringBuilder(selector.length());
+        int i = 0;
+        int n = selector.length();
+        while (i < n) {
+            char c = selector.charAt(i);
+            int next;
+            if (c == '"' || c == '\'') {
+                next = skipQuoted(selector, i);
+            } else if (c == '[') {
+                next = skipBalanced(selector, i, '[', ']');
+            } else if (c == '(' && isLiteralArgumentPseudo(selector, i)) {
+                next = skipBalanced(selector, i, '(', ')');
+            } else {
+                syntax.append(c);
+                i++;
+                continue;
+            }
+            if (next < 0) {
+                return true;
+            }
+            syntax.append(' ');
+            i = next;
+        }
+        return POSITIONAL_PSEUDO.matcher(syntax).find();
     }
 
     /**

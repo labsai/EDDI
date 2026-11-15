@@ -16,6 +16,7 @@ import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -271,6 +272,15 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant, allowedHosts != null ? allowedHosts : before.allowedHosts());
             } else {
+                if (expected != null && allowedHosts != null && !SecretMetadata.sameGrant(before.allowedAgents(), expected)) {
+                    // A stale request is refused BEFORE the host list is written. The
+                    // precondition is checked atomically only by the grant write below, so
+                    // a request carrying hosts used to commit them first and then answer
+                    // 409 "nothing was written" — a stale edit that could still widen or
+                    // clear where the key may go. A concurrent edit landing between this
+                    // read and the grant write is still refused there, after the hosts.
+                    return grantConflictResponse(ref, before.allowedAgents());
+                }
                 boolean hostsWritten = false;
                 try {
                     if (allowedHosts != null) {
@@ -576,7 +586,10 @@ public class RestSecretStore implements IRestSecretStore {
     @Override
     public Response healthCheck() {
         boolean available = secretProvider.isAvailable();
-        var status = Map.of("status", available ? "UP" : "DOWN", "provider", secretProvider.getClass().getSimpleName(), "available", available);
+        // The injected @ApplicationScoped provider is an ArC client proxy, whose class
+        // is VaultSecretProvider_ClientProxy: name the bean behind it.
+        var status = Map.of("status", available ? "UP" : "DOWN", "provider", ClientProxy.unwrap(secretProvider).getClass().getSimpleName(),
+                "available", available);
 
         if (available) {
             return Response.ok(status).build();

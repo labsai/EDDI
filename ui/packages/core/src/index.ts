@@ -9,6 +9,7 @@ export * from "./types";
 export * from "./http";
 export * from "./sse";
 export * from "./stream-events";
+export * from "./tool-labels";
 export * from "./conversation";
 export * from "./hitl";
 export * from "./attachments";

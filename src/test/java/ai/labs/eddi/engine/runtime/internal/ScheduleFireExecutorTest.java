@@ -1735,4 +1735,50 @@ class ScheduleFireExecutorTest {
             throw new RuntimeException("Cannot set field " + fieldName, e);
         }
     }
+
+    private static ScheduleConfiguration makeLessonConsolidationSchedule(String id) {
+        var s = makeTeamCadenceSchedule(id);
+        s.setName("lesson-consolidation-group-1");
+        s.setMetadata(Map.of(
+                LessonConsolidationService.METADATA_TYPE_KEY, LessonConsolidationService.METADATA_TYPE_CONSOLIDATION,
+                LessonConsolidationService.METADATA_GROUP_ID_KEY, "group-1"));
+        return s;
+    }
+
+    private static LessonConsolidationService.Result lessonResult(LessonConsolidationService.Status status, String message) {
+        return new LessonConsolidationService.Result("group-1", "run-1", status, message, false, 8, 2, 0.01, List.of());
+    }
+
+    @Test
+    @Timeout(10)
+    void fire_lessonConsolidationSchedule_dispatchesToTheConsolidationService() throws Exception {
+        var consolidation = mock(LessonConsolidationService.class);
+        setField(executor, "lessonConsolidationService", consolidation);
+        var schedule = makeLessonConsolidationSchedule("sched-lessons-1");
+        when(consolidation.processScheduledFire(any())).thenReturn(lessonResult(LessonConsolidationService.Status.COMPLETED, "Applied 1 of 1"));
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.COMPLETED.name(), result.status());
+        verify(consolidation).processScheduledFire(schedule.getMetadata());
+        // A maintenance job over a team's lessons is not a conversation turn.
+        verifyNoInteractions(conversationService);
+        verifyNoInteractions(teamCadenceService);
+    }
+
+    @Test
+    @Timeout(10)
+    void fire_lessonConsolidationSchedule_skipIsCompleted_failureRetries() throws Exception {
+        var consolidation = mock(LessonConsolidationService.class);
+        setField(executor, "lessonConsolidationService", consolidation);
+        when(consolidation.processScheduledFire(any())).thenReturn(lessonResult(LessonConsolidationService.Status.SKIPPED, "too few lessons"));
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(makeLessonConsolidationSchedule("sched-lessons-2"), "instance-1", 1).status(),
+                "a deliberate skip is a successful fire, not a retryable failure");
+
+        when(consolidation.processScheduledFire(any())).thenReturn(lessonResult(LessonConsolidationService.Status.FAILED, "no model configured"));
+        ScheduleFireLog failed = executor.fire(makeLessonConsolidationSchedule("sched-lessons-3"), "instance-1", 2);
+        assertEquals(FireStatus.FAILED.name(), failed.status(), "a real failure must retry and dead-letter");
+        assertTrue(failed.errorMessage().contains("no model configured"), failed.errorMessage());
+    }
+
 }

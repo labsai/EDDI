@@ -26,6 +26,7 @@ import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -43,16 +44,19 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -62,6 +66,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -239,6 +244,50 @@ class RestExportServiceReviewFixesTest {
         assertNotNull(written.get());
         assertFalse(written.get().contains("hunter2-literal"), written.get());
         assertTrue(written.get().contains("svc"), "the rest of the document travels: " + written.get());
+    }
+
+    @Test
+    @DisplayName("an agent-shaped reference carrying a configuration's id does not exempt that configuration from VIEW")
+    void agentShapedReferenceDoesNotVetAConfiguration() throws Exception {
+        var agentStep = new WorkflowConfiguration.WorkflowStep();
+        agentStep.setType(URI.create("eddi://ai.labs.agent"));
+        // The authoring check gives an agent reference USE only.
+        agentStep.setConfig(new LinkedHashMap<>(Map.of("uri", "eddi://ai.labs.agent/agentstore/agents/" + FOREIGN_LLM_ID + "?version=1")));
+        var config = new LinkedHashMap<String, Object>();
+        config.put("uri", "eddi://ai.labs.apicalls/apicallstore/apicalls/" + HTTPCALLS_ID + "?version=1");
+        config.put("note", "eddi://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM_ID + "?version=1");
+        workflow = workflowNaming(config);
+        workflow.getWorkflowSteps().add(agentStep);
+        when(guard.requireAccess(eq(FOREIGN_LLM_ID), eq(AccessLevel.VIEW), anyString())).thenThrow(new ForbiddenException("no"));
+
+        assertThrows(ForbiddenException.class, () -> exportService.exportAgent(AGENT_ID, 1, null, null, null));
+
+        verify(llmStore, never()).read(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("a workflow the agent names repeatedly is read and archived once")
+    void repeatedWorkflowIsReadOnce() throws Exception {
+        URI workflowUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1");
+        var agentConfig = new AgentConfiguration();
+        agentConfig.setWorkflows(List.of(workflowUri, workflowUri, workflowUri));
+        when(agentStore.read(AGENT_ID, 1)).thenReturn(agentConfig);
+
+        exportService.exportAgent(AGENT_ID, 1, null, null, null);
+
+        verify(workflowStore, times(1)).read(WORKFLOW_ID, 1);
+    }
+
+    @Test
+    @DisplayName("connection references are found in linear time, unterminated openers or not")
+    void connectionScanIsLinear() {
+        // Nothing after the openers closes them: the regex rescanned the rest of the
+        // text from each one.
+        String openers = "${connection:".repeat(40_000);
+        Set<ConnectionReference> found = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> RestExportService.extractConnectionReferences(List.of("${connection:jira} " + openers)));
+
+        assertTrue(found.contains(new ConnectionReference("default", "jira")), "found: " + found);
     }
 
     private static WorkflowConfiguration workflowNaming(Map<String, Object> config) {

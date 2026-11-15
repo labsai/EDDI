@@ -15,12 +15,20 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
+import ai.labs.eddi.engine.hitl.review.HitlDecisionRecords;
+import ai.labs.eddi.engine.hitl.review.HitlDecisionValidator;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -38,6 +46,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -122,6 +131,10 @@ class ConversationHitlService {
     private final Counter counterHitlResume;
     private final MeterRegistry meterRegistry;
     private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations;
+    /**
+     * The {@code hitl.approval} audit contract (schema 2) — see HitlApprovalAudit.
+     */
+    private final HitlApprovalAudit approvalAudit;
 
     ConversationHitlService(ConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore, IConversationCoordinator conversationCoordinator,
@@ -145,6 +158,7 @@ class ConversationHitlService {
         this.counterHitlResume = counterHitlResume;
         this.meterRegistry = meterRegistry;
         this.inFlightConversations = inFlightConversations;
+        this.approvalAudit = new HitlApprovalAudit(auditLedgerService);
     }
 
     // --- HITL lifecycle ---
@@ -345,6 +359,39 @@ class ConversationHitlService {
         }
     }
 
+    /**
+     * Refuse a decision that names a plan other than the pause's — the pre-CAS half
+     * of {@link HitlPlanBinding#check}. A decision without a hash is not judged
+     * here: strict binding needs the agent configuration, read once the resume is
+     * committed to the snapshot.
+     */
+    private static void requireDecisionMatchesPlan(String conversationId, HitlDecision decision, String committedPlanHash) {
+        try {
+            HitlPlanBinding.check(conversationId, decision, committedPlanHash, () -> false);
+        } catch (HitlPlanBinding.PlanMismatch mismatch) {
+            throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+        }
+    }
+
+    /**
+     * Whether a human decision on this agent's pauses must carry the plan hash: the
+     * deployment says so ({@code eddi.hitl.plan-hash.strict}), or the paused agent
+     * version's {@code hitlConfig.requirePlanHash} does. A failed config read
+     * counts as strict — an unknown policy must not relax a binding the agent may
+     * require.
+     */
+    boolean planBindingStrict(String agentId, Integer agentVersion) {
+        if (conversationService.planHashStrict) {
+            return true;
+        }
+        AgentConfigLookup lookup = lookupAgentConfigPinned(agentId, agentVersion);
+        if (lookup.readFailed()) {
+            return true;
+        }
+        AgentConfiguration config = lookup.config();
+        return config != null && config.getHitlConfig() != null && Boolean.TRUE.equals(config.getHitlConfig().getRequirePlanHash());
+    }
+
     private static IConversationService.PauseMismatchException pauseMismatch(String conversationId) {
         LOGGER.infof("Refusing a HITL decision for conversation %s: it names a pause that is no longer current",
                 sanitize(conversationId));
@@ -370,6 +417,50 @@ class ConversationHitlService {
                                    Boolean returnDetailed,
                                    Boolean returnCurrentStepOnly,
                                    List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        doResume(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields, null);
+    }
+
+    /**
+     * The streamed resume: the same validation, commit and turn as
+     * {@link #resumeConversation(String, HitlDecision, ConversationResponseHandler, Boolean, Boolean, List)},
+     * with the resumed turn's events routed to {@code streaming}. Refusals throw
+     * before {@code streaming} has been touched.
+     */
+    public void resumeConversationStreaming(String conversationId,
+                                            HitlDecision decision,
+                                            IConversationService.StreamingResponseHandler streaming,
+                                            Boolean returnDetailed,
+                                            Boolean returnCurrentStepOnly,
+                                            List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        if (streaming == null) {
+            throw new IllegalArgumentException("a streaming resume needs a handler");
+        }
+        // The turn's completion reaches the stream through the same delivery points a
+        // plain reply handler uses (settled, re-paused after persist, skipped); only
+        // the failure paths differ and are routed to onError below.
+        ConversationResponseHandler adapter = new ConversationResponseHandler() {
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onComplete(snapshot);
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onSkipped(snapshot);
+            }
+        };
+        doResume(conversationId, decision, adapter, returnDetailed, returnCurrentStepOnly, returningFields, streaming);
+    }
+
+    private void doResume(String conversationId,
+                          HitlDecision decision,
+                          ConversationResponseHandler handler,
+                          Boolean returnDetailed,
+                          Boolean returnCurrentStepOnly,
+                          List<String> returningFields,
+                          IConversationService.StreamingResponseHandler streaming)
             throws ResourceStoreException, ResourceNotFoundException {
         // See resumeConversation's @throws IllegalArgumentException javadoc
         // (IConversationService) for why this is checked here rather than trusted
@@ -400,7 +491,10 @@ class ConversationHitlService {
         boolean hasToolDecisions = decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty();
         boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
         boolean hasResumeContext = decision.getContext() != null && !decision.getContext().isEmpty();
-        if (hasToolDecisions || namesPause || hasResumeContext) {
+        boolean hasReviewFields = HitlDecisionValidator.hasReviewFields(decision);
+        HitlPlanBinding.requireWellFormed(decision);
+        boolean namesPlan = decision.namesPlan();
+        if (hasToolDecisions || namesPause || namesPlan || hasResumeContext || hasReviewFields) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
                 // A decision made for an earlier pause must not consume this one.
@@ -413,12 +507,21 @@ class ConversationHitlService {
                 // the state) — "pause changed" would misdescribe it.
                 if (preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                     requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                    // A decision for another plan is refused before the CAS too; the
+                    // authoritative check (and the strict missing-hash refusal) runs
+                    // again on the snapshot the resume actually executes.
+                    if (namesPlan) {
+                        requireDecisionMatchesPlan(conversationId, decision, preCasSnapshot.getHitlPlanHash());
+                    }
                 }
                 if (hasToolDecisions) {
                     validateToolDecisions(decision, preCasSnapshot);
                 }
                 if (hasResumeContext && preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                     validateResumeContext(decision, preCasSnapshot);
+                }
+                if (hasReviewFields && preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    validateReviewFields(decision, preCasSnapshot);
                 }
             }
         }
@@ -454,6 +557,11 @@ class ConversationHitlService {
         // The pending batch the DECISION applies to — captured here so the audit reads
         // it deterministically even though the async resume may mutate the live memory.
         final PendingToolCallBatch prePauseBatch;
+        // The id of the pause this decision settles - what a resume stream announces.
+        final String settledPauseId;
+        // The pause as it was, for the decision's audit entry: when it began, its
+        // timeout policy and, for a RULE pause, the draft an edit replaces.
+        final HitlDecisionRecords.RegularPause prePauseFacts;
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (snapshot == null) {
@@ -472,6 +580,24 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw pauseMismatch(conversationId);
             }
+            // Plan binding (HitlPlanHash): a decision for another plan, or a human
+            // decision without one under strict binding, is refused here, on the
+            // snapshot this resume runs. The pause is put back untouched (its timeout
+            // schedule is still armed), exactly as for a changed pause.
+            final String committedPlanHash = snapshot.getHitlPlanHash();
+            final HitlPlanBinding.Outcome planOutcome;
+            final String agentIdForStrict = snapshot.getAgentId();
+            final Integer agentVersionForStrict = snapshot.getAgentVersion();
+            try {
+                planOutcome = HitlPlanBinding.check(conversationId, decision, committedPlanHash,
+                        () -> planBindingStrict(agentIdForStrict, agentVersionForStrict));
+            } catch (HitlPlanBinding.PlanMismatch mismatch) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+            } catch (HitlPlanBinding.PlanHashRequired planHashRequired) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw planHashRequired;
+            }
             // GDPR Art. 18 — the same admission rule as start and say. A resume runs the
             // rest of the turn (tools, a model call, a rejection-note revision) for the
             // conversation's OWNER, so an owner whose processing an administrator has
@@ -486,14 +612,30 @@ class ConversationHitlService {
             }
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            // Execution side of the binding: re-derive the hash from the plan this
+            // resume is about to run and refuse when it is not the committed one —
+            // whatever changed the stored plan after the pause, the approval was not
+            // given for it.
+            if (!HitlPlanBinding.verifies(committedPlanHash, HitlPlanHash.forPause(memory))) {
+                LOGGER.warnf("hitl.plan.changed: the stored plan of the pause of conversation %s no longer matches the hash it was "
+                        + "committed with — refusing the decision; nothing was run", sanitize(conversationId));
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException("The pending approval's plan no longer matches the plan it was "
+                        + "committed with — nothing was run. Cancel the conversation or contact an administrator.");
+            }
+            decision.bindPlan(committedPlanHash, planOutcome.name());
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
+            settledPauseId = HitlDecision.pauseIdOf(snapshot.getHitlPausedAt());
             prePauseWasToolCall = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
-        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException e) {
+            prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
+                    snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
+        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
+                | HitlPlanBinding.PlanHashRequired e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -545,6 +687,12 @@ class ConversationHitlService {
             // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
             populateToolApprovalsConfig(memory);
 
+            // A streamed resume reports the continued turn through the same sink a
+            // streamed say installs, so task, tool and token events reach the client.
+            if (streaming != null) {
+                memory.setEventSink(ConversationService.eventSinkFor(streaming));
+            }
+
             // Ordering contract (same as the say path, see ConversationService
             // .completeTurn): a resume that RE-PAUSES tells its client only after the
             // re-pause is persisted by resumeFinished below, with the state the store
@@ -556,9 +704,24 @@ class ConversationHitlService {
             // Whether the caller's handler has been given (or is holding) its answer, so a
             // failure path can tell "nothing delivered yet" from "already answered".
             final AtomicBoolean replyDelivered = new AtomicBoolean(false);
+            // Cluster mode: set when the lease this resume runs under is lost (A5).
+            final AtomicBoolean resumeLeaseLost = new AtomicBoolean(false);
+            // Cluster mode: the resume's commit was refused by the fence (A5/A6).
+            final AtomicReference<ConversationFencedException> resumeFenced = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     returnMemory -> {
+                        // A streamed turn that lost the cluster lease stored nothing: the
+                        // stream ends with an error, not with a done event for a turn that
+                        // is not stored (as a streamed say does). Checked BEFORE meterTurnCost,
+                        // as the say path does: a turn stopped by lease loss stores nothing, and
+                        // the node that took the conversation over runs (and meters) it again.
+                        if (streaming != null && conversationService.stoppedByLeaseLoss(conversationId, returnMemory,
+                                new SimpleConversationMemorySnapshot())) {
+                            replyDelivered.set(true);
+                            streaming.onError(new ConversationStepRunner.TurnLeaseLostException(conversationId, returnMemory.getFenceToken()));
+                            return;
+                        }
                         // Settle point of a resumed turn: charge what the resume added
                         // to the step's priced spend (the pre-pause part was charged
                         // when the pause settled — audit:metered_cost says how much).
@@ -566,6 +729,17 @@ class ConversationHitlService {
                         // resume (timeout policy) spends just the same.
                         conversationService.meterTurnCost(returnMemory);
                         if (handler == null) {
+                            return;
+                        }
+                        if (resumeLeaseLost.get() || returnMemory.isLeaseLost()) {
+                            // Cluster mode (A1/A5): this node lost the lease while the resume
+                            // ran. It is not stored and is dead-lettered, so its caller is told
+                            // it was not applied (409) instead of getting the reply of a resume
+                            // that will not exist.
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly,
+                                        returningFields);
+                            }
                             return;
                         }
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, returnDetailed, returnCurrentStepOnly,
@@ -606,9 +780,28 @@ class ConversationHitlService {
             // a scheduled turn), and the approver is bound only around the tool calls
             // they explicitly approved — see ToolLoopResumer.
             final CallerIdentity approverIdentity = callerIdentityContext.captureOrCurrent();
+            // The audit entry is written after the enqueue, while the resumed turn may
+            // already run: its id is fixed now, so the turn can refer to it.
+            decision.setDecisionId(HitlApprovalAudit.newDecisionId());
             final boolean approverOwnsConversation = CallerIdentityContext.isSameUser(approverIdentity, memory.getUserId());
             final CallerIdentity resumeCallerIdentity = approverOwnsConversation ? approverIdentity : null;
             final CallerIdentity approvedCallsIdentity = approverOwnsConversation ? null : approverIdentity;
+
+            // The decision is committed and the resumed turn is about to run: a streamed
+            // client hears so exactly once, before any event of the continued turn. Called
+            // from the resume callable, after its cancelled/ended check, rather than at
+            // submit - so a resume the coordinator drops, or one cancelled before it ran,
+            // never announces itself (those end in onSkipped, the pause restored).
+            final Runnable announceResumeAccepted = () -> {
+                if (streaming == null) {
+                    return;
+                }
+                try {
+                    streaming.onResumeAccepted(settledPauseId, decision.getVerdict());
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Could not announce the accepted resume of %s", sanitize(conversationId));
+                }
+            };
 
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
@@ -630,6 +823,7 @@ class ConversationHitlService {
                     }
                     return null;
                 }
+                announceResumeAccepted.run();
                 try {
                     conversation.resume(decision);
                 } catch (Exception e) {
@@ -638,7 +832,11 @@ class ConversationHitlService {
                     // The resume threw: when its output was never rendered the client is
                     // still waiting, so answer with the ERROR snapshot and its reason.
                     if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                        deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        if (streaming != null) {
+                            streaming.onError(e);
+                        } else {
+                            deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        }
                     }
                 }
                 return null;
@@ -706,7 +904,18 @@ class ConversationHitlService {
                         if (!rePaused) {
                             conversationService.decideContinuation(memory);
                         }
-                        boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        boolean persisted;
+                        try {
+                            persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        } catch (ConversationFencedException e) {
+                            // A6: another node holds the conversation now and has started on
+                            // it. Not an ERROR (the document is the newer holder's): the resume
+                            // is dead-lettered by its task (see call()).
+                            conversationService.counterFenceRejected();
+                            resumeFenced.set(e);
+                            LOGGER.errorf("Resume of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
+                            return;
+                        }
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
                                     + "IN_PROGRESS or rewrote the document — discarding the resumed outcome so the "
@@ -757,7 +966,11 @@ class ConversationHitlService {
                         // timeout. Once only: if the REST timeout answered first, this
                         // second answer is simply ignored.
                         if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                            deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            if (streaming != null) {
+                                streaming.onError(t);
+                            } else {
+                                deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
                         }
                     }
                 }
@@ -793,17 +1006,27 @@ class ConversationHitlService {
 
                 public Void call() {
                     LeaseHandle held = lease;
-                    if (held != null && held.fence() != null) {
-                        // Same fencing as a say turn: the resumed turn's write is refused if
-                        // another node took the conversation over, and losing the lease
-                        // cancels it at the next task boundary.
-                        memory.setFenceToken(held.fence());
-                        try {
-                            conversationMemoryStore.raiseFence(conversationId, held.fence());
-                        } catch (Exception e) {
-                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                    boolean fenced = held != null && held.fence() != null;
+                    if (fenced) {
+                        // Same fencing as a say turn: the fence goes up before the resume runs
+                        // (A3), the resumed turn's write is refused if another node took the
+                        // conversation over, and losing the lease cancels it at the next task
+                        // boundary. A resume that cannot raise the fence does not run: the pause
+                        // is restored, so the approval can be given again.
+                        if (!conversationService.fenceRaised(conversationId, held)) {
+                            inFlightConversations.remove(conversationId, memory);
+                            restorePauseAfterFailedResume(conversationId, memory, true);
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
+                            return null;
                         }
-                        held.onLost(() -> memory.setCancelled(true));
+                        memory.setFenceToken(held.fence());
+                        memory.setLeaseLostCheck(held::isLost);
+                        held.onLost(() -> {
+                            resumeLeaseLost.set(true);
+                            memory.setCancelled(true);
+                        });
                     }
                     try {
                         // The identities were captured on the REST request thread
@@ -829,7 +1052,51 @@ class ConversationHitlService {
                         // value-conditional: never evict a newer execution's registration
                         inFlightConversations.remove(conversationId, memory);
                     }
+                    if (fenced) {
+                        settleLostResume(held.fence());
+                    }
                     return null;
+                }
+
+                /**
+                 * Cluster mode (A5): a resume that lost its lease, or whose commit the fence
+                 * refused, stored nothing. Before, only the cancel flag went up and the
+                 * conversation stayed IN_PROGRESS (the resume's own CAS) with nothing to move
+                 * it: say, undo and redo were refused and crash recovery restored the pause
+                 * only minutes later, with no trace of the decision. Now the pause is restored
+                 * at once, with a fenced CAS, so it stands only while no node that took the
+                 * conversation over has started on it; and the resume is thrown to the
+                 * coordinator, which dead-letters it with its fencing token.
+                 */
+                private void settleLostResume(long fence) {
+                    ConversationFencedException refused = resumeFenced.get();
+                    boolean lost = resumeLeaseLost.get() || memory.isLeaseLost();
+                    if (refused == null && (!lost || committedResumeState.get() != null)) {
+                        return; // committed, or never lost: nothing to settle
+                    }
+                    try {
+                        if (conversationMemoryStore.compareAndSetStateFenced(conversationId, ConversationState.IN_PROGRESS,
+                                ConversationState.AWAITING_HUMAN, fence)) {
+                            conversationService.cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
+                            // Re-arm from the STORED bookmark: the resumed pipeline already
+                            // cleared the live memory's (Conversation.resume), and the original
+                            // schedule was deleted before it ran. The store still holds the
+                            // pause, since the lost resume stored nothing.
+                            scheduleHitlTimeout(conversationId,
+                                    convertConversationMemorySnapshot(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)));
+                            LOGGER.warnf("Resume of conversation %s lost its lease — the pause is restored (AWAITING_HUMAN) and the "
+                                    + "resume is dead-lettered; the decision has to be given again", sanitize(conversationId));
+                        } else {
+                            conversationService.refreshCachedState(conversationId);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.errorf(e, "Could not restore the pause of conversation %s after its resume lost the lease",
+                                sanitize(conversationId));
+                    }
+                    if (refused != null) {
+                        throw new IllegalStateException(refused.getMessage(), refused);
+                    }
+                    throw new ConversationStepRunner.TurnLeaseLostException(conversationId, fence);
                 }
 
                 /**
@@ -866,7 +1133,7 @@ class ConversationHitlService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
-                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy());
+                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy(), prePauseFacts);
             // Task 10 — tool-resume metric, tagged by aggregate verdict.
             if (prePauseWasToolCall) {
                 recordToolResumeMetric(decision, prePauseBatch);
@@ -1005,6 +1272,54 @@ class ConversationHitlService {
                 throw new IllegalArgumentException("context['" + sanitize(key) + "'] was not a secret context value in the paused turn — "
                         + "a resume can only re-supply a secret the paused turn carried");
             }
+        }
+    }
+
+    /**
+     * Validates {@code editedAnswer} / {@code reasonCode} against the paused
+     * snapshot and the agent's PINNED review config, before the CAS (see
+     * {@link HitlDecisionValidator}). A config that cannot be read fails closed: an
+     * edit is refused rather than applied under an unknown policy.
+     */
+    void validateReviewFields(HitlDecision decision, ConversationMemorySnapshot snapshot) throws ResourceStoreException {
+        var lookup = lookupAgentConfigPinned(snapshot.getAgentId(), snapshot.getAgentVersion());
+        if (lookup.readFailed()) {
+            throw new ResourceStoreException("Could not read the review policy of agent " + snapshot.getAgentId()
+                    + " — the pause is untouched; retry", null);
+        }
+        HitlDecisionValidator.validate(decision, snapshot, lookup.config() != null ? lookup.config().getHitlConfig() : null);
+    }
+
+    /**
+     * Side-effect-free dry run of a decision for a paused conversation: the same
+     * pause, tool-decision and review checks the resume runs before the CAS,
+     * without consuming anything. For surfaces that must answer synchronously
+     * (Slack's {@code view_submission}).
+     *
+     * @throws IllegalArgumentException
+     *             on an invalid decision (with the message the resume would give)
+     * @throws IConversationService.PauseMismatchException
+     *             when the decision names a pause that is no longer current
+     * @throws IllegalStateException
+     *             when the conversation is not awaiting a decision
+     */
+    public void validateDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        if (decision == null || decision.getVerdict() == null) {
+            throw new IllegalArgumentException("decision.verdict is required (APPROVED or REJECTED)");
+        }
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        if (snapshot.getConversationState() != ConversationState.AWAITING_HUMAN) {
+            throw new IllegalStateException("Conversation is not awaiting a decision (current: " + snapshot.getConversationState() + ")");
+        }
+        requireDecisionMatchesPause(conversationId, decision, snapshot.getHitlPausedAt());
+        if (decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty()) {
+            validateToolDecisions(decision, snapshot);
+        }
+        if (HitlDecisionValidator.hasReviewFields(decision)) {
+            validateReviewFields(decision, snapshot);
         }
     }
 
@@ -1359,36 +1674,49 @@ class ConversationHitlService {
                            HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch,
                            HitlRevisionPolicy revisionPolicy) {
+        auditHitlDecision(conversationId, agentId, agentVersion, userId, environment, decision, toolCallPause, pendingBatch, revisionPolicy,
+                HitlDecisionRecords.RegularPause.UNKNOWN);
+    }
+
+    /**
+     * As above, with what the pause looked like before the decision consumed it —
+     * the schema-2 fields (pause id, latency, timeout policy, edit metrics). The
+     * entry keeps every pre-6.7 field; see {@link HitlApprovalAudit}.
+     */
+    void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                           String userId, Environment environment,
+                           HitlDecision decision,
+                           boolean toolCallPause, PendingToolCallBatch pendingBatch,
+                           HitlRevisionPolicy revisionPolicy, HitlDecisionRecords.RegularPause pause) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
-            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
-            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
-            if (decision.getNote() != null) {
-                detail.put("note", decision.getNote());
-            }
-            // Task 10 — TOOL_CALL pauses carry a per-call decision summary. Each entry
-            // records the callId, resolved verdict, whether the args were amended, and
-            // the tool name — plus a SHA-256 argsDigest so the ledger can prove WHICH
-            // arguments were approved WITHOUT ever storing the raw (possibly sensitive)
-            // arguments.
-            if (toolCallPause) {
-                detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
-                detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
-            } else if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null && revisionPolicy.revise()) {
-                detail.put("onRejection", revisionPolicy.onRejection().name());
-            }
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
-                    environment != null ? environment.toString() : null, -1,
-                    "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            String onRejection = !toolCallPause && decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null
+                    && revisionPolicy.revise() ? revisionPolicy.onRejection().name() : null;
+            AgentConfiguration agentConfig = toolCallPause ? null : readAgentConfigPinned(agentId, agentVersion);
+            var record = HitlDecisionRecords.regularDecision(conversationId, agentId, agentVersion, userId,
+                    environment != null ? environment.toString() : null, decision, toolCallPause, pendingBatch,
+                    agentConfig != null ? agentConfig.getHitlConfig() : null, pause,
+                    toolCallPause ? buildToolDecisionSummary(decision, pendingBatch) : null, onRejection);
+            approvalAudit.write(record, decision.getDecisionId());
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * The answer a RULE pause kept for review (its revision candidate's draft), or
+     * null — read before the resume takes the candidate off the step.
+     */
+    static String ruleDraftOf(IConversationMemory memory) {
+        try {
+            var step = memory.getCurrentStep();
+            var stored = step != null ? step.getLatestData(HitlRevisionCandidate.STEP_KEY) : null;
+            HitlRevisionCandidate candidate = stored != null ? HitlRevisionCandidate.fromMap(stored.getResult()) : null;
+            return candidate != null ? candidate.getDraft() : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -1552,16 +1880,25 @@ class ConversationHitlService {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", "CANCELLED");
-            detail.put("mode", mode != null ? mode.name() : "CANCEL_GRACEFUL");
-            detail.put("decidedBy", cancelledBy != null ? cancelledBy : "unknown");
-            detail.put("automated", cancelledBy != null && cancelledBy.startsWith("system:"));
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), conversationId, null, null, null,
-                    null, -1, "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            // The bookmark is still in place (it is cleared after this call): the entry
+            // names the agent, the owner and the pause that was cancelled.
+            ConversationMemorySnapshot snapshot = null;
+            try {
+                snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            } catch (Exception e) {
+                LOGGER.debugf("Cancelled pause of %s not readable for the audit entry: %s", sanitize(conversationId), e.getMessage());
+            }
+            String agentId = snapshot != null ? snapshot.getAgentId() : null;
+            Integer agentVersion = snapshot != null ? snapshot.getAgentVersion() : null;
+            AgentConfiguration agentConfig = agentId != null ? readAgentConfigPinned(agentId, agentVersion) : null;
+            var record = HitlDecisionRecords.regularCancellation(conversationId, agentId, agentVersion,
+                    snapshot != null ? snapshot.getUserId() : null,
+                    snapshot != null && snapshot.getEnvironment() != null ? snapshot.getEnvironment().toString() : null,
+                    snapshot != null ? snapshot.getHitlPauseType() : null, snapshot != null ? snapshot.getHitlPendingToolCalls() : null,
+                    agentConfig != null ? agentConfig.getHitlConfig() : null, snapshot != null ? snapshot.getHitlPausedAt() : null,
+                    snapshot != null && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null,
+                    mode != null ? mode.name() : ControlSignal.CANCEL_GRACEFUL.name(), cancelledBy);
+            approvalAudit.write(record);
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL cancel audit entry for %s: %s", conversationId, e.getMessage());
         }
@@ -1606,6 +1943,39 @@ class ConversationHitlService {
      * WAIT_INDEFINITELY (the default).
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
+        populateTimeoutBookmark(memory);
+        renderApprovalContext(memory);
+        // Last: after the turn's secret scrub (done before this is called) and before
+        // the store, so the hash covers exactly what is persisted.
+        HitlPlanHash.commit(memory);
+    }
+
+    /**
+     * Renders the agent's {@code approvalContext} blocks (and the matched tool
+     * rules' {@code context}) once, for this pause, onto the memory — persisted
+     * with the pause by the caller. Overwrites the previous pause's context; a
+     * failure leaves none and never fails the pause.
+     */
+    private void renderApprovalContext(IConversationMemory memory) {
+        try {
+            memory.setHitlApprovalContext(null);
+            ApprovalContextRenderer renderer = conversationService.approvalContextRenderer();
+            if (renderer == null) {
+                return;
+            }
+            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
+            // An agent without hitlConfig can still pause on a task-level toolApprovals
+            // rule: the renderer then
+            // takes the blocks of the effective configuration stored on the pending batch.
+            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
+                    hitlConfig != null ? hitlConfig.getToolApprovals() : null));
+        } catch (Exception e) {
+            LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+        }
+    }
+
+    private void populateTimeoutBookmark(IConversationMemory memory) {
         try {
             memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
@@ -1753,9 +2123,14 @@ class ConversationHitlService {
             if (matched == null) {
                 return true;
             }
+            // The rule a call selected is the FIRST one with its match string: rules of
+            // equal match sort stably (ToolApprovalRules), and the strict merge puts a
+            // task's rules before the agent's. A later rule with the same match is
+            // shadowed, so its policy says nothing about this call.
             boolean statesPolicy = matched.equals(governing.getMatch())
                     || toolApprovals != null && toolApprovals.getRules() != null && toolApprovals.getRules().stream()
-                            .anyMatch(r -> r != null && matched.equals(r.getMatch()) && r.getTimeoutPolicy() != null);
+                            .filter(r -> r != null && matched.equals(r.getMatch())).findFirst()
+                            .map(r -> r.getTimeoutPolicy() != null).orElse(false);
             if (!statesPolicy) {
                 return true;
             }

@@ -96,6 +96,12 @@ public class GroupWorkspace {
      * completes.
      */
     private List<String> pulledTaskIds = new CopyOnWriteArrayList<>();
+    /**
+     * Cross-team handoff state: origins of handed-off tasks, the intake inbox and
+     * decline tombstones. Absent in documents written before handoff existed, which
+     * read back as empty.
+     */
+    private WorkspaceHandoffs handoffs = new WorkspaceHandoffs();
     private Instant created;
     private Instant lastModified;
     /**
@@ -311,6 +317,14 @@ public class GroupWorkspace {
 
     public void setPulledTaskIds(List<String> pulledTaskIds) {
         this.pulledTaskIds = pulledTaskIds != null ? new CopyOnWriteArrayList<>(pulledTaskIds) : new CopyOnWriteArrayList<>();
+    }
+
+    public WorkspaceHandoffs getHandoffs() {
+        return handoffs;
+    }
+
+    public void setHandoffs(WorkspaceHandoffs handoffs) {
+        this.handoffs = handoffs != null ? handoffs : new WorkspaceHandoffs();
     }
 
     public Instant getCreated() {

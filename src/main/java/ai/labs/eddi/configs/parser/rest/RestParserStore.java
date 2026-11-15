@@ -78,6 +78,9 @@ public class RestParserStore implements IRestParserStore {
     static Map<String, URI> referencedResources(ParserConfiguration parserConfiguration) {
         Map<String, URI> references = new LinkedHashMap<>();
         if (parserConfiguration != null) {
+            // config.uri too: the standalone parse endpoint loads the parser it names
+            // (InputParserTask.loadParserDocument) and uses that parser's dictionaries.
+            RestWorkflowStore.addConfigReference(parserConfiguration.getConfig(), references);
             RestWorkflowStore.addExtensionReferences(parserConfiguration.getExtensions(), references);
         }
         return references;

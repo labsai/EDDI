@@ -64,7 +64,9 @@ class NatsSharedStateFactoryLeaderReadsTest {
         when(entry.getRevision()).thenReturn(4L);
         when(reopened.get("k")).thenReturn(entry);
         when(connections.keyValue("T_LEASES")).thenReturn(opened, reopened);
-        var kv = new NatsSharedKv(connections, "T_LEASES", null);
+        // No minimum handle age: the reopen is tested here, the age floor in
+        // NatsSharedKvReopenTest.
+        var kv = new NatsSharedKv(connections, "T_LEASES", null, 0);
 
         assertThrows(ClusterUnavailableException.class, () -> kv.get("k"));
         assertEquals(4L, kv.get("k").orElseThrow().revision(), "the next call opens a new handle instead of reusing the failed one");

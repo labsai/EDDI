@@ -1,0 +1,50 @@
+# nats.conf for the three-node NATS cluster of the nats component.
+#
+# No secret in here: NATS expands $NATS_EDDI_PASSWORD and $NATS_ROUTE_PASSWORD
+# from the pod environment, which the StatefulSet fills from the `nats-auth`
+# Secret you create (see kustomization.yaml). Without authentication anything
+# that reached port 4222 could drain every EDDI node with one publish, delete the
+# lease and nonce buckets, or read dead letters; without route authentication,
+# anything that reached 6222 could join the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: eddi
+data:
+  nats.conf: |
+    server_name: $POD_NAME
+    port: 4222
+    http_port: 8222
+    jetstream {
+      store_dir: /data
+      # 80 % of the 5Gi volume: JetStream refuses new data before the filesystem
+      # is full (a full volume corrupts the store and blocks lease creates).
+      max_file_store: 4096M
+    }
+    # EDDI's user may touch only EDDI's subjects, and never delete a stream or
+    # touch JetStream placement: every EDDI pod holds this one credential.
+    authorization {
+      users: [
+        {
+          user: eddi
+          password: $NATS_EDDI_PASSWORD
+          permissions: { publish: { allow: ["eddi.>", "$JS.API.>", "$KV.*.>", "$O.*.>", "$JS.ACK.>", "$JS.FC.>", "_INBOX.>"], deny: ["$JS.API.STREAM.DELETE.>", "$JS.API.SERVER.>", "$JS.API.META.>", "$JS.API.ACCOUNT.PURGE.>"] }, subscribe: ["eddi.>", "$JS.API.>", "$KV.*.>", "_INBOX.>"] }
+        }
+      ]
+    }
+    cluster {
+      name: eddi
+      port: 6222
+      # Routes authenticate on their own: client authorization does not cover
+      # them. The outgoing routes, with these credentials, are passed as --routes
+      # (see nats-statefulset.yaml).
+      authorization {
+        user: route
+        password: $NATS_ROUTE_PASSWORD
+        timeout: 2
+      }
+    }

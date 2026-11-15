@@ -509,6 +509,78 @@ class RestChannelIntegrationStoreCrudTest {
 
             assertDoesNotThrow(() -> sut.createChannel(config));
         }
+
+        private static final String STORED_ID = "aabbccddeeff112233445577";
+
+        private ChannelIntegrationConfiguration bindingC12345() {
+            var config = validConfig();
+            config.setPlatformConfig(new HashMap<>(Map.of("channelId", "C12345")));
+            return config;
+        }
+
+        /** One stored integration, named differently, that already binds C12345. */
+        private ChannelIntegrationConfiguration storedBindingC12345() throws Exception {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/" + STORED_ID + "?version=1"));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of(descriptor));
+            var stored = validConfig();
+            stored.setName("Other Config");
+            stored.setPlatformConfig(Map.of("channelId", "C12345"));
+            return stored;
+        }
+
+        @Test
+        @DisplayName("a channelId scan that cannot run refuses the save instead of allowing it")
+        void scanFailureRefusesSave() throws Exception {
+            // The hiccup hits the channelId scan only; the name scan right after it reads
+            // fine.
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenThrow(new IResourceStore.ResourceStoreException("store down"))
+                    .thenReturn(List.of());
+            lenient().when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.createChannel(bindingC12345()));
+            verify(channelStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a transient failure reading the integration that holds the channelId refuses the save")
+        void transientEntryReadFailureRefusesSave() throws Exception {
+            var stored = storedBindingC12345();
+            // Unreadable during the channelId scan, readable again for the name scan: the
+            // save would otherwise store a second integration bound to C12345.
+            when(channelStore.read(STORED_ID, 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("connection reset"))
+                    .thenReturn(stored);
+            lenient().when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
+
+            assertThrows(ServiceUnavailableException.class, () -> sut.createChannel(bindingC12345()));
+            verify(channelStore, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a stored integration whose document no longer deserialises is skipped, not a blocker")
+        void corruptEntryIsSkipped() throws Exception {
+            storedBindingC12345();
+            when(channelStore.read(STORED_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException(
+                    "unreadable", new JsonParseException(null, "unexpected token")));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
+
+            assertDoesNotThrow(() -> sut.createChannel(bindingC12345()));
+            verify(channelStore).create(any());
+        }
+
+        @Test
+        @DisplayName("a descriptor whose integration no longer exists is skipped")
+        void missingEntryIsSkipped() throws Exception {
+            storedBindingC12345();
+            when(channelStore.read(STORED_ID, 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
+
+            assertDoesNotThrow(() -> sut.createChannel(bindingC12345()));
+            verify(channelStore).create(any());
+        }
     }
 
     // ─── sanitizeForLog ────────────────────────────────────────────────────────

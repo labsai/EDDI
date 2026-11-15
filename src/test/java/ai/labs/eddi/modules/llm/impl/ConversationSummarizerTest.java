@@ -234,6 +234,24 @@ class ConversationSummarizerTest {
         verify(summarizationService).summarizeWithUsage(anyString(), contains("ALREADY stored"), anyString(), anyString(), any());
     }
 
+    /**
+     * Order numbers, ticket ids and links are what a user comes back for, and a
+     * summarizer left to itself paraphrases them ("the order from earlier").
+     */
+    @Test
+    void updateIfNeeded_defaultPrompt_asksForIdentifiersVerbatim() {
+        var memory = createMockMemory(7);
+        var config = createConfig(5);
+
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary", 0, 0));
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verify(summarizationService).summarizeWithUsage(anyString(), contains("Every opaque identifier exactly as written"), anyString(), anyString(),
+                any());
+    }
+
     @Test
     void readSummary_noProperty_returnsNull() {
         var memory = createMockMemory(1);
@@ -511,7 +529,7 @@ class ConversationSummarizerTest {
     void updateIfNeeded_refusedSpendCheck_makesNoCall() {
         var memory = createMockMemory(7);
 
-        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> false);
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, pending -> false);
 
         verifyNoInteractions(summarizationService);
         assertTrue(usage.isEmpty());
@@ -524,7 +542,7 @@ class ConversationSummarizerTest {
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(new SummarizationService.SummarizationResult("Summary", 1200, 300));
 
-        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> true);
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, pending -> true);
 
         assertEquals(1200, usage.get("inputTokens"));
         assertEquals(300, usage.get("outputTokens"));

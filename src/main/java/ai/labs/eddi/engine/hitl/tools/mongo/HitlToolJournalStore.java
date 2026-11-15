@@ -142,16 +142,34 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
     @Override
     public int reconcileRetention() {
         int dropped = 0;
+        RuntimeException firstFailure = null;
         for (Document index : collection.listIndexes()) {
             String name = index.getString("name");
             if (name != null && isStaleRetentionIndex(name, index)) {
                 LOGGER.warnf("HITL tool journal: dropping stale TTL index %s — it expires EXECUTING claims and was recreated by an older "
                         + "pod during a rolling update; finish the upgrade so no old pod is left", name);
-                dropIndexIfPresent(name);
-                dropped++;
+                // Strict: a drop that failed for any reason but a missing index must not count
+                // as a
+                // repair, or the pass reports success while the stale index keeps expiring
+                // claims. One
+                // failing drop must not keep the others, or the partial index, from being
+                // handled: the
+                // first failure is rethrown at the end, for the scheduled job to log and retry.
+                try {
+                    if (dropIndexStrict(name)) {
+                        dropped++;
+                    }
+                } catch (RuntimeException e) {
+                    if (firstFailure == null) {
+                        firstFailure = e;
+                    }
+                }
             }
         }
         createTtlIndexWithConflictRetry(retentionSeconds);
+        if (firstFailure != null) {
+            throw firstFailure;
+        }
         return dropped;
     }
 
@@ -164,6 +182,22 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
         }
         Object key = index.get("key");
         return key instanceof Document keyDoc && keyDoc.containsKey(CLAIMED_AT);
+    }
+
+    /**
+     * Drops the index; {@code false} when it was already gone (IndexNotFound 27,
+     * NamespaceNotFound 26). Any other failure propagates.
+     */
+    private boolean dropIndexStrict(String indexName) {
+        try {
+            collection.dropIndex(indexName);
+            return true;
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() == 27 || e.getErrorCode() == 26) {
+                return false;
+            }
+            throw e;
+        }
     }
 
     private void dropIndexIfPresent(String indexName) {

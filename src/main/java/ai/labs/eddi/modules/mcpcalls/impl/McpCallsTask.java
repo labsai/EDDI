@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.mcpcalls.impl;
 
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyOverlayService;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
@@ -123,6 +124,10 @@ public class McpCallsTask implements ILifecycleTask {
      */
     @Inject
     CallerIdentityContext callerIdentityContext;
+
+    /** Re-gates suspended earned-autonomy categories; null in hand-built tests. */
+    @Inject
+    AutonomyOverlayService autonomyOverlay;
 
     @Inject
     public McpCallsTask(IResourceClientLibrary resourceClientLibrary, IMemoryItemConverter memoryItemConverter, IJsonSerialization jsonSerialization,
@@ -440,7 +445,7 @@ public class McpCallsTask implements ILifecycleTask {
         if (!toolHitlEnabled) {
             return false;
         }
-        ToolApprovalsConfig approvals = memory.getAgentToolApprovalsConfig();
+        ToolApprovalsConfig approvals = AutonomyOverlayService.applyTo(autonomyOverlay, memory, memory.getAgentToolApprovalsConfig());
         if (approvals == null || toolRequest.name() == null) {
             return false;
         }

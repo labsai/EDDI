@@ -6,8 +6,8 @@ import java.util.function.Consumer;
 
 /**
  * The one structured INFO line every LLM recovery action leaves (R11): a repair
- * of the model's reply, a same-model re-ask, an escalation to the next cascade
- * step, a skipped (open-circuit) model, a served fallback.
+ * (or wrap) of the model's reply, a same-model re-ask, an escalation to the
+ * next cascade step, a skipped (open-circuit) model, a served fallback.
  * <p>
  * One recovery, one line — the call site that performs the action emits it, and
  * nothing else logs the same event at INFO. The failures that triggered a
@@ -26,6 +26,8 @@ final class LlmRecoveryLog {
 
     /** The actions, as they appear in {@code action=} and in the metric. */
     static final String REPAIR = "repair";
+    /** A plain-text reply wrapped into the configured JSON object. */
+    static final String WRAP = "wrap";
     static final String RETRY = "retry";
     static final String ESCALATE = "escalate";
     static final String CIRCUIT_SKIP = "circuit_skip";

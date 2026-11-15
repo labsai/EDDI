@@ -73,6 +73,26 @@ describe("GroupHitlEditor", () => {
     expect(payload.config.phases.every((p: DiscussionPhase) => p.requiresApproval === false)).toBe(true);
   });
 
+  it("saving keeps hitlConfig fields the editor has no control for (review)", () => {
+    const config = makeConfig({
+      phases: [phase("Initial Opinions"), phase("Synthesis", true)],
+      hitlConfig: {
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        granularity: "PHASE",
+        onTaskRejection: "FAIL",
+        approvalTimeout: null,
+        review: { allowResultEdits: true },
+      },
+    } as Partial<AgentGroupConfiguration>);
+    renderWithProviders(
+      <GroupHitlEditor config={config} groupId="g1" groupVersion={3} onDone={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId("group-hitl-save"));
+
+    const payload = mockMutate.mock.calls[0]![0];
+    expect(payload.config.hitlConfig.review).toEqual({ allowResultEdits: true });
+  });
+
   it("blocks save when a finite timeout policy has an invalid duration", () => {
     renderWithProviders(
       <GroupHitlEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
