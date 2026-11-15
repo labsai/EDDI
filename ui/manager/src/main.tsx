@@ -74,7 +74,7 @@ async function startApp() {
           ? "[EDDI] eddi-force-mocks is set — starting mock API (MSW), backend not probed"
           : "[EDDI] Backend not reachable — starting mock API (MSW)",
       );
-      const { worker, recordUnhandledApiRequest } = await import("@/test/mocks/browser");
+      const { worker, recordUnhandledApiFrame } = await import("@/test/mocks/browser");
       await worker.start({
         // NOT "bypass". An API call with no handler used to fall through to the
         // dev server silently, so a page could fail to load all of its data and
@@ -82,7 +82,7 @@ async function startApp() {
         // too slow" skips came from. Unhandled API calls are now recorded on
         // `window` so a Playwright fixture can fail the test that caused them,
         // and still bypassed so dev-server behaviour is unchanged.
-        onUnhandledRequest: recordUnhandledApiRequest,
+        onUnhandledFrame: recordUnhandledApiFrame,
       });
       // Signal to UI components that mock data is active
       (window as unknown as Record<string, unknown>).__EDDI_MOCK_ACTIVE__ = true;

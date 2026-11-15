@@ -16,7 +16,7 @@ import type { ConvergenceProgress } from "@/hooks/use-group-discussion-stream";
  */
 
 const server = setupServer(...handlers);
-beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "bypass" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 

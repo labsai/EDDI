@@ -158,8 +158,12 @@ describe("FeedbackPage", () => {
     fireEvent.click(screen.getByTestId("rating-select-r1"));
     fireEvent.click(screen.getByTestId("rating-select-r4"));
     fireEvent.click(screen.getByTestId("feedback-review-selected"));
-    await waitFor(() => expect(screen.queryByTestId("rating-row-r1")).toBeNull());
-    expect(screen.queryByTestId("rating-row-r4")).toBeNull();
+    // The selected ratings are reviewed one after another, so r1 can leave the list
+    // before r4's request has finished: wait for both rather than racing the second.
+    await waitFor(() => {
+      expect(screen.queryByTestId("rating-row-r1")).toBeNull();
+      expect(screen.queryByTestId("rating-row-r4")).toBeNull();
+    });
     expect(screen.getByTestId("rating-row-r3")).toBeInTheDocument();
   });
 

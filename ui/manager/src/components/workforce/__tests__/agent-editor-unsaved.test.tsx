@@ -230,6 +230,10 @@ describe("AgentEditorSheet unsaved changes", () => {
     renderWithProviders(<AgentEditorSheet agentId="agent1" onClose={vi.fn()} />);
 
     await screen.findByLabelText("Description");
+    // The field is on screen a beat before the fetched agent has been copied into
+    // it; in that gap the form really does differ from the agent. Wait for it to
+    // settle, then require that it stays clean.
+    await waitFor(() => expect(fire()).toBe(false));
     expect(fire()).toBe(false);
 
     await user.type(screen.getByLabelText("Description"), " edited");
