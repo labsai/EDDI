@@ -56,8 +56,9 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 git clone https://github.com/<your-username>/EDDI.git
 cd EDDI/ui/manager
 
-# 3. Install dependencies
-npm install
+# 3. Install dependencies — at ui/, the npm workspaces root (one lockfile for
+#    the Manager, the Chat UI and ui/packages/*)
+(cd .. && npm ci)
 
 # 4. Start the dev server
 npm run dev
