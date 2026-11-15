@@ -302,7 +302,7 @@ follow the deployed version, like the rest of the profile.
 | `appearance.starters` | `[]` | ≤ 6 one-click starters of ≤ 200 characters, sent as the user's message exactly as written |
 | `conversationControls.undo` · `redo` · `attachments` · `quickReplies` · `streaming` | shown | `false` hides the control; absent keeps it |
 | `conversationControls.rating` | shown | `false` hides the rating controls `ratingConfig` enables; it cannot switch ratings on |
-| `conversationControls.rawHtml` | **`false`** | `true` renders HTML in the agent's replies (through the client's sanitizer). Absent or `false` shows HTML as text |
+| `conversationControls.rawHtml` | **`false`** | The configured default, as the profile reports it: `true` asks clients to render HTML in the agent's replies (through their sanitizer), absent or `false` to show it as text. **The Chat UI widget does not apply it yet** and still renders HTML for every agent; see the upgrade note |
 
 The profile returns `conversationControls` with every default applied
 (booleans, never absent), and `appearance` as stored or `null`. These are
@@ -310,9 +310,14 @@ presentation switches: hiding undo does not disable the undo endpoint. A save
 with an invalid value answers 400 naming the field — on every write path,
 including ZIP import and agent sync, which carry both blocks unchanged.
 
-> **Upgrade note — `rawHtml` defaults to off.** Before 6.7.0 the Chat UI
-> rendered HTML in every agent's replies. An agent whose replies are meant to
-> contain HTML needs `"conversationControls": { "rawHtml": true }`; see
+> **Upgrade note — `rawHtml` defaults to off.** From 6.7.0 the profile reports
+> `rawHtml: false` for every agent that does not set it. That is the configured
+> default, not yet what the widget does: the Chat UI keeps rendering HTML in
+> every agent's replies until the release whose widget reads
+> `conversationControls`, so leaving `rawHtml` off changes nothing visible today.
+> An agent whose replies are meant to contain HTML should get
+> `"conversationControls": { "rawHtml": true }` now, so it keeps rendering once
+> the widget follows the setting; see
 > [chat-ui-embedding.md](chat-ui-embedding.md#upgrading-html-in-replies-is-off-by-default).
 
 ## Conversation Titles (`titleGeneration`)
