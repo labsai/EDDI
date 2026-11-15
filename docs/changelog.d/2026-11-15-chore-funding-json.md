@@ -4,7 +4,7 @@
 
 ### What changed
 
-- `funding.json` (repo root): a [funding.json](https://fundingjson.org/) v1.1.0 manifest, the format FLOSS/fund and similar programmes read. It names EDDI Solutions (organisation, owner, `gregor.jarisch@eddi.solutions`, https://eddi.technology), the EDDI project (Apache-2.0, `https://github.com/labsai/EDDI`), one bank-transfer channel and two plans of any amount in EUR (one-time and monthly). Validated against `https://fundingjson.org/schema/v1.1.0.json` with `jsonschema`.
+- `funding.json` (repo root): a [funding.json](https://fundingjson.org/) v1.1.0 manifest, the format FLOSS/fund and similar programmes read. It names EDDI Solutions (organisation, owner, `gregor.jarisch@eddi.solutions`, commercial website https://eddi.solutions), the EDDI project (Apache-2.0, https://eddi.technology, `https://github.com/labsai/EDDI`), one bank-transfer channel and two plans of any amount in EUR (one-time and monthly). Validated against `https://fundingjson.org/schema/v1.1.0.json` with `jsonschema`.
 
 ### Design decisions
 
@@ -13,4 +13,4 @@
 
 ### What's next
 
-- `https://eddi.technology` is a different host, so directories show the entity and project web pages as *unverified* until the website (`labsai/EDDI-LABS-AI-Website`) serves `/.well-known/funding-manifest-urls` containing `https://github.com/labsai/EDDI/blob/main/funding.json`; then add `wellKnown` to both `webpageUrl` entries.
+- `https://eddi.solutions` (entity) and `https://eddi.technology` (project) are other hosts, so directories show those web pages as *unverified* until each site serves `/.well-known/funding-manifest-urls` containing `https://github.com/labsai/EDDI/blob/main/funding.json`; then add `wellKnown` to the matching `webpageUrl` entry.
