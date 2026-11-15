@@ -116,6 +116,41 @@ describe("--chat-* aliases", () => {
     for (const name of new Set(written)) expect(Object.keys(BEFORE), name).toContain(name);
   });
 
+  it("follows the chat accent, not the Manager's tokens, under /branding/brand.css", () => {
+    // What BrandDelivery.stylesheet emits for a brand with a primary and a
+    // separate chat accent: the Manager's tokens (--color-primary, --color-ring
+    // …) land on :root of the widget page too, after variables.css.
+    const brand = new Map<string, string>([
+      ["--color-primary", "#e11d48"],
+      ["--color-ring", "#e11d48"],
+      ["--color-sidebar-accent", "#e11d48"],
+      ["--color-primary-foreground", "#ffffff"],
+      ["--color-sidebar-accent-foreground", "#ffffff"],
+      ["--brand-loader-accent", "#e11d48"],
+      ["--chat-accent", "#0f766e"],
+    ]);
+    function branded(theme: "dark" | "light", name: string, depth = 0): string {
+      expect(depth, `var() loop at ${name}`).toBeLessThan(10);
+      const value =
+        brand.get(name) ?? (theme === "light" ? light.get(name) : undefined) ?? aliases.get(name) ?? base.get(name);
+      expect(value, `${theme}: ${name} is not declared`).toBeDefined();
+      const ref = /^var\((--[\w-]+)\)$/.exec(value!);
+      return ref ? branded(theme, ref[1]!, depth + 1) : value!;
+    }
+
+    for (const theme of ["dark", "light"] as const) {
+      for (const name of ["--chat-accent", "--chat-user-bg", "--chat-input-focus"]) {
+        expect(branded(theme, name), `${theme}: ${name}`).toBe("#0f766e");
+      }
+    }
+    // Every other --chat-* name ignores the brand: it writes no other widget colour.
+    for (const name of Object.keys(BEFORE)) {
+      if (["--chat-accent", "--chat-user-bg", "--chat-input-focus"].includes(name)) continue;
+      expect(branded("dark", name), name).toBe(BEFORE[name]!.dark);
+      expect(branded("light", name), name).toBe(BEFORE[name]!.light);
+    }
+  });
+
   it("keeps --chat-accent overridable by /branding/brand.css", () => {
     // BrandDelivery writes `:root{--chat-accent:…}` after this stylesheet; a
     // higher-specificity declaration here would silently win over the brand.
