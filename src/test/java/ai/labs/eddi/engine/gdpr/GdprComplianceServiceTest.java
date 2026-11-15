@@ -2046,6 +2046,49 @@ class GdprComplianceServiceTest {
     }
 
     @Nested
+    @DisplayName("erased-subject record")
+    class ErasedSubjectRecord {
+
+        @Test
+        @DisplayName("erasure records the user before any participant runs, and again at the end")
+        void recordedBeforeParticipants() throws Exception {
+            var erasedSubjects = mock(ErasedSubjects.class);
+            service.erasedSubjects = erasedSubjects;
+            var participant = mock(IGdprParticipant.class);
+            when(participant.name()).thenReturn("hitlOversight");
+            @SuppressWarnings("unchecked")
+            Instance<IGdprParticipant> instance = mock(Instance.class);
+            doAnswer(invocation -> {
+                Consumer<IGdprParticipant> consumer = invocation.getArgument(0);
+                consumer.accept(participant);
+                return null;
+            }).when(instance).forEach(any());
+            service.participantInstances = instance;
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            var order = inOrder(erasedSubjects, participant);
+            order.verify(erasedSubjects).record(eq("alice"), any(Instant.class));
+            order.verify(participant).erase("alice");
+            order.verify(erasedSubjects).record(eq("alice"), any(Instant.class));
+            assertTrue(result.complete(), result.failedSteps().toString());
+        }
+
+        @Test
+        @DisplayName("a record that cannot be written makes the erasure incomplete, reported once")
+        void failureIsReported() {
+            var erasedSubjects = mock(ErasedSubjects.class);
+            doThrow(new IllegalStateException("down")).when(erasedSubjects).record(anyString(), any());
+            service.erasedSubjects = erasedSubjects;
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            assertFalse(result.complete());
+            assertEquals(1, result.failedSteps().stream().filter("erasedSubjectRecord"::equals).count(), result.failedSteps().toString());
+        }
+    }
+
+    @Nested
     @DisplayName("registered participants")
     class Participants {
 

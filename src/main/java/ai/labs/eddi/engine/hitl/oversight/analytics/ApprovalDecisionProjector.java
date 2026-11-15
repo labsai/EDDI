@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.hitl.oversight.analytics;
 
+import ai.labs.eddi.engine.gdpr.ErasedSubjects;
 import ai.labs.eddi.engine.hitl.audit.HitlDecisionRecorded;
 import ai.labs.eddi.engine.hitl.audit.HitlDecisionUnit;
 import ai.labs.eddi.engine.hitl.oversight.OversightMetrics;
@@ -14,6 +15,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -25,6 +27,16 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link HitlDecisionRecorded}). Idempotent: a unit is keyed by its decision id
  * and position, so the event and a later rebuild from the ledger store it once.
  * A failed write is logged and counted; a rebuild repairs it.
+ * <p>
+ * <b>Erased identities.</b> Before a row is stored, each identity it carries —
+ * the conversation owner ({@code userId}) and the decider ({@code decidedBy}) —
+ * is checked against {@link ErasedSubjects}. For a decision made no later than
+ * that person's erasure the row gets what erasure leaves in a stored row
+ * ({@link IApprovalDecisionStore#eraseUser}): no {@code userId}, the ledger's
+ * pseudonym as decider. Without this a rebuild re-inserted, from ledger entries
+ * erasure does not rewrite, rows naming a decider who had been erased. When the
+ * record cannot be read the unit is not stored (counted as a failed projection)
+ * rather than stored with an identity that may be erased.
  *
  * @since 6.7.0
  */
@@ -36,12 +48,20 @@ public class ApprovalDecisionProjector {
     private final IApprovalDecisionStore store;
     private final OversightMetrics metrics;
     private final Instance<AutonomyService> autonomy;
+    private final ErasedSubjects erasedSubjects;
 
     @Inject
-    public ApprovalDecisionProjector(IApprovalDecisionStore store, OversightMetrics metrics, Instance<AutonomyService> autonomy) {
+    public ApprovalDecisionProjector(IApprovalDecisionStore store, OversightMetrics metrics, Instance<AutonomyService> autonomy,
+            ErasedSubjects erasedSubjects) {
         this.store = store;
         this.metrics = metrics;
         this.autonomy = autonomy;
+        this.erasedSubjects = erasedSubjects;
+    }
+
+    /** Without the erased-subject record, for tests that do not exercise it. */
+    ApprovalDecisionProjector(IApprovalDecisionStore store, OversightMetrics metrics, Instance<AutonomyService> autonomy) {
+        this(store, metrics, autonomy, null);
     }
 
     void onDecisionRecorded(@ObservesAsync HitlDecisionRecorded event) {
@@ -69,7 +89,7 @@ public class ApprovalDecisionProjector {
                 continue;
             }
             try {
-                ApprovalDecision row = ApprovalDecision.of(unit, i);
+                ApprovalDecision row = withoutErasedIdentities(ApprovalDecision.of(unit, i));
                 if (store.insertIfAbsent(row)) {
                     inserted.add(row);
                     metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
@@ -88,5 +108,28 @@ public class ApprovalDecisionProjector {
             }
         }
         return inserted.size();
+    }
+
+    /**
+     * The row as erasure would have left it, for each of its identities erased at
+     * or after the decision.
+     */
+    ApprovalDecision withoutErasedIdentities(ApprovalDecision row) {
+        if (erasedSubjects == null) {
+            return row;
+        }
+        Instant at = row.decidedAt() != null ? row.decidedAt() : row.pausedAt();
+        String userId = row.userId();
+        String decidedBy = row.decidedBy();
+        boolean changed = false;
+        if (userId != null && erasedSubjects.covers(userId, at)) {
+            userId = null;
+            changed = true;
+        }
+        if (decidedBy != null && erasedSubjects.covers(decidedBy, at)) {
+            decidedBy = erasedSubjects.pseudonymOf(decidedBy);
+            changed = true;
+        }
+        return changed ? row.withPersonalFields(userId, decidedBy) : row;
     }
 }

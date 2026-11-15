@@ -264,6 +264,17 @@ reviewer, as a decider in the decision facts and as the actor in the autonomy st
 removes the `userId` from the decision facts of their conversations (the rows stay — they hold no content, and keep the
 analytics correct). Export includes their samples and decision rows.
 
+A rebuild (`POST /hitl/analytics/rebuild`, or the first-start one) does not undo this. The decision facts are a
+projection of the `hitl.approval` ledger entries, and an entry is filed under the conversation owner while it names the
+decider in `output.decidedBy` — so erasing a decider who is not the owner leaves the entry as it was, and a rebuild that
+re-inserted a row it had lost (retention, a failed write, a pre-6.7 entry imported for the first time) used to name the
+erased person again. Erasure now writes the person to the `gdpr_erased_subjects` record first (see
+[GDPR Compliance](gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105)), and the projector checks both
+identities of every row against it: for a decision made no later than the erasure it stores what erasure leaves — no
+`userId`, the same keyed pseudonym as decider — so the rebuilt counts match the erased ones. A decision made after the
+erasure (a returning user) keeps its id. When the record cannot be read the unit is not stored and counts as a failed
+projection, which the next rebuild repairs.
+
 ## Metrics and properties
 
 Metrics are listed in [Metrics → HITL](metrics.md#hitl-metrics) and charted in the Full Metrics Reference dashboard's

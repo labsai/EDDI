@@ -96,6 +96,25 @@ public class GdprPseudonymizer {
     }
 
     /**
+     * A keyed one-way token of {@code userId} that does not change when the audit
+     * signing key rotates: always the per-deployment salt
+     * ({@code gdpr-erased:s1:…}), never the ledger's keyed pseudonym.
+     * {@link ErasedSubjects} keys its durable record by it, which must still find a
+     * person years and key rotations later. Falls back to the unsalted hash, like
+     * {@link #pseudonymFor}, only when the metadata store cannot provide the salt.
+     *
+     * @throws IllegalArgumentException
+     *             if {@code userId} is null
+     */
+    public String stableTokenFor(String userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null when deriving a GDPR token");
+        }
+        byte[] deploymentSalt = deploymentSalt();
+        return deploymentSalt != null ? AuditHmac.saltedPseudonymFor(userId, deploymentSalt) : AuditHmac.pseudonymFor(userId);
+    }
+
+    /**
      * The persisted salt, created on first use. Null — and retried on the next call
      * — when the metadata store cannot provide one.
      */

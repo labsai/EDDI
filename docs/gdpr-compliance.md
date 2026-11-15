@@ -182,7 +182,13 @@ principal, not a user: erasing or exporting it is refused with 400.
     other people's data and stay). Ratings deliberately outlive retention purges
     of transcripts, so no conversation sweep reaches them. See
     [Conversation Ratings](conversation-ratings.md). The `hitlOversight` participant deletes the audit samples of the user's
-    conversations and keeps their approval-decision facts without them ([HITL Oversight](hitl-oversight.md#gdpr))
+    conversations and keeps their approval-decision facts without them ([HITL Oversight](hitl-oversight.md#gdpr)).
+    Before any of the steps above, erasure records the person in **`gdpr_erased_subjects`** (MongoDB collection or
+    PostgreSQL table): a keyed one-way token (HMAC under the per-deployment pseudonym salt, never the raw id) and the
+    time of the latest erasure, written again when the cascade ends. Projections rebuilt from the audit ledger consult
+    it, so a rebuild of approval analytics cannot re-insert a row naming an erased decider from a ledger entry filed
+    under someone else. The write is idempotent; a failure reports the step `erasedSubjectRecord` and the erasure as
+    incomplete. Rows are kept indefinitely — a few bytes each, no content
 17. **Tool quota counters** (`toolQuotas`) — **permanently deleted** by the `toolQuotas`
     participant: every counter whose subject equals the erased user id. A counter holds a subject
     identifier and a count, no content, and expires on its own an hour after its window ends. When an
@@ -486,6 +492,7 @@ should name them and the measure that bounds each one.
 | **Application log files** (console, files a log shipper collects) | Written as text to destinations EDDI does not control and cannot rewrite afterwards. The persisted database logs *are* pseudonymised (step 13); the console copy is not. Credential material is redacted before any record is written, and user ids appear only where the logging context carries them | Keep file and shipper retention short, and treat the collected logs as a processor's data set in your record of processing |
 | **Telemetry exports** (OpenTelemetry spans, Micrometer metrics) | Spans carry conversation and agent ids and timings, never message content or user ids; metrics are aggregates. Once exported they are the collector's data, outside EDDI's reach | Retention is set on the collector or metrics backend |
 | **Approver identity in other users' HITL tool journals** | The journal is deleted by conversation id, so an approver's `decidedBy` entry inside another user's journal survives the approver's own erasure | Treat approver ids as pseudonymous staff data and bound them with the journal's retention |
+| **Approver identity in other users' `hitl.approval` ledger entries** | The ledger is redacted by the entry's `userId`, which is the conversation owner; an approver named in `output.decidedBy` of another user's entry keeps that entry as it was (record-keeping duty) | The approval analytics derived from those entries do not re-expose them: a rebuild consults `gdpr_erased_subjects` and stores the pseudonym ([HITL Oversight](hitl-oversight.md#gdpr)). Bound the ledger itself by its access controls |
 | **Group discussions the user took part in but did not start** | The group store matches the discussion's owner, so only discussions the user started are erased or exported | Handle shared transcripts in your DSAR process |
 | **LLM-provider retention** | Every LLM call sends the message and its context to the configured provider, a processor under its own DPA; EDDI cannot recall what the provider has logged | Choose providers with zero-retention terms, or self-host (Ollama, jlama); see [LLM Provider Data Flow](#llm-provider-data-flow) |
 

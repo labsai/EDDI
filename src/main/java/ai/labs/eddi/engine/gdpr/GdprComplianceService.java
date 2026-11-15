@@ -162,6 +162,14 @@ public class GdprComplianceService {
     @Inject
     GdprPseudonymizer pseudonymizer;
 
+    /**
+     * The durable record of erased people that projections rebuilt from the audit
+     * ledger consult (approval analytics). Field-injected; null in tests built with
+     * {@code new}.
+     */
+    @Inject
+    ErasedSubjects erasedSubjects;
+
     private String pseudonymFor(String userId) {
         return pseudonymizer != null ? pseudonymizer.pseudonymFor(userId) : AuditHmac.pseudonymFor(userId);
     }
@@ -453,6 +461,16 @@ public class GdprComplianceService {
         } catch (Exception e) {
             recordFailure(failedSteps, "auditRewrite", e, pseudonym);
         }
+
+        // 0c. Record the erasure durably and cluster-wide before anything is erased. A
+        // projection rebuilt from the audit ledger later (approval analytics) re-reads
+        // entries this cascade does not rewrite — one names its decider while it is
+        // filed under another user — and consults this record so that it does not put
+        // the erased identity back. Written first so a rebuild running concurrently,
+        // or an erasure that fails half-way, is still covered; written again at the end
+        // to cover decisions made while the cascade ran.
+        Instant erasureStarted = Instant.now();
+        recordErasedSubject(userId, erasureStarted, failedSteps, pseudonym);
 
         // 0. Stop the user's in-flight work on this node BEFORE deleting anything. A
         // turn still running wrote its longTerm properties back to user memory at
@@ -980,6 +998,8 @@ public class GdprComplianceService {
             }
         }
 
+        recordErasedSubject(userId, Instant.now(), failedSteps, pseudonym);
+
         var result = new GdprDeletionResult(userId, memoriesDeleted,
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
@@ -1026,6 +1046,20 @@ public class GdprComplianceService {
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /** Writes the erased-subject record; a failure marks the erasure incomplete. */
+    private void recordErasedSubject(String userId, Instant at, List<String> failedSteps, String pseudonym) {
+        if (erasedSubjects == null) {
+            return;
+        }
+        try {
+            erasedSubjects.record(userId, at);
+        } catch (Exception e) {
+            if (!failedSteps.contains("erasedSubjectRecord")) {
+                recordFailure(failedSteps, "erasedSubjectRecord", e, pseudonym);
+            }
+        }
     }
 
     private List<IGdprParticipant> participants() {
