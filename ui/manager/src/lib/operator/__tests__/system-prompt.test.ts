@@ -1341,3 +1341,22 @@ describe("6.7 feature knowledge in the quick reference (no endpoint needed)", ()
     }
   });
 });
+
+/**
+ * The prompt is rendered as a Qute template on the server, and an expression
+ * with a namespace the engine has no resolver for (`{outcome:…}`) fails the
+ * whole render: the model then receives the prompt unrendered. #1318 shipped
+ * `{outcome: match, no_match}` in a metric description and broke Operator
+ * activation against a real backend. Only the pass-through namespaces that
+ * EDDI registers (ConfigReferenceNamespaceResolvers, CallerNamespaceResolver)
+ * may appear.
+ */
+describe("Qute namespaces in the prompt", () => {
+  const PASS_THROUGH = new Set(["vault", "eddivault", "connection", "context", "vars", "caller"]);
+
+  it.each(["read_only", "read_write"] as const)("the %s prompt names no namespace the backend cannot resolve", (scope) => {
+    const prompt = buildOperatorSystemPrompt(defaultOperatorPromptBody(scope), scope, "Acme Assist");
+    const namespaces = [...prompt.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)].map((m) => m[1]);
+    expect(namespaces.filter((ns) => !PASS_THROUGH.has(ns))).toEqual([]);
+  });
+});
