@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.runtime.LogRecordRedactor;
+import ai.labs.eddi.modules.llm.pricing.UsageMetering;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -12,6 +13,13 @@ import dev.langchain4j.model.chat.listener.ChatModelListener;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ChatRequestParameters;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.CompleteToolCall;
+import dev.langchain4j.model.chat.response.PartialResponse;
+import dev.langchain4j.model.chat.response.PartialResponseContext;
+import dev.langchain4j.model.chat.response.PartialThinking;
+import dev.langchain4j.model.chat.response.PartialThinkingContext;
+import dev.langchain4j.model.chat.response.PartialToolCall;
+import dev.langchain4j.model.chat.response.PartialToolCallContext;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.jboss.logging.Logger;
 
@@ -91,7 +99,67 @@ class ObservableStreamingChatModel implements StreamingChatModel {
     @Override
     public void doChat(ChatRequest request, StreamingChatResponseHandler handler) {
         logRequest(request);
-        delegate.chat(request, observing(handler));
+        delegate.chat(request, metering(observing(handler), request));
+    }
+
+    /**
+     * Meters the complete response's token usage (see {@link UsageMetering}) before
+     * anything downstream — EDDI's listener included — sees it. Every other
+     * callback is forwarded as is, context variants included, because this wrapper
+     * is always applied.
+     */
+    private StreamingChatResponseHandler metering(StreamingChatResponseHandler handler, ChatRequest request) {
+        return new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                handler.onPartialResponse(partialResponse);
+            }
+
+            @Override
+            public void onPartialResponse(PartialResponse partialResponse, PartialResponseContext context) {
+                handler.onPartialResponse(partialResponse, context);
+            }
+
+            @Override
+            public void onPartialThinking(PartialThinking partialThinking) {
+                handler.onPartialThinking(partialThinking);
+            }
+
+            @Override
+            public void onPartialThinking(PartialThinking partialThinking, PartialThinkingContext context) {
+                handler.onPartialThinking(partialThinking, context);
+            }
+
+            @Override
+            public void onPartialToolCall(PartialToolCall partialToolCall) {
+                handler.onPartialToolCall(partialToolCall);
+            }
+
+            @Override
+            public void onPartialToolCall(PartialToolCall partialToolCall, PartialToolCallContext context) {
+                handler.onPartialToolCall(partialToolCall, context);
+            }
+
+            @Override
+            public void onCompleteToolCall(CompleteToolCall completeToolCall) {
+                handler.onCompleteToolCall(completeToolCall);
+            }
+
+            @Override
+            public void onUnmappedRawEvent(Object rawEvent) {
+                handler.onUnmappedRawEvent(rawEvent);
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse completeResponse) {
+                handler.onCompleteResponse(UsageMetering.meter(completeResponse, modelType, request));
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                handler.onError(error);
+            }
+        };
     }
 
     private void logRequest(ChatRequest request) {

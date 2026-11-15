@@ -62,7 +62,7 @@ public class RagConfiguration {
      * <li>Bedrock: {"model": "amazon.titan-embed-text-v2:0", "region":
      * "us-east-1"}</li>
      * <li>Cohere: {"model": "embed-english-v3.0", "apiKey": "${vault:...}"}</li>
-     * <li>Gemini: {"model": "gemini-embedding-001", "apiKey": "${vault:...}",
+     * <li>Gemini: {"model": "gemini-embedding-2", "apiKey": "${vault:...}",
      * "taskType": "RETRIEVAL_DOCUMENT"}</li>
      * <li>Vertex: {"project": "my-project", "location": "us-central1", "model":
      * "text-embedding-005"}</li>

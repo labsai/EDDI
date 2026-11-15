@@ -310,10 +310,14 @@ class GdprComplianceServiceTest {
         // When — should not throw
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
-        // Then — cascade continued past the journal failure
+        // Then — cascade continued past the journal failure, but kept the snapshots:
+        // they are how a retry finds the journal entries still left
         assertNotNull(result);
-        assertEquals(1, result.conversationsDeleted());
-        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+        assertEquals(0, result.conversationsDeleted());
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        verify(userConversationStore).deleteAllForUser(USER_ID);
+        assertTrue(result.failedSteps().contains("hitlToolJournal"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
     }
 
     @Test
@@ -430,6 +434,21 @@ class GdprComplianceServiceTest {
         verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
         assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
         assertTrue(result.failedSteps().contains("conversationIdLookup"), result.failedSteps().toString());
+    }
+
+    @Test
+    void deleteUserData_checkpointDeleteFails_keepsSnapshotsForTheRetry() throws Exception {
+        // A checkpoint carries a copy of the properties and is found by conversation
+        // id, which only the snapshot still lists once this run is over.
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        when(checkpointStore.deleteByConversationId("conv-1")).thenThrow(new RuntimeException("store down"));
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        assertTrue(result.failedSteps().contains("conversationCheckpoints"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+        assertFalse(result.complete());
     }
 
     @Test
@@ -1511,7 +1530,9 @@ class GdprComplianceServiceTest {
 
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
-        assertEquals(1, result.conversationsDeleted());
+        // The failed checkpoint delete keeps the snapshots for the retry; every
+        // later, independent store is still swept.
+        assertEquals(0, result.conversationsDeleted());
         verify(scheduleStore).deleteSchedulesByUserId(USER_ID);
     }
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactValidator;
+import ai.labs.eddi.engine.agenttests.BoundedRegex;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.networknt.schema.JsonSchema;
@@ -20,6 +21,7 @@ import com.networknt.schema.resource.AllowSchemaLoader;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -148,6 +150,10 @@ public final class ArtifactValidators {
                     } catch (PatternSyntaxException e) {
                         throw new IllegalArgumentException(path + " is not a valid regex: " + e.getMessage());
                     }
+                    Optional<String> unbounded = unboundedWork(spec);
+                    if (unbounded.isPresent()) {
+                        throw new IllegalArgumentException(path + " is not a usable regex: it " + unbounded.get());
+                    }
                 }
                 case MAX_LENGTH -> {
                     int max;
@@ -206,6 +212,11 @@ public final class ArtifactValidators {
     }
 
     private static String checkRegex(String spec, String content) {
+        if (unboundedWork(spec).isPresent()) {
+            // Stored before the save-time check existed: the deadline cannot stop it, so
+            // it is not run.
+            return "This discussion's artifact pattern validator could not finish in time; the write was refused.";
+        }
         try {
             if (!Pattern.compile(spec, Pattern.DOTALL).matcher(deadlineGuarded(content)).find()) {
                 return "The content does not match this discussion's required pattern for artifacts. Expected to find a match of: " + spec;
@@ -219,9 +230,20 @@ public final class ArtifactValidators {
     }
 
     /**
-     * Save-time schema check, two layers: the spec must parse, and it must itself
+     * Why a config-authored regex can run past the match deadline, which only sees
+     * work that reads the content: a counted repetition of something that matches
+     * empty ({@code (?:a?){100000000}}) spins without reading. The same scan agent
+     * test regexes use ({@link BoundedRegex#excessiveRepetition}).
+     */
+    private static Optional<String> unboundedWork(String regex) {
+        return BoundedRegex.excessiveRepetition(regex);
+    }
+
+    /**
+     * Save-time schema check, three layers: the spec must parse, it must itself
      * satisfy the 2020-12 meta-schema — {@code getSchema(spec)} alone accepts e.g.
-     * {@code {"type": "strng"}} and only misbehaves at write time. Returns the
+     * {@code {"type": "strng"}} and only misbehaves at write time — and its
+     * evaluation must be bounded ({@link ArtifactSchemaComplexity}). Returns the
      * problem, or {@code null} for a valid spec.
      */
     private static String schemaSpecProblem(String spec) {
@@ -240,10 +262,15 @@ public final class ArtifactValidators {
                         .collect(Collectors.joining("; "));
             }
         }
+        String complexity = ArtifactSchemaComplexity.problem(schemaNode);
+        if (complexity != null) {
+            return complexity;
+        }
         try {
             // initializeValidators resolves every $ref now, so a reference to a
-            // remote or file schema fails the save instead of the first write
-            SCHEMA_FACTORY.getSchema(spec).initializeValidators();
+            // remote or file schema fails the save instead of the first write; with
+            // SCHEMA_CONFIG so a pattern the deadline cannot bound fails it too
+            SCHEMA_FACTORY.getSchema(spec, SCHEMA_CONFIG).initializeValidators();
         } catch (Exception e) {
             return refProblem(e);
         }
@@ -333,6 +360,10 @@ public final class ArtifactValidators {
             .build();
 
     private static RegularExpression deadlineBoundRegex(String regex) {
+        Optional<String> unbounded = unboundedWork(regex);
+        if (unbounded.isPresent()) {
+            throw new IllegalArgumentException("pattern '" + regex + "' " + unbounded.get());
+        }
         Pattern pattern = Pattern.compile(regex);
         return value -> {
             Long deadline = SCHEMA_REGEX_DEADLINE.get();
@@ -352,6 +383,11 @@ public final class ArtifactValidators {
     private static String checkJsonSchema(String spec, String content) {
         JsonSchema schema;
         try {
+            // Again here, for a schema stored before the save-time check existed: its
+            // evaluation reads no clock, so an unbounded one is not run.
+            if (ArtifactSchemaComplexity.problem(MAPPER.readTree(spec)) != null) {
+                return "This discussion's artifact schema validator could not finish in time; the write was refused.";
+            }
             schema = SCHEMA_FACTORY.getSchema(spec, SCHEMA_CONFIG);
             schema.initializeValidators();
         } catch (Exception e) {
@@ -368,6 +404,10 @@ public final class ArtifactValidators {
         try {
             violations = schema.validate(node);
         } catch (MatchDeadlineExceededException e) {
+            return "This discussion's artifact schema validator did not finish in time; the write was refused.";
+        } catch (StackOverflowError e) {
+            // a recursion the complexity check did not foresee: refuse, never let the Error
+            // escape the tool call
             return "This discussion's artifact schema validator did not finish in time; the write was refused.";
         } catch (Exception e) {
             // a $ref first reached during validation (e.g. under a dynamic ref) that the

@@ -23,8 +23,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 /**
  * Expose EDDI documentation as MCP resources.
  * <p>
- * AI agents can browse and read the 40+ markdown docs via MCP resources/list
- * and resources/read.
+ * AI agents can browse and read the markdown docs the deployment ships via MCP
+ * resources/list and resources/read.
  * <p>
  * Thin delegate over {@link DocsService}, which owns the filesystem access, the
  * path-traversal guard, and the {@code eddi.docs.enabled} switch. The same doc

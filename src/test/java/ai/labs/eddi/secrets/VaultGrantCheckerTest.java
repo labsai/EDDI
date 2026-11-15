@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.parser.IParserStore;
+import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -25,6 +27,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.utils.LogCaptureSupport.CapturedRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,6 +40,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -72,6 +76,7 @@ class VaultGrantCheckerTest {
     private ILlmStore llmStore;
     private IApiCallsStore apiCallsStore;
     private IMcpCallsStore mcpCallsStore;
+    private IParserStore parserStore;
     private IAgentStore agentStore;
     private IConnectionStore connectionStore;
     private GlobalVariableResolver globalVariableResolver;
@@ -86,6 +91,7 @@ class VaultGrantCheckerTest {
 
         apiCallsStore = mock(IApiCallsStore.class);
         mcpCallsStore = mock(IMcpCallsStore.class);
+        parserStore = mock(IParserStore.class);
 
         agentStore = mock(IAgentStore.class);
         connectionStore = mock(IConnectionStore.class);
@@ -94,7 +100,7 @@ class VaultGrantCheckerTest {
         // resolver too.
         when(globalVariableResolver.resolveValue(anyString(), anyString())).thenAnswer(i -> i.getArgument(0));
         checker = new VaultGrantChecker(secretProvider, agentStore, workflowStore, llmStore, apiCallsStore, mcpCallsStore,
-                mock(IRagStore.class), connectionStore, globalVariableResolver);
+                mock(IRagStore.class), parserStore, connectionStore, globalVariableResolver);
     }
 
     /**
@@ -377,6 +383,27 @@ class VaultGrantCheckerTest {
                     "the general scan had the same blind spot as the connection hop");
         }
 
+        /**
+         * The in-place expansion had no exception handling, so a variable-store failure
+         * escaped to the catch-all of findUngrantedReferences(agentId, version), which
+         * answers "no violations": the agent deployed with nothing checked.
+         */
+        @Test
+        @DisplayName("a variable store that fails is a violation, not a pass")
+        void variableStoreFailureFailsClosed() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.llm", LLM_ID);
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "${vars:anthropic-key}")));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+            when(globalVariableResolver.resolveValue(anyString(), anyString())).thenThrow(new IllegalStateException("variable store down"));
+            when(agentStore.read(eq("agent-1"), anyInt())).thenReturn(agent);
+
+            assertFalse(checker.findUngrantedReferences("agent-1", 1).isEmpty(),
+                    "an unreadable variable may hold any vault reference, so the check must not pass");
+        }
+
         @Test
         @DisplayName("a variable that expands to plain text contributes nothing")
         void plainVariableIsIgnored() throws Exception {
@@ -510,6 +537,24 @@ class VaultGrantCheckerTest {
         }
 
         /**
+         * Let through, but not silently: the resolver checks no grants, so a deploy
+         * during a store outage is the one moment a restricted secret goes unchecked,
+         * and the operator has to be able to see that it happened.
+         */
+        @Test
+        @DisplayName("unreadable metadata is logged at WARN, naming the agent and the reference")
+        void unreadableMetadataIsLoggedAtWarn() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
+            var agent = agentReferencingTheVault();
+
+            List<CapturedRecord> logs = captureRecordsOf(VaultGrantChecker.class,
+                    () -> checker.findUngrantedReferences(agent, "some-other-agent"));
+
+            assertTrue(logs.stream().anyMatch(r -> r.isWarning() && r.message().contains("some-other-agent") && r.message().contains(VAULT_REF)),
+                    "a grant check skipped over a provider error has to be visible: " + logs);
+        }
+
+        /**
          * Deploying before the secret exists is a supported flow — agent sync promotes
          * a workflow to an instance that does not hold the source's secret, then
          * deploys it. The grant the secret is later created with is checked at creation
@@ -519,8 +564,12 @@ class VaultGrantCheckerTest {
         @DisplayName("a secret that does not exist is not a violation — its grant is checked when it is created")
         void absentSecretIsNotAViolation() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("Secret not found"));
+            var agent = agentReferencingTheVault();
 
-            assertTrue(checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent").isEmpty());
+            List<CapturedRecord> logs = captureRecordsOf(VaultGrantChecker.class,
+                    () -> assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty()));
+
+            assertTrue(logs.stream().noneMatch(CapturedRecord::isWarning), "a supported flow is not a warning: " + logs);
         }
 
         @Test
@@ -586,6 +635,51 @@ class VaultGrantCheckerTest {
             when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
 
             assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        /**
+         * A parser's semanticFallback names an embedding model, whose API key is a
+         * vault reference resolved by EmbeddingModelFactory. Parser documents were not
+         * read at all, so such a key was used without the agent being granted it.
+         */
+        @Test
+        @DisplayName("a parser document's vault reference is found")
+        void parserDocumentsAreScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.parser", LLM_ID);
+
+            var parser = new ParserConfiguration();
+            parser.setConfig(Map.of("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", VAULT_REF))));
+            when(parserStore.read(eq(LLM_ID), anyInt())).thenReturn(parser);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        /**
+         * Only the document a step's config.uri names was scanned; a parser is usually
+         * configured inline in the workflow step itself.
+         */
+        @Test
+        @DisplayName("a vault reference in a step's inline configuration is found, and its tenant reported")
+        void inlineStepConfigurationIsScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.parser"));
+            var stepConfig = new LinkedHashMap<String, Object>();
+            stepConfig.put("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", VAULT_REF)));
+            step.setConfig(stepConfig);
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenReturn(workflow);
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+
+            var spaced = "${vault:t.acme.1a2b3c4d/openai-key}";
+            stepConfig.put("semanticFallback", Map.of("embeddingProvider", "openai", "embeddingParameters", Map.of("apiKey", spaced)));
+            when(agentStore.read(eq("agent-1"), anyInt())).thenReturn(agent);
+            assertTrue(checker.referencedTenants("agent-1", 1).contains("t.acme.1a2b3c4d"), String.valueOf(checker.referencedTenants("agent-1", 1)));
         }
 
         @Test
@@ -703,6 +797,22 @@ class VaultGrantCheckerTest {
             agentWhoseCallCarries("${vault:t.eng.1a2b3c4d/openai}&m=${vars:u.alice.5e6f7a8b/model}&x=${vault:plain}");
 
             assertEquals(Set.of("t.eng.1a2b3c4d", "u.alice.5e6f7a8b"), checker.referencedTenants(AGENT_ID, 1));
+        }
+
+        @Test
+        @DisplayName("a malformed opener of one namespace cannot swallow a reference of the other")
+        void malformedOpenerHidesNothing() throws Exception {
+            // One scanner for ${vault: and ${vars: read each of these as ONE reference
+            // with a bogus tenant ("a${vault:t.finance…"), while the runtime — vault and
+            // variables each resolved by their own rules — resolved the inner one.
+            agentWhoseCallCarries("${vars:a${vault:t.finance.9e8d7c6b/key}&y=${vault:b${vars:u.dave.1f2e3d4c/model}"
+                    + "&z=${vars:c${vars:u.erin.5a6b7c8d/region}");
+
+            Set<String> tenants = checker.referencedTenants(AGENT_ID, 1);
+
+            assertTrue(tenants.contains("t.finance.9e8d7c6b"), "the vault reference inside a malformed ${vars: opener: " + tenants);
+            assertTrue(tenants.contains("u.dave.1f2e3d4c"), "the variable inside a malformed ${vault: opener: " + tenants);
+            assertTrue(tenants.contains("u.erin.5a6b7c8d"), "the variable inside a malformed ${vars: opener: " + tenants);
         }
 
         @Test

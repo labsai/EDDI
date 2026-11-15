@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -25,7 +26,7 @@ import java.util.Map;
  * strict-mode handling.
  * <p>
  * Preset text is resolved from {@link PromptSnippetService} first (snippet
- * names: {@code counterweight-cautious}, {@code counterweight-strict}). If no
+ * names: {@code counterweight_cautious}, {@code counterweight_strict}). If no
  * snippet is configured, built-in defaults are used as fallback. Users override
  * presets entirely via {@code customInstructions}.
  * <p>
@@ -42,9 +43,11 @@ public class CounterweightService {
     private static final Logger LOGGER = Logger.getLogger(CounterweightService.class);
 
     // === Snippet keys for Prompt Snippet resolution ===
-    static final String SNIPPET_KEY_CAUTIOUS = "counterweight-cautious";
-    static final String SNIPPET_KEY_STRICT = "counterweight-strict";
-
+    // Snippet names must match [a-z0-9_]+ (PromptSnippetStore), so the keys use
+    // underscores. The hyphenated names are read as a legacy fallback only; they
+    // cannot be created through the REST API.
+    static final String SNIPPET_KEY_CAUTIOUS = "counterweight_cautious";
+    static final String SNIPPET_KEY_STRICT = "counterweight_strict";
     // === Fallback presets (used when no Prompt Snippet is configured) ===
     static final String CAUTIOUS_FALLBACK = """
             ## BEHAVIORAL GUIDELINES (engine-injected)
@@ -112,7 +115,7 @@ public class CounterweightService {
      * agents only) or a legacy snippet can replace the built-in preset. A snippet
      * granted or published from another workspace never can, so another workspace
      * cannot override this agent's safety text by naming a snippet
-     * {@code counterweight-strict}. A {@code null} agent gets the legacy snippets
+     * {@code counterweight_strict}. A {@code null} agent gets the legacy snippets
      * only.
      *
      * @param agentId
@@ -138,19 +141,29 @@ public class CounterweightService {
             level = "cautious";
         }
 
-        String injection = resolveInjection(config, level, agentId);
+        // Classify the level before resolving: an unknown level resolves no preset, so
+        // deciding it after the "no injection" return counted every typo as normal.
+        String normalizedLevel = level.toLowerCase(Locale.ROOT);
+        boolean knownLevel = "normal".equals(normalizedLevel) || "cautious".equals(normalizedLevel) || "strict".equals(normalizedLevel);
+        if (!knownLevel) {
+            LOGGER.warnf("Unknown counterweight level '%s' — treating as normal (no preset)", level);
+            activationUnknownCounter.increment();
+        }
+
+        String injection = resolveInjection(config, normalizedLevel, agentId);
         if (injection == null || injection.isBlank()) {
-            activationNormalCounter.increment();
+            if (knownLevel) {
+                activationNormalCounter.increment();
+            }
             return systemMessage;
         }
 
-        // Track activation
-        switch (level.toLowerCase()) {
+        // Track activation (an unknown level was counted above)
+        switch (normalizedLevel) {
             case "cautious" -> activationCautiousCounter.increment();
             case "strict" -> activationStrictCounter.increment();
+            case "normal" -> activationNormalCounter.increment();
             default -> {
-                LOGGER.warnf("Unknown counterweight level '%s' — treating as normal (no injection)", level);
-                activationUnknownCounter.increment();
             }
         }
 
@@ -167,8 +180,8 @@ public class CounterweightService {
      * Resolve the injection text. Priority order:
      * <ol>
      * <li>Custom instructions (override everything)</li>
-     * <li>Prompt Snippet ({@code counterweight-cautious} /
-     * {@code counterweight-strict})</li>
+     * <li>Prompt Snippet ({@code counterweight_cautious} /
+     * {@code counterweight_strict})</li>
      * <li>Built-in fallback preset</li>
      * </ol>
      */
@@ -182,7 +195,7 @@ public class CounterweightService {
             return sb.toString().trim();
         }
 
-        return switch (level.toLowerCase()) {
+        return switch (level.toLowerCase(Locale.ROOT)) {
             case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK, agentId);
             case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK, agentId);
             default -> null; // normal = no injection
@@ -196,6 +209,9 @@ public class CounterweightService {
     private String resolveFromSnippetsOrFallback(String snippetKey, String fallback, String agentId) {
         Map<String, Object> snippets = promptSnippetService.getForAgent(agentId);
         Object snippetValue = snippets.get(snippetKey);
+        if (!(snippetValue instanceof String s && !s.isBlank())) {
+            snippetValue = snippets.get(snippetKey.replace('_', '-'));
+        }
         if (snippetValue instanceof String text && !text.isBlank()) {
             LOGGER.debugf("Counterweight preset resolved from Prompt Snippet '%s'", snippetKey);
             return text;

@@ -23,7 +23,7 @@ public class LifecycleException extends Exception {
         }
 
         public LifecycleInterruptedException(String message, Exception e) {
-            super(message);
+            super(message, e);
         }
     }
 }

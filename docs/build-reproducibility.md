@@ -7,7 +7,7 @@ This document describes what is and is not guaranteed about EDDI builds.
 | Property | Status |
 |----------|--------|
 | **Deterministic dependency resolution** — the same commit resolves the same dependency set, byte-identical, on any machine | ✅ Guaranteed |
-| **Deterministic toolchain** — same JDK, same Maven, same base image | ✅ Guaranteed |
+| **Deterministic toolchain** — same Maven (wrapper) and same base image; the exact JDK is pinned by `mise.toml`, while CI uses a floating Temurin 25 | ✅ Maven and base image; JDK pinned locally only |
 | **Verifiable provenance** — you can prove a published image came from a specific commit of this repository | ✅ Guaranteed |
 | **Bit-for-bit reproducible artifacts** — two builds of the same commit produce byte-identical JARs | ❌ Not yet — see [Bit-for-bit reproducibility](#bit-for-bit-reproducibility) |
 

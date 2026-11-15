@@ -26,6 +26,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.GroupConversationService;
@@ -47,6 +48,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -301,6 +303,67 @@ class GroupHitlCoordinatorTest {
         verifyNoInteractions(scheduleStore);
     }
 
+    /**
+     * The cancellation audit names the pause it cancelled: pausedAt (and so the
+     * pause id and the latency) must be captured before the conversion clears it.
+     */
+    @Test
+    void convertPauseToCancelIfSignalled_auditEntryKeepsThePausedAt() throws Exception {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        conversationStore = mock(IGroupConversationStore.class);
+        groupStore = mock(IAgentGroupStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
+                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        Instant pausedAt = Instant.parse("2026-11-01T10:00:00Z");
+        gc.setPausedAt(pausedAt);
+        var token = new DiscussionControlToken();
+        token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+
+        coordinator.convertPauseToCancelIfSignalled(gc, mock(GroupDiscussionEventListener.class), token);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals(pausedAt.toString(), entry.getValue().output().get("pausedAt"));
+        assertNotNull(entry.getValue().output().get("latencyMs"));
+        assertEquals("system:unattributed", entry.getValue().output().get("decidedBy"),
+                "no canceller recorded on the token and no identity on this thread");
+    }
+
+    /**
+     * A cancel signalled by one caller and audited later on the running leg's
+     * thread names that caller, not whoever the leg's thread runs as.
+     */
+    @Test
+    void convertPauseToCancelIfSignalled_auditNamesTheCallerThatSignalled() throws Exception {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        conversationStore = mock(IGroupConversationStore.class);
+        groupStore = mock(IAgentGroupStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
+                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(Instant.parse("2026-11-01T10:00:00Z"));
+        var token = new DiscussionControlToken();
+        token.setSignal(ControlSignal.CANCEL_GRACEFUL, "admin-1");
+
+        coordinator.convertPauseToCancelIfSignalled(gc, mock(GroupDiscussionEventListener.class), token);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("admin-1", entry.getValue().output().get("decidedBy"));
+        assertEquals("admin-1", token.getSignalledBy());
+    }
+
     @Test
     void constructedWithMockedCollaborators_doesNotThrow() {
         assertDoesNotThrow(this::coordinator);
@@ -478,6 +541,29 @@ class GroupHitlCoordinatorTest {
         assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(5_000L)), pauseId.getValue(),
                 "the approve CAS must name the pause that was read, not just the state");
         verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void approve_stampsLastModifiedInTheResumeWrite() throws Exception {
+        // Startup crash recovery cancels a running discussion last written before the
+        // process started; the approve that starts a new leg must therefore move
+        // lastModified, as the human-turn and tie-break resumes already do.
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(5_000L);
+        gc.setLastModified(Instant.ofEpochMilli(5_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var written = new AtomicReference<Instant>();
+        doAnswer(invocation -> {
+            written.set(invocation.<GroupConversation>getArgument(0).getLastModified());
+            throw new IResourceStore.ResourceModifiedException("stop after the resume write");
+        }).when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
+        Instant before = Instant.now();
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, new GroupApprovalRequest(), null));
+
+        assertNotNull(written.get(), "the resume write must carry a lastModified");
+        assertFalse(written.get().isBefore(before), "the resume write must stamp lastModified, not keep the pause's");
     }
 
     @Test

@@ -58,6 +58,18 @@ class ConversationMemoryUtilitiesDriftTest {
     }
 
     @Test
+    @DisplayName("outputs without steps still project the current step, from a full snapshot and from a tail")
+    void outputsWithoutStepsStillProjectTheCurrentStep() {
+        var snapshot = snapshotWith(0, 2);
+
+        var full = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshot, false, true);
+        assertEquals(1, full.getConversationOutputs().size());
+
+        var tail = ConversationMemoryUtilities.convertSimpleConversationMemory(new ConversationMemoryTail(snapshot, 0, 2, 0, null), false);
+        assertEquals(1, tail.getConversationOutputs().size());
+    }
+
+    @Test
     @DisplayName("G11 — fewer steps than outputs loads with a warning instead of throwing")
     void fewerStepsThanOutputsStillLoads() {
         var snapshot = snapshotWith(1, 3);

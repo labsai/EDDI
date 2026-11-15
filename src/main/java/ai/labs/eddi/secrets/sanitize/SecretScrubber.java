@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets.sanitize;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -146,6 +147,11 @@ public class SecretScrubber {
             "authorization", "pwd", "passphrase", "privatekey", "private_key");
 
     /**
+     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
+     */
+    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
+
+    /**
      * Qualifiers that turn a credential noun into a COUNT of them.
      * <p>
      * Without this the suffix rule above is a round-trip bug on the most common LLM
@@ -164,11 +170,6 @@ public class SecretScrubber {
      * {@code accessToken}, {@code refreshToken} and {@code authToken} do not begin
      * with a quantity.
      */
-    /**
-     * {@code scheme://} at the start of a value. Bounded, so the scan stays linear.
-     */
-    private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
-
     private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
 
     /**
@@ -239,12 +240,24 @@ public class SecretScrubber {
     }
 
     /**
-     * Scrub potential plaintext secrets from a JSON string. Returns the sanitized
-     * JSON, or the original string if parsing fails.
+     * Scrub potential plaintext secrets from a JSON string.
+     * <p>
+     * Fails closed, like {@link #containsCredential(String)}: a document that
+     * cannot be parsed has not been shown to be free of credentials, so it is never
+     * handed back as it stands. Even serializer output can fail here: Jackson's
+     * read constraints, such as the nesting depth, do not bind the writer. The
+     * export then aborts, or skips the section it was building; an agent sync's
+     * remote source skips the document.
+     * <p>
+     * The exception carries neither the input nor the parser's exception as its
+     * cause: a parse error quotes the source text it stopped at, which may be the
+     * credential, and a cause is printed with the stack trace that logs it.
      *
      * @param json
      *            the JSON string to scrub
      * @return sanitized JSON with secrets replaced by ${vault:REDACTED}
+     * @throws IllegalStateException
+     *             when {@code json} cannot be parsed or written back
      */
     public String scrubJson(String json) {
         if (json == null || json.isBlank()) {
@@ -255,9 +268,9 @@ public class SecretScrubber {
             JsonNode root = objectMapper.readTree(json);
             scrubNode(root, null);
             return objectMapper.writeValueAsString(root);
-        } catch (Exception e) {
-            LOGGER.warnv("Failed to parse JSON for scrubbing, returning original: {0}", e.getMessage());
-            return json;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not parse a document for secret scrubbing; refusing to pass it on unscrubbed ("
+                    + e.getClass().getSimpleName() + ")");
         }
     }
 
@@ -369,6 +382,12 @@ public class SecretScrubber {
         if (embedded && WHOLE_POINTER.matcher(textValue).matches()) {
             return null;
         }
+        if (!isSecretFieldName(fieldName, parentFieldName) && isEmbeddedMapName(fieldName)) {
+            String map = scrubEmbeddedMap(fieldName, textValue);
+            if (map != null) {
+                return map.equals(textValue) ? null : map;
+            }
+        }
         boolean requestMaterial = embedded || isRequestMaterial(fieldName, parentFieldName);
         // A credential-named field is redacted whole below, whatever its shape. Only
         // request material, and a field that names itself a JSON document
@@ -397,6 +416,62 @@ public class SecretScrubber {
         }
         return isHeaderContainer(parentFieldName)
                 || (parentFieldName != null && REQUEST_MATERIAL_CONTAINERS.contains(normalizeFieldName(parentFieldName)));
+    }
+
+    /**
+     * A field whose string value is a header or query-parameter map serialized as
+     * JSON — an LLM task's {@code customHeaders} / {@code customQueryParams}. The
+     * editor read ({@code ConfigSecretRedactor}) judges each entry as if it sat in
+     * a real map; this scrubber saw one opaque string and kept a credential header
+     * whose value has no recognisable shape.
+     */
+    private static boolean isEmbeddedMapName(String fieldName) {
+        if (fieldName == null) {
+            return false;
+        }
+        String name = normalizeFieldName(fieldName);
+        return name.endsWith("headers") || name.endsWith("queryparams");
+    }
+
+    /**
+     * The map with each entry judged under the map's own name — so a header map's
+     * credential header names, and a query map's credential parameter names
+     * ({@code key}, {@code sig}, …), apply — re-serialised only when something was
+     * redacted. {@code null} when the value is not a JSON object.
+     */
+    private String scrubEmbeddedMap(String mapName, String textValue) {
+        String trimmed = textValue.trim();
+        if (!trimmed.startsWith("{")) {
+            return null;
+        }
+        try {
+            JsonNode original = objectMapper.readTree(trimmed);
+            if (!(original instanceof ObjectNode)) {
+                return null;
+            }
+            ObjectNode scrubbed = original.deepCopy();
+            boolean queryMap = normalizeFieldName(mapName).endsWith("queryparams");
+            Iterator<Map.Entry<String, JsonNode>> entries = scrubbed.properties().iterator();
+            while (entries.hasNext()) {
+                Map.Entry<String, JsonNode> entry = entries.next();
+                if (!entry.getValue().isTextual()) {
+                    scrubNode(entry.getValue(), entry.getKey(), true);
+                    continue;
+                }
+                String value = entry.getValue().asText();
+                String replacement = scrubTextValue(entry.getKey(), mapName, value, true);
+                if (replacement == null && queryMap && !value.isEmpty() && !WHOLE_POINTER.matcher(value).matches()
+                        && ConfigSecretRedactor.isCredentialQueryName(entry.getKey())) {
+                    replacement = REDACTED;
+                }
+                if (replacement != null) {
+                    entry.setValue(new TextNode(replacement));
+                }
+            }
+            return scrubbed.equals(original) ? textValue : objectMapper.writeValueAsString(scrubbed);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -520,7 +595,9 @@ public class SecretScrubber {
             boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
             boolean credential = !decoded.isEmpty() && !pointer
                     && (isSecretFieldName(name, null) || isSecretFieldName(decodedName, null) || UriRedactor.isSensitiveHeaderName(decodedName)
-                            || (queryString && ConfigSecretRedactor.isCredentialQueryName(name)) || redactFreeText(decoded) != null);
+                            || (queryString
+                                    && (ConfigSecretRedactor.isCredentialQueryName(name) || ConfigSecretRedactor.isCredentialQueryName(decodedName)))
+                            || redactFreeText(decoded) != null);
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return out.toString();
@@ -695,6 +772,8 @@ public class SecretScrubber {
                 continue;
             }
             String name = pair.substring(0, eq);
+            // Classified decoded as well: a server reads %73ig as sig.
+            String decodedName = UriRedactor.decodeQueryComponent(name);
             String rawValue = pair.substring(eq + 1);
             String decoded;
             try {
@@ -703,13 +782,12 @@ public class SecretScrubber {
                 decoded = rawValue;
             }
             boolean credential = !decoded.isEmpty() && !WHOLE_POINTER.matcher(decoded).matches()
-                    && ConfigSecretRedactor.isCredentialQueryName(name);
+                    && (ConfigSecretRedactor.isCredentialQueryName(name) || ConfigSecretRedactor.isCredentialQueryName(decodedName));
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return url.substring(0, queryStart) + "?" + out + fragment;
     }
 
-    /** An http(s) URL — the only shape {@link UriRedactor} is meant to be given. */
     /**
      * Any {@code scheme://authority} value, not just the two web schemes.
      * <p>

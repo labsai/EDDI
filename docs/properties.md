@@ -15,7 +15,7 @@ Properties are the glue that connects the pipeline's processing steps with persi
 A property has:
 
 - **Name** (key): The identifier used to access the property (e.g., `preferred_language`, `company_name`)
-- **Value**: Can be a `String`, `Integer`, `Float`, `Map`, `List`, or `Boolean`
+- **Value**: Can be a `String`, `Integer`, `Long`, `Float`, `Double`, `Map`, `List`, or `Boolean`
 - **Scope**: How long the property lives
 - **Visibility** (v6): Who can see the property
 
@@ -108,6 +108,8 @@ The PropertySetter task (`ai.labs.property`) sets properties based on triggered 
 When the `greet_user` action fires:
 1. `greeted` is set to `"true"` for this conversation session
 2. `preferred_language` is set from the input context and persisted across all conversations and agents
+
+`"actions": ["*"]` selects an entry on every turn that emitted at least one action. Each instruction runs **at most once per turn**, however many of the turn's actions select it — in the order of the turn's actions, then the order of `setOnActions`.
 
 ### Via Pre/Post Request Instructions
 
@@ -216,9 +218,9 @@ Conversation.init()
       └─→ Available as {properties.key} in all templates
 ```
 
-Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`, but only when the agent sets **`enableMemoryTools: true`** — that flag is what attaches the block (and, when the block is absent, a defaults instance whose field defaults are **`most_recent` ordering and 50 entries**).
+Recall order (`most_recent` or `most_accessed`) and the maximum number of recalled entries come from the agent's `userMemoryConfig`. The block applies whenever it is declared, with or without `enableMemoryTools`; when it is absent, the `UserMemoryConfig` defaults apply (**`most_recent` ordering and 50 entries**).
 
-> **Note:** with `enableMemoryTools: false` the config is never attached, so the defaults on `UserMemoryConfig` apply — `maxRecallEntries` is 50 either way. This used to differ: a separate hard-coded default in `Conversation` recalled 1000 entries when no config was attached, so the effective cap changed twentyfold depending on that flag and a `maxRecallEntries` declared without `enableMemoryTools` had no effect. The two are now the same constant. Set `enableMemoryTools: true` plus an explicit `maxRecallEntries` if the number matters to you.
+> **Note:** `enableMemoryTools` only controls the LLM memory tool. `maxRecallEntries` is 50 by default either way; declare `userMemoryConfig` with an explicit `maxRecallEntries` if the number matters to you.
 
 ### 2. Pipeline Execution
 
@@ -233,10 +235,14 @@ LifecycleManager runs pipeline
 
 ### 3. Conversation Teardown
 
+This runs at the end of **every turn** that completes, not only when the conversation ends.
+
 ```
 Conversation.postConversationLifecycleTasks()
   └─→ storePropertiesPermanently()
-      └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+      └─→ longTerm properties that changed this turn (or whose write an earlier,
+          paused or failed turn still owes) saved via IUserMemoryStore.upsert();
+          unchanged ones are not rewritten
       └─→ Visibility applied at persistence boundary:
           - Explicit visibility on property → used as-is
           - No visibility set → defaults to agent's defaultVisibility (or `global`)

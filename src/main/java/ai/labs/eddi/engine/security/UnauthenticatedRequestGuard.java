@@ -340,7 +340,10 @@ public class UnauthenticatedRequestGuard {
         }
         String withoutMatrix = path.indexOf(';') < 0 ? path : path.replaceAll(";[^/]*", "");
         for (String prefix : SIDE_EFFECTING_GET_PREFIXES) {
-            if (withoutMatrix.startsWith(prefix)) {
+            // Anywhere in the path, not only at its start: under a quarkus.http.root-path
+            // the route is /<root>/agents/managed/…, and a start-only match let it through
+            // as a safe GET. A false match only adds the cross-site check.
+            if (withoutMatrix.contains(prefix)) {
                 return true;
             }
         }

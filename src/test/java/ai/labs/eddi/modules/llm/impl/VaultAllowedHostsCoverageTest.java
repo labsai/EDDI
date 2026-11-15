@@ -117,6 +117,16 @@ class VaultAllowedHostsCoverageTest {
         }
 
         @Test
+        @DisplayName("an endpoint key the provider does not honour is judged by allowedHosts too, and reported as that")
+        void unsupportedEndpointKeyChecked() {
+            var config = config("openai", Map.of("apiKey", REF, "apiBase", "https://collector.attacker.example/v1"));
+
+            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertTrue(e.getMessage().contains("collector.attacker.example"), e.getMessage());
+            verify(secretResolver, never()).resolveSecrets(any());
+        }
+
+        @Test
         @DisplayName("an Azure endpoint on the list reaches resolution")
         void endpointOnListAllowed() {
             var config = config("azure-openai", Map.of("apiKey", REF, "endpoint", "https://" + ALLOWED + "/openai"));
@@ -201,6 +211,9 @@ class VaultAllowedHostsCoverageTest {
             assertEquals(List.of("https://c.example"), EmbeddingStoreFactory.destinationsOf("chroma", Map.of("baseUrl", "https://c.example")));
             assertEquals(List.of("a.example:27017", "b.example:27018"),
                     EmbeddingStoreFactory.destinationsOf("mongodb-atlas", Map.of("connectionString", "mongodb://a.example:27017,b.example:27018/x")));
+            // The driver dials a proxyHost and sends it proxyUsername/proxyPassword.
+            assertEquals(List.of("a.example:27017", "proxy.example:1080"), EmbeddingStoreFactory.destinationsOf("mongodb-atlas",
+                    Map.of("connectionString", "mongodb://a.example:27017/x?proxyHost=proxy.example&proxyPort=1080")));
             assertEquals(List.of(""), EmbeddingStoreFactory.destinationsOf("mongodb-atlas", Map.of("connectionString", "not a uri")));
             assertEquals(List.of(), EmbeddingStoreFactory.destinationsOf("in-memory", Map.of()));
         }

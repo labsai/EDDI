@@ -778,6 +778,34 @@ class RetryConfigurationTest {
         }
 
         @Test
+        @DisplayName("jitter only ever shortens the backoff, by at most the ratio")
+        void jitterShortensWithinTheRatio() {
+            assertEquals(1000L, RetryConfiguration.jittered(1000L, 0.2, 0.0), "random 0 keeps the full backoff");
+            assertEquals(800L, RetryConfiguration.jittered(1000L, 0.2, 0.999_999_9), "random near 1 takes the full 20% off");
+            assertEquals(900L, RetryConfiguration.jittered(1000L, 0.2, 0.5));
+            for (int i = 0; i < 200; i++) {
+                long value = RetryConfiguration.jittered(1000L, new RetryConfiguration());
+                assertTrue(value >= 800L && value <= 1000L, "the default 0.2 ratio keeps a 1000ms backoff in [800, 1000], got " + value);
+            }
+        }
+
+        @Test
+        @DisplayName("a zero, negative, NaN or null ratio leaves the backoff alone; above 1 is clamped to 1")
+        void jitterRatioIsClamped() {
+            assertEquals(1000L, RetryConfiguration.jittered(1000L, 0.0, 0.7));
+            assertEquals(1000L, RetryConfiguration.jittered(1000L, -3.0, 0.7));
+            assertEquals(1000L, RetryConfiguration.jittered(1000L, Double.NaN, 0.7));
+            assertEquals(300L, RetryConfiguration.jittered(1000L, 5.0, 0.7), "a ratio above 1 acts as 1, never a negative sleep");
+            assertEquals(0L, RetryConfiguration.jittered(0L, 0.2, 0.7));
+            assertEquals(0L, RetryConfiguration.jittered(-5L, 0.2, 0.7));
+
+            var nullRatio = new RetryConfiguration();
+            nullRatio.setJitterRatio(null);
+            long value = RetryConfiguration.jittered(1000L, nullRatio);
+            assertTrue(value >= 800L && value <= 1000L, "a null ratio falls back to the default, got " + value);
+        }
+
+        @Test
         @DisplayName("null config uses defaults without error")
         void nullConfigUsesDefaults() {
             // Should not throw — defaults are applied internally
@@ -797,6 +825,7 @@ class RetryConfigurationTest {
             partial.setBackoffDelayMs(null);
             partial.setBackoffMultiplier(null);
             partial.setMaxBackoffDelayMs(5L);
+            partial.setJitterRatio(0.0); // exact values below
 
             // Default 1000ms base and 2.0 multiplier, both clamped by maxBackoffDelayMs.
             assertEquals(5L, RetryConfiguration.backoff(1, partial, 0L));
@@ -835,6 +864,7 @@ class RetryConfigurationTest {
             config.setBackoffDelayMs(10L);
             config.setBackoffMultiplier(1.0);
             config.setMaxBackoffDelayMs(10L);
+            config.setJitterRatio(0.0); // exact values below
 
             assertEquals(10L, RetryConfiguration.backoff(1, config, 0L));
             // Only 5ms of budget is left, so the sleep is trimmed to it.
@@ -854,6 +884,7 @@ class RetryConfigurationTest {
             config.setBackoffDelayMs(60_000L);
             config.setBackoffMultiplier(1.0);
             config.setMaxBackoffDelayMs(30_000L);
+            config.setJitterRatio(0.0); // exact value below
 
             Thread.currentThread().interrupt();
             long start = System.nanoTime();

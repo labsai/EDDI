@@ -42,8 +42,15 @@ import java.util.regex.Pattern;
  */
 final class BoundedFormat {
 
-    /** The specifier grammar of {@link java.util.Formatter}. */
-    private static final Pattern SPECIFIER = Pattern.compile("%(\\d+\\$)?([-#+ 0,(<]*)?(\\d+)?(\\.\\d+)?([tT])?([a-zA-Z%])");
+    /**
+     * The specifier grammar of {@link java.util.Formatter}, with a width that
+     * cannot start with {@code 0}. The grammar lets a {@code 0} be a flag or the
+     * start of the width; a regex that accepts both backtracks over every way of
+     * splitting a run of zeros, so a {@code %} followed by a long run of them took
+     * time quadratic in its length. A leading {@code 0} is the flag, as it is to
+     * {@code String.format}.
+     */
+    private static final Pattern SPECIFIER = Pattern.compile("%(\\d+\\$)?([-#+ 0,(<]*)?([1-9]\\d*)?(\\.\\d+)?([tT])?([a-zA-Z%])");
 
     static final Set<String> NAMES = Set.of("fmt", "format");
 

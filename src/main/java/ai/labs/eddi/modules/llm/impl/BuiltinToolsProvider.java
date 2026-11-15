@@ -128,8 +128,7 @@ class BuiltinToolsProvider implements ToolSourceProvider {
      * Deliberately does <em>not</em> apply the {@code enableBuiltInTools} switch —
      * {@code AgentOrchestrator#collectAllBuiltInTools} checks that once, before
      * calling any source, and calls this from inside both of its whitelist
-     * branches. Package-private so that call site can use it while
-     * {@code buildToolSetup} still assembles tools the old way.
+     * branches. Package-private so that call site can use it.
      */
     List<Object> collect(ToolAssemblyContext ctx) {
         List<Object> tools = new ArrayList<>();

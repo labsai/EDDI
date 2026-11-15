@@ -19,9 +19,11 @@ import java.util.function.Function;
  * <p>
  * Every mutation is applied locally first, then announced as an eviction (never
  * as the new value): a receiving node simply forgets the key and reads the
- * database the next time it needs it. Reads are untouched. A lost event is
- * bounded by the cache's TTL ({@code eddi.cluster.local-cache-ttl} for the
- * caches that had none).
+ * database the next time it needs it. Reads are untouched, and so is a
+ * read-through fill ({@link #fill}, {@link #fillIfAbsent}): announcing those
+ * made round-robin nodes evict each other's fresh copies on every read. A lost
+ * event is bounded by the cache's TTL ({@code eddi.cluster.local-cache-ttl} for
+ * the caches that had none).
  */
 public class ClusterInvalidatingCache<K, V> implements ICache<K, V> {
 
@@ -107,6 +109,17 @@ public class ClusterInvalidatingCache<K, V> implements ICache<K, V> {
     @Override
     public V replace(K key, V value) {
         return announce(key, delegate.replace(key, value));
+    }
+
+    @Override
+    public V fill(K key, V value) {
+        // Read from the source of truth: nothing changed, so nobody else must evict.
+        return delegate.put(key, value);
+    }
+
+    @Override
+    public V fillIfAbsent(K key, V value) {
+        return delegate.putIfAbsent(key, value);
     }
 
     @Override

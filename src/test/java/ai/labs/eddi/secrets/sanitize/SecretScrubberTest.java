@@ -118,9 +118,30 @@ class SecretScrubberTest {
     }
 
     @Test
-    void scrubJson_invalidJson_returnsOriginal() {
-        String invalid = "not valid json {{{";
-        assertEquals(invalid, scrubber.scrubJson(invalid));
+    void scrubJson_unparseable_throwsWithoutEchoingInput() {
+        // A document that could not be inspected has not been shown to be safe, so
+        // it is never exported as it stands. Jackson's parse errors quote the source
+        // text, so neither the input nor that message may reach the exception.
+        String invalid = "not valid json {{{ sk-fixturefixturefixture00";
+
+        var thrown = assertThrows(IllegalStateException.class, () -> scrubber.scrubJson(invalid));
+
+        assertFalse(thrown.getMessage().contains("fixture"), thrown.getMessage());
+    }
+
+    @Test
+    void scrubJson_overDeepDocument_neverReturnsTheCredential() {
+        // Jackson's default read constraints (nesting depth 1000) do not bind the
+        // write side, so a serialised config can be deeper than readTree accepts.
+        String json = "{\"a\":".repeat(1001) + "{\"apiKey\":\"fixturefixturefixture00\"}" + "}".repeat(1001);
+
+        String scrubbed;
+        try {
+            scrubbed = scrubber.scrubJson(json);
+        } catch (IllegalStateException expected) {
+            return;
+        }
+        assertFalse(scrubbed.contains("fixturefixturefixture00"), "the credential left the scrubber in clear text");
     }
 
     @Test
@@ -334,6 +355,28 @@ class SecretScrubberTest {
         String scrubbed = scrubber.scrubJson(json);
 
         assertTrue(scrubbed.contains("aaaaaaaaaaaaaaaaaaaa"), "a structural identifier outside a header map must survive: " + scrubbed);
+    }
+
+    @Test
+    @DisplayName("a percent-encoded query name is judged by what the server reads: %6bey is key")
+    void scrubJson_encodedQueryCredentialName() {
+        String json = "{\"path\": \"/x?%6bey=abc123session&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("abc123session"), "the decoded name is key, a credential query name: " + scrubbed);
+        assertTrue(scrubbed.contains("lang=en"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("an absolute URL's percent-encoded query name is judged decoded too: %73ig is sig")
+    void scrubJson_encodedQueryCredentialNameInAnAbsoluteUrl() {
+        String json = "{\"specUrl\": \"https://api.example.com/v1?%73ig=opaquesignature123&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("opaquesignature123"), "the decoded name is sig, a credential query name: " + scrubbed);
+        assertTrue(scrubbed.contains("lang=en"), scrubbed);
     }
 
     @Test

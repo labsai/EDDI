@@ -36,6 +36,7 @@ class RestActionTest {
     private IRuleSetStore behaviorStore;
     private IApiCallsStore httpCallsStore;
     private IOutputStore outputStore;
+    private ResourceAccessGuard accessGuard;
     private RestAction restAction;
 
     @BeforeEach
@@ -44,7 +45,29 @@ class RestActionTest {
         behaviorStore = mock(IRuleSetStore.class);
         httpCallsStore = mock(IApiCallsStore.class);
         outputStore = mock(IOutputStore.class);
-        restAction = new RestAction(workflowStore, behaviorStore, httpCallsStore, outputStore, mock(ResourceAccessGuard.class));
+        accessGuard = mock(ResourceAccessGuard.class);
+        when(accessGuard.hasAccess(any(), any())).thenReturn(true);
+        restAction = new RestAction(workflowStore, behaviorStore, httpCallsStore, outputStore, accessGuard);
+    }
+
+    @Test
+    @DisplayName("a referenced rule set the caller may not VIEW contributes no actions, however its uri is spelled")
+    void skipsReferencedResourceTheCallerCannotView() throws Exception {
+        // A relative config.uri carries no host, so the workflow store's reference
+        // check
+        // never saw it; the id is still read here, by the store the step type picks.
+        var step = new WorkflowStep();
+        step.setType(URI.create("eddi://ai.labs.rules"));
+        step.setConfig(Map.of("uri", "rulesstore/rules/" + VALID_ID + "?version=1"));
+        var wfConfig = new WorkflowConfiguration();
+        wfConfig.setWorkflowSteps(List.of(step));
+        when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+        when(accessGuard.hasAccess(eq(VALID_ID), any())).thenReturn(false);
+
+        List<String> result = restAction.readActions("wf-1", 1, "", 20);
+
+        assertTrue(result.isEmpty());
+        verifyNoInteractions(behaviorStore);
     }
 
     @Test

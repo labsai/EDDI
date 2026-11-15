@@ -77,11 +77,22 @@ public final class ToolSourceRegistry {
      *            request that is not the one about to run.
      * @param failures
      *            every provider's structured failures, concatenated
+     * @param toolGroups
+     *            dispatch name → {@link ToolGroup}, only for names whose spec
+     *            survived collision resolution (the same rule as the resolvers)
      */
     public record Assembled(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
             Map<String, String> toolSources, Map<String, String> toolEndpoints,
             Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers,
-            List<ProviderFailure> failures) {
+            List<ProviderFailure> failures, Map<String, ToolGroup> toolGroups) {
+
+        /** Without tool groups. */
+        public Assembled(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+                Map<String, String> toolSources, Map<String, String> toolEndpoints,
+                Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers,
+                List<ProviderFailure> failures) {
+            this(specs, executors, toolSources, toolEndpoints, toolCanonicalNames, toolRequestResolvers, failures, Map.of());
+        }
     }
 
     /**
@@ -127,6 +138,7 @@ public final class ToolSourceRegistry {
         private final Map<String, String> toolCanonicalNames = new LinkedHashMap<>();
         private final Map<String, ToolRequestResolver> toolRequestResolvers = new LinkedHashMap<>();
         private final List<ProviderFailure> failures = new ArrayList<>();
+        private final Map<String, ToolGroup> toolGroups = new LinkedHashMap<>();
 
         private Merger() {
         }
@@ -171,7 +183,7 @@ public final class ToolSourceRegistry {
         public Assembled build() {
             return new Assembled(List.copyOf(specs), Map.copyOf(executors), Map.copyOf(toolSources),
                     Map.copyOf(toolEndpoints), Map.copyOf(toolCanonicalNames), Map.copyOf(toolRequestResolvers),
-                    List.copyOf(failures));
+                    List.copyOf(failures), Map.copyOf(toolGroups));
         }
 
         private void merge(String source, ToolContribution contribution) {
@@ -222,6 +234,10 @@ public final class ToolSourceRegistry {
                 var resolver = contribution.toolRequestResolvers().get(name);
                 if (resolver != null) {
                     toolRequestResolvers.put(name, resolver);
+                }
+                var group = contribution.toolGroups().get(name);
+                if (group != null) {
+                    toolGroups.put(name, group);
                 }
             }
         }

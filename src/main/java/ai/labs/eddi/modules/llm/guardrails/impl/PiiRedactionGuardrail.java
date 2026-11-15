@@ -77,7 +77,7 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     @Override

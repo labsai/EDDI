@@ -94,6 +94,13 @@ class SwaggerUiBrandingTest {
     }
 
     @Test
+    void aMalformedAlphaIsLeftAsItWas() {
+        String css = SwaggerUiBranding.stylesheet(".swagger-ui .x { border-color: rgba(217, 119, 6, 1.2.3); }", TEAL);
+
+        assertTrue(css.contains("rgba(217, 119, 6, 1.2.3)"), css);
+    }
+
+    @Test
     void theStylesheetTakesTheBrandColoursPerModeAndKeepsPutAmber() throws IOException {
         String css = SwaggerUiBranding.stylesheet(styleSource(), TEAL);
 

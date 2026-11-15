@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import java.time.Instant;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
@@ -27,6 +28,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
+import ai.labs.eddi.engine.internal.groups.GroupQuestionLimits;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -161,13 +164,20 @@ public class McpGroupTools {
      * from the store such as a validation message, a stale version — are described,
      * because the caller can act on them ({@link McpToolUtils#isCallerFacing}
      * decides, so an {@link IllegalArgumentException} a library raised is not one
-     * of them). A missing group or conversation is reported as such. Anything else
-     * is a server-side failure: its exception text can carry datastore or
-     * configuration detail (and a {@code NullPointerException} reads literally as
-     * "null"), so it is logged under a short reference id and the caller gets a
-     * fixed message with errorCode {@code INTERNAL} and that reference.
+     * of them). A missing group or conversation is reported as such, and an access
+     * refusal from a guard the store runs (an assigned agent the caller may not
+     * use, which REST answers with 403) as {@code FORBIDDEN}, the way
+     * {@link McpToolUtils#toolFailure(Logger, String, String, Throwable)} answers
+     * it. Anything else is a server-side failure: its exception text can carry
+     * datastore or configuration detail (and a {@code NullPointerException} reads
+     * literally as "null"), so it is logged under a short reference id and the
+     * caller gets a fixed message with errorCode {@code INTERNAL} and that
+     * reference.
      */
     private String failure(String tool, String message, Exception e) {
+        if (e instanceof ForbiddenException denied) {
+            return accessRefusal(LOGGER, tool, message, denied);
+        }
         if (e instanceof IResourceStore.ResourceNotFoundException || e instanceof NotFoundException) {
             LOGGER.debugf("%s: not found: %s", tool, LogSanitizer.sanitize(e.getMessage()));
             return errorJson(message + ": not found", "NOT_FOUND", null);
@@ -448,6 +458,12 @@ public class McpGroupTools {
                                      @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                               required = false) String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        // The ceilings REST holds a question to: no validator sees an in-process MCP
+        // call, and the question is fanned out to every member in every phase.
+        String rejection = GroupQuestionLimits.rejectionReason(question, userId);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             // Parity with REST: running a group is the USE act on it (see
             // RestGroupConversation#requireGroupUseAccess).
@@ -481,6 +497,9 @@ public class McpGroupTools {
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // The same serve-time pass the REST group views run: the stored context was
+            // rendered by whatever build wrote it, and the redaction rules are per build.
+            gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
             return jsonSerialization.serialize(gc);
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);
@@ -537,6 +556,10 @@ public class McpGroupTools {
                                          @ToolArg(description = "User ID (optional). With authorization enabled this defaults to the calling user and may not name another user.",
                                                   required = false) String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.rejectionReason(question, userId);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             resourceAccessGuard.requireUseAccess(groupId, "group");
         } catch (ForbiddenException e) {
@@ -585,6 +608,10 @@ public class McpGroupTools {
                                        @ToolArg(description = "Agent ID or display name of the member to address") String targetAgentId,
                                        @ToolArg(description = "The follow-up question") String question) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.followUpRejectionReason(question, targetAgentId, null);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         try {
             GroupConversation owned = requireConversationOwner(groupConversationId);
             // A follow-up runs a member agent, like a continuation: re-check USE on
@@ -616,6 +643,10 @@ public class McpGroupTools {
                                             @ToolArg(description = "Group conversation ID") String groupConversationId,
                                             @ToolArg(description = "The follow-up question for the group") String question) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
+        String rejection = GroupQuestionLimits.rejectionReason(question, null);
+        if (rejection != null) {
+            return errorJson(rejection, "BAD_REQUEST", null);
+        }
         GroupConversation owned;
         try {
             owned = requireConversationOwner(groupConversationId);
@@ -674,11 +705,23 @@ public class McpGroupTools {
                                 @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
                                 @ToolArg(description = "Task description (optional)", required = false) String description,
                                 @ToolArg(description = "Priority, higher runs earlier (default: 0)", required = false,
-                                         defaultValue = "0") String priority) {
+                                         defaultValue = "0") String priority,
+                                @ToolArg(description = "Only to file the task as a bet: what is believed. Needs metric and reviewDate too",
+                                         required = false) String hypothesis,
+                                @ToolArg(description = "With hypothesis: what judges the bet", required = false) String metric,
+                                @ToolArg(description = "With hypothesis: the value that counts as success", required = false) String target,
+                                @ToolArg(description = "With hypothesis: ISO date the bet is due for a verdict, e.g. 2026-12-01",
+                                         required = false) String reviewDate) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             if (subject == null || subject.isBlank()) {
                 return errorJson("subject is required");
+            }
+            SharedTaskList.Bet bet;
+            try {
+                bet = SharedTaskList.Bet.of(hypothesis, metric, target, reviewDate);
+            } catch (IllegalArgumentException e) {
+                return errorJson(e.getMessage());
             }
             if (subject.trim().length() > SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH) {
                 return errorJson("subject exceeds " + SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + " characters");
@@ -709,7 +752,7 @@ public class McpGroupTools {
                             + "by subject, so subjects must be unique");
                 }
                 var task = workspace.getBacklog().addTask(new TaskItem(
-                        trimmedSubject, description != null ? description : "", parseIntOrDefault(priority, 0)));
+                        trimmedSubject, description != null ? description : "", parseIntOrDefault(priority, 0), bet));
                 if (workspaceStore.casRevision(workspace)) {
                     return jsonSerialization.serialize(task);
                 }
@@ -722,7 +765,9 @@ public class McpGroupTools {
 
     @Tool(description = "List a standing team's backlog (I13): every task with its status, priority, "
             + "assignee and verification outcome.")
-    public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId) {
+    public String list_team_backlog(@ToolArg(description = "Group configuration ID") String groupId,
+                                    @ToolArg(description = "true to list only the bets whose review date has arrived and have no verdict yet",
+                                             required = false) Boolean dueForReview) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             if (groupStore.getCurrentResourceId(groupId) == null) {
@@ -733,6 +778,10 @@ public class McpGroupTools {
                 return groupAccessDenied("list_team_backlog", groupId);
             }
             var workspace = workspaceStore.find(groupId);
+            if (Boolean.TRUE.equals(dueForReview)) {
+                return jsonSerialization.serialize(
+                        workspace != null ? workspace.getBacklog().findDueReviews(Instant.now()) : List.of());
+            }
             return jsonSerialization.serialize(
                     workspace != null ? workspace.getBacklog().getTasks() : List.of());
         } catch (Exception e) {

@@ -5,19 +5,29 @@ import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { UpdateBanner } from "@/components/layout/update-banner";
 import { UpdateCheckCard } from "@/components/shared/update-check-card";
-import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
 
+const SWITCH_URL = "*/administration/update-check";
+
+/** The server's switch, as the backend reports it. On by default, like the real thing. */
+function updateCheckSwitch(settings: { enabled: boolean; lockedByConfig?: boolean; uiEnabled?: boolean }) {
+  server.use(
+    http.get(SWITCH_URL, () =>
+      HttpResponse.json({ lockedByConfig: false, uiEnabled: settings.enabled, ...settings }),
+    ),
+  );
+}
+
 describe("UpdateBanner", () => {
   it("stays silent when the automatic check is off", async () => {
+    updateCheckSwitch({ enabled: false });
     renderWithProviders(<UpdateBanner />);
     // Give the disabled query every chance to fire before asserting it did not.
     await waitFor(() => expect(screen.queryByTestId("update-banner")).not.toBeInTheDocument());
   });
 
-  it("announces a newer release once the automatic check is on", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
+  it("announces a newer release without anyone opting in, because the check is on by default", async () => {
     renderWithProviders(<UpdateBanner />);
 
     const banner = await screen.findByTestId("update-banner");
@@ -26,7 +36,6 @@ describe("UpdateBanner", () => {
   });
 
   it("stays silent when the deployment is already current", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     server.use(http.get(LATEST_URL, () => HttpResponse.json({ tag_name: "6.0.0-demo" })));
 
     renderWithProviders(<UpdateBanner />);
@@ -35,7 +44,6 @@ describe("UpdateBanner", () => {
   });
 
   it("stays silent when the check fails", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     server.use(http.get(LATEST_URL, () => HttpResponse.error()));
 
     renderWithProviders(<UpdateBanner />);
@@ -44,7 +52,6 @@ describe("UpdateBanner", () => {
   });
 
   it("announces itself, since it appears long after the page has settled", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(<UpdateBanner />);
 
     const banner = await screen.findByTestId("update-banner");
@@ -55,7 +62,6 @@ describe("UpdateBanner", () => {
   });
 
   it("can be dismissed", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     const user = userEvent.setup();
     renderWithProviders(<UpdateBanner />);
 
@@ -66,6 +72,7 @@ describe("UpdateBanner", () => {
   });
 
   it("appears as soon as the checkbox is ticked, without a reload", async () => {
+    updateCheckSwitch({ enabled: false });
     const user = userEvent.setup();
     // Banner and card sit in separate subtrees, exactly as in the app layout.
     renderWithProviders(
@@ -85,7 +92,6 @@ describe("UpdateBanner", () => {
   it.each(["/manage/updates", "/manage/updates/"])(
     "stays out of the way on the page it points at (%s)",
     async (route) => {
-      localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
       // The card is rendered alongside so the check's completion is observable:
       // asserting the banner's absence against a still-pending query would pass
       // no matter what the route rule did, since the banner is absent while the
@@ -106,14 +112,12 @@ describe("UpdateBanner", () => {
   );
 
   it("still announces itself everywhere else, so this is a route rule and not a mute", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(<UpdateBanner />, { initialRoute: "/manage/agents" });
 
     expect(await screen.findByTestId("update-banner")).toBeInTheDocument();
   });
 
   it("links to the Updates page and to the release notes", async () => {
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(<UpdateBanner />);
 
     const banner = await screen.findByTestId("update-banner");

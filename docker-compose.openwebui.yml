@@ -32,6 +32,8 @@ services:
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
+      # Update check (see docker-compose.yml): false switches it off entirely.
+      - "EDDI_UPDATE_CHECK_ENABLED=${EDDI_UPDATE_CHECK_ENABLED:-true}"
       # With authentication off EDDI answers only localhost, IP addresses and the
       # hosts listed here; Open WebUI and the seeder address it as http://eddi:7070.
       - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=eddi"

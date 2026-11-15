@@ -150,7 +150,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     @Override
     public Response patchApiCalls(String id, Integer version, String jsonPatch) {
         // The same pre-write check updateApiCalls runs.
-        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, patched -> {
+        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             requireMayAuthorCallerToken(patched);
             return validateBatchLimits(patched);
         });
@@ -206,8 +206,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     /**
      * Refuses {@code ${caller:token}} from a caller who may not author it — see
-     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
-     * path treats a non-200 update as "create it directly instead".
+     * {@link CallerTokenAuthorPolicy}. Throws rather than returning a response; a
+     * merge import fails on the refusal like on any other refused update.
      */
     private void requireMayAuthorCallerToken(Object configuration) {
         // A document read through the redacted view must not be stored with the
@@ -252,9 +252,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
         String authHeaderRef = trimToNull(request.authHeaderRef());
         if (authHeaderRef != null && !isReference(authHeaderRef)) {
-            return badRequest("authHeaderRef must be exactly one ${vault:…}, ${vars:…} or ${caller:…} reference, with nothing before or after "
-                    + "it — not a literal credential. "
-                    + "Store the key with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
+            return badRequest(
+                    "authHeaderRef must be exactly one ${vault:…}, ${eddivault:…}, ${vars:…} or ${caller:…} reference, with nothing before or after "
+                            + "it — not a literal credential. "
+                            + "Store the key with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
         }
 
         return discover(request.specUrl(), request.apiBaseUrl(), authHeaderRef);

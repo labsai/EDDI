@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.webhook;
 
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -517,5 +518,23 @@ class WebhookEventHandlerTest {
             assertEquals(429, handler.dispatch(INTEGRATION_ID, integration, budget, event("r-" + i, "{}"), "b:r" + i).status(),
                     "a sender looping on a quota refusal must keep seeing the real 429, not a capacity 503");
         }
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void aDeduplicationThatCannotBeCheckedClusterWideRefusesRetryablyAndRunsNothing() throws Exception {
+        // B4: cluster mode, NATS unreachable, eddi.cluster.degraded.nonces=reject — the
+        // shared de-duplication fails closed instead of answering from this node only.
+        ICache<String, String> down = mock(ICache.class);
+        when(down.putIfAbsent(anyString(), anyString())).thenThrow(new ClusterUnavailableException("NATS is not connected"));
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.getCache(anyString(), any(Duration.class))).thenReturn((ICache) down);
+        handler = new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
+                new SimpleMeterRegistry());
+
+        Dispatch dispatch = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("u-1", "{}"), "b:u1");
+
+        assertEquals(503, dispatch.status());
+        verify(conversationService, never()).startConversation(any(), anyString(), anyString(), anyMap());
     }
 }

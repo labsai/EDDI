@@ -12,6 +12,8 @@ import com.mongodb.MongoCommandException;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import com.mongodb.client.FindIterable;
+import com.mongodb.client.ListIndexesIterable;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -133,6 +135,33 @@ class HitlJournalCodecCoverageTest {
 
             MongoCommandException thrown = assertThrows(MongoCommandException.class, this::buildStore);
             assertSame(other, thrown);
+        }
+
+        @Test
+        @DisplayName("reconcileRetention counts only drops that happened, and surfaces a failed drop")
+        void reconcileCountsOnlySuccessfulDrops() {
+            ListIndexesIterable<Document> listing = mock(ListIndexesIterable.class);
+            doReturn(listing).when(collection).listIndexes();
+            doAnswer(inv -> {
+                MongoCursor<Document> cursor = mock(MongoCursor.class);
+                doReturn(true, false).when(cursor).hasNext();
+                doReturn(new Document("name", "idx_journal_ttl")).when(cursor).next();
+                return cursor;
+            }).when(listing).iterator();
+            HitlToolJournalStore store = buildStore();
+            reset(collection);
+            doReturn(listing).when(collection).listIndexes();
+
+            // already gone: nothing was repaired
+            doThrow(commandException(27)).when(collection).dropIndex("idx_journal_ttl");
+            assertEquals(0, store.reconcileRetention());
+
+            // a real failure must reach the caller, not be counted as a repair
+            doThrow(commandException(13)).when(collection).dropIndex("idx_journal_ttl");
+            assertThrows(MongoCommandException.class, store::reconcileRetention);
+
+            doNothing().when(collection).dropIndex("idx_journal_ttl");
+            assertEquals(1, store.reconcileRetention());
         }
 
         private boolean isTtlOptions(IndexOptions options) {

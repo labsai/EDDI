@@ -1,6 +1,7 @@
 # Upgrading from EDDI 6.5
 
-This guide is for an existing **EDDI 6.5.x deployment** moving to the next release. It
+This guide is for an existing **EDDI 6.5.x deployment** moving to 6.6 or 6.7. Everything up to
+[Changes in 6.7](#changes-in-67) applies from 6.6 on; the last section adds what 6.7 changes on top. It
 collects the changes that a working 6.5 client notices. It is written as the changes land, so
 read it again before you upgrade. For an older deployment, start with
 [Upgrading from 6.4](upgrading-from-6.4.md).
@@ -159,6 +160,16 @@ What to check:
   and connect with `authSource=eddi`. If you changed `mongodb.database`, use that name instead
   of `eddi` throughout.
 
+## NATS: cluster mode replaces the build-profile coordinator
+
+Only for a 6.5 deployment that ran `eddi.messaging.type=nats` on an image built with the `nats`
+Quarkus build profile (the 6.5 NATS coordinator existed only in such a build). 6.6 removes that
+coordinator; the published image selects cluster mode at runtime. The old
+`eddi.nats.stream-name`, `eddi.nats.max-retries`, `eddi.nats.ack-wait-seconds` and
+`eddi.nats.stream-max-*` settings no longer do anything (a WARN names each one that is still set),
+and the `EDDI_CONVERSATIONS` stream is unused. See
+[Upgrading from the build-profile NATS coordinator](clustering.md#upgrading-from-the-build-profile-nats-coordinator).
+
 ## Newly reserved names
 
 - **`CONTINUE_CONVERSATION` is a reserved action** ([self-continuation](long-jobs.md)). A behaviour
@@ -191,3 +202,184 @@ admin password is, so it refuses a wider bind until `keycloak-admin-rotate` has 
 and left a marker (`.eddi-admin-verified`) in the volume. One `up` with `KEYCLOAK_BIND=127.0.0.1`
 does that; after it, set `KEYCLOAK_BIND` back. A fresh volume is created with your password and
 needs nothing.
+
+---
+
+## Changes in 6.7
+
+6.7 is mostly hardening and opt-in features. Stored agent, group and workflow configs keep working:
+every new field is optional and absent on existing documents. What an existing deployment notices:
+
+### Defaults that changed
+
+- **A new-release check is on by default.** The backend asks `api.github.com` once a day (through the
+  SSRF-safe `OutboundHttp`) whether a newer EDDI exists and raises one admin notification per
+  release. Set `eddi.update-check.enabled=false` (or its environment-variable form) to turn it off before
+  first boot; that also locks the switch in the Manager. The old browser-only `localStorage` flag is
+  ignored. In an air-gapped deployment, disable it so the daily call does not fail.
+- **Cost figures rise for some workloads.** Usage is normalised the way each provider bills it, so
+  `inputTokens` and spend now include Anthropic/Bedrock prompt-cache reads and writes and Gemini
+  thinking tokens. Dashboards and cost ceilings that were tuned on the old, understated numbers may
+  trigger sooner. `eddi.llm.pricing.provider-normalization=false` restores the old counting. Prices
+  now come from a managed model-price catalog (`/administration/model-prices`); the default
+  `unpricedPolicy` is `ALLOW`, so nothing is refused until you opt in.
+- **Team budgets are admin-edit only.** `eddi.groups.team-budget.admin-only-edits=true`: editors can
+  no longer change a group's `teamBudget`. Set it to `false` to restore editor edits. New root
+  discussions, follow-ups and continuations are refused with `409` when the team or tenant is spent
+  or its budget cannot be read (fail closed), and scheduled cadence fires are skipped.
+- **`HumanInputRequest.content` is optional on the DTO** (REST) and gains `choice`; MCP
+  `submit_group_human_input` gains `choice`. A missing `content` is still a `400` for every pause
+  kind except a tie-break.
+- **The cascade judge sees the request.** With `modelCascade.strategy: judge_model`, the judge now
+  receives the last 8,000 characters of the user message along with the answer, so its scores (and
+  thus escalation rates) can shift.
+
+### Several controls fail closed
+
+The review sweep tightened many paths; callers that relied on the loose behaviour see an error
+rather than a silent success. Examples: ingestion refuses a source whose ownership it cannot verify;
+a resumed conversation re-checks USE access; Slack approval cards need a known pause; every bot-token
+reference is checked against `allowedHosts`; scheme-relative and parser references in configs and
+exports are vetted; a caller without access to a group gets `403` (not `500`) from the workspace
+endpoints; the GDPR stop sequence now waits for the member count it read itself. Check your
+automation and Slack/e-mail integrations after upgrading and read the per-area changelog entries for
+the exact behaviour.
+
+### Cluster deployments (NATS)
+
+Applies only if you run more than one node.
+
+- **Readiness is loud.** A node that never connected to NATS, or hit an unrecoverable
+  authentication or TLS error, now reports not-ready (`eddi.cluster.readiness.require-first-connect`
+  and `.fail-on-misconfiguration`, both default `true`). A wrong credential therefore takes every
+  node with it out of rotation instead of running silently unfenced. Both switches can be turned
+  off.
+- **`tls://` and `wss://` servers are host-name verified** against the configured host names;
+  `opentls://` fails boot. Boot also refuses non-positive durations, two auth methods at once and a
+  malformed inbox prefix.
+- **Signing is opt-in.** Set `eddi.cluster.signing.key` to sign every RPC, reply and event
+  (`Eddi-Sig`, HMAC-SHA256); `eddi.cluster.signing.required=true` refuses unsigned messages and
+  refuses to start without a key. Without a key only a WARN is logged. During a rolling upgrade
+  keep `required=false` until every node carries the key.
+- **Webhook de-duplication fails closed** (`503`) while NATS is unreachable, under
+  `eddi.cluster.degraded.nonces=reject` (the default).
+- **Duplicate node ids are detected.** A twin stops announcing, and the new `cluster-node-identity`
+  readiness check goes DOWN.
+- **New NATS objects.** A `<prefix>_DEPLOYMENTS` KV bucket; `<prefix>_ARCHIVES` is capped
+  (`eddi.cluster.archives.max-bytes`, 1 GiB). Account isolation and a custom inbox prefix are opt-in
+  because switching an existing release would strand its dead letters and archives.
+- **Helm and Kustomize.** The chart is `2.14.0` or later. The Kustomize `nats` component now needs a
+  `nats-auth` Secret that you create before applying; `nats.antiAffinity: required` needs at least
+  three nodes; a `preStop` sleep and a short readiness grace are added for SIGTERM. The chart exposes
+  `eddi.cluster.degradedTurns`; `reject` is recommended for production, though the code default is
+  still `local`.
+- **Rolling upgrades.** Group conversation schema goes to version 5; a pod that predates it refuses
+  to resume a document that holds a human tie-break pause. Finish the rollout before enabling
+  `HUMAN_DECIDES`. `SharedTaskList` gains `reviewerEdits`: confirm older pods tolerate the unknown
+  field before enabling `allowResultEdits` on a mixed-version cluster. New collections and tables
+  (settings, model prices, team budgets, approval analytics) are created on first use and ignored
+  by older nodes.
+- **Rolling upgrades — the later 6.7 features.** Everything below is created on first use or is an
+  optional field, and nothing writes it until you configure it, so a mixed-version cluster is safe
+  as long as you finish the rollout before switching the feature on. A backlog task's `bet` is an
+  optional field of `TaskItem`, and `lessonConfig` is an optional field of a group: stored documents are
+  read leniently, so an older pod ignores them, but an older pod that saves the same document
+  silently drops the field. Do not set either until every pod is upgraded.
+  New collections and tables (`group_outcomes`, `group_lesson_history`, `conversation_ratings`,
+  `alert_rules`, `alert_events`, `alert_windows`, and the email channel's `email_mailbox_state`,
+  `email_mailbox_notices`, `email_message_ledger` and `email_suppressions`) are created on first use
+  and ignored by older nodes. `ratingConfig` is an optional agent field. The tenant cost reservation
+  and `toolQuotas` `"window": "RUN"` store nothing new beyond their own counters.
+- **Alerts run their maintenance schedule by default.** `eddi.alerts.enabled` defaults to `true`, which
+  creates one background maintenance schedule (retries and digests) at startup; with no alert rules
+  nothing is delivered. Set it to `false` to create nothing. **On a mixed-version cluster set it to
+  `false` until every pod runs 6.7:** a 6.5 or 6.6 scheduler does not recognise the `alertType` marker
+  on that schedule, so it may claim the row and treat it as an ordinary conversation fire, which has no
+  agent target and can fail, retry or dead-letter. Enable it once the rollout is complete.
+  **Setting it to `false` afterwards does not remove a schedule a 6.7 pod already created** (it only stops
+  creating one), and the REST API and the schedule MCP tool refuse to delete or disable it (`409
+  SYSTEM_SCHEDULE`). Before you roll back to 6.6 or run mixed versions, stop the 6.7 pods, then delete the row
+  directly in the datastore. It is the schedule named `alerts-maintenance` whose `metadata.alertType` is
+  `alert_maintenance`; a same-named row without that marker is an ordinary schedule, so match on the marker:
+  - MongoDB, collection `eddi_schedules`: `db.eddi_schedules.deleteMany({ "metadata.alertType": "alert_maintenance" })`
+  - PostgreSQL, table `eddi_schedules`: `DELETE FROM eddi_schedules WHERE metadata->>'alertType' = 'alert_maintenance';`
+
+  Alert rules, events and windows are separate collections or tables and are untouched. To confirm that
+  re-enabling recreates the schedule, return to 6.7 with `eddi.alerts.enabled=true` and restart (or save an
+  alert rule): the log shows `Created the alerts-maintenance system schedule`, and the schedule is listed
+  again under Schedules.
+
+### Slack channels still declared on an agent
+
+Applies only if a deployed agent still carries the deprecated `channels` list
+([Slack integration](slack-integration.md)). The startup migration that turns those connectors into
+channel integrations runs once more on the first 6.7 start, because the configs it created before
+were never listed: Slack kept routing through the legacy connector, and the integrations did not
+appear in the Manager, the REST listing or `list_channel_integrations`. After this start each
+channel has one integration, owned like the agent it routes to by default (its visibility narrowed
+to `space` unless the agent is `private`), and Slack routes through it: the default target is the
+first agent by id (or, if that agent's connector sets a `groupId`, that group), and every other
+agent sharing the channel is reached through its trigger keyword, the slug of its name. An agent
+whose name slugs to the reserved `help` gets no trigger; give it another one. The configs the
+earlier run created stay in the database unreferenced; nothing reads them. A channel that already
+has an integration is left alone.
+
+If the default agent has no descriptor, the integration is unowned, and under the default `shared`
+legacy policy other editors can read its configuration (literal Slack credentials are redacted for
+non-admins). Set `eddi.workspaces.legacy-visibility=admin-only` to restrict it; explicit grants still
+apply. If a descriptor write or the descriptor listing fails, the migration stays incomplete and
+startup continues: check the migration log, fix the cause and restart to retry.
+
+### New opt-in features
+
+None of these changes behaviour until configured; each has its own page.
+
+| Feature | Switch | Read |
+| --- | --- | --- |
+| White-label branding | Admin → Branding in the Manager | [white-labeling](white-labeling.md) |
+| `toolQuotas` — per-subject, per-window tool-call caps | `toolQuotas` on the LLM task | [langchain](langchain.md) |
+| Tool-call guardrails | `toolCallGuardrails` | [langchain](langchain.md) |
+| Edit-on-approve and decision audit v2 | `hitlConfig.review` | [hitl](hitl.md) |
+| Approval analytics, sampled audit, earned autonomy | `hitlConfig.oversight` | [hitl](hitl.md) |
+| Human tie-breaks and humans as task-force executors | `voteConfig.humanTieBreak`, `tiePolicy: HUMAN_DECIDES` | [group-conversations](group-conversations.md) |
+| Cross-team handoff | `teamHandoff.targets`, `handoffConfig` | [group-conversations](group-conversations.md) |
+| Model-backed convergence judge | `convergence.judge: SERVICE` | [group-conversations](group-conversations.md) |
+| Team budgets | `teamBudget` on a group | [group-conversations](group-conversations.md) |
+| Bets on backlog tasks | `bet` on a team backlog task | [team-learning-loop](team-learning-loop.md) |
+| Team outcome events | `outcomeConfig` on a group | [team-learning-loop](team-learning-loop.md) |
+| Team lessons — sharing between teams and cost-capped consolidation | `lessonConfig` on a group | [team-learning-loop](team-learning-loop.md#lessons) |
+| Agent operations tools — team scorecard, budget proposals, follow-ups | `team_scorecard`, `propose_team_budget`, `schedule_followup` in `builtInToolsWhitelist`; optional `agentOps` | [agent-ops-tools](agent-ops-tools.md) |
+| Hard tenant ceiling (cost reservation) | `eddi.tenant.quota.cost-reservation.enabled=true` (default `false`) | [tenant-quotas](tenant-quotas.md) |
+| Per-run tool caps | `"window": "RUN"` in `toolQuotas` | [langchain](langchain.md#per-run-caps-window-run) |
+| Email channel | A channel integration with `channelType: "email"` (`mode: trigger` or `conversation`); `eddi.email.allowed-hosts` confines servers | [email-integration](email-integration.md) |
+| Conversation ratings | `ratingConfig` on the agent | [conversation-ratings](conversation-ratings.md) |
+| Alert rules | Create rules in the Manager's Alerts page; `eddi.alerts.enabled` (default `true`) | [alerts](alerts.md) |
+
+### Dependency advisories
+
+6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
+Manager and Chat UI. Nothing to do besides pulling the new image.
+
+## Changes after 6.7.0
+
+### An httpcall whose literal target is refused now fails at deploy
+
+With `eddi.security.ssrf-protection.enabled=true` (off by default), an httpcall whose `targetServerUrl`, or an
+absolute `request.path`, names a host the SSRF check refuses (loopback such as `http://127.0.0.1:7070`, a
+private address, `localhost`, `*.internal`, `*.local`, not on `eddi.security.ssrf-protection.allowed-hosts`)
+used to save and deploy, and only failed when the first conversation reached the call. It now fails the
+deployment. Independent of the flag, a target that is a cloud instance-metadata address fails to deploy too (it
+already failed on every call).
+
+Who is affected: deployments with protection on that have agents calling internal APIs, or EDDI itself (the
+Platform Operator's tools, for one), without listing the host. What you will see: the deploy request fails
+(and an auto-deploy at startup logs the failure for that agent) with a message naming the host and the exact
+`host:port` entry to add. To keep the agent working, add that entry to
+`eddi.security.ssrf-protection.allowed-hosts`, or point the call at a public address. Templated and
+`${vars:...}` hosts, and hosts that do not resolve at deploy (logged as a WARN), are still only checked per call.
+There is no switch to restore the old deploy-then-fail behaviour.
+
+DNS lookups made by this check now give up after `eddi.security.ssrf-protection.dns-timeout` (default `5s`) and
+count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
+refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
+See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).

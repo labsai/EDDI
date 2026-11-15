@@ -45,9 +45,9 @@ describe("GroupWorkspacePage — form clarity", () => {
     expect(screen.getByTestId("workspace-task-priority")).toHaveAccessibleDescription(
       /Higher numbers are picked first/,
     );
-    // No edit/delete endpoint exists for a backlog task; the page says so
-    // instead of leaving the user hunting for the control.
-    expect(screen.getByTestId("workspace-backlog-note")).toHaveTextContent(/cannot be edited or removed/);
+    // A backlog task cannot be edited, but it can be deleted (the 200-task cap has no
+    // other way down); the page says so instead of leaving the user hunting.
+    expect(screen.getByTestId("workspace-backlog-note")).toHaveTextContent(/cannot be edited once it is added.*delete it/);
   });
 });
 

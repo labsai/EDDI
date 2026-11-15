@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import type { SharedTaskList, TaskItem } from "./groups";
 import { seg } from "./path-segment";
+import type { WorkspaceHandoffs } from "./team-handoffs";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +
@@ -79,6 +80,8 @@ export interface GroupWorkspace {
   runningDiscussionId: string;
   /** Backlog task ids the in-flight claim pulled — cleared when the run settles. */
   pulledTaskIds: string[];
+  /** Cross-team handoff state: the intake inbox and the origin of handed-off tasks. Absent on a backend that predates handoff. */
+  handoffs?: WorkspaceHandoffs;
   created: string;
   lastModified: string;
   revision: string;
@@ -90,7 +93,16 @@ export interface AddBacklogTaskRequest {
   description?: string;
   /** Higher runs earlier when a cadence pulls — NOT the "0 = highest" convention `TaskItem`'s general Javadoc describes elsewhere. */
   priority?: number;
+  /** Set all of hypothesis, metric and reviewDate to file the task as a bet; target is optional. The server answers 400 for a partial set. */
+  hypothesis?: string;
+  metric?: string;
+  target?: string;
+  /** ISO date (`2026-12-01`, UTC midnight) or instant. */
+  reviewDate?: string;
 }
+
+/** Backend `Bet.MAX_FIELD_CHARS`. */
+export const BET_MAX_FIELD_CHARS = 500;
 
 /** Body of `addWorkspaceCadence`. */
 export interface AddCadenceRequest {
@@ -136,9 +148,9 @@ export function getGroupWorkspaceBacklog(groupId: string): Promise<TaskItem[]> {
  * duplicate subject, or lost a concurrent-write retry — the thrown ApiError's
  * `message` names which).
  *
- * NOTE: there is no companion delete/update endpoint for a single backlog task
- * (confirmed absent on both REST and MCP) — the only way a task leaves PENDING
- * today is via a cadence run pulling and completing it.
+ * NOTE: there is no update endpoint for a single backlog task. A task leaves
+ * PENDING when a cadence run pulls and completes it, and can be removed with
+ * `deleteWorkspaceBacklogTask` (team-handoffs.ts).
  */
 export function addWorkspaceBacklogTask(
   groupId: string,
@@ -148,6 +160,27 @@ export function addWorkspaceBacklogTask(
     `/groupstore/groups/${seg(groupId)}/workspace/backlog`,
     request,
   );
+}
+
+/**
+ * Bets whose review date has arrived and that have no verdict yet, earliest first.
+ * `asOf` (ISO date or instant) asks what will be due by then.
+ * GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews
+ */
+export function getDueBetReviews(groupId: string, asOf?: string): Promise<TaskItem[]> {
+  const query = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+  return api.get<TaskItem[]>(`/groupstore/groups/${seg(groupId)}/workspace/backlog/due-reviews${query}`);
+}
+
+/**
+ * Close a bet's review (it stops being due), or reopen it for a later date with
+ * `rescheduleTo`. Failures: 404 (no such task), 409 (the task is not a bet).
+ * POST /groupstore/groups/{groupId}/workspace/backlog/{taskId}/bet/review
+ */
+export function reviewBet(groupId: string, taskId: string, rescheduleTo?: string): Promise<TaskItem> {
+  return api.post<TaskItem>(`/groupstore/groups/${seg(groupId)}/workspace/backlog/${seg(taskId)}/bet/review`, {
+    rescheduleTo: rescheduleTo || null,
+  });
 }
 
 /**

@@ -43,9 +43,11 @@ import java.util.Objects;
  * <li>An <strong>explicit</strong> physical location ({@code table},
  * {@code collectionName}, {@code indexName}) may not use EDDI's reserved
  * {@code eddi_kb} prefix, and may only name a location another knowledge base
- * already uses if the caller may edit that knowledge base too. Checked only
- * when the value is new or changed, so a stored configuration is never refused
- * on a save that does not touch it.</li>
+ * already uses if the caller may edit that knowledge base too. A check that
+ * cannot see every other knowledge base — too many to scan, or one that cannot
+ * be read — refuses the location. Checked only when the value is new or
+ * changed, so a stored configuration is never refused on a save that does not
+ * touch it.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -115,13 +117,17 @@ public class KnowledgeBaseStorageGuard {
         // its name maps. That location changes - unchecked - when it is renamed, and
         // also when an explicit location is dropped: renaming while keeping the
         // explicit location and then removing it reached the default store of a
-        // different name. Either way it moves to a store of its own, keyed by its id.
+        // different name. So does a change of backend or of the server it connects
+        // to: the same name maps to that backend's or server's default store, which
+        // can be another 6.5.0 knowledge base of the same name there. Any of these
+        // moves it to a store of its own, keyed by its id.
         boolean losesExplicitLocation = previous != null && KnowledgeBaseStorage.explicitPhysicalName(previous) != null;
         if (previous != null && !KnowledgeBaseStorage.usesIdNamespace(updated)
-                && (!Objects.equals(previous.getName(), updated.getName()) || losesExplicitLocation)
+                && (!Objects.equals(previous.getName(), updated.getName()) || losesExplicitLocation
+                        || KnowledgeBaseStorage.movesServer(previous, updated))
                 && KnowledgeBaseStorage.explicitPhysicalName(updated) == null) {
-            LOGGER.warnf("Knowledge base %s (was '%s', now '%s') changed its name or dropped its explicit location while still in "
-                    + "the 6.5.0 name layout. It now uses "
+            LOGGER.warnf("Knowledge base %s (was '%s', now '%s') changed its name, backend or server, or dropped its explicit location,"
+                    + " while still in the 6.5.0 name layout. It now uses "
                     + "storeNamespace '%s': a store of its own, keyed by its id, rather than the one named after '%s'.",
                     LogSanitizer.sanitize(id), LogSanitizer.sanitize(previous.getName()), LogSanitizer.sanitize(updated.getName()),
                     KnowledgeBaseStorage.NAMESPACE_ID, LogSanitizer.sanitize(updated.getName()));
@@ -233,10 +239,16 @@ public class KnowledgeBaseStorageGuard {
             RagConfiguration other = ragStore.read(resourceId.getId(), resourceId.getVersion());
             String explicit = KnowledgeBaseStorage.explicitPhysicalName(other);
             return explicit == null ? null : KnowledgeBaseStorage.collisionKey(other, explicit);
-        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | RuntimeException e) {
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Deleted since it was listed: it no longer owns a location.
             LOGGER.debugf("Skipping knowledge base %s in the storage collision check: %s", LogSanitizer.sanitize(resourceId.getId()),
                     e.getMessage());
             return null;
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // Fail closed, like a scan past its page budget: the knowledge base that
+            // cannot be read may be the very one that owns this location.
+            throw new IllegalStateException("Could not read knowledge base " + resourceId.getId()
+                    + " to check the explicit storage location against it", e);
         }
     }
 }

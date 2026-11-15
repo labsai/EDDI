@@ -57,8 +57,10 @@ public class GlobalVariableResolver {
      * <li>{@code ${vars:tenantId/keyName}} — group(1) is tenantId, group(2) is
      * keyName</li>
      * </ul>
+     * Public so the space-reference check discovers variable tenants with the same
+     * grammar this class resolves them with.
      */
-    static final Pattern VARS_PATTERN = Pattern.compile(
+    public static final Pattern VARS_PATTERN = Pattern.compile(
             "\\$\\{vars:(?:([a-zA-Z0-9_.\\-]+)/)?([a-zA-Z0-9_.\\-]+)\\}");
 
     private final IGlobalVariableStore store;

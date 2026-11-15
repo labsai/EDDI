@@ -48,6 +48,14 @@ class ThirdPartyImagePinsTest {
     private static final Pattern MONGO_IMAGE = Pattern.compile("(?<![\\w./-])mongo:([\\w.\\-]+)");
     private static final Pattern KEYCLOAK_IMAGE = Pattern.compile("quay\\.io/keycloak/keycloak:([\\w.\\-]+)");
     private static final Pattern PATCH_VERSION = Pattern.compile("\\d+\\.\\d+\\.\\d+");
+    /**
+     * The whole image reference after {@code nats:}, up to whitespace or a quote —
+     * not a valid-looking prefix of it, so a malformed suffix is part of what is
+     * checked. A word character must follow the colon, which leaves out
+     * {@code nats://} URLs.
+     */
+    private static final Pattern NATS_IMAGE = Pattern.compile("(?<![\\w./-])nats:(\\w[^\\s\"'#]*)");
+    private static final Pattern NATS_PINNED = Pattern.compile("(\\d+\\.\\d+\\.\\d+)(?:-[a-z0-9]+)?@sha256:[0-9a-f]{64}");
     private static final YAMLMapper YAML = new YAMLMapper();
 
     @Test
@@ -68,6 +76,46 @@ class ThirdPartyImagePinsTest {
         assertEquals("quay.io/keycloak/keycloak", helm.path("repository").asText(), "helm keycloak.image.repository");
         versions.computeIfAbsent(helm.path("tag").asText(), v -> new TreeSet<>()).add("helm/eddi/values.yaml");
         assertSinglePatchVersion("Keycloak", versions);
+    }
+
+    /**
+     * C10: the NATS image of cluster mode floated on {@code nats:2.11-alpine} in
+     * the chart, the Kustomize component and the compose files. It is pinned like
+     * the other third-party images — one full patch version — and, as the
+     * coordination backbone of every replica, by digest as well, so a re-tagged
+     * image cannot change under a deployment.
+     */
+    @Test
+    @DisplayName("NATS is one full patch version, pinned by digest, on every delivery path")
+    void natsIsPinnedOnceByDigest() throws IOException {
+        TreeMap<String, TreeSet<String>> references = collect(NATS_IMAGE, false);
+        JsonNode helm = helmValues().path("nats").path("image");
+        assertEquals("nats", helm.path("repository").asText(), "helm nats.image.repository");
+        references.computeIfAbsent(helm.path("tag").asText() + "@" + helm.path("digest").asText(), v -> new TreeSet<>())
+                .add("helm/eddi/values.yaml");
+        assertTrue(references.values().stream().anyMatch(files -> files.stream().anyMatch(f -> f.startsWith("k8s/"))),
+                "the Kustomize NATS component must be part of the sweep: " + references);
+        assertEquals(1, references.size(), "NATS is pinned to more than one reference: " + references);
+        String reference = references.firstKey();
+        Matcher pinned = NATS_PINNED.matcher(reference);
+        assertTrue(pinned.matches(), "NATS is referenced as `" + reference + "` in " + references.get(reference)
+                + " — pin a full MAJOR.MINOR.PATCH tag AND its @sha256 digest");
+    }
+
+    @Test
+    @DisplayName("the NATS pin check sees a malformed suffix instead of accepting the valid prefix")
+    void natsReferenceIsCheckedWhole() {
+        String digest = "0".repeat(64);
+        Matcher valid = NATS_IMAGE.matcher("    image: nats:2.11.17-alpine@sha256:" + digest + "\n");
+        assertTrue(valid.find());
+        assertTrue(NATS_PINNED.matcher(valid.group(1)).matches(), valid.group(1));
+
+        Matcher malformed = NATS_IMAGE.matcher("    image: \"nats:2.11.17-alpine@sha256:" + digest + "oops\"\n");
+        assertTrue(malformed.find());
+        assertEquals("2.11.17-alpine@sha256:" + digest + "oops", malformed.group(1));
+        assertFalse(NATS_PINNED.matcher(malformed.group(1)).matches(), "a malformed suffix must fail the pin check");
+
+        assertFalse(NATS_IMAGE.matcher("url: nats://eddi-nats:4222").find(), "a nats:// URL is not an image");
     }
 
     @Test

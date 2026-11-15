@@ -166,7 +166,7 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * <p>
      * Only the synchronous client exists for this provider. Should a streaming
      * client be added: langchain4j's {@code VertexAiGeminiStreamingChatModel}
-     * builder has no {@code seed} setter (1.22.0-beta32).
+     * builder has no {@code seed} setter (still none in 1.23.0-beta33).
      */
     static VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder applyTo(VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder builder,
                                                                           Map<String, String> parameters) {

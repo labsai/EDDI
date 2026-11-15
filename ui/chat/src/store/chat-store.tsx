@@ -37,7 +37,7 @@ export interface ChatState {
    * True between a `cascade_escalation` event and the next token. The cascade
    * has given up on a cheaper model and moved to a more capable one; the user
    * sees only that the agent is working harder, never the model, confidence or
-   * cost — those stay admin-side in EDDI-Manager.
+   * cost — those stay admin-side in the Manager.
    */
   isEscalating: boolean;
   /**

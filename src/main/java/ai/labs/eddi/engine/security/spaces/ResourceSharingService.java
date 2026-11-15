@@ -222,7 +222,9 @@ public class ResourceSharingService {
         accessGuard.requireAccess(resourceId, AccessLevel.VIEW, RESOURCE_TYPE);
         DocumentDescriptor descriptor = loadOrThrow(resourceId);
         AccessLevel level = accessGuard.effectiveLevel(descriptor);
-        boolean maySeeGrants = level != null && level.includes(AccessLevel.OWN);
+        // Asked structurally, not of `level`: with enforcement off every caller's level
+        // is OWN, and the grant audience would go to every editor.
+        boolean maySeeGrants = accessGuard.mayReadGrants(descriptor);
         List<ResourceGrant> grants = maySeeGrants && descriptor.getGrants() != null ? List.copyOf(descriptor.getGrants()) : List.of();
 
         Set<String> principals = new LinkedHashSet<>();

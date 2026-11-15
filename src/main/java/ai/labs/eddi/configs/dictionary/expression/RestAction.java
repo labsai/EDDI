@@ -73,6 +73,13 @@ public class RestAction implements IRestAction {
                 var type = workflowStep.getType().toString();
                 var id = resourceId.getId();
                 var version = resourceId.getVersion();
+                // VIEW on the workflow does not extend to what it references: the store
+                // is picked by step type and read by whatever id config.uri spells,
+                // relative or not, so each resource is checked on its own. One the
+                // caller may not read contributes nothing.
+                if (!accessGuard.hasAccess(id, AccessLevel.VIEW)) {
+                    continue;
+                }
 
                 if (type.startsWith("eddi://ai.labs.rules")) {
                     actions = behaviorStore.readActions(id, version, filter, limit);

@@ -14,8 +14,25 @@ interface HumanTurnBannerProps {
   requestedAt?: string | null;
   /** The group's `humanMemberConfig.turnTimeout` (ISO-8601 duration), if set. */
   turnTimeout?: string | null;
-  onSubmit: (content: string) => void;
+  /**
+   * The tied options when the pending input is a tie-break (`tiePolicy:
+   * HUMAN_DECIDES`). The banner then asks for one choice, with an optional
+   * rationale, instead of a free-text turn.
+   */
+  options?: string[];
+  /**
+   * The task-force task the pending input is about (a HUMAN executor's task). The
+   * banner then names the task and asks for its result.
+   */
+  task?: { subject: string; description?: string | null };
+  onSubmit: (content: string, choice?: string) => void;
   isSubmitting?: boolean;
+  /**
+   * Identifies the pause being answered (conversation id + pause). When it
+   * changes the banner starts over: a choice or rationale typed for one pause
+   * must never be submitted for another.
+   */
+  pauseKey?: string;
 }
 
 function isValidDate(iso?: string | null): boolean {
@@ -29,17 +46,25 @@ function isValidDate(iso?: string | null): boolean {
  * OWN contribution, so the interaction (compose + submit) has nothing in common
  * with approve/reject/amend.
  */
-export function HumanTurnBanner({
+export function HumanTurnBanner({ pauseKey, ...props }: HumanTurnBannerProps) {
+  return <HumanTurnBannerBody key={pauseKey ?? ""} {...props} />;
+}
+
+function HumanTurnBannerBody({
   displayName,
   renderedPrompt,
   pausedPhaseName,
   requestedAt,
   turnTimeout,
+  options,
+  task,
   onSubmit,
   isSubmitting,
-}: HumanTurnBannerProps) {
+}: Omit<HumanTurnBannerProps, "pauseKey">) {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
+  const [choice, setChoice] = useState<string | null>(null);
+  const tieBreak = options !== undefined;
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -58,11 +83,13 @@ export function HumanTurnBanner({
   })();
 
   const trimmed = content.trim();
-  const canSubmit = trimmed.length > 0 && !isSubmitting;
+  // A tie-break is answered by its choice; the rationale is optional.
+  const canSubmit = (tieBreak ? choice !== null : trimmed.length > 0) && !isSubmitting;
 
   function handleSubmit() {
     if (!canSubmit) return;
-    onSubmit(trimmed);
+    if (tieBreak) onSubmit(trimmed, choice!);
+    else onSubmit(trimmed);
   }
 
   return (
@@ -76,8 +103,18 @@ export function HumanTurnBanner({
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-foreground">
-            {t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
+            {tieBreak
+              ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
+              : task
+                ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
+                : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
           </h3>
+          {task && (
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="human-turn-task">
+              <span className="font-medium text-foreground">{task.subject}</span>
+              {task.description ? ` — ${task.description}` : ""}
+            </p>
+          )}
         </div>
       </div>
 
@@ -128,13 +165,46 @@ export function HumanTurnBanner({
         </div>
       )}
 
+      {tieBreak && (
+        <fieldset className="mb-3 space-y-1.5" data-testid="human-turn-options">
+          <legend className="mb-1 text-xs font-medium text-foreground">
+            {t("groupTieBreak.chooseOne", "Choose one option")}
+          </legend>
+          {options!.map((option, i) => (
+            <label key={option} className="flex items-start gap-2 text-sm text-foreground">
+              <input
+                type="radio"
+                name="tie-break-choice"
+                value={option}
+                checked={choice === option}
+                onChange={() => setChoice(option)}
+                disabled={isSubmitting}
+                className="mt-0.5 accent-primary"
+                data-testid={`human-turn-option-${i}`}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        aria-label={t("groups.humanTurnResponsePlaceholder", "Your response")}
-        placeholder={t("groups.humanTurnResponsePlaceholder", "Your response")}
+        aria-label={
+          tieBreak
+            ? t("groupTieBreak.rationalePlaceholder", "Why (optional)")
+            : t("groups.humanTurnResponsePlaceholder", "Your response")
+        }
+        placeholder={
+          tieBreak
+            ? t("groupTieBreak.rationalePlaceholder", "Why (optional)")
+            : task
+              ? t("groupHumanTasks.resultPlaceholder", "Your result for this task")
+              : t("groups.humanTurnResponsePlaceholder", "Your response")
+        }
         className="mb-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        rows={4}
+        rows={tieBreak ? 2 : 4}
         disabled={isSubmitting}
         data-testid="human-turn-input"
         onKeyDown={(e) => {

@@ -12,7 +12,7 @@ HttpCalls are lifecycle tasks that execute during the agent's processing pipelin
 User Input → Parser → Behavior Rules → HttpCalls → Output Generation
 ```
 
-Typically, Behavior Rules decide **when** to make an API call by triggering an action like `httpcall(weather-api)`, and the HttpCalls extension defines **how** to make that call.
+Typically, Behavior Rules decide **when** to make an API call by emitting an action such as `get_weather` (any string; by convention it names the call), and the HttpCalls extension defines **how** to make that call: a call runs when its own `actions` list contains an action the rules emitted.
 
 ### Common Use Cases
 
@@ -34,6 +34,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Batch requests**: Make multiple API calls by iterating over an array (requires `"fireAndForget": true`)
 - **Fire and forget**: Optional asynchronous calls that don't wait for a response
 - **Caller identity**: Call an API *as the signed-in user* with `${caller:token}` — see [Calling as the signed-in user](#calling-as-the-signed-in-user)
+- **Per-turn credentials**: Send the token a client supplied as secret context with `${context:<key>}` — see [Per-turn credentials from secret context](#per-turn-credentials-from-secret-context)
 
 ## Calling as the signed-in user
 
@@ -71,8 +72,7 @@ than degrading quietly:
   deployment's own address. The caller's origin is read from the inbound request;
   the deployment's own address comes from deployment configuration alone —
   `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` (or the
-  `quarkus.http.host` address, when the listener binds one specific non-loopback
-  address and `127.0.0.1` is therefore not this process) — never
+  `quarkus.http.host` address, when the listener binds one specific address, loopback ones such as `127.0.0.5` or `::1` included, so `127.0.0.1` is therefore not this process) — never
   from an agent config or a request header. So a config naming a third-party host
   cannot exfiltrate a user's token, and no allow-list is needed for this to be safe
   by default. With `quarkus.http.port=0` (a random port) and no
@@ -91,11 +91,14 @@ than degrading quietly:
   could not be captured never gets the self release.
 
   With `eddi.security.ssrf-protection.enabled=true`, the loopback default is
-  refused before any request is made (loopback is exactly what that protection
-  blocks), so such a deployment must set `eddi.self.base-url` to an address the
-  server can reach *and* that passes the full SSRF target policy — which also
-  rejects private and link-local addresses, so an in-cluster service name that
-  resolves to a private IP stays blocked. `eddi.self.base-url` must be a bare
+  refused (loopback is exactly what that protection blocks; httpcalls have no
+  self exception), and an httpcall naming it literally fails to deploy. Such a
+  deployment either lists the self host in
+  `eddi.security.ssrf-protection.allowed-hosts` (`127.0.0.1:7070`), or sets
+  `eddi.self.base-url` to an address the server can reach *and* that passes the
+  full SSRF target policy — which also rejects private and link-local
+  addresses, so an in-cluster service name that resolves to a private IP must be
+  listed as well. `eddi.self.base-url` must be a bare
   `scheme://host[:port]`; a value with a path, query, fragment or credentials is
   ignored (logged at ERROR). A plain-`http` value naming a non-loopback host is
   accepted but logged at WARN, since the caller's token would cross the network
@@ -153,6 +156,56 @@ Only the tool call carries the caller — the handshake and `tools/list` do not,
 because the client is cached and a session opened with one user's token would be
 reused by everyone after them. See
 [`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
+
+### Per-turn credentials from secret context
+
+When EDDI's own OIDC is off, `${caller:token}` has no caller to forward. An
+application that hands EDDI its user's own bearer token with every request — as a
+context entry marked secret, re-supplied on a HITL resume — references it with
+`${context:<key>}`:
+
+```json
+"headers": {
+  "Authorization": "Bearer ${context:userToken}"
+}
+```
+
+The client sends the value with each say (and resume) request:
+
+```json
+"context": { "userToken": { "type": "string", "value": "eyJ…", "secret": true } }
+```
+
+This is the **recommended form**. `Bearer {context.userToken}` (a plain Qute
+template) works too, but it is only templating: it renders into any part of the
+request, towards any host, and renders `Bearer ` when the value is missing. The
+reference follows the `${caller:token}` rules instead:
+
+- **Secret entries only.** An entry without `"secret": true` is refused: only
+  secret entries are scrubbed from the stored conversation when the turn ends.
+- **Headers only.** A reference in the path, a query parameter or the body is
+  refused, never resolved.
+- **Written in the header itself**, as a lone reference optionally after a scheme
+  (`Bearer ${context:userToken}`). A value mixing it with other text is refused,
+  and so is a reference that user input, an API response or a `${vars:…}` value
+  rendered into the header.
+- **Only to the configuration's own host.** The request must go to the origin of
+  the httpcalls configuration's `targetServerUrl`; an absolute path naming another
+  host is refused, and so is a `targetServerUrl` that is itself a template.
+  Redirects are not followed for such a request.
+- **Over https.** Plain http is refused unless the host is this machine
+  (localhost, 127.0.0.0/8, ::1, judged as an address, not as text).
+- **Fails closed.** A missing or empty entry — or, on a resumed turn, a value the
+  client did not send again — fails the call instead of sending `Bearer `.
+- **Never stored.** The resolved value joins the call's redaction set: it is
+  removed by value from the request record in conversation memory, the approval
+  preview, error bodies and log lines, whatever the header is called.
+
+`setup-api` accepts the reference as `apiAuth` (`"apiAuth": "Bearer ${context:userToken}"`),
+so an agent generated from an OpenAPI spec can call the API as each user. Outcomes
+are counted as `eddi.httpcalls.context.reference` (tag `outcome`: `resolved`,
+`missing`, `not_secret`, `expired`, `cross_origin`, `insecure_transport`, `mixed`, `not_configured`,
+`misplaced`).
 
 ### Cookies are not kept between calls
 
@@ -246,6 +299,7 @@ We will emphasize the `httpCall` model and go through an example step by step, y
 ```javascript
 {
   "targetServerUrl": "string",
+  "description": "string",
   "httpCalls": [
     {
       "name": "string",
@@ -304,15 +358,18 @@ We will emphasize the `httpCall` model and go through an example step by step, y
             "iterationObjectName": "String",
             "templateFilterExpression": "String",
             "outputType": "String",
-            "outputValue": "String"
+            "outputValue": "String",
+            "httpCodeValidator": { "runOnHttpCode": [ <array of Integers> ], "skipOnHttpCode": [ <array of Integers> ] }
           }
         ],
         "qrBuildInstructions": [
           {
             "pathToTargetArray": "String",
             "iterationObjectName": "String",
+            "templateFilterExpression": "String",
             "quickReplyValue": "String",
-            "quickReplyExpressions": "String"
+            "quickReplyExpressions": "String",
+            "httpCodeValidator": { "runOnHttpCode": [ <array of Integers> ], "skipOnHttpCode": [ <array of Integers> ] }
           }
         ],
         "propertyInstructions": [
@@ -344,7 +401,7 @@ We will emphasize the `httpCall` model and go through an example step by step, y
 
 ### Description
 
-An `httpCall` is mainly composed from the `targetServer` `array` of `httpCalls`, the latter will have request where you put all details about your actual **http request** (`method`,`path`,`headers`, etc..) and postResponse where you can define what happens after the `httpCall` has been executed and a `response` has been received; such as quick replies by using `qrBuildInstruction`.
+An `httpCall` configuration is mainly composed of the `targetServerUrl` and the `array` of `httpCalls`, the latter will have request where you put all details about your actual **http request** (`method`,`path`,`headers`, etc..) and postResponse where you can define what happens after the `httpCall` has been executed and a `response` has been received; such as quick replies by using `qrBuildInstruction`.
 
 You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access your `JSON` object, so you can use it in `output templating` or in another `httpCall`, for example an `httpCall` will get the `oAuth` `token` and another `httpCall` will use in the `http` `headers` to authenticate to an API.
 
@@ -353,12 +410,15 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | Element                                                                     | Description                                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | targetServerUrl                                                             | (`String`) `root/context` path of the `httpCall` (e.g `http://example.com/api)`                                                                                                                                                  |
+| description                                                                 | (`String`, optional) one-line summary of this group of calls. Shown by `discover_tools` when an LLM task loads its http tools lazily (`lazySources: ["http"]`, see [Lazy tool loading](langchain.md#lazy-tool-loading)); the OpenAPI generator fills it from the tag|
 | httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `{memory.current.httpCalls}`. `true` requires a `responseObjectName`; saving a config that sets one without the other is refused with `400`, because the executor would have nothing to store the body under                                      |
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |
 | httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
 | httpCall.description                                                        | (`String`) what the call does, in natural language — shown to an LLM when the call is offered as a tool.                                                                                                                       |
 | httpCall.parameters                                                         | (`Map<String, String>`) parameter name → description, for an LLM calling the call as a tool.                                                                                                                                    |
+| httpCall.argumentSchema                                                     | (`Object`, unset by default) JSON Schema of the tool arguments: one object whose `properties` are the tool parameters. When set, the tool's parameters are **typed** from it and a call that violates it is refused **before the approval gate** — see [Argument schema](#argument-schema-for-llm-tools). Unset keeps string parameters and today's rendering exactly. Generated by the OpenAPI tool builder. |
+| httpCall.unknownFields                                                      | (`String`, default `reject` when a schema is set) what happens to an argument field the schema does not declare: `reject` refuses the call, `drop` removes the field before the request is built, `allow` passes it through. An explicit `additionalProperties: true` keeps the field under every mode; an explicit `false` is refused under `reject` and `allow`, and under `drop` the field is removed (so it is never sent). Any other value is refused at save time. |
 | httpCall.actions                                                            | (`List<String>`) the behavior-rule actions that trigger this call (`"*"` matches any action).                                                                                                                                   |
 | httpCall.timeoutInMillis                                                    | (`Integer`) request timeout for this call; unset falls back to `eddi.httpcalls.default-timeout-millis` (30 s).                                                                                                                  |
 | httpCall.maxResponseSizeInBytes                                             | (`Integer`) how much of the response body is kept in conversation memory. A larger body is **truncated** (with a warning) rather than failing the call; unset falls back to `eddi.httpcalls.default-max-response-size-bytes` (2 MB). |
@@ -372,26 +432,27 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.forEach.maxTotalResponseSizeInBytes                                | (`Integer`, default: the call's `maxResponseSizeInBytes`) budget for every item's stored body together; bodies past it are dropped (status kept) and marked `bodyDropped`.                                                         |
 | httpCall.preRequest.delayBeforeExecutingInMillis                            | (`Integer`, default `0`) wait this long before sending the request.                                                                                                                                                            |
 | httpCall.preRequest.propertyInstructions                                    | (`List`) property instructions run before the request is built, with the same fields and behaviour as `postResponse.propertyInstructions` (no HTTP-code gate).                                                                  |
-| httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently.                                                                                                                       |
+| httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently. In either mode a request that fails (a timeout, a refused connection) is logged with its position in the batch and the rest are still sent. |
 | httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent — use [`forEach`](#foreach--one-call-per-element) to collect per-element results. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.preRequest.batchRequests.maxBatchSize                              | (`Integer`, default `100`, at most `1000` — both operator-configurable, see `eddi.httpcalls.batch.*` in the [configuration reference](configuration-reference.md)) most requests the batch may expand into. A target array with more elements refuses the whole call — nothing is sent and the turn fails with a message naming the limit — instead of silently dropping the tail. Saving a value above the ceiling is refused with `400`. |
-| httpCall.request.path                                                       | (`String`) path in the `targetServer` of the `httpCall` (e.g /`books`)                                                                                                                                                           |
+| httpCall.request.path                                                       | (`String`) path below the `targetServerUrl` of the `httpCall` (e.g /`books`)                                                                                                                                                         |
 | httpCall.request.headers                                                    | (`Array`:\<key, value> ) for each `httpCall HTTP header`                                                                                                                                                                         |
 | httpCall.request.queryParams                                                | (`Array`: \<key, value>) for each `httpCall` query parameter                                                                                                                                                                     |
+| httpCall.request.optionalQueryParams                                        | (`List<String>`, default none) keys of `queryParams` that are left off the request when their value renders empty, instead of being sent as `?name=`. Set by tools generated from an OpenAPI spec for query parameters it does not mark required; without it every query parameter is sent. |
 | httpCall.request.method                                                     | (`String`) `HTTP` Method of the `httpCall` (e.g `GET`,`POST`,etc...)                                                                                                                                                             |
 | httpCall.request.contentType                                                | (`String`) value of the `contentType HTTP header` of the `httpCall`                                                                                                                                                              |
 | httpCall.request.body                                                       | (`String`) an escaped `JSON` object that goes in the `HTTP Request` body if needed.                                                                                                                                              |
-| httpCall.postResponse.retryApiCallInstruction.maxRetries                    | (`Integer`, default `3`) how often the call is repeated when a retry condition below matches.                                                                                                                                   |
+| httpCall.postResponse.retryApiCallInstruction.maxRetries                    | (`Integer`, default `3`) how often the call is repeated when a retry condition below matches. Only the final attempt's outcome is kept: a failed attempt's `{responseObjectName}Error` and `{responseObjectName}HttpCode` are visible to the retry conditions of that attempt only, and a retry that succeeds leaves neither behind. |
 | httpCall.postResponse.retryApiCallInstruction.exponentialBackoffDelayInMillis | (`Integer`, default `1000`) base delay of the exponential backoff between attempts.                                                                                                                                            |
 | httpCall.postResponse.retryApiCallInstruction.maxBackoffDelayInMillis       | (`Integer`) upper bound for one backoff delay — the engine clamps it to 30 s in any case.                                                                                                                                      |
 | httpCall.postResponse.retryApiCallInstruction.retryOnHttpCodes              | (`List<Integer>`, default `[502, 503]`) response codes that trigger a retry.                                                                                                                                                   |
 | httpCall.postResponse.retryApiCallInstruction.responseValuePathMatchers     | (`List`) `{valuePath, equals, contains, trueIfNoMatch}` checks on the response; a match (or, with `trueIfNoMatch`, a non-match) triggers a retry.                                                                                |
-| httpCall.postResponse.outputBuildInstructions[]                             | (`List`) builds output items from the response: one item of `outputType` per element of `pathToTargetArray` (bound to `iterationObjectName`, optionally filtered by `templateFilterExpression`), its text rendered from `outputValue`. Without `pathToTargetArray`, `outputValue` is rendered once. The items reach the reply through the output task. |
+| httpCall.postResponse.outputBuildInstructions[]                             | (`List`) builds output items from the response: one item of `outputType` per element of `pathToTargetArray` (bound to `iterationObjectName`, optionally filtered by `templateFilterExpression`), its text rendered from `outputValue`. Without `pathToTargetArray`, `outputValue` is rendered once. The items reach the reply through the output task. Each instruction also takes an `httpCodeValidator`, with the defaults described below. |
 | httpCall.postResponse.qrBuildInstructions[].pathToTargetArray               | (`String`) path to the array in your `JSON` **response data.**                                                                                                                                                                   |
 | httpCall.postResponse.qrBuildInstructions[].iterationObjectName             | (`String`) a variable name that will point to the `TargetArray.`                                                                                                                                                                 |
 | httpCall.postResponse.qrBuildInstructions[].quickReplyValue                 | (`String`) `Qute expression` to use as a `quickReply` value.                                                                                                                                                                |
-| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`.                                                                                                                                                       |
+| httpCall.postResponse.qrBuildInstructions[].quickReplyExpressions           | (`String`) `expression` to retrieve a property from `iterationObjectName`. `templateFilterExpression` and `httpCodeValidator` work as for `outputBuildInstructions`.                                                              |
 | httpCall.postResponse.propertyInstructions.name                             | (`String`) name of property to be used in templating                                                                                                                                                                             |
 | httpCall.postResponse.propertyInstructions.valueString                      | (`String`) a static value (a template) used when `fromObjectPath` is not defined. Typed siblings exist for other value types: `valueInt`, `valueLong`, `valueFloat`, `valueDouble`, `valueBoolean`, `valueObject`, `valueList`. |
 | httpCall.postResponse.propertyInstructions.scope                            | <p>(<code>String</code>) one of: </p><p><code>step</code> for this user interaction only, </p><p><code>conversation</code> for the entire conversation, </p><p><code>longTerm</code> across conversations, </p><p><code>secret</code> vaulted — see [Properties](properties.md#secret-properties)</p> |
@@ -401,12 +462,79 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.postResponse.propertyInstructions.convertToObject                  | (`Boolean`, default `false`) parse a string value shaped like a JSON object (`{...}`) into an object.                                                                                                                          |
 | httpCall.postResponse.propertyInstructions.override                         | (`Boolean`, default `true`) `false` leaves an already-set property alone.                                                                                                                                                        |
 | httpCall.postResponse.propertyInstructions.runOnValidationError             | (`Boolean`, default `false`) also run the instruction when the call ended in a validation error (an MCP call's error path uses this).                                                                                         |
-| httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]                                                                                                                                   |
-| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http codes that skip this property instruction e.g \[`500,501,400`]                                                                                                                              |
+| httpCall.postResponse.propertyInstructions.httpCodeValidator.runOnHttpCode  | (`Array`: \<Integer> ) a list of http code that enables this property instruction e.g \[`200`]. Unset: `[200, 201]`                                                                                                             |
+| httpCall.postResponse.propertyInstructions.httpCodeValidator.skipOnHttpCode | (`Array`: \<Integer>) list of http codes that skip this property instruction e.g \[`500,501,400`]. Unset: `[0, 400, 401, 402, 403, 404, 409, 410, 500, 501, 502]` (`0` = no response) |
 
 A property instruction here runs on the same implementation as a `property.json` instruction, so the two store the same values. A failing one (a template that does not render) no longer disappears into the log: it is logged with the conversation id and recorded in the step under `propertyInstructions:errors`, and the remaining instructions still run. See [Properties](properties.md#via-prepost-request-instructions).
 
 **A missing array is an empty loop.** Quick-reply and output build instructions iterate `pathToTargetArray` with `.orEmpty` appended (unless you already wrote it, or use `?:`, `??` or `or`), so a response that does not contain the array yields no quick replies or output items instead of failing the turn with `Iteration error ... not found`.
+
+### Argument schema (for LLM tools)
+
+An httpcall used as an LLM tool can declare the JSON Schema of its arguments in `argumentSchema`.
+Agents generated from an OpenAPI spec get one per operation: the path and query parameters (typed
+`integer`, `number`, `boolean` or `string`, with their `enum`; an array or object path/query parameter
+stays a string), and the request-body variable with the body's schema, every component `$ref`
+resolved. Path parameters and the body variable are required; a query parameter is required only
+when the spec marks it `required`, and requiredness inside the body is the spec's own. A query
+parameter the model may leave out is also listed in `request.optionalQueryParams`, so an omitted one
+is not sent at all and the server applies its own default. `readOnly` body fields are left out.
+Tools are named after their `operationId`; when a spec repeats one, the later operation is named by
+its method and path (`get_groups_groupid_outcomes`), so no tool is lost to a name collision.
+
+```json
+{
+  "name": "inviteMembers",
+  "parameters": {"teamId": "The team", "requestBody": "The complete JSON request body, as a single JSON object."},
+  "argumentSchema": {
+    "type": "object",
+    "required": ["teamId", "requestBody"],
+    "properties": {
+      "teamId": {"type": "integer"},
+      "requestBody": {
+        "type": "object",
+        "required": ["emails", "role"],
+        "properties": {
+          "emails": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "role": {"type": "string", "enum": ["manager", "curator"]}
+        }
+      }
+    }
+  },
+  "unknownFields": "reject",
+  "request": {"method": "post", "path": "/teams/{teamId}/invites", "contentType": "application/json", "body": "{requestBody}"}
+}
+```
+
+What it changes:
+
+- **Typed tool parameters.** The model is offered `teamId` as an integer and `requestBody` as an
+  object, so it writes the body as structured arguments instead of one JSON-encoded string. A
+  parameter whose schema has no tool-parameter form (no `type`, `anyOf`/`oneOf`, a free-form object
+  without `properties`, which Gemini rejects) is offered as a string, as before — and a JSON string
+  given for an object or array parameter is still accepted and decoded.
+- **Checked before the gate.** A call whose arguments break the schema is not executed and **not
+  paused for approval**. The model receives
+
+  ```json
+  {"status":"NOT_EXECUTED","reason":"The arguments do not match this tool's schema, ...","violations":["$.requestBody.emails: required","$.requestBody.emials: unknown field (declared fields: emails, role)","$.requestBody.role: must be one of manager, curator"]}
+  ```
+
+  and corrects the call on its next iteration. The trace records `tool_error` with
+  `error: "argument_schema"` and the violations; the metric is `eddi.tool.arguments.refused`
+  (tag `source`). The executor checks again before sending, so an approved call resumed after the
+  schema changed is refused too.
+- **Rendering.** A string argument is substituted as itself (path and query values are never
+  quoted); every other value as its compact JSON — `5`, `true`, `["a"]`, `{"role":"curator"}` —
+  never a Java `toString` such as `{role=curator}`. The text is substituted as data into the
+  authored placeholder, exactly as a model-written string always was: a `{…}` inside an argument is
+  sent as written, never evaluated.
+
+Supported keywords: `type`, `properties`, `required`, `items`, `enum`, boolean
+`additionalProperties`, `description`, `nullable`, `minimum`/`maximum` (and the exclusive forms),
+`minLength`/`maxLength`, `minItems`/`maxItems`. Anything else — `$ref`, `pattern`, `format`,
+compositions — is ignored and accepts any value, so the check never refuses what it cannot read.
+Without `argumentSchema` nothing here applies and the request is rendered byte for byte as before.
 
 ### Turn deadline
 
@@ -483,12 +611,16 @@ Each element of the stored array describes one item, in the order of the source 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
 | ----------- | ----------------------------------------------- | --------------- | ------------------------------------- |
 | POST        | `/apicallstore/apicalls`                     | http-call-model | N/A                                   |
-| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model |
-| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A                                   |
+| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model (query: `filter`, `index`, `limit`) |
+| GET         | `/apicallstore/apicalls/jsonSchema`          | N/A             | JSON Schema of the http-call-model |
+| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A (query: `version`, `permanent=true` removes the history too) |
 | GET         | `/apicallstore/apicalls/{id}`                | N/A             | http-call-model                       |
 | PUT         | `/apicallstore/apicalls/{id}`                | http-call-model | N/A                                   |
 | GET         | `/apicallstore/apicalls/{id}/currentversion` | N/A             | current version number (`text/plain` integer) |
 | POST        | `/apicallstore/apicalls/{id}/currentversion` | N/A             | `303` redirect to `/apicallstore/apicalls/{id}?version=<latest>` |
+| POST        | `/apicallstore/apicalls/{id}`                | N/A             | duplicates the config (query: `version`); `Location` names the copy |
+| PATCH       | `/apicallstore/apicalls/{id}`                | RFC 6902 JSON Patch (`application/json-patch+json`) | new version in `Location` (query: `version`, required; `409` when it is not the current version) |
+| POST        | `/apicallstore/apicalls/discover-endpoints`  | `{specUrl, apiBaseUrl, authHeaderRef}` — `specUrl` is the OpenAPI 3.x URL or the document inline; `authHeaderRef` must be a `${vault:…}`, `${vars:…}` or `${caller:…}` reference | the spec's operations grouped by tag, as generated httpcalls (used by the Manager's API import) |
 
 ### httpCall Sample
 
@@ -971,7 +1103,7 @@ _Response Body_
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [
@@ -1012,11 +1144,19 @@ _Request Body_
 
 ```javascript
 {
+  "input": "Vienna"
+}
+```
+
+_Response Body_
+
+```javascript
+{
   "agentId": "5af8b075ba31c023bcb9ef3b",
   "agentVersion": 1,
   "environment": "production",
   "conversationState": "READY",
-  "redoCacheSize": 0,
+  "redoAvailable": false,
   "conversationSteps": [
     {
       "conversationStep": [

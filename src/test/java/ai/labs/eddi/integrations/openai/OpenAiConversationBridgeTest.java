@@ -280,8 +280,55 @@ class OpenAiConversationBridgeTest {
         var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
 
         assertEquals(CONVERSATION_ID, turn.conversationId());
-        verify(userConversationStore).deleteUserConversation(any(), eq(USER_ID));
+        verify(userConversationStore).deleteUserConversationIfMatches(any(), eq(USER_ID), eq(OTHER_CONVERSATION_ID));
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
         verify(conversationService).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void endedMappingReplacedConcurrently_convergesOnTheOtherRequestsConversation() throws Exception {
+        // Open WebUI sends a chat's completion and its title request together. Both
+        // read the ended mapping; the other request has already replaced it by the
+        // time this one deletes. An unconditional delete removed that fresh mapping
+        // and split the chat across two conversations, one of them orphaned.
+        String intent = bridge.buildIntent(AGENT_ID_SUPPORT, "chat-a");
+        String winnerConversationId = "66c0ffee0000000000000003";
+        Map<String, UserConversation> rows = new HashMap<>();
+        rows.put(intent, new UserConversation(intent, USER_ID, Environment.production, AGENT_ID_SUPPORT,
+                winnerConversationId));
+        UserConversation staleRead = new UserConversation(intent, USER_ID, Environment.production, AGENT_ID_SUPPORT,
+                OTHER_CONVERSATION_ID);
+        when(conversationService.getConversationState(OTHER_CONVERSATION_ID)).thenReturn(ConversationState.ENDED);
+        when(userConversationStore.readUserConversation(intent, USER_ID))
+                .thenReturn(staleRead)
+                .thenAnswer(invocation -> rows.get(intent));
+        doAnswer(invocation -> {
+            rows.remove(invocation.<String>getArgument(0));
+            return null;
+        }).when(userConversationStore).deleteUserConversation(any(), any());
+        when(userConversationStore.deleteUserConversationIfMatches(any(), any(), any())).thenAnswer(invocation -> {
+            UserConversation current = rows.get(invocation.<String>getArgument(0));
+            if (current == null || !current.getConversationId().equals(invocation.getArgument(2))) {
+                return false;
+            }
+            rows.remove(invocation.<String>getArgument(0));
+            return true;
+        });
+        doAnswer(invocation -> {
+            UserConversation mapping = invocation.getArgument(0);
+            if (rows.putIfAbsent(mapping.getIntent(), mapping) != null) {
+                throw new RuntimeException("E11000 duplicate key");
+            }
+            return null;
+        }).when(userConversationStore).createUserConversation(any());
+
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        assertEquals(winnerConversationId, turn.conversationId(),
+                "both requests of one chat must land in one conversation");
+        assertEquals(winnerConversationId, rows.get(intent).getConversationId(),
+                "the other request's fresh mapping must survive");
+        verify(conversationService).endConversation(CONVERSATION_ID);
     }
 
     @Test
@@ -381,6 +428,27 @@ class OpenAiConversationBridgeTest {
         assertEquals("Title", bridge.say(turn, statelessModel, USER_ID, headers(null), simpleRequest()).text());
 
         verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void abandonedStatelessTurn_endsItsConversation() throws Exception {
+        // prepare() already started the throwaway conversation; a turn that is never
+        // run must not leave it open.
+        var turn = statelessTurn();
+
+        bridge.abandon(turn);
+
+        verify(conversationService).endConversation(CONVERSATION_ID);
+    }
+
+    @Test
+    void abandonedStatefulTurn_leavesTheChatsConversationAlone() throws Exception {
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+        var turn = bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID);
+
+        bridge.abandon(turn);
+
+        verify(conversationService, never()).endConversation(any());
     }
 
     // ─── HITL discrimination ───
@@ -581,6 +649,8 @@ class OpenAiConversationBridgeTest {
 
         assertEquals("recovered", outcome.text());
         verify(conversationService, times(2)).say(any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        verify(userConversationStore).deleteUserConversationIfMatches(any(), eq(USER_ID), eq(CONVERSATION_ID));
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
     }
 
     @Test
@@ -828,7 +898,7 @@ class OpenAiConversationBridgeTest {
         assertEquals(CONVERSATION_ID, turn.conversationId());
         verify(conversationService).startConversation(any(), eq(AGENT_ID_SUPPORT), eq(NS_OWUI), any());
         verify(userConversationStore, never()).readUserConversation(INTENT_A, RAW_OWUI);
-        verify(userConversationStore, never()).deleteUserConversation(INTENT_A, RAW_OWUI);
+        verify(userConversationStore, never()).deleteUserConversationIfMatches(eq(INTENT_A), eq(RAW_OWUI), any());
     }
 
     @Test
@@ -861,7 +931,21 @@ class OpenAiConversationBridgeTest {
         var turn = adoptingBridge().prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
 
         assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
-        verify(userConversationStore, never()).deleteUserConversation(INTENT_A, RAW_OWUI);
+        verify(userConversationStore, never()).deleteUserConversationIfMatches(eq(INTENT_A), eq(RAW_OWUI), any());
+    }
+
+    @Test
+    void endedLegacyMapping_isDroppedOnlyWhileItStillNamesTheEndedConversation() throws Exception {
+        when(userConversationStore.readUserConversation(INTENT_A, NS_OWUI)).thenReturn(null);
+        when(userConversationStore.readUserConversation(INTENT_A, RAW_OWUI)).thenReturn(new UserConversation(
+                INTENT_A, RAW_OWUI, Environment.production, AGENT_ID_SUPPORT, OTHER_CONVERSATION_ID));
+        when(conversationService.getConversationState(OTHER_CONVERSATION_ID)).thenReturn(ConversationState.ENDED);
+
+        var turn = adoptingBridge().prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
+
+        assertEquals(CONVERSATION_ID, turn.conversationId());
+        verify(userConversationStore).deleteUserConversationIfMatches(INTENT_A, RAW_OWUI, OTHER_CONVERSATION_ID);
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
     }
 
     @Test
@@ -876,7 +960,7 @@ class OpenAiConversationBridgeTest {
         var turn = adoptingBridge().prepare(statefulModel, simpleRequest(), headers("chat-a"), NS_OWUI);
 
         assertEquals(OTHER_CONVERSATION_ID, turn.conversationId());
-        verify(userConversationStore).deleteUserConversation(INTENT_A, RAW_OWUI);
+        verify(userConversationStore).deleteUserConversationIfMatches(INTENT_A, RAW_OWUI, OTHER_CONVERSATION_ID);
     }
 
     @Test
@@ -898,7 +982,7 @@ class OpenAiConversationBridgeTest {
         verify(userConversationStore).createUserConversation(created.capture());
         assertEquals(NS_OWUI, created.getValue().getUserId());
         assertEquals(OTHER_CONVERSATION_ID, created.getValue().getConversationId());
-        verify(userConversationStore).deleteUserConversation(INTENT_A, RAW_OWUI);
+        verify(userConversationStore).deleteUserConversationIfMatches(INTENT_A, RAW_OWUI, OTHER_CONVERSATION_ID);
         // Adoption must NEVER touch the shared bare-id memory namespace.
         verify(userMemoryStore, never()).getAllEntries(any());
         verify(userMemoryStore, never()).upsert(any());

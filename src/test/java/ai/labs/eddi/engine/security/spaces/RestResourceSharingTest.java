@@ -143,6 +143,20 @@ class RestResourceSharingTest {
         }
 
         @Test
+        @DisplayName("revoking the canonical subject describe() returned names that same subject")
+        void revokeTakesTheCanonicalSubjectAsIs() {
+            when(service.revoke(anyString(), anyString(), anyBoolean(), anyBoolean())).thenReturn(empty());
+            String user = Subjects.user("a|b%c");
+            String team = Subjects.team("ops|eu");
+
+            sut.revoke(RESOURCE_ID, user, true);
+            sut.revoke(RESOURCE_ID, team, true);
+
+            verify(service).revoke(eq(RESOURCE_ID), eq(user), eq(true), anyBoolean());
+            verify(service).revoke(eq(RESOURCE_ID), eq(team), eq(true), anyBoolean());
+        }
+
+        @Test
         @DisplayName("revoking refuses the same subjects sharing refuses")
         void revokeRefusesIdentically() {
             assertThrows(BadRequestException.class, () -> sut.revoke(RESOURCE_ID, "group:engineering", true));

@@ -101,7 +101,7 @@ user blanks the comment excerpt in every alert event about their ratings.
 
 ## Writing a rule
 
-`POST /alerts/rules` (the Manager has no Alerts page yet, so rules are written over REST):
+Rules are written in the Manager under **Alerts** (rule editor and event inbox), or over REST with `POST /alerts/rules`:
 
 ```json
 {
@@ -296,7 +296,7 @@ An event's `state`: `PENDING` (delivering, or a target waits for its next retry)
 `lastError`), `INBOX_ONLY`, `DIGEST_PENDING`, `DIGESTED`. `duplicates` counts later
 alerts folded into this one.
 
-Rules: `GET /alerts/rules` (`agentId`), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
+Rules: `GET /alerts/rules` (`agentId`, required unless the caller is an administrator; `index`, `limit` ≤ 100, default 20), `GET`/`PUT`/`DELETE /alerts/rules/{ruleId}`,
 `POST /alerts/rules`. Deleting a rule keeps its events.
 
 ## Who may do what
@@ -400,6 +400,18 @@ most 10,000 of each, without naming anybody else.
 | `eddi.alerts.event-retention` | `90d` | Events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call (kept between 1 s and 60 s) |
 | `eddi.alerts.manager-url` | — | The Manager's base URL, for links in delivered alerts |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules that may list one agent, and most rules over every agent (at least 1) |
+
+- **Rule limit.** Every rule watching an agent is evaluated on each of its ratings
+  and failed turns, so the rules per agent are capped. A create or update that would
+  give an agent more than `eddi.alerts.max-rules-per-agent` rules listing it — enabled
+  or not — is refused with 409 `RULE_LIMIT_REACHED`, naming the agent (an every-agent rule is refused with the every-agent count instead); the rules over
+  every agent have a limit of the same size of their own, so at most twice the limit
+  watch one agent. Only what a save adds is counted: an agent the rule already listed,
+  or an every-agent rule that already was one, is not counted again, so after the
+  limit is lowered the existing rules stay editable — only new ones are refused. The
+  check runs before the insert without a lock, so two saves at the same moment can
+  each pass it once.
 
 - The `alerts-maintenance` schedule appears in the schedule list as system-managed.
   Updating, deleting, enabling, disabling or dismissing it — over REST or the MCP

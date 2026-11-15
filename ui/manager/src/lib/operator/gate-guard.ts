@@ -3,7 +3,9 @@ import { parseJsonPatch, type JsonPatchOp } from "./json-patch";
 
 /**
  * Refuses a gated write that would set an approval gate from inside an LLM
- * configuration document.
+ * configuration document — and, the same way, one that sets the task's
+ * `toolCallGuardrails`, the argument screen that runs before that gate (see
+ * {@link GateCarryingReason} `carries-guardrails`).
  *
  * Like `self-guard.ts` and unlike `escalation-flags.ts`, this is a **control**:
  * the Manager's approval surfaces disable Approve outright when it fires.
@@ -115,8 +117,24 @@ import { parseJsonPatch, type JsonPatchOp } from "./json-patch";
  * removing the easy path, not as a boundary.
  */
 
-/** Why one call was refused. Distinguishes the failure modes for the UI. */
-export type GateCarryingReason = "carries-gate" | "unverifiable-body" | "unpinned-request" | "unsupported-patch-op";
+/**
+ * Why one call was refused. Distinguishes the failure modes for the UI.
+ *
+ * `carries-guardrails`: the write sets `toolCallGuardrails`, the screen that
+ * runs over a tool call's arguments BEFORE the approval gate (`block`, `redact`,
+ * `reprompt`). It is not a gate, but it is the same kind of control: a document
+ * that carries a weaker screen — or none, for a task whose stored one is
+ * replaced by an empty list — lets through, unreviewed by any screen, what the
+ * screen exists to stop. The backend refuses the same approved write
+ * (`SelfUngatingGuard.GUARDRAIL_WRITE_REASON`); this keeps the Approve button
+ * honest about it. Editing guardrails is a person's job in the LLM editor.
+ */
+export type GateCarryingReason =
+  | "carries-gate"
+  | "carries-guardrails"
+  | "unverifiable-body"
+  | "unpinned-request"
+  | "unsupported-patch-op";
 
 /** A call refused because its body could set, or might set, an approval gate. */
 export interface GateCarryingCall {
@@ -153,14 +171,23 @@ export function uriTargetsLlmStore(uri: string | null | undefined): boolean {
  * backend version accepts. Matching the key anywhere costs nothing: no other
  * field in an LLM configuration is called this.
  */
-function containsToolApprovalsKey(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some(containsToolApprovalsKey);
+function containsKey(node: unknown, wanted: string): boolean {
+  if (Array.isArray(node)) return node.some((item) => containsKey(item, wanted));
   if (typeof node !== "object" || node === null) return false;
   for (const [key, value] of Object.entries(node)) {
-    if (key === "toolApprovals") return true;
-    if (containsToolApprovalsKey(value)) return true;
+    if (key === wanted) return true;
+    if (containsKey(value, wanted)) return true;
   }
   return false;
+}
+
+function containsToolApprovalsKey(node: unknown): boolean {
+  return containsKey(node, "toolApprovals");
+}
+
+/** The same depth-agnostic test for `toolCallGuardrails` (see `carries-guardrails`). */
+function containsToolCallGuardrailsKey(node: unknown): boolean {
+  return containsKey(node, "toolCallGuardrails");
 }
 
 /** The only patch operations the operator may use — see "Patches" above. */
@@ -171,17 +198,26 @@ function pointerNamesGate(pointer: string | undefined): boolean {
   return typeof pointer === "string" && pointer.toLowerCase().includes("toolapprovals");
 }
 
+/** Whether a JSON Pointer names the tool-call guardrails. Same rules as {@link pointerNamesGate}. */
+function pointerNamesGuardrails(pointer: string | undefined): boolean {
+  return typeof pointer === "string" && pointer.toLowerCase().includes("toolcallguardrails");
+}
+
 /**
  * How a patch relates to the gate: touching it outranks using an operation the
  * guard will not reason about, so the approver is told the more serious thing.
  */
 function judgePatch(ops: readonly JsonPatchOp[]): GateCarryingReason | null {
   let unsupported = false;
+  let guardrails = false;
   for (const op of ops) {
     if (pointerNamesGate(op.path) || pointerNamesGate(op.from)) return "carries-gate";
     if (op.value !== undefined && containsToolApprovalsKey(op.value)) return "carries-gate";
+    if (pointerNamesGuardrails(op.path) || pointerNamesGuardrails(op.from)) guardrails = true;
+    if (op.value !== undefined && containsToolCallGuardrailsKey(op.value)) guardrails = true;
     if (!ALLOWED_PATCH_OPS.has(op.op)) unsupported = true;
   }
+  if (guardrails) return "carries-guardrails";
   return unsupported ? "unsupported-patch-op" : null;
 }
 
@@ -206,6 +242,8 @@ function judgePatch(ops: readonly JsonPatchOp[]): GateCarryingReason | null {
  *  - *absent* body → allowed; the request is pinned, so what was previewed is
  *    what runs, and it carries nothing.
  *  - body containing `toolApprovals` at any depth → refused.
+ *  - body containing `toolCallGuardrails` at any depth → refused
+ *    (`carries-guardrails`); a patch naming it in a path, `from` or value too.
  */
 export function findGateCarryingCalls(
   calls: readonly PendingToolCallView[] | null | undefined,
@@ -280,6 +318,8 @@ export function findGateCarryingCalls(
 
     if (containsToolApprovalsKey(parsed)) {
       found.push({ callId: call.callId, reason: "carries-gate" });
+    } else if (containsToolCallGuardrailsKey(parsed)) {
+      found.push({ callId: call.callId, reason: "carries-guardrails" });
     }
   }
   return found;

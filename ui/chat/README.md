@@ -4,11 +4,11 @@
 
 > Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-420%2B-brightgreen)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-500%2B-brightgreen)
 
 EDDI Chat UI is a standalone, themeable React chat widget that connects to any EDDI agent. It ships **inside** the EDDI Docker image and can also be embedded as an `<iframe>` in any web page. Supports SSE streaming, rich Markdown, LaTeX math, code highlighting, quick replies, and full conversation control — all configurable via URL parameters or a typed config object.
 
-**🌐 Website:** [eddi.labs.ai](https://eddi.labs.ai/) · **📖 Docs:** [docs.labs.ai](https://docs.labs.ai/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+**🌐 Website:** [eddi.technology](https://eddi.technology/) · **📖 Docs:** [docs.eddi.technology](https://docs.eddi.technology/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 
@@ -30,7 +30,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 
 ## ✨ Features
 
-- 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and raw HTML
+- 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and sanitised HTML
 - 🌊 **SSE Streaming** — Real-time token-by-token agent responses with thinking indicator
 - 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$$…$$`, inline or on its own lines; a single `$` stays a dollar sign)
 - 🎨 **Syntax Highlighting** — Code blocks with language-aware highlighting via `rehype-highlight`
@@ -63,7 +63,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 ### Standalone Development
 
 ```bash
-# Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 26.13.0), EDDI backend on localhost:7070
+# Prerequisites: Node.js 22.22.2+, 24.15.0+ or 26+ (jsdom's floor for the test suite; the build pins 26.13.0), EDDI backend on localhost:7070
 (cd .. && npm ci)  # once, at ui/: the npm workspaces root and its one lockfile
 npm run dev        # Vite dev server on http://localhost:5174
 ```
@@ -99,6 +99,13 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
 | `hideLogo`            | `?hideLogo=true`            | Show the text title (default: the brand's product name, else "EDDI") instead of the logo |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
+| `hideStreaming`       | `?hideStreaming=true`       | Turn off token streaming           |
+| `hideAgentName`       | `?hideAgentName=true`       | Hide the agent name                |
+| `userId`              | `?userId=alice`             | User id to chat as (when the host page does not set one) |
+| `token`               | `?token=…`                  | Bearer token for the API, read once and removed from the address bar. Ignored unless the server sets `eddi.chat.url-token.enabled=true` (default `false`); prefer `tokenOrigin` |
+| `apiServer`           | `?apiServer=/eddi` | A clean same-origin path (single leading `/`); absolute URLs are ignored. For a cross-origin server set `apiBaseUrl` in the widget config. Defaults to the serving origin |
+
+Further colour and font parameters (such as `accentHover`) are listed in `COLOR_PARAM_MAP` in `src/components/ChatWidget.tsx`.
 
 <details>
 <summary><strong>Programmatic configuration (ChatConfig)</strong></summary>
@@ -123,6 +130,7 @@ interface ChatConfig {
   enableRedo?: boolean;        // Default: true
   enableNewConversation?: boolean; // Default: true
   showAgentName?: boolean;     // Default: true
+  authToken?: string;          // Bearer token; required when the server enforces OIDC
 }
 ```
 
@@ -208,7 +216,7 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 | UI        | React 19 + TypeScript 5.9 (strict)                     |
 | Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
 | Markdown  | react-markdown 10 + remark-gfm + remark-math           |
-| Math      | KaTeX 0.18 (loaded on first use)                       |
+| Math      | KaTeX 0.19 (loaded on first use)                       |
 | Code      | rehype-highlight (loaded on first use)                 |
 | Routing   | React Router v7                                        |
 | Streaming | Native `fetch` + `ReadableStream` (SSE via AsyncGenerator) |
@@ -217,6 +225,8 @@ Dark/light themes are controlled by `[data-theme]` attribute — no runtime styl
 ---
 
 ## 📁 Project Structure
+
+The main files (the full map, with the backend contract the widget relies on, is in [`AGENTS.md`](AGENTS.md#2-project-structure)):
 
 ```
 src/

@@ -65,4 +65,17 @@ class ApprovedCallScopeTest {
             return null;
         }));
     }
+
+    /**
+     * Raw MCP arguments are JSON: the receiver decodes string escapes, so an id
+     * spelled with them still names the running conversation.
+     */
+    @Test
+    void seesAnIdSpelledWithJsonEscapes() {
+        String conversationId = "0123456789abcdef01234567";
+        String backslash = String.valueOf((char) 92);
+
+        assertTrue(ApprovedCallScope.targetsConversation("{\"id\":\"0123" + backslash + "u0034" + "56789abcdef01234567\"}", conversationId));
+        assertFalse(ApprovedCallScope.targetsConversation("{\"id\":\"ffffeeeeddddccccbbbbaaaa\"}", conversationId));
+    }
 }

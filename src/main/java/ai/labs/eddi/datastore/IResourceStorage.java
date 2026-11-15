@@ -67,6 +67,21 @@ public interface IResourceStorage<T> {
         }
     }
 
+    /**
+     * A view of this storage whose reads are served by the authoritative copy of
+     * the data (the replica-set primary on MongoDB) rather than by whichever member
+     * is nearest. The deployment reads from the nearest member by default, which
+     * may lag; a caller that acts on the <em>latest</em> write (a credential's
+     * allow-list just narrowed, say) asks for this view for the reads that decide
+     * it. Writes through the view behave exactly as through this storage.
+     * <p>
+     * The default returns {@code this}: a backend with no replicas has nothing
+     * fresher to offer.
+     */
+    default IResourceStorage<T> primaryReads() {
+        return this;
+    }
+
     IResource<T> newResource(T content) throws IOException;
 
     IResource<T> newResource(String id, Integer version, T content) throws IOException;

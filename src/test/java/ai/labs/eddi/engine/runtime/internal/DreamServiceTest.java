@@ -10,10 +10,18 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
+import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
+import ai.labs.eddi.engine.pricing.model.ModelPriceCatalog;
+import ai.labs.eddi.engine.pricing.model.ModelPriceEntry;
+import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.pricing.UsageNormalizer;
+import dev.langchain4j.model.output.TokenUsage;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -1894,6 +1902,27 @@ class DreamServiceTest {
     }
 
     @Test
+    void pricedCost_aHalfPricedDreamIsCompletedFromTheCatalog() {
+        var catalog = PriceCatalogSnapshot.of(
+                new ModelPriceCatalog(1, UnpricedPolicy.ALLOW, null, null, List.of(ModelPriceEntry.of("openai", "gpt-4o-mini", 3.0, 15.0))),
+                UnpricedPolicy.ALLOW);
+        ModelPriceCatalogs.publish(catalog);
+        try {
+            var raw = new TokenUsage(1_000_000, 1_000_000);
+            var usage = ToolContextBudget.tokenUsageMap(UsageNormalizer.normalize(raw, "openai", null, "gpt-4o-mini", catalog, true));
+            var result = new SummarizationService.SummarizationResult("x", 1_000_000, 1_000_000, usage);
+            // only the input price is configured: the output side comes from the catalog,
+            // not $0
+            assertEquals(1.0 + 15.0, DreamService.pricedCost(result, 0, 1.0, null), 1e-9);
+            assertEquals(3.0 + 5.0, DreamService.pricedCost(result, 0, null, 5.0), 1e-9);
+            // fully configured stays on the configured prices
+            assertEquals(1.0 + 5.0, DreamService.pricedCost(result, 0, 1.0, 5.0), 1e-9);
+        } finally {
+            ModelPriceCatalogs.publish(null);
+        }
+    }
+
+    @Test
     void splitGroupScopedGroupsByGroupIds_neverMergesDifferentGroupReaderships() {
         Instant now = Instant.now();
         var inA = new UserMemoryEntry("1", "user-1", "k1", "v1", "fact", Visibility.group, "agent-1", List.of("A"), "c", false, 0, now, now);
@@ -1919,5 +1948,23 @@ class DreamServiceTest {
         var parts = DreamService.splitGroupScopedGroupsByGroupIds(Map.of("fact", List.of(a1, a2)));
 
         assertEquals(Map.of("fact", List.of(a1, a2)), parts);
+    }
+
+    @Test
+    void splitGroupScopedGroupsByGroupIds_keepsAGlobalEntryApartFromAReaderlessGroupEntry() {
+        // A global entry carries the ids of the group conversation it was written in;
+        // merged with a group entry that has no readers, the union handed those ids
+        // to the reader-less fact.
+        Instant now = Instant.now();
+        var readerless = new UserMemoryEntry("1", "user-1", "k1", "v1", "fact", Visibility.group, "agent-1", List.of(), "c", false, 0, now,
+                now);
+        var global = new UserMemoryEntry("2", "user-1", "k2", "v2", "fact", Visibility.global, "agent-1", List.of("A"), "c", false, 0, now,
+                now);
+
+        var parts = DreamService.splitGroupScopedGroupsByGroupIds(Map.of("fact", List.of(readerless, global)));
+
+        assertEquals(2, parts.size(), parts.keySet().toString());
+        assertTrue(parts.values().contains(List.of(readerless)));
+        assertTrue(parts.values().contains(List.of(global)));
     }
 }

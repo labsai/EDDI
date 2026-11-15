@@ -1034,6 +1034,145 @@ describe("SyncPage — failed and stale previews", () => {
     expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
   });
 
+  // The rows stay editable while a preview runs. Its reply used to land on
+  // whatever each row had become by then: a diff computed for one target shown
+  // under another, with Sync armed to send the new target.
+  describe("a row edited while its preview was running", () => {
+    /** Holds the batch preview until `release()`; records what each call sent. */
+    function holdPreview() {
+      const control = { release: () => {}, sent: [] as { sourceAgentId: string }[][] };
+      server.use(
+        http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+          const mappings = (await request.json()) as { sourceAgentId: string }[];
+          control.sent.push(mappings);
+          await new Promise<void>((resolve) => (control.release = resolve));
+          return HttpResponse.json(
+            mappings.map((m) => ({
+              sourceAgentId: m.sourceAgentId,
+              sourceAgentName: null,
+              targetAgentId: null,
+              targetAgentName: null,
+              resources: [
+                { sourceId: `${m.sourceAgentId}-res`, resourceType: "behavior", name: "rules", action: "CREATE", targetId: null, sourceContent: "{}", targetContent: null },
+              ],
+            }))
+          );
+        })
+      );
+      return control;
+    }
+
+    const row = (index: number) => screen.getAllByRole("checkbox")[index]!.parentElement!;
+
+    it("gets no preview when its target changed, and Sync stays disabled", async () => {
+      const preview = holdPreview();
+      renderPage();
+      const user = await connectAndWaitForMapping();
+      const checkboxes = screen.getAllByRole("checkbox");
+      for (const cb of checkboxes.slice(1)) await user.click(cb);
+
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(preview.sent).toHaveLength(1));
+      expect(preview.sent[0]!.map((m) => m.sourceAgentId)).toEqual(["remote-agent1"]);
+
+      // Another local agent, so only the target changes ("Create new" stays off).
+      const select = row(0).querySelector("select")!;
+      const other = Array.from(select.options).find((o) => o.value !== "" && o.value !== select.value)!;
+      await user.selectOptions(select, other.value);
+
+      await act(async () => {
+        preview.release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(row(0)).not.toHaveTextContent(/changes/);
+      expect(row(0)).not.toHaveTextContent("Preview failed");
+      expect(select.value).toBe(other.value);
+      expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+    });
+
+    it("gets no preview when Create new was picked, and the rows that did not change still get theirs", async () => {
+      const preview = holdPreview();
+      renderPage();
+      const user = await connectAndWaitForMapping();
+      // Target a local agent first, so the in-flight change is the switch TO "Create new".
+      const select = row(0).querySelector("select")!;
+      const local = Array.from(select.options).find((o) => o.value !== "")!.value;
+      await user.selectOptions(select, local);
+
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(preview.sent).toHaveLength(1));
+      expect(preview.sent[0]![0]).toMatchObject({ sourceAgentId: "remote-agent1", targetAgentId: local, createNew: false });
+      await user.selectOptions(select, "");
+      expect(select.value).toBe("");
+
+      await act(async () => {
+        preview.release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(row(0)).not.toHaveTextContent(/changes/);
+      expect(row(1)).toHaveTextContent(/changes/);
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+
+    it("gets no preview when reconnecting listed a newer source version", async () => {
+      // Connect stays enabled during the preview. The reconnect lists the same
+      // agent at a new version, and Sync would send that version on the
+      // strength of a diff computed for the old one.
+      const preview = holdPreview();
+      renderPage();
+      const user = await connectAndWaitForMapping();
+      const checkboxes = screen.getAllByRole("checkbox");
+      for (const cb of checkboxes.slice(1)) await user.click(cb);
+
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(preview.sent).toHaveLength(1));
+      expect(preview.sent[0]![0]).toMatchObject({ sourceAgentId: "remote-agent1", sourceAgentVersion: 5 });
+
+      server.use(
+        http.get("*/backup/import/sync/agents", () =>
+          HttpResponse.json([
+            { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent1?version=6", name: "Support Agent", description: "", lastModifiedOn: new Date().toISOString() },
+          ])
+        )
+      );
+      await user.click(screen.getByTestId("sync-connect-btn"));
+      await waitFor(() => expect(row(0)).toHaveTextContent("v6"));
+
+      await act(async () => {
+        preview.release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(row(0)).not.toHaveTextContent(/changes/);
+      expect(screen.getByTestId("sync-execute-btn")).toBeDisabled();
+    });
+
+    it("does not mark a row ticked after the request as failed", async () => {
+      // A row checked mid-flight was never sent, so the reply has nothing for it;
+      // it used to be shown as "Preview failed".
+      const preview = holdPreview();
+      renderPage();
+      const user = await connectAndWaitForMapping();
+      await user.click(screen.getAllByRole("checkbox")[1]!);
+
+      await user.click(screen.getByTestId("sync-preview-all"));
+      await waitFor(() => expect(preview.sent).toHaveLength(1));
+      expect(preview.sent[0]!.map((m) => m.sourceAgentId)).not.toContain("remote-agent2");
+      await user.click(screen.getAllByRole("checkbox")[1]!);
+
+      await act(async () => {
+        preview.release();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(row(0)).toHaveTextContent(/changes/);
+      expect(row(1)).not.toHaveTextContent("Preview failed");
+      expect(row(1)).not.toHaveTextContent(/changes/);
+    });
+  });
+
   // The connect request was not tied to the source it was sent for. Editing the
   // URL while it was in flight cleared the list, and the late reply then filled
   // it again with the OLD source's agents, ready to preview and sync.

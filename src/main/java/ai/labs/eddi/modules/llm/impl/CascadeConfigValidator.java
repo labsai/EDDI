@@ -60,6 +60,7 @@ final class CascadeConfigValidator {
         // negative value, cascade or not.
         requireNonNegativeTaskPrice(taskId, "inputPricePer1M", task.getInputPricePer1M());
         requireNonNegativeTaskPrice(taskId, "outputPricePer1M", task.getOutputPricePer1M());
+        ModelPricingValidator.validate(taskId, task);
 
         // Warnings only, never blocking: timeouts that contradict each other and a
         // JSON agent with no fallback path (TurnResilienceWarnings).
@@ -100,6 +101,11 @@ final class CascadeConfigValidator {
             if (judge == null || isBlank(judge.getType())) {
                 warn(taskId, "evaluationStrategy 'judge_model' has no judgeModel with a 'type' — confidence will fall back to heuristic");
             }
+        }
+
+        // Only the judge reads the acceptance criterion: without one it is dead config.
+        if (!isBlank(cascade.getAcceptanceCriterion()) && (cascade.getJudgeModel() == null || isBlank(cascade.getJudgeModel().getType()))) {
+            warn(taskId, "acceptanceCriterion is set but there is no judgeModel with a 'type' — only the judge reads it, so it has no effect");
         }
 
         // Cross-provider credential check. Step/judge parameters are merged OVER the

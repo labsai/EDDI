@@ -60,7 +60,7 @@ public final class RetroEngine {
      * speaker id there would make the same lesson from two speakers two rows,
      * defeating the idempotency key.
      */
-    static final String RETRO_SOURCE = "retro";
+    public static final String RETRO_SOURCE = "retro";
 
     /**
      * M-G4 default for {@link RetroConfig#maxLessonChars()}: the most a stored

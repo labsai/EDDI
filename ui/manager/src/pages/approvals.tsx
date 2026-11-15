@@ -46,6 +46,7 @@ import type {
   PendingApprovalSummary,
   HitlVerdict,
   ToolCallDecision,
+  DecisionReview,
   PendingToolCallView,
 } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
@@ -91,6 +92,7 @@ interface ApprovalQueueRowProps {
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => void;
   onToolCancel: (item: PendingApprovalSummary) => void;
   /** Decide a group pause from the inline review panel (note included). */
@@ -138,6 +140,10 @@ function ApprovalQueueRow({
   const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
   /** I6: a member's turn, not a decision anyone takes from this queue. */
   const isHumanTurn = item.pauseType === "HUMAN_TURN";
+  /** A tied vote waiting for its decider (tiePolicy HUMAN_DECIDES) — still a human turn. */
+  const isTieBreak = isHumanTurn && item.pendingKind === "TIE_BREAK";
+  /** A task-force task assigned to a HUMAN member. */
+  const isHumanTask = isHumanTurn && item.pendingKind === "TASK";
   /** A group phase pause: decided here, and reviewable in place like a tool call. */
   const isGroupDecision = !!item.groupId && !isHumanTurn;
   // A HUMAN turn names its member by id; the group's roster has the name a
@@ -258,18 +264,38 @@ function ApprovalQueueRow({
               data-testid={`human-turn-badge-${item.conversationId}`}
             >
               <UserCheck className="h-3 w-3" />{" "}
-              {t("hitl.humanTurn", "Member's turn")}
+              {isTieBreak
+                ? t("groupTieBreak.inboxBadge", "Tie-break")
+                : isHumanTask
+                  ? t("groupHumanTasks.inboxBadge", "Task")
+                  : t("hitl.humanTurn", "Member's turn")}
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
             ? item.toolNames.join(", ")
             : isHumanTurn
-              ? t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
-                  member:
-                    turnMemberName ||
-                    item.pendingMemberId ||
-                    t("hitl.humanTurnMemberFallback", "a member"),
-                })
+              ? (
+                  <span
+                    data-testid={`human-turn-reason-${item.conversationId}`}
+                    data-reason-kind={isTieBreak ? "tie-break" : isHumanTask ? "task" : "turn"}
+                  >
+                    {isTieBreak
+                      ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
+                        t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
+                          member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                        })
+                      : isHumanTask
+                        ? t("groupHumanTasks.inboxReason", "Waiting on {{member}} to finish an assigned task", {
+                            member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                          })
+                        : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                            member:
+                              turnMemberName ||
+                              item.pendingMemberId ||
+                              t("hitl.humanTurnMemberFallback", "a member"),
+                          })}
+                  </span>
+                )
               : item.pauseReason || "—"}
         </td>
         <td className="px-4 py-3 text-muted-foreground text-xs max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pausedAt", "Paused")}>
@@ -456,6 +482,7 @@ function ApprovalQueueRow({
                 approvalTimeout={item.approvalTimeout ?? undefined}
                 pausedPhaseName={groupConversation.data?.pausedPhaseName}
                 granularity={groupConversation.data?.hitlPauseType}
+                approvalContext={groupConversation.data?.hitlApprovalContext ?? null}
                 pendingTaskIds={(groupConversation.data?.taskList?.tasks ?? [])
                   .filter((task) => task.status === "AWAITING_APPROVAL")
                   .map((task) => task.id)}
@@ -493,6 +520,7 @@ function ApprovalQueueRow({
                 timeoutPolicy={item.timeoutPolicy ?? undefined}
                 approvalTimeout={item.approvalTimeout ?? undefined}
                 pauseDetails={approvalStatus.data?.pauseDetails ?? null}
+                approvalContext={approvalStatus.data?.approvalContext ?? null}
                 // The query's own flags, not `!data`: that conflated a failed
                 // read with a successful one carrying no pauseDetails, and
                 // resolved the latter to "not pending" — enabling Approve on
@@ -508,8 +536,8 @@ function ApprovalQueueRow({
                 renderCallExtra={renderCallExtra}
                 // The status the banner rendered goes along, so the decision is
                 // bound to the calls the reviewer actually saw.
-                onDecide={(verdict, note, _taskApprovals, toolDecisions) =>
-                  onToolDecide(item, approvalStatus.data, verdict, note, toolDecisions)
+                onDecide={(verdict, note, _taskApprovals, toolDecisions, review) =>
+                  onToolDecide(item, approvalStatus.data, verdict, note, toolDecisions, review)
                 }
                 onCancel={() => onToolCancel(item)}
               />
@@ -813,6 +841,7 @@ export function ApprovalsPage() {
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => {
     // No status means nothing was shown; fall back to the row's own identity
     // rather than sending an unbound verdict.
@@ -824,7 +853,7 @@ export function ApprovalsPage() {
       () =>
         resumeMutation.mutateAsync({
           conversationId: item.conversationId,
-          decision: { verdict, note, toolDecisions },
+          decision: { verdict, note, toolDecisions, ...review },
           shown,
         }),
       () => {

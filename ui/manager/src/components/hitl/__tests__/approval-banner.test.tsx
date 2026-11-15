@@ -257,6 +257,31 @@ describe("ApprovalBanner", () => {
       });
     });
 
+    it("keeps an explicit rejection of a call whose provider-chosen id is __proto__", () => {
+      // Assigned onto a plain {} that key re-prototypes the object instead of
+      // becoming an entry, so the rejection was missing from the JSON sent and
+      // the backend read the absent call as approved.
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={toolPause({
+            calls: [
+              { callId: "__proto__", toolName: "transfer_funds", source: "builtin", arguments: "{}", argsTruncated: false, gateReason: "transfer_*", requestPinned: false },
+              { callId: "c2", toolName: "sendEmail", source: "mcp", arguments: "{}", argsTruncated: false, gateReason: "mcp:*", requestPinned: false },
+            ],
+          })}
+          onDecide={onDecide}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("tool-reject-__proto__"));
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      const decisions = onDecide.mock.calls[0]![3] as Record<string, unknown>;
+      expect(Object.keys(decisions)).toEqual(["__proto__"]);
+      expect(JSON.stringify(decisions)).toBe('{"__proto__":{"verdict":"REJECTED"}}');
+    });
+
     it("rejecting the batch is all-or-nothing (no contradictory per-call approvals sent)", () => {
       const onDecide = vi.fn();
       renderWithProviders(
@@ -749,6 +774,24 @@ describe("ApprovalBanner — fewest steps under requireExplicitPerCall", () => {
     expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
       c1: { verdict: "APPROVED", amendedArguments: '{"a":1}' },
     });
+  });
+
+  it("single call: an amendment identical to the shown arguments is a plain approval and carries no reason code", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={{ ...oneCall({ arguments: '{"a":1}' }), reasonCodes: [{ code: "TONE", label: "Tone" }] }}
+        onDecide={onDecide}
+        requireExplicitPerCall
+      />,
+    );
+    fireEvent.change(screen.getByTestId("reason-code"), { target: { value: "TONE" } });
+    fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+    fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: '{"a":1}' } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, { c1: { verdict: "APPROVED" } });
   });
 
   it("single call: Reject still confirms and rejects the batch", () => {

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.rag.RagIngestionService;
@@ -36,7 +37,8 @@ class RestRagIngestionTest {
     void setUp() {
         openMocks(this);
         restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(RagSourceIngestionService.class),
-                mock(IngestedFileService.class), mock(KnowledgeBaseInspector.class), mock(ResourceAccessGuard.class));
+                mock(IngestedFileService.class), mock(KnowledgeBaseInspector.class), mock(ResourceAccessGuard.class),
+                mock(SpaceReferenceGuard.class));
     }
 
     @Test
@@ -142,8 +144,8 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_carriesTheWarningWhenThereIsOne() {
-        when(ragIngestionService.getStatus("ing-1")).thenReturn("completed");
-        when(ragIngestionService.getWarning("ing-1")).thenReturn("previous version still retrievable");
+        when(ragIngestionService.getStatus("rag-123", "ing-1")).thenReturn("completed");
+        when(ragIngestionService.getWarning("rag-123", "ing-1")).thenReturn("previous version still retrievable");
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "ing-1");
 
@@ -156,7 +158,7 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_unknownIdIs404() {
-        when(ragIngestionService.getStatus("never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
+        when(ragIngestionService.getStatus("rag-123", "never-started")).thenReturn(RagIngestionService.STATUS_UNKNOWN);
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "never-started");
 
@@ -169,7 +171,7 @@ class RestRagIngestionTest {
 
     @Test
     void getIngestionStatus_shouldReturnStatus() {
-        when(ragIngestionService.getStatus("ing-123")).thenReturn("completed");
+        when(ragIngestionService.getStatus("rag-123", "ing-123")).thenReturn("completed");
 
         Response response = restRagIngestion.getIngestionStatus("rag-123", "ing-123");
 

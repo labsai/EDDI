@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Download, Lock, Palette, RefreshCw, RotateCcw, Save } from "lucide-react";
@@ -37,9 +37,10 @@ import {
   PRODUCT_NAME_MAX,
   SHORT_NAME_MAX,
   TAGLINE_MAX,
-  toColorInputValue,
+  toPickerValue,
   type BrandTextProblem,
 } from "@/lib/brand-validation";
+import { WriteTimeoutError, withWriteTimeout } from "@/lib/brand-write-guard";
 import { isForbidden } from "@/lib/access";
 import { cn } from "@/lib/utils";
 
@@ -176,6 +177,24 @@ export function BrandingPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [assetErrors, setAssetErrors] = useState<Partial<Record<BrandAssetSlot, string>>>({});
   const [busySlot, setBusySlot] = useState<BrandAssetSlot | null>(null);
+  // One write of any kind (save, reset, image upload or removal) at a time: each
+  // bumps the shared revision, so two in flight could land out of order and
+  // leave the page on the older one. The ref gates synchronously; the state
+  // drives the disabled buttons and inert slots.
+  const writeInFlight = useRef(false);
+  const [writing, setWriting] = useState(false);
+
+  /** Runs one write under the guard; the guard is always released, even for a request that never settles. */
+  const runWrite = async <T,>(work: () => Promise<T>): Promise<T> => {
+    writeInFlight.current = true;
+    setWriting(true);
+    try {
+      return await withWriteTimeout(work());
+    } finally {
+      writeInFlight.current = false;
+      setWriting(false);
+    }
+  };
   const [resetOpen, setResetOpen] = useState(false);
   const [themeDownloading, setThemeDownloading] = useState(false);
 
@@ -284,12 +303,12 @@ export function BrandingPage() {
   const hasClientErrors = Object.keys(clientErrors).length > 0;
 
   const handleSave = async () => {
-    if (!form || baseRevision === null || hasClientErrors || readOnly) return;
+    if (!form || baseRevision === null || hasClientErrors || readOnly || writeInFlight.current) return;
     setSaveError(null);
     setServerViolations({});
     setConflict(null);
     try {
-      const next = await updateMutation.mutateAsync(toUpdate(form, baseRevision));
+      const next = await runWrite(() => updateMutation.mutateAsync(toUpdate(form, baseRevision)));
       adopt(next);
       setWarnings(next.warnings ?? []);
       toast.success(t("branding.toast.saved", "Brand saved"));
@@ -299,6 +318,10 @@ export function BrandingPage() {
   };
 
   const handleWriteError = (e: unknown) => {
+    if (e instanceof WriteTimeoutError) {
+      setSaveError(t("branding.writeTimeout", "The server did not answer in time. Reload the page to see whether the change was applied."));
+      return;
+    }
     const info: BrandingErrorInfo | null = brandingErrorInfo(e);
     if (info?.status === 409 && info.currentRevision !== null) {
       setConflict(info.currentRevision);
@@ -316,8 +339,9 @@ export function BrandingPage() {
   };
 
   const handleReset = async () => {
+    if (writeInFlight.current) return;
     try {
-      const next = await resetMutation.mutateAsync();
+      const next = await runWrite(() => resetMutation.mutateAsync());
       adopt(next);
       setWarnings([]);
       setResetOpen(false);
@@ -330,6 +354,9 @@ export function BrandingPage() {
 
   const assetErrorMessage = (e: unknown): string => {
     const info = brandingErrorInfo(e);
+    if (e instanceof WriteTimeoutError) {
+      return t("branding.writeTimeout", "The server did not answer in time. Reload the page to see whether the change was applied.");
+    }
     switch (info?.status) {
       case 400:
         return t("branding.assets.errorInvalid", "The image was refused: {{reason}}", { reason: info.message });
@@ -354,10 +381,13 @@ export function BrandingPage() {
   };
 
   const handleUpload = async (slot: BrandAssetSlot, file: File) => {
+    // One image write at a time: each bumps the shared revision, and two in
+    // flight could land out of order and leave the page on the older one.
+    if (writeInFlight.current) return;
     setBusySlot(slot);
     setAssetErrors((prev) => ({ ...prev, [slot]: undefined }));
     try {
-      afterAssetWrite(await uploadMutation.mutateAsync({ slot, file }));
+      afterAssetWrite(await runWrite(() => uploadMutation.mutateAsync({ slot, file })));
     } catch (e) {
       setAssetErrors((prev) => ({ ...prev, [slot]: assetErrorMessage(e) }));
     } finally {
@@ -366,10 +396,11 @@ export function BrandingPage() {
   };
 
   const handleRemove = async (slot: BrandAssetSlot) => {
+    if (writeInFlight.current) return;
     setBusySlot(slot);
     setAssetErrors((prev) => ({ ...prev, [slot]: undefined }));
     try {
-      afterAssetWrite(await deleteAssetMutation.mutateAsync(slot));
+      afterAssetWrite(await runWrite(() => deleteAssetMutation.mutateAsync(slot)));
     } catch (e) {
       setAssetErrors((prev) => ({ ...prev, [slot]: assetErrorMessage(e) }));
     } finally {
@@ -455,7 +486,7 @@ export function BrandingPage() {
    * colour this field could ever resolve to.
    */
   const swatchFor = (key: ColorKey): string => {
-    const own = toColorInputValue((form?.colors[key] ?? "").trim());
+    const own = toPickerValue((form?.colors[key] ?? "").trim());
     if (own) return own;
     switch (key) {
       case "darkPrimary":
@@ -476,7 +507,7 @@ export function BrandingPage() {
     const value = form?.colors[key] ?? "";
     // An empty field shows what it falls back to (dark follows light, the
     // accent follows the primary), dimmed; the native picker needs some hex.
-    const own = toColorInputValue(value.trim());
+    const own = toPickerValue(value.trim());
     const swatch = swatchFor(key);
     return (
       <div className="space-y-1.5">
@@ -591,7 +622,7 @@ export function BrandingPage() {
             <Button
               variant="outline"
               onClick={() => setResetOpen(true)}
-              disabled={resetMutation.isPending}
+              disabled={resetMutation.isPending || writing}
               data-testid="branding-reset-btn"
             >
               <RotateCcw />
@@ -599,7 +630,7 @@ export function BrandingPage() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={!dirty || hasClientErrors || updateMutation.isPending || conflict !== null}
+              disabled={!dirty || hasClientErrors || updateMutation.isPending || conflict !== null || writing}
               data-testid="branding-save-btn"
             >
               <Save />
@@ -893,6 +924,7 @@ export function BrandingPage() {
                       revision={revision}
                       readOnly={readOnly}
                       busy={busySlot === slot}
+                      blocked={writing && busySlot !== slot}
                       error={assetErrors[slot] ?? null}
                       note={slotNote(slot)}
                       onUpload={(file) => handleUpload(slot, file)}

@@ -117,13 +117,13 @@ endpoint for volume, and the dropped counter above for integrity.
 
 ### HIPAA (§164.408)
 
-- **HHS (Secretary)**: Within **60 days** of discovery
+- **HHS (Secretary)**: For breaches of 500 or more individuals, within **60 days** of discovery, contemporaneously with individual notice
 - **Affected individuals**: Without unreasonable delay, no later than
   **60 days** after discovery
 - **Media**: If breach affects ≥ 500 residents of a state, notify
   prominent media outlets in that state
-- **Small breaches** (< 500 individuals): May be reported annually to HHS
-  in a batch submission
+- **Small breaches** (< 500 individuals): Logged and reported annually to HHS,
+  within 60 days of the end of the calendar year
 
 ### Template
 
@@ -150,7 +150,9 @@ Contact: [DPO / PRIVACY CONTACT]
 ## 6. Prevention
 
 - Enable Keycloak authentication in production
-- Use RBAC (`eddi-admin`, `eddi-viewer`) for all administrative operations
+- Use RBAC: grant `eddi-admin` only to administrators and the narrower roles
+  (`eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer`) to everyone else —
+  roles are enumerated per endpoint, with no hierarchy
 - Review audit trail regularly for anomalies
 - Keep EDDI updated to the latest version
 - Use self-hosted LLM providers for sensitive deployments

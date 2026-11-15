@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.deployment.mongo;
 
 import java.util.Map;
 import java.util.HashMap;
+import ai.labs.eddi.engine.cluster.TransientDeployments;
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.configs.deployment.IDeploymentStorage;
@@ -37,6 +38,15 @@ public class DeploymentStore implements IDeploymentStore {
     @Inject
     IClusterEventBus clusterEvents;
 
+    /**
+     * Cluster mode: the shared record of {@code autoDeploy=false} deployments. An
+     * undeploy or a deletion writes its tombstone there <em>before</em> the event
+     * goes out, so a node that misses the event, or receives it out of order, still
+     * converges on it. Field-injected; null in tests.
+     */
+    @Inject
+    TransientDeployments transientDeployments;
+
     @Inject
     public DeploymentStore(IDeploymentStorage storage) {
         this.storage = storage;
@@ -61,14 +71,23 @@ public class DeploymentStore implements IDeploymentStore {
     @Override
     public void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentInfo.DeploymentStatus deploymentStatus) {
         storage.setDeploymentInfo(environment, agentId, agentVersion, deploymentStatus);
+        if (deploymentStatus == DeploymentInfo.DeploymentStatus.undeployed && transientDeployments != null) {
+            transientDeployments.markUndeployed(environment, agentId, agentVersion);
+        }
         announce(environment, agentId, agentVersion, deploymentStatus == null ? null : deploymentStatus.toString());
     }
 
     /**
-     * Status {@value #TRANSIENT} — the receiving nodes deploy it without a record.
+     * Status {@value #TRANSIENT} — the receiving nodes deploy it without a record
+     * in the deployment collection. In cluster mode it is recorded in
+     * {@link TransientDeployments} first, which is what a node that joins later, or
+     * one that missed this event, deploys it from.
      */
     @Override
     public void announceTransientDeployment(String environment, String agentId, Integer agentVersion) {
+        if (transientDeployments != null) {
+            transientDeployments.markDeployed(environment, agentId, agentVersion);
+        }
         announce(environment, agentId, agentVersion, TRANSIENT);
     }
 
@@ -91,6 +110,9 @@ public class DeploymentStore implements IDeploymentStore {
     @Override
     public int deleteDeploymentInfos(String agentId) throws IResourceStore.ResourceStoreException {
         int deleted = storage.deleteDeploymentInfos(agentId);
+        if (transientDeployments != null) {
+            transientDeployments.markAgentUndeployed(null, agentId);
+        }
         announce(null, agentId, null, "deleted");
         return deleted;
     }
@@ -98,6 +120,9 @@ public class DeploymentStore implements IDeploymentStore {
     @Override
     public int deleteDeploymentInfo(String environment, String agentId, Integer agentVersion) throws IResourceStore.ResourceStoreException {
         int deleted = storage.deleteDeploymentInfo(environment, agentId, agentVersion);
+        if (transientDeployments != null) {
+            transientDeployments.markUndeployed(environment, agentId, agentVersion);
+        }
         announce(environment, agentId, agentVersion, "deleted");
         return deleted;
     }

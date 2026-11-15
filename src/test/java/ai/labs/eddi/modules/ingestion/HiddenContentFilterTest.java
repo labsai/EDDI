@@ -83,6 +83,41 @@ class HiddenContentFilterTest {
 
         @ParameterizedTest
         @ValueSource(strings = {
+                "<style>@media screen{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media all { .a { display: none } }</style><div class=\"a\">INJECTED</div>",
+                "<style>@MEDIA Only Screen{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media print, screen{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media not print{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media {.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media /* x */ scr\\65 en{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@layer{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@layer base, theme; @layer theme{.a{visibility:hidden}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@supports (display:block){.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@layer{@media screen{@supports (color:red){.a{display:none}}}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media print{.p{color:red}} @media screen{.q{color:red}} .a{display:none}</style><div class=\"a\">INJECTED</div>"})
+        @DisplayName("a hiding rule inside an at-block that holds on every screen is applied")
+        void atBlockOnEveryScreen(String html) {
+            String mail = mail(html);
+
+            assertFalse(mail.contains("INJECTED"), mail);
+            assertTrue(mail.contains("VISIBLE"), mail);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "<style>@media print{.a{display:none}}</style><div class=\"a\">KEPT</div>",
+                "<style>@media not screen{.a{display:none}}</style><div class=\"a\">KEPT</div>",
+                "<style>@media screen and (max-width:480px){.a{display:none}}</style><div class=\"a\">KEPT</div>",
+                "<style>@media (prefers-color-scheme:dark){.a{display:none}}</style><div class=\"a\">KEPT</div>",
+                "<style>@layer{@media (max-width:600px){.a{display:none}}}</style><div class=\"a\">KEPT</div>",
+                "<style>@container (min-width:0){.a{display:none}}</style><div class=\"a\">KEPT</div>"})
+        @DisplayName("a hiding rule inside an at-block that depends on the viewport or medium is not applied")
+        void atBlockNotOnEveryScreen(String html) {
+            assertTrue(mail(html).contains("KEPT"), mail(html));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
                 "<div style=\"display:block\">KEPT</div>",
                 "<div style=\"opacity:0.9\">KEPT</div>",
                 "<div style=\"position:absolute;left:10px\">KEPT</div>",
@@ -269,6 +304,15 @@ class HiddenContentFilterTest {
         void atRules() {
             assertStillApplied("@a;".repeat(700_000));
             assertStillApplied("@media x {".repeat(200_000));
+        }
+
+        @Test
+        @DisplayName("2 MB of nested at-blocks that are entered, closed and unclosed")
+        void enteredAtBlocks() {
+            // Entered blocks are read in place rather than recursed into, so depth
+            // costs neither stack nor a second pass over the text.
+            assertStillApplied("@media screen {".repeat(140_000));
+            assertStillApplied("@layer{@supports (x){".repeat(100_000) + "}}".repeat(100_000));
         }
 
         @Test

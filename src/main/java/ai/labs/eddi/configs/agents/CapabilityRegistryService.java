@@ -35,8 +35,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Agents register their structured {@link Capability} declarations at
  * deployment time. Other agents (or external systems via REST / MCP) can query
  * the registry to find agents that match a required skill. Selection strategies
- * (highest_confidence, round_robin, all) are deterministic algorithms, not LLM
- * guesses.
+ * (highest_confidence, round_robin, random, all) are deterministic algorithms,
+ * not LLM guesses.
  *
  * <h3>How the index is maintained</h3> It is seeded once at startup from
  * {@link IAgentStore} (see {@link #onStartup}), and kept current by
@@ -207,7 +207,8 @@ public class CapabilityRegistryService {
      * @param skill
      *            the required skill name (case-insensitive)
      * @param strategy
-     *            selection strategy: "highest_confidence", "round_robin", or "all"
+     *            selection strategy: "highest_confidence", "round_robin", "random",
+     *            or "all"
      * @return matching agents ordered by the selection strategy
      */
     public List<CapabilityMatch> findBySkill(String skill, String strategy) {

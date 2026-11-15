@@ -12,7 +12,7 @@ The detailed pages are linked from each section. Start with [Collecting diagnost
 | --- | --- | --- |
 | Readiness | `GET /q/health/ready` | Readable without authentication. Lists each readiness check by name: `Agents are ready health check` (with `agentsInErrorCount`), `Graceful shutdown readiness check`, `PostgreSQL connection` on the postgres profile, and the MongoDB extension's check on the default profile. |
 | Liveness | `GET /q/health/live` | Readable without authentication. |
-| Metrics | `GET /q/metrics` | Requires authentication by default (`eddi.metrics.http-policy=authenticated`). With OIDC on, a scraper without a token gets 401. See [Monitoring](monitoring/monitoring-guide.md) and [Metrics](metrics.md). |
+| Metrics | `GET /q/metrics` | Requires the `eddi-admin` or `eddi-metrics` role by default (`eddi.metrics.http-policy=eddi-metrics-reader`; `authenticated` and `permit` are the alternatives). With OIDC on, a scraper without a token gets 401 and a token without one of those roles gets 403. See [Monitoring](monitoring/monitoring-guide.md) and [Metrics](metrics.md). |
 | Vault status | `GET /secretstore/secrets/health` | `200` with `"status": "UP"` when the vault is active, `503` with `"status": "DOWN"` when it is not. |
 | Deployment status | `GET /administration/{environment}/deploymentstatus/{agentId}?version={n}` | Returns `{"status": "READY"}`, `IN_PROGRESS`, `NOT_FOUND` or `ERROR`. `GET /administration/{environment}/deploymentstatus` lists every deployed agent. `environment` is `production` or `test`. |
 | Recent logs | `GET /administration/logs?level=WARN&conversationId=...` | Admin only. See [Log Administration](log-administration.md). |
@@ -31,7 +31,7 @@ In production mode (`java -jar`, the Docker image), several guards refuse to sta
 
 - **Error:** `IllegalStateException: OIDC must be enabled in production. Set QUARKUS_OIDC_TENANT_ENABLED=true and configure your Keycloak realm, or explicitly opt out with EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true.`
 - **Cause:** `quarkus.oidc.tenant-enabled=false` (the shipped default) in production mode, without the opt-out.
-- **Fix:** Turn on OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus your realm settings). For a local or demo setup only, set `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. EDDI then logs `[SECURITY]` ... `OIDC is DISABLED in production mode!` at startup and an hourly `REMINDER: OIDC is DISABLED in production.` warning.
+- **Fix:** Turn on OIDC (`QUARKUS_OIDC_TENANT_ENABLED=true` plus your realm settings). For a local or demo setup only, set `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. EDDI then logs `[SECURITY]` ... `OIDC is DISABLED in production mode!` once at startup. A repeating `REMINDER: OIDC is DISABLED in production.` warning is opt-in via `EDDI_SECURITY_UNAUTHENTICATED_REMINDER_INTERVAL` (default `off`).
 
 ### Boot fails: high-value surfaces open without authentication
 
@@ -108,7 +108,7 @@ See [LLM Integration](langchain.md) and [Model Cascade](model-cascade.md).
 
 ### A turn fails and the conversation goes to ERROR
 
-- **Log:** `Error while processing user input (conversationId=..., conversationState=ERROR)` with the provider exception attached.
+- **Log:** `Error while processing user input (conversationId=... , conversationState=ERROR)` with the provider exception attached.
 - **Cause:** Anything the LLM task could not recover from: a provider rejecting the key, an unknown model name, a non-retriable 4xx, or retries exhausted.
 - **Fix:** Read the attached exception; it carries the provider's own error. Fix the task config in the `langchain` resource and send the next message; the conversation is not locked by the ERROR state.
 
@@ -130,7 +130,7 @@ See [LLM Integration](langchain.md) and [Model Cascade](model-cascade.md).
 
 ### Rate limits and transient errors
 
-- **Behaviour:** With a `retry` block on the task, EDDI retries only errors it classifies as retriable: socket and connect timeouts, unknown host, and HTTP 429, 502, 503 and 504. Authentication failures and malformed requests are never retried. Retries are clamped to 10 attempts and 60 seconds of total backoff.
+- **Behaviour:** With a `retry` block on the task, EDDI retries only errors it classifies as retriable: timeouts and connection failures, HTTP 408 and 429, and any 5xx (including 529 "overloaded"). Authentication failures, unknown models, malformed requests, and a 429 that reports an exhausted quota (`insufficient_quota`, a per-day limit) are never retried. Retries are clamped to 10 attempts and 60 seconds of total backoff.
 - **Fix for sustained 429s:** lower concurrency, add a `retry` block, or add a cascade step on another provider.
 
 ### Unusable `timeout` parameter
@@ -236,7 +236,7 @@ Secrets are written with `PUT /secretstore/secrets/{tenantId}/{keyName}` and a b
 
 ### Agent deployment refused because of a secret grant
 
-- **Log:** `Agent '<id>' v<n> references vault secret(s) it is not granted: [...]. ... Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).` The deployment status becomes `ERROR`.
+- **Log:** `Agent '<id>' v<n> uses vault secret(s) it is not granted: [...]. ... Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).` The deployment status becomes `ERROR`.
 - **Fix:** Add the agent to the secret's `allowedAgents` with `PUT /secretstore/secrets/{tenantId}/{keyName}/grant`, or remove the reference. `eddi.vault.grant-enforcement=warn` logs instead of blocking.
 
 ### Key rotation
@@ -270,7 +270,7 @@ See [Scheduling](scheduling.md).
 
 ### No schedule fires
 
-- **Log at startup:** `Schedule poller DISABLED (eddi.schedule.enabled=false)`. When enabled you see `Schedule poller initialized (instance=..., leaseTimeout=..., maxRetries=...)`.
+- **Log at startup:** `Schedule poller DISABLED (eddi.schedule.enabled=false)`. When enabled you see `Schedule poller initialized (instance=..., leaseTimeout=..., fireTimeout=..., maxRetries=..., maxConcurrentFires=...)`.
 - **Fix:** Set `eddi.schedule.enabled=true`, the default. The poller checks every `eddi.schedule.poll-interval` (15s). A schedule can also be disabled on its own; re-enable it with `POST /schedulestore/schedules/{scheduleId}/enable`.
 
 ### Schedule rejected on save
@@ -287,7 +287,7 @@ See [Scheduling](scheduling.md).
 - **Log:** `[SCHEDULE] Schedule '<name>' (id=...) failed (attempt n/5), retry at <time>`, and after the last attempt `[SCHEDULE] Schedule '<name>' (id=...) dead-lettered after 5 retries`.
 - **Inspect:** `GET /schedulestore/schedules/{scheduleId}/fires` for one schedule's fire log, `GET /schedulestore/schedules/admin/failed` for every failed and dead-lettered fire.
 - **Recover:** `POST /schedulestore/schedules/{scheduleId}/retry` requeues a dead-lettered schedule; `POST /schedulestore/schedules/{scheduleId}/dismiss` drops it. Retries back off exponentially (`eddi.schedule.backoff-base-seconds`, `eddi.schedule.backoff-multiplier`); `eddi.schedule.max-retries` sets the limit.
-- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (5m); if the instance dies, another instance reclaims it after the lease expires. A fire that outlives its lease logs `[SCHEDULE] Dispatched fire task exceeded the batch lease deadline` and is cancelled.
+- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (10m); if the instance dies, another instance reclaims it after the lease expires and counts the lost fire as a failed attempt (`[SCHEDULE] Schedule '<name>' (id=...) was still claimed when its lease expired`). A fire that runs longer than `eddi.schedule.fire-timeout` (5m) plus a 30 s grace logs `[SCHEDULE] A fire exceeded eddi.schedule.fire-timeout` and is interrupted, then recorded as failed and retried.
 
 ---
 
@@ -330,6 +330,11 @@ See [Deployment management](deployment-management-of-agents.md).
 
 - **Cause:** `Agents are ready health check` is DOWN while any agent's deployment is in `ERROR`. The check reports only the count; the ids are in the log and in `GET /administration/{environment}/deploymentstatus`.
 
+### Container flagged unhealthy while a 5.x migration runs
+
+- **Cause:** The image's own `HEALTHCHECK` probes `/q/health/ready` with a 30 s start period and 3 retries. Readiness stays DOWN for minutes during a 5.x migration, so plain `docker run` or Compose users can see the container marked `unhealthy` even though the migration is progressing.
+- **Fix:** Wait for the migration to finish (watch the log), or override the health check to liveness with a longer start period, as the [AWS guide](setup-eddi-on-aws-with-mongodb-atlas.md) does. Kubernetes ignores the image `HEALTHCHECK`; see [Kubernetes](kubernetes.md) for the probes.
+
 ### Undeploy answers 409
 
 - **Cause:** The version still has open conversations.
@@ -355,7 +360,7 @@ See [Security](security.md).
   | `eddi-editor` | Config stores (`/agentstore/agents`, `/workflowstore/workflows`, ...), deployment (`/administration`), schedules |
   | `eddi-user` | Conversations (`/agents/{agentId}/start`, `/agents/{conversationId}`) |
   | `eddi-approver` | HITL decisions (`/agents/{conversationId}/resume`, `/approval-status`, `/cancel`, `/agents/pending-approvals`) |
-  | `eddi-viewer` | Mainly the MCP read tools; over REST only a few read endpoints (documentation, usage, workspaces) accept it |
+  | `eddi-viewer` | Mainly the MCP read tools; over REST only a few read endpoints (documentation, usage, conversation-store reads, workspaces, team budgets, cluster status, update check) accept it |
 
   Give each user the roles they need explicitly.
 - **Cause 2:** The role claim is misconfigured, so the token's roles are never seen. See [Role claim warning](#role-claim-warning-then-every-request-answers-403).

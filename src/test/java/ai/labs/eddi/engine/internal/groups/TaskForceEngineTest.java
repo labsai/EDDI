@@ -510,7 +510,7 @@ class TaskForceEngineTest {
                 .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, null, 0, "Execute", TranscriptEntryType.SKIPPED,
                         Instant.now(), "timed out", null));
 
-        engine.executeTaskExecutionPhase(gc, config, List.of(member(AGENT_A)), phase, protocol, "Q", 0, null,
+        engine.executeTaskExecutionPhase(gc, config, phase, protocol, "Q", 0, null,
                 new AtomicInteger(), 50);
 
         assertEquals(SharedTaskList.TaskStatus.FAILED, taskList.findById(research.id()).status(), "a skipped turn is not a completed task");
@@ -542,7 +542,7 @@ class TaskForceEngineTest {
                 .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, null, 0, "Execute", TranscriptEntryType.SKIPPED,
                         Instant.now(), "timed out", null));
 
-        assertThrows(GroupDiscussionException.class, () -> engine.executeTaskExecutionPhase(gc, config, List.of(member(AGENT_A)), phase,
+        assertThrows(GroupDiscussionException.class, () -> engine.executeTaskExecutionPhase(gc, config, phase,
                 protocol, "Q", 0, null, new AtomicInteger(), 50));
 
         assertEquals(SharedTaskList.TaskStatus.FAILED, taskList.findById(first.id()).status());
