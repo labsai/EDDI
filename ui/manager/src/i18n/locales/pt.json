@@ -6343,7 +6343,6 @@
     "rules": "Regras",
     "property": "Definidor de propriedades",
     "apicalls": "Chamadas à API",
-    "httpcallsLegacy": "Chamadas à API (legado)",
     "llm": "LLM",
     "output": "Saída",
     "templating": "Modelos",
