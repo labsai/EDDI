@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.caching;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -23,7 +24,8 @@ import java.util.function.Function;
  * read-through fill ({@link #fill}, {@link #fillIfAbsent}): announcing those
  * made round-robin nodes evict each other's fresh copies on every read. A lost
  * event is bounded by the cache's TTL ({@code eddi.cluster.local-cache-ttl} for
- * the caches that had none).
+ * the caches that had none). The views are read-only (see {@link ICache}): a
+ * change through one would reach the local copy without being announced.
  */
 public class ClusterInvalidatingCache<K, V> implements ICache<K, V> {
 
@@ -36,10 +38,13 @@ public class ClusterInvalidatingCache<K, V> implements ICache<K, V> {
 
     private final ICache<K, V> delegate;
     private final Announcer announcer;
+    /** What the views read: the delegate's entries, never changed through them. */
+    private final Map<K, V> readOnly;
 
     public ClusterInvalidatingCache(ICache<K, V> delegate, Announcer announcer) {
         this.delegate = delegate;
         this.announcer = announcer;
+        this.readOnly = Collections.unmodifiableMap(delegate);
     }
 
     private <T> T announce(Object key, T result) {
@@ -192,16 +197,16 @@ public class ClusterInvalidatingCache<K, V> implements ICache<K, V> {
 
     @Override
     public Set<K> keySet() {
-        return delegate.keySet();
+        return readOnly.keySet();
     }
 
     @Override
     public Collection<V> values() {
-        return delegate.values();
+        return readOnly.values();
     }
 
     @Override
     public Set<Entry<K, V>> entrySet() {
-        return delegate.entrySet();
+        return readOnly.entrySet();
     }
 }
