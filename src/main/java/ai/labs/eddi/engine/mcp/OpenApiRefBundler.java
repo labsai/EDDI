@@ -603,41 +603,53 @@ final class OpenApiRefBundler {
             return;
         }
         // A container of its own before it is changed: the merged properties may still
-        // be
-        // one side's own map.
+        // be one side's own map.
         ObjectNode mergedProperties = NODES.objectNode();
         mergedProperties.setAll(shared);
         merged.set("properties", mergedProperties);
         JsonNode sideProperties = side.path("properties");
+        // Read once per pass: scanning "required" again for every forbidden property
+        // was
+        // quadratic in two lists the spec author controls.
+        Set<String> required = requiredNames(merged);
         for (Map.Entry<String, JsonNode> property : otherProperties.properties()) {
             String key = property.getKey();
             if (sideProperties.has(key)) {
                 continue;
             }
+            JsonNode propertySchema = mergedProperties.get(key);
             if (additional.isBoolean() && !additional.asBoolean()) {
-                if (requires(merged, key)) {
+                if (required.contains(key)) {
                     throw new IllegalArgumentException("OpenAPI spec merges a $ref with a sibling that requires property '" + key
                             + "', which the referenced schema forbids (additionalProperties: false): no value can satisfy both; refused"
                             + (side.has("patternProperties") ? " (patternProperties are not evaluated, so they are taken to match nothing)" : ""));
                 }
                 mergedProperties.remove(key);
-            } else if (additional.isObject() && mergedProperties.get(key) instanceof ObjectNode propertySchema) {
-                mergedProperties.set(key, mergeSchemas(propertySchema, additional));
+            } else if (additional.isObject() && propertySchema instanceof ObjectNode objectSchema) {
+                mergedProperties.set(key, mergeSchemas(objectSchema, additional));
+            } else if (additional.isObject() && propertySchema != null && propertySchema.isBoolean()) {
+                // An OpenAPI 3.1 boolean schema: true is {} - intersected with the other
+                // side's schema, it is that schema; false admits nothing, so the property
+                // is dropped, and a required one makes the spec unsatisfiable.
+                if (propertySchema.asBoolean()) {
+                    mergedProperties.set(key, additional);
+                } else if (required.contains(key)) {
+                    throw new IllegalArgumentException("OpenAPI spec requires property '" + key + "', whose schema is false: no value can "
+                            + "satisfy it; refused");
+                } else {
+                    mergedProperties.remove(key);
+                }
             }
         }
     }
 
-    private static boolean requires(JsonNode schema, String key) {
+    private static Set<String> requiredNames(JsonNode schema) {
+        Set<String> names = new HashSet<>();
         JsonNode required = schema.get("required");
-        if (required == null || !required.isArray()) {
-            return false;
+        if (required != null && required.isArray()) {
+            required.forEach(name -> names.add(name.asText()));
         }
-        for (JsonNode name : required) {
-            if (key.equals(name.asText())) {
-                return true;
-            }
-        }
-        return false;
+        return names;
     }
 
     private static JsonNode stricter(String name, JsonNode target, JsonNode holder) {

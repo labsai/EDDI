@@ -612,6 +612,46 @@ class OpenApiRefBundlerTest {
     }
 
     @Test
+    @DisplayName("a boolean property schema meets the other side's additionalProperties schema: true takes it, false is dropped or refused")
+    void booleanPropertySchemasAreIntersected() throws Exception {
+        String defs = "{\"Typed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
+                + "\"additionalProperties\":{\"type\":\"string\",\"maxLength\":5}}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$ref":"https://example.com/defs.json#/Typed","properties":{"b":true,"c":false}%s}}}}
+                """;
+
+        JsonNode properties = JSON.readTree(OpenApiRefBundler.bundle(spec.formatted(""), null, fetcher)).at("/components/schemas/S/properties");
+
+        assertEquals(5, properties.at("/b/maxLength").asInt(), "true is {}, so b takes the additionalProperties schema: " + properties);
+        assertFalse(properties.has("c"), "false admits nothing: " + properties);
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> OpenApiRefBundler.bundle(spec.formatted(",\"required\":[\"c\"]"), null, fetcher));
+        assertTrue(e.getMessage().contains("whose schema is false"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("dropping many forbidden sibling properties beside a long required list is linear")
+    void forbiddenPropertiesAgainstLongRequiredListIsLinear() throws Exception {
+        String defs = "{\"Closed\":{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},\"additionalProperties\":false}}";
+        OpenApiSpecFetcher fetcher = fetcherServing(Map.of("https://example.com/defs.json", defs));
+        StringBuilder props = new StringBuilder();
+        StringBuilder required = new StringBuilder();
+        for (int i = 0; i < 40_000; i++) {
+            props.append(i == 0 ? "" : ",").append("\"p").append(i).append("\":{\"type\":\"string\"}");
+            required.append(i == 0 ? "" : ",").append("\"q").append(i).append('"');
+        }
+        String spec = "{\"openapi\":\"3.1.0\",\"info\":{\"title\":\"T\",\"version\":\"1\"},\"paths\":{},\"components\":{\"schemas\":{\"S\":"
+                + "{\"$ref\":\"https://example.com/defs.json#/Closed\",\"properties\":{" + props + "},\"required\":[" + required + "]}}}}";
+
+        String bundled = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> OpenApiRefBundler.bundle(spec, null, fetcher));
+
+        JsonNode properties = JSON.readTree(bundled).at("/components/schemas/S/properties");
+        assertEquals(1, properties.size(), "every sibling property is forbidden by the target");
+    }
+
+    @Test
     @DisplayName("merging properties beside many references to a schema with a large literal shares it, and the output cap refuses")
     void propertyMergeSharesLargeLiterals() {
         // Each holder's empty "properties" sibling makes the merge copy the target's
