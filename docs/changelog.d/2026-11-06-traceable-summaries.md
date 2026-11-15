@@ -110,3 +110,8 @@ the rolling summary's check to every consolidation group. See
   (empty before the first call, the first call's usage before the retry), and `LlmTask` prices it with the same
   `ModelPrices` it records the summary spend with and passes it as `pendingUsd`. The cost is only checked there; both
   calls are still recorded once, together, after the update.
+- **An empty first answer gets the citation policy.** With `citeSources` on, an empty summarizer answer returned early,
+  before the check: `retry_once` never made its corrective call and no outcome was counted. It now goes through the
+  check, which fails it ("the summary is empty"), and the configured policy applies. `retry_once` retries,
+  `fallback_to_previous` falls back, and `keep`, having nothing to keep, falls back rather than replace the previous
+  summary with nothing. Each case is counted. With `citeSources` off the early return is unchanged.

@@ -293,10 +293,13 @@ public class ConversationSummarizer {
             return Map.of();
         }
 
-        if (summary.isEmpty()) {
+        if (summary.isEmpty() && !config.isCiteSources()) {
             LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
             return usage;
         }
+        // With citeSources an empty answer goes through the check like any other: it
+        // fails it ("the summary is empty"), so the configured policy applies — a
+        // retry_once makes its corrective call, and the outcome is counted.
 
         if (config.isCiteSources()) {
             // The check reads each turn as the summarizer saw it: screened, and — for a
@@ -315,7 +318,12 @@ public class ConversationSummarizer {
                 LOGGER.debugf("[SUMMARY] Citation problems for conversation='%s': %s", sanitize(memory.getConversationId()),
                         sanitize(check.describe()));
                 summary = switch (policy) {
+                    // An empty answer has nothing to keep: storing it would replace the
+                    // previous summary with nothing, so keep falls back instead.
                     case keep -> {
+                        if (summary.isBlank()) {
+                            yield null;
+                        }
                         SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_KEPT);
                         yield summary;
                     }

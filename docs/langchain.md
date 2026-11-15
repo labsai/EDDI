@@ -2034,6 +2034,10 @@ its continuation lines, or any other line on its own):
 | `retry_once` | One more summarizer call, with the problems appended to the instructions. It sends the same, already screened content, is asked of the spend check (conversation ceiling and tenant budget) first like the first call, and its tokens are added to the first call's, so the step records and prices both. If it fails the check too, throws, comes back empty or is refused by the spend check, it falls back | `retried` on success, else `fallback` |
 | `fallback_to_previous` | The new summary is discarded. The previous summary and its boundary stay, so the turns past it keep reaching the model verbatim, and the next turn tries again | `fallback` |
 
+An empty answer fails the check too ("the summary is empty"), so the policy applies to it as well: `retry_once` makes its
+corrective call, and `keep`, having nothing to keep, falls back (`fallback`). With `citeSources` off an empty answer is
+neither checked nor counted, and the next turn tries again.
+
 A passing summary counts as `passed`. Note what `fallback` costs: like a failed summarizer call, it
 retries on the next turn — a model that never cites correctly pays for a summarizer call on every
 turn while the verbatim window grows (up to `maxTurnsPerUpdate` turns per attempt). That is why the

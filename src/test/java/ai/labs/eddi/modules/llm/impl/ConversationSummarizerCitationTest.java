@@ -331,4 +331,88 @@ class ConversationSummarizerCitationTest {
         assertEquals("- Budget is 4,250 EUR [turn 0]", ConversationSummarizer.readSummary(memory));
         assertEquals(1, count("passed"));
     }
+
+    // === An empty first answer goes through the check and the policy ===
+
+    private static IConversationMemory memoryWithPreviousSummary() {
+        var memory = memory();
+        memory.getConversationProperties().put(ConversationSummarizer.PROP_RUNNING_SUMMARY,
+                new Property(ConversationSummarizer.PROP_RUNNING_SUMMARY, "- Opened [turn 0]", Scope.conversation));
+        memory.getConversationProperties().put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
+                new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, 1, Scope.conversation));
+        return memory;
+    }
+
+    private void assertPreviousSummaryKept(IConversationMemory memory) {
+        assertEquals("- Opened [turn 0]", ConversationSummarizer.readSummary(memory));
+        assertEquals(1, ConversationSummarizer.readSummaryThroughStep(memory));
+    }
+
+    @Test
+    void emptyFirstAnswer_retryOnce_makesTheCorrectiveCall_andAPassingRetryIsStored() {
+        var memory = memory();
+        answer("", GOOD);
+
+        var usage = run(memory, config(true, "retry_once"), null);
+
+        var instructions = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        assertTrue(instructions.getAllValues().get(1).contains("the summary is empty"), "the retry is told what failed");
+        assertEquals(GOOD, ConversationSummarizer.readSummary(memory));
+        assertEquals(240, ((Number) usage.get("totalTokens")).intValue(), "both calls are reported");
+        assertEquals(1, count("retried"));
+        assertEquals(0, count("fallback"));
+    }
+
+    @Test
+    void emptyFirstAnswer_retryOnce_emptyAgain_fallsBack() {
+        var memory = memoryWithPreviousSummary();
+        answer("", "");
+
+        run(memory, config(true, "retry_once"), null);
+
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        assertPreviousSummaryKept(memory);
+        assertEquals(1, count("fallback"));
+        assertEquals(0, count("retried"));
+    }
+
+    @Test
+    void emptyFirstAnswer_fallbackToPrevious_keepsThePreviousSummaryAndCountsIt() {
+        var memory = memoryWithPreviousSummary();
+        answer("");
+
+        var usage = run(memory, config(true, "fallback_to_previous"), null);
+
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        assertPreviousSummaryKept(memory);
+        assertEquals(120, ((Number) usage.get("totalTokens")).intValue());
+        assertEquals(1, count("fallback"));
+    }
+
+    @Test
+    void emptyFirstAnswer_keep_hasNothingToKeep_soItFallsBack() {
+        var memory = memoryWithPreviousSummary();
+        answer("");
+
+        run(memory, config(true, "keep"), null);
+
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        assertPreviousSummaryKept(memory);
+        assertEquals(1, count("fallback"));
+        assertEquals(0, count("kept"));
+    }
+
+    @Test
+    void emptyFirstAnswer_withoutCiteSources_isNeitherCheckedNorCounted() {
+        var memory = memoryWithPreviousSummary();
+        answer("");
+
+        var usage = run(memory, config(false, "retry_once"), null);
+
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        assertPreviousSummaryKept(memory);
+        assertEquals(120, ((Number) usage.get("totalTokens")).intValue());
+        assertTrue(registry.find("eddi.summary.citation.checks").counters().isEmpty());
+    }
 }
