@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -169,6 +170,21 @@ class WebSearchToolProviderTest {
 
             String uri = sentRequest().uri().toString();
             assertTrue(uri.contains("q=" + "a".repeat(WebSearchTool.BRAVE_MAX_QUERY_LENGTH) + "&count="), uri);
+        }
+
+        @Test
+        void queryWithTooManyShortWordsIsCutToBravesWordLimit() throws Exception {
+            brave("k");
+            answer(200, "{}");
+            // 100 single-character words are only 199 characters, inside the character
+            // limit.
+            String query = String.join(" ", Collections.nCopies(100, "a"));
+
+            textOf(() -> tool.searchWeb(query, 5));
+
+            String uri = sentRequest().uri().toString();
+            String expected = String.join("+", Collections.nCopies(WebSearchTool.BRAVE_MAX_QUERY_WORDS, "a"));
+            assertTrue(uri.contains("q=" + expected + "&count="), uri);
         }
 
         @Test

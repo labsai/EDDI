@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -82,6 +83,9 @@ public class WebSearchTool {
 
     /** Brave rejects a {@code q} longer than 400 characters. */
     static final int BRAVE_MAX_QUERY_LENGTH = 400;
+
+    /** Brave also rejects a {@code q} of more than 75 words. */
+    static final int BRAVE_MAX_QUERY_WORDS = 75;
 
     private final OutboundHttp http;
     private final ObjectMapper objectMapper;
@@ -228,7 +232,7 @@ public class WebSearchTool {
 
     private String searchWithBrave(String query, int maxResults) throws IOException, InterruptedException {
         String key = resolveBraveKey();
-        String q = query.length() > BRAVE_MAX_QUERY_LENGTH ? query.substring(0, BRAVE_MAX_QUERY_LENGTH) : query;
+        String q = fitBraveQuery(query);
         String url = BRAVE_ENDPOINT + "?q=" + URLEncoder.encode(q, StandardCharsets.UTF_8) + "&count=" + maxResults;
 
         // The key travels in X-Subscription-Token, one of OutboundHttp's
@@ -236,6 +240,16 @@ public class WebSearchTool {
         String body = fetch(get(url).header("Accept", "application/json").header("X-Subscription-Token", key).build(), "Brave search");
 
         return formatBraveResults(body, query, maxResults);
+    }
+
+    /** Cuts a query to Brave's limits: at most 75 words and 400 characters. */
+    static String fitBraveQuery(String query) {
+        String q = query.strip();
+        String[] words = q.split("\\s+");
+        if (words.length > BRAVE_MAX_QUERY_WORDS) {
+            q = String.join(" ", Arrays.copyOf(words, BRAVE_MAX_QUERY_WORDS));
+        }
+        return q.length() > BRAVE_MAX_QUERY_LENGTH ? q.substring(0, BRAVE_MAX_QUERY_LENGTH) : q;
     }
 
     /**

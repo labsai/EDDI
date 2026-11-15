@@ -74,3 +74,14 @@ thin for research agents. (The docs said it did "HTML scraping"; it never did. C
 
 - `searchNews` still appends " news" to a web search. Brave has a dedicated news endpoint, which
   could back `searchNews` when `provider=brave`.
+
+### Review follow-up (2026-11-15)
+
+- A Brave query is now cut to 75 words as well as 400 characters, so a short query with many
+  one-letter words stays inside the API contract.
+- `docker-compose.yml` passes `EDDI_TOOLS_WEBSEARCH_PROVIDER` and
+  `EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY` into the container (documented in `.env.example` and the
+  developer quickstart); before, setting them on the host left Compose on DuckDuckGo.
+- The Platform Operator prompt now says that search pricing follows the configured provider even
+  when a missing key makes the search run on DuckDuckGo, and states the precedence: the agent's
+  `toolPricing`, then `eddi.tools.websearch.price-per-call`, then the provider default.

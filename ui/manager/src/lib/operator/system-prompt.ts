@@ -241,8 +241,12 @@ You can:
   ranked results; \`google\` is deprecated because Google shuts its Custom
   Search JSON API down on 2027-01-01 and takes no new customers. A paid
   provider without its key falls back to DuckDuckGo with a startup WARN. The
-  default price per search is $0.001 on \`duckduckgo\` and $0.005 on \`brave\`
-  or \`google\`, unless the agent's \`toolPricing\` sets one.
+  price of a search follows the configured provider, not the one that ran: a
+  \`brave\` or \`google\` deployment without its key still searches on
+  DuckDuckGo but is priced as configured. Precedence, highest first: the
+  agent's \`toolPricing\` entry, then the deployment-wide
+  \`eddi.tools.websearch.price-per-call\` override, then the provider default
+  of $0.001 on \`duckduckgo\` and $0.005 on \`brave\` or \`google\`.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait

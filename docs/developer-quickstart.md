@@ -125,6 +125,13 @@ If you plan to use the **Web Search** or **Weather** tools in your agents, you n
 
 Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
 
+With Docker Compose, put the same two settings in `.env` as environment variables; `docker-compose.yml` passes them into the container:
+
+```bash
+EDDI_TOOLS_WEBSEARCH_PROVIDER=brave
+EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...
+```
+
 **Weather (OpenWeatherMap):**
 
 - `eddi.tools.weather.openweathermap.api-key=...`
