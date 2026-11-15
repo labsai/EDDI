@@ -77,6 +77,11 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
      */
     private static final String FIELD_ASSESSMENT = "assessment";
     private static final String FIELD_SUPERSEDED_BY = "supersededBy";
+    /**
+     * Ids of the entries a Dream consolidation built this one from. Absent on
+     * documents written before it existed, which read as none.
+     */
+    private static final String FIELD_SOURCE_ENTRY_IDS = "sourceEntryIds";
     private static final String FIELD_ACCESS_COUNT = "accessCount";
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_UPDATED_AT = "updatedAt";
@@ -190,7 +195,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
             // A new value is a new statement of the fact: it resolves a contest.
             Bson update = Updates.combine(Updates.set(FIELD_VALUE, entry.getValue()), Updates.set(FIELD_UPDATED_AT, now.toString()),
                     Updates.set(FIELD_ASSESSMENT, UserMemoryEntry.Assessment.ACCEPTED.name()), Updates.set(FIELD_SUPERSEDED_BY, null),
-                    Updates.set(FIELD_CONFLICTED, false), Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
+                    Updates.set(FIELD_SOURCE_ENTRY_IDS, List.of()), Updates.set(FIELD_CONFLICTED, false),
+                    Updates.setOnInsert(FIELD_USER_ID, userId), Updates.setOnInsert(FIELD_KEY, key),
                     Updates.setOnInsert(FIELD_VISIBILITY, Visibility.global.name()), Updates.setOnInsert(FIELD_CATEGORY, "property"),
                     Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
 
@@ -330,8 +336,9 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), sourceAgentUpdate,
                 Updates.set(FIELD_GROUP_IDS, entry.groupIds()), Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.set(FIELD_CONFLICTED, entry.conflicted()), Updates.set(FIELD_ASSESSMENT, entry.assessment().name()),
-                Updates.set(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.set(FIELD_UPDATED_AT, now.toString()),
-                Updates.setOnInsert(FIELD_USER_ID, entry.userId()), Updates.setOnInsert(FIELD_KEY, entry.key()),
+                Updates.set(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.set(FIELD_SOURCE_ENTRY_IDS, entry.sourceEntryIds()),
+                Updates.set(FIELD_UPDATED_AT, now.toString()), Updates.setOnInsert(FIELD_USER_ID, entry.userId()),
+                Updates.setOnInsert(FIELD_KEY, entry.key()),
                 Updates.setOnInsert(FIELD_CREATED_AT, now.toString()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0));
     }
 
@@ -368,7 +375,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.set(FIELD_VISIBILITY, entry.visibility().name()), Updates.set(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.set(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()), Updates.set(FIELD_CONFLICTED, entry.conflicted()),
                 Updates.set(FIELD_ASSESSMENT, entry.assessment().name()), Updates.set(FIELD_SUPERSEDED_BY, entry.supersededBy()),
-                Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
+                Updates.set(FIELD_SOURCE_ENTRY_IDS, entry.sourceEntryIds()), Updates.set(FIELD_UPDATED_AT, Instant.now().toString()));
         return memoriesCollection.updateOne(and(eq(FIELD_ID, new ObjectId(entryId)), updatedAtIs(expectedUpdatedAt)), update)
                 .getModifiedCount() == 1;
     }
@@ -624,7 +631,8 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 Updates.setOnInsert(FIELD_SOURCE_AGENT_ID, entry.sourceAgentId()), Updates.setOnInsert(FIELD_GROUP_IDS, entry.groupIds()),
                 Updates.setOnInsert(FIELD_SOURCE_CONVERSATION_ID, entry.sourceConversationId()),
                 Updates.setOnInsert(FIELD_CONFLICTED, entry.conflicted()), Updates.setOnInsert(FIELD_ASSESSMENT, entry.assessment().name()),
-                Updates.setOnInsert(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
+                Updates.setOnInsert(FIELD_SUPERSEDED_BY, entry.supersededBy()), Updates.setOnInsert(FIELD_SOURCE_ENTRY_IDS, entry.sourceEntryIds()),
+                Updates.setOnInsert(FIELD_ACCESS_COUNT, 0),
                 Updates.setOnInsert(FIELD_CREATED_AT, now), Updates.setOnInsert(FIELD_UPDATED_AT, now));
         BsonValue upserted;
         try {
@@ -682,6 +690,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
                 doc.getList(FIELD_GROUP_IDS, String.class, List.of()), doc.getString(FIELD_SOURCE_CONVERSATION_ID),
                 doc.getBoolean(FIELD_CONFLICTED, false), doc.getInteger(FIELD_ACCESS_COUNT, 0),
                 createdAtStr != null ? Instant.parse(createdAtStr) : null, updatedAtStr != null ? Instant.parse(updatedAtStr) : null,
-                UserMemoryEntry.Assessment.parse(doc.getString(FIELD_ASSESSMENT)), doc.getString(FIELD_SUPERSEDED_BY));
+                UserMemoryEntry.Assessment.parse(doc.getString(FIELD_ASSESSMENT)), doc.getString(FIELD_SUPERSEDED_BY),
+                doc.getList(FIELD_SOURCE_ENTRY_IDS, String.class, List.of()));
     }
 }
