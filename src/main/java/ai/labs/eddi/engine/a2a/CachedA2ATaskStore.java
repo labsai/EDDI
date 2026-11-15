@@ -18,8 +18,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 /**
@@ -103,6 +106,27 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * residual is documented in {@code clustering.md}.
      */
     private final ReadWriteLock erasureLock = new ReentrantReadWriteLock();
+    /**
+     * Serializes, per index shard on this node, a record write with the eviction it
+     * triggers. Without it, writer A could evict id {@code t} from the shard and
+     * pause before removing the record, writer B could save {@code t} again, and
+     * A's removal would then delete B's record while the index still names it.
+     * Taken inside the erasure read lock, never around the write lock, so the two
+     * cannot deadlock. Striped, so it is a fixed cost whatever the principal count.
+     */
+    private final Lock[] shardLocks = newShardLocks();
+
+    private static Lock[] newShardLocks() {
+        Lock[] locks = new Lock[64];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new ReentrantLock();
+        }
+        return locks;
+    }
+
+    private Lock shardLock(String shardKey) {
+        return shardLocks[Math.floorMod(shardKey.hashCode(), shardLocks.length)];
+    }
 
     @Inject
     public CachedA2ATaskStore(ICacheFactory cacheFactory) {
@@ -160,10 +184,15 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
             if (erasing.containsKey(principal)) {
                 return;
             }
-            tasks.put(scopedKey(principal, record.taskId()), record);
             String shard = indexKey(principal, shardOf(record.taskId()));
-            for (String evicted : updateIndex(shard, current -> current.withTask(record.taskId())).taskIds()) {
-                tasks.remove(scopedKey(principal, evicted));
+            Lock lock = shardLock(shard);
+            lock.lock();
+            try {
+                tasks.put(scopedKey(principal, record.taskId()), record);
+                List<String> evicted = updateIndex(shard, current -> current.withTask(record.taskId())).taskIds();
+                removeEvicted(principal, shard, evicted, PrincipalIndex::taskIds, tasks);
+            } finally {
+                lock.unlock();
             }
         } finally {
             erasureLock.readLock().unlock();
@@ -182,13 +211,39 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
             if (erasing.containsKey(principal)) {
                 return;
             }
-            contexts.put(scopedKey(principal, contextId), conversationId);
             String shard = indexKey(principal, shardOf(contextId));
-            for (String evicted : updateIndex(shard, current -> current.withContext(contextId)).contextIds()) {
-                contexts.remove(scopedKey(principal, evicted));
+            Lock lock = shardLock(shard);
+            lock.lock();
+            try {
+                contexts.put(scopedKey(principal, contextId), conversationId);
+                List<String> evicted = updateIndex(shard, current -> current.withContext(contextId)).contextIds();
+                removeEvicted(principal, shard, evicted, PrincipalIndex::contextIds, contexts);
+            } finally {
+                lock.unlock();
             }
         } finally {
             erasureLock.readLock().unlock();
+        }
+    }
+
+    /**
+     * Removes the records of ids the cap pushed out of a shard — except an id the
+     * shard names again by now, which a writer on another node saved after this one
+     * evicted it: that record is live and the index still lists it. (Writers on
+     * this node are excluded by {@link #shardLock}; across nodes the re-read
+     * narrows the window rather than closing it, as the erasure lock does.)
+     */
+    private <V> void removeEvicted(String principal, String shardKey, List<String> evicted, Function<PrincipalIndex, List<String>> idsOf,
+                                   ICache<String, V> cache) {
+        if (evicted.isEmpty()) {
+            return;
+        }
+        PrincipalIndex now = index.get(shardKey);
+        Set<String> live = now == null ? Set.of() : new LinkedHashSet<>(idsOf.apply(now));
+        for (String id : evicted) {
+            if (!live.contains(id)) {
+                cache.remove(scopedKey(principal, id));
+            }
         }
     }
 
@@ -245,9 +300,10 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         while (true) {
             PrincipalIndex current = index.get(shardKey);
             PrincipalIndex next = change.apply(current == null ? PrincipalIndex.empty() : current);
-            if (next.equals(current)) {
-                return PrincipalIndex.empty();
-            }
+            // An unchanged shard is still written (compare-and-set to the same value):
+            // the record it names was just refreshed, and the shard's expiry must be
+            // renewed with it, or the shard can lapse while a live record outlives it
+            // and a node that holds no local copy can no longer find that record.
             boolean landed = current == null ? index.putIfAbsent(shardKey, next) == null : index.replace(shardKey, current, next);
             if (landed) {
                 return (current == null ? PrincipalIndex.empty() : current).minus(next);

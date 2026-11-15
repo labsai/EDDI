@@ -430,6 +430,102 @@ class CachedA2ATaskStoreTest {
         assertNull(participant.export("alice"));
     }
 
+    /**
+     * Ids that hash into shard 0, so a fixed count of them fills exactly one shard.
+     */
+    private static List<String> idsInShardZero(int count) {
+        List<String> ids = new ArrayList<>();
+        for (int n = 0; ids.size() < count; n++) {
+            if (CachedA2ATaskStore.shardOf("t" + n) == 0) {
+                ids.add("t" + n);
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * Writer A evicts the oldest id from a full shard and stalls before removing
+     * its record; writer B saves it again. A's removal must not delete B's record:
+     * the index names it, so a missing record is a silent loss.
+     */
+    @Test
+    @DisplayName("an eviction paused before its delete cannot remove a record saved again meanwhile")
+    void pausedEvictionDoesNotDeleteALaterSave() throws Exception {
+        var evictionReached = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        List<String> ids = idsInShardZero(CachedA2ATaskStore.MAX_IDS_PER_SHARD + 1);
+        String oldest = ids.getFirst();
+        String stalled = CachedA2ATaskStore.scopedKey("alice", oldest);
+        Map<String, ICache<String, Object>> caches = new HashMap<>();
+        ICacheFactory factory = mock(ICacheFactory.class);
+        when(factory.<String, Object>getCache(anyString())).thenAnswer(invocation -> caches.computeIfAbsent(invocation.getArgument(0), name -> {
+            if (!CachedA2ATaskStore.TASK_CACHE.equals(name)) {
+                return new MapCache<>();
+            }
+            return new MapCache<String, Object>() {
+                @Override
+                public Object remove(Object key) {
+                    if (stalled.equals(key) && Thread.currentThread().getName().equals("writer-a")) {
+                        evictionReached.countDown();
+                        try {
+                            release.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    return super.remove(key);
+                }
+            };
+        }));
+        CachedA2ATaskStore racing = new CachedA2ATaskStore(factory);
+
+        for (String id : ids.subList(0, CachedA2ATaskStore.MAX_IDS_PER_SHARD)) {
+            racing.saveTask("alice", record(id, "task " + id));
+        }
+        Thread writerA = new Thread(() -> racing.saveTask("alice", record(ids.getLast(), "overflow")), "writer-a");
+        writerA.start();
+        assertTrue(evictionReached.await(10, TimeUnit.SECONDS), "writer A reached the eviction of the oldest id");
+
+        Thread writerB = new Thread(() -> racing.saveTask("alice", record(oldest, "saved again")), "writer-b");
+        writerB.start();
+        writerB.join(300); // with the lock B waits for A; without it, B finishes here
+        release.countDown();
+        writerA.join(10_000);
+        writerB.join(10_000);
+
+        assertEquals("saved again", racing.findTask("alice", oldest).orElseThrow().userText(),
+                "the record saved after the eviction began survives it");
+    }
+
+    /**
+     * A re-save with unchanged ids must still write the shard, because that write
+     * is what renews its expiry together with the record's.
+     */
+    @Test
+    @DisplayName("saving a task again renews its index shard even though the ids are unchanged")
+    void resaveRenewsTheIndexShard() {
+        List<String> shardWrites = new ArrayList<>();
+        ICacheFactory factory = mock(ICacheFactory.class);
+        when(factory.<String, Object>getCache(anyString())).thenAnswer(invocation -> {
+            if (!CachedA2ATaskStore.INDEX_CACHE.equals(invocation.getArgument(0))) {
+                return new MapCache<>();
+            }
+            return new MapCache<String, Object>() {
+                @Override
+                public boolean replace(String key, Object oldValue, Object value) {
+                    shardWrites.add(key);
+                    return super.replace(key, oldValue, value);
+                }
+            };
+        });
+        CachedA2ATaskStore renewing = new CachedA2ATaskStore(factory);
+
+        renewing.saveTask("alice", record("t1", "first"));
+        assertTrue(shardWrites.isEmpty(), "the first save creates the shard rather than replacing it");
+        renewing.saveTask("alice", record("t1", "second"));
+
+        assertEquals(List.of(CachedA2ATaskStore.indexKey("alice", CachedA2ATaskStore.shardOf("t1"))), shardWrites);
+    }
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
 
         @Override

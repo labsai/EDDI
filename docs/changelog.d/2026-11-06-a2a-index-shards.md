@@ -43,6 +43,12 @@
   refuses `Entry.setValue`. `ICache`'s new class Javadoc states the contract. `CacheImpl.put` and
   `remove` delegate to Caffeine's atomic `asMap()` operations, so the casts and their
   `@SuppressWarnings` are gone.
+- **Review fixes:** a save and the eviction it triggers now run under a per-shard lock (64 stripes,
+  taken inside the erasure read lock), so a writer that evicted an id and paused cannot delete
+  the record another writer saved again meanwhile; the eviction also re-reads the shard and skips
+  an id it names again, which narrows the same window across nodes (not closed there, like the
+  erasure lock). A re-save whose ids are unchanged still writes its shard (compare-and-set to
+  the same value), so the shard's expiry renews with the record's instead of lapsing first.
 - **Docs:** `clustering.md` describes the shards of `A2A_INDEX`, the erasure count, and the read
   of the previous release's index value.
 
