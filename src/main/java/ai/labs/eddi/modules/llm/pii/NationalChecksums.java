@@ -217,7 +217,10 @@ public final class NationalChecksums {
 
     /**
      * Austrian social insurance number: a three-digit serial, a check digit, then
-     * the birth date DDMMYY; weights 3 7 9 _ 5 8 4 2 1 6, mod 11.
+     * the birth date DDMMYY; weights 3 7 9 _ 5 8 4 2 1 6, mod 11. The month may be
+     * the fictitious 13, 14 or 15, used when the birth date is unknown or all
+     * serials of the real date are taken (Hauptverband, parliamentary answer
+     * 4690/AB XXIII. GP, 2008).
      */
     public static boolean atSocialSecurity(String v) {
         if (v.length() != 10 || !allDigits(v) || v.charAt(0) == '0') {
@@ -229,7 +232,9 @@ public final class NationalChecksums {
             sum += digit(v, i) * weights[i];
         }
         int check = sum % 11;
-        return check != 10 && check == digit(v, 3) && date(v.substring(6, 8), v.substring(4, 6));
+        int month = (int) value(v.substring(6, 8));
+        int day = (int) value(v.substring(4, 6));
+        return check != 10 && check == digit(v, 3) && month >= 1 && month <= 15 && day >= 1 && day <= 31;
     }
 
     /** Swiss AHV number: 13 digits starting 756, EAN-13 check digit. */
@@ -427,7 +432,8 @@ public final class NationalChecksums {
         }
         String nine = v.length() == 8 ? "0" + v : v;
         long number = value(nine);
-        if (number <= 10_000_000L || number >= 150_000_000L) {
+        // Upper limit raised from 150,000,000 to 200,000,000 (Inland Revenue, 2026).
+        if (number <= 10_000_000L || number > 200_000_000L) {
             return false;
         }
         int check = irdCheck(nine, new int[]{3, 2, 7, 6, 5, 4, 3, 2});

@@ -1144,7 +1144,7 @@ finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
 
 | Kind | What | Check |
 | --- | --- | --- |
-| `email`, `phone`, `creditcard`, `iban` | Any country. Cards and IBANs (ISO 13616, per-country length) carry check digits; a phone number is grouped, or unspaced with a leading `+` | Luhn, mod-97 |
+| `email`, `phone`, `creditcard`, `iban` | Any country. Cards and IBANs (ISO 13616, per-country length) carry check digits; an IBAN is found in upper or lower case, grouped in fours or unspaced; a phone number is grouped, or unspaced with a leading `+` | Luhn, mod-97 |
 | `ip_address` | IPv4 and IPv6 addresses | octet ranges, IPv6 group rules |
 | `passport_mrz` | The second line of a passport's machine-readable zone (ICAO 9303 TD3), any issuing country | four ICAO check digits |
 | `date_of_birth` | A date next to a birth keyword (`geb.`, `born`, `DOB`, `né le`, `fecha de nacimiento`, `生年月日`, …) | plausible date, keyword |
@@ -1161,7 +1161,7 @@ finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
 | `nl_bsn` (NL) | BSN | eleven test, keyword |
 | `be_national_number` (BE) | National register number | mod-97, both centuries |
 | `de_tax_id`, `de_social_security`, `de_id_card` (DE) | Steuer-ID; Rentenversicherungsnummer; ID card or passport serial | MOD 11,10 and repetition rule; check digit; ICAO digit and keyword |
-| `at_social_security` (AT) | Sozialversicherungsnummer | mod-11, birth date, keyword |
+| `at_social_security` (AT) | Sozialversicherungsnummer, including the fictitious months 13–15 | mod-11, birth date, keyword |
 | `ch_ahv` (CH) | AHV/AVS number (756…) | EAN-13 |
 | `pl_pesel` (PL) | PESEL | check digit, birth date, keyword |
 | `se_personnummer` (SE) | Personnummer, coordination numbers included | Luhn, date |
@@ -1173,7 +1173,7 @@ finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
 | `kr_rrn` (KR) | Resident registration number | date and sex digit (no check digit since 2020) |
 | `sg_nric` (SG) | NRIC and FIN (S, T, F, G and M series) | check letter |
 | `au_tfn`, `au_medicare` (AU) | Tax file number; Medicare card number | mod-11 and keyword; check digit and keyword |
-| `nz_ird` (NZ) | IRD number | mod-11, keyword |
+| `nz_ird` (NZ) | IRD number, up to 200,000,000 | mod-11, keyword |
 | `za_id` (ZA) | Identity number | Luhn, birth date |
 
 "Keyword" means a word such as `PESEL`, `NHS`, `BSN`, `Aadhaar` or `マイナンバー` must stand at most 40 characters before the value. It is required where the check digit alone lets about one in ten random numbers of that length through. The kinds run one after another in a fixed order: e-mail first, so an address is redacted whole even when its local part is an identifier, then the longer and checked formats, and the loose card and phone patterns last, so they cannot take an identifier's digit groups. On a text with none of the newer kinds the result is exactly what the first four kinds always produced. Every pattern is fixed and bounded, so a scan is linear in the text and needs no time budget.

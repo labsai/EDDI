@@ -92,10 +92,13 @@ public final class BuiltinRecognizers {
     // it cannot be told apart from an order or account number.
     private static final Pattern PHONE = Pattern.compile(
             "(?<![\\w+(])(?:\\+\\d{1,3}[ -]?)?(?:\\(\\d{2,4}\\)[ -]?|\\d{2,4}[ -])\\d{3,4}[ -]?\\d{3,4}\\b" + "|(?<![\\w+])\\+\\d{8,15}\\b");
-    // Upper-case, as printed; single spaces between characters allowed (groups of
-    // four). A run may swallow a following upper-case word; the acceptor tries the
-    // shorter windows.
-    private static final Pattern IBAN = Pattern.compile("(?<![A-Za-z0-9])[A-Z]{2}\\d{2}(?: ?[A-Z0-9]){11,30}(?![A-Za-z0-9])");
+    // Either case (printed upper-case, often typed lower-case; the acceptor
+    // upper-cases
+    // before the mod-97 check); single spaces between characters allowed (groups of
+    // four). A run may swallow a following word; the acceptor tries the shorter
+    // windows.
+    private static final Pattern IBAN = Pattern.compile("(?<![A-Za-z0-9])[A-Z]{2}\\d{2}(?: ?[A-Z0-9]){11,30}(?![A-Za-z0-9])",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern DE_TAX_ID = Pattern.compile("(?<![\\d+])[1-9]\\d ?\\d{3} ?\\d{3} ?\\d{3}(?!\\d)");
     // Serial alphabet of German ID cards and passports: digits and the consonants
     // C F G H J K L M N P R T V W X Y Z; nine characters, optionally the ICAO check
@@ -126,7 +129,10 @@ public final class BuiltinRecognizers {
 
     private static final Pattern IPV4 = Pattern
             .compile("(?<![\\d.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?!\\d|\\.\\d)");
-    private static final Pattern IPV6 = Pattern.compile("(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![0-9A-Za-z:])");
+    // Up to eight colons: seven groups and a leading or trailing "::" (RFC 4291
+    // 2.2)
+    // has eight; NationalChecksums.ipv6 checks the structure.
+    private static final Pattern IPV6 = Pattern.compile("(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,8}(?![0-9A-Za-z:])");
     private static final Pattern PASSPORT_MRZ = Pattern
             .compile("(?<![A-Z0-9<])[A-Z0-9<]{9}\\d[A-Z<]{3}\\d{6}\\d[MFX<]\\d{6}\\d[A-Z0-9<]{14}[0-9<]\\d(?![A-Z0-9<])");
 
@@ -390,7 +396,7 @@ public final class BuiltinRecognizers {
             if (e != end && text.charAt(e) != ' ') {
                 continue;
             }
-            if (PiiChecksums.iban(compact(text, start, e))) {
+            if (PiiChecksums.iban(compact(text, start, e).toUpperCase(Locale.ROOT))) {
                 return new int[]{start, e};
             }
         }

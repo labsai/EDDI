@@ -99,6 +99,7 @@ class PiiRedactionGuardrailTest {
             var verdict = guardrail.evaluate("IBAN DE89 3704 0044 0532 0130 00 bitte", context(Map.of()));
             assertEquals("IBAN [REDACTED:iban] bitte", verdict.text());
             assertEquals("pii:iban", verdict.reason());
+            assertEquals("IBAN [REDACTED:iban] bitte", rewrite("IBAN de89 3704 0044 0532 0130 00 bitte", Map.of()));
         }
 
         @Test

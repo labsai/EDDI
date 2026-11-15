@@ -45,6 +45,7 @@ class BuiltinPiiDetectorTest {
             "IBAN|IBAN: GB82WEST12345698765432.|GB82WEST12345698765432",
             "IBAN|DE89 3704 0044 0532 0130 00 OK danke|DE89 3704 0044 0532 0130 00",
             "IBAN|Oman OM81 0180 0000 0129 9123 456 ok|OM81 0180 0000 0129 9123 456", "IBAN|MN580050099123456789|MN580050099123456789",
+            "IBAN|meine iban de89 3704 0044 0532 0130 00 danke|de89 3704 0044 0532 0130 00", "IBAN|gb82west12345698765432|gb82west12345698765432",
             "DE_TAX_ID|Steuer-ID 86 095 742 719 liegt bei|86 095 742 719", "DE_TAX_ID|IdNr. 86095742719|86095742719",
             "DE_SOCIAL_SECURITY|Rentenversicherungsnummer 15070649C103|15070649C103",
             "DE_SOCIAL_SECURITY|RVNR 15 070649 C 103 vorhanden|15 070649 C 103", "DE_ID_CARD|Personalausweis Nr. L01X00T47|L01X00T47",
@@ -59,7 +60,8 @@ class BuiltinPiiDetectorTest {
 
     @ParameterizedTest
     @DisplayName("look-alikes without a check digit or keyword are not found")
-    @CsvSource(delimiter = '|', value = {"IBAN|DE89 3704 0044 0532 0130 01", "IBAN|ZZ89370400440532013000", "DE_TAX_ID|Bestellung 86095742718",
+    @CsvSource(delimiter = '|', value = {"IBAN|DE89 3704 0044 0532 0130 01", "IBAN|ZZ89370400440532013000", "IBAN|de89 3704 0044 0532 0130 01",
+            "DE_TAX_ID|Bestellung 86095742718",
             "DE_TAX_ID|+49 860 957 427 19", "DE_SOCIAL_SECURITY|15070649C104", "DE_ID_CARD|Artikel L01X00T47",
             "DE_ID_CARD|Ausweis L01X00T472", "DE_ID_CARD|Ausweis PRTVWXYZK", "DE_ID_CARD|password L01X00T47", "DATE_OF_BIRTH|Termin 12.03.1980",
             "DATE_OF_BIRTH|geb. 32.13.1980", "DATE_OF_BIRTH|born 12.03.1850"})

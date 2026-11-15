@@ -73,7 +73,10 @@ class NationalChecksumsTest {
             "beNationalNumber, 93051822361, true", "beNationalNumber, 00010100105, true", "beNationalNumber, 9305182236, false",
             "beNationalNumber, 9305182236A, false", "beNationalNumber, 93051822362, false",
             // Austria
-            "atSocialSecurity, 1237010180, true", "atSocialSecurity, 123701018, false", "atSocialSecurity, 123701018A, false",
+            "atSocialSecurity, 1237010180, true",
+            // fictitious months 13-15 (unknown birth date or exhausted serials); 16 is none
+            "atSocialSecurity, 1234011356, true", "atSocialSecurity, 1235011657, false", "atSocialSecurity, 123701018, false",
+            "atSocialSecurity, 123701018A, false",
             "atSocialSecurity, 0237010180, false", "atSocialSecurity, 1238010180, false", "atSocialSecurity, 1000000003, false",
             // Switzerland
             "chAhv, 7569217076985, true", "chAhv, 756921707698, false", "chAhv, 756921707698A, false", "chAhv, 7559217076985, false",
@@ -116,6 +119,8 @@ class NationalChecksumsTest {
             // New Zealand, a number needing the secondary weights included
             "nzIrd, 49091850, true", "nzIrd, 35901981, true", "nzIrd, 136410132, true", "nzIrd, 136410133, false", "nzIrd, 4909185, false",
             "nzIrd, 4909185000, false", "nzIrd, 4909185A, false", "nzIrd, 10000000, false", "nzIrd, 150000000, false",
+            // limit raised to 200,000,000 in 2026
+            "nzIrd, 150000009, true", "nzIrd, 200000013, false",
             // South Africa
             "zaId, 8001015009087, true", "zaId, 800101500908, false", "zaId, 800101500908A, false", "zaId, 8001015009387, false",
             "zaId, 8013015009087, false", "zaId, 8001015009088, false",
@@ -128,7 +133,8 @@ class NationalChecksumsTest {
             "passportMrz, L898902C36UTO7408122F1204159ZE184226B<<<<<11, false",
             "passportMrz, l898902C36UTO7408122F1204159ZE184226B<<<<<10, false",
             // IPv6
-            "ipv6, 1:2:3:4:5:6:7:8, true", "ipv6, fe80::1, true", "ipv6, 1:2:3:4:5:6:7, false", "ipv6, 1::2::3, false",
+            "ipv6, 1:2:3:4:5:6:7:8, true", "ipv6, 1:2:3:4:5:6:7::, true", "ipv6, ::2:3:4:5:6:7:8, true", "ipv6, fe80::1, true",
+            "ipv6, 1:2:3:4:5:6:7, false", "ipv6, 1::2::3, false",
             "ipv6, 12345::1, false", "ipv6, ::, false"})
     void validates(String validator, String value, boolean expected) {
         assertEquals(expected, VALIDATORS.get(validator).test(value), validator + "(" + value + ")");
