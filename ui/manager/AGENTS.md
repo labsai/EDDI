@@ -361,6 +361,14 @@ what it finds. Off by default. Worth knowing before touching it:
   new default. **Changing the prompt, the allow-list or the gate means bumping
   the revision**: `operator-revision.test.ts` pins a fingerprint of all three
   and fails until you do, printing the new fingerprint.
+  **The prompt is a Qute template on the server**, and most of it is documentation
+  that looks like expressions (`metric_total{reason}`, `/agents/{agentId}`,
+  `{input}`). `buildOperatorSystemPrompt` escapes every such span (`qute-literal.ts`),
+  so write the text naturally and do not reword or hand-wrap braces; the only live
+  syntax is the per-turn context block. `qute-literal.test.ts` fails on anything
+  else, and its rule is held to the real engine by the Java
+  `OperatorPromptQuteCorpusTest` through `qute-literal-corpus.json`. Add a case
+  there before changing the rule.
 - **`authMode: "caller-identity"`** makes tool calls run as the signed-in user
   via the backend's `${caller:token}` resolver (EDDI 6.2.0+). `"none"` is
   blocked at activation when OIDC is on, because every tool call would 401.

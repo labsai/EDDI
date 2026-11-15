@@ -1,0 +1,221 @@
+{
+  "//": "Shared by qute-literal.test.ts (this file's TypeScript rule) and OperatorPromptQuteCorpusTest (EDDI's real Qute engine, Java). Each case says what the ENGINE does with a brace, and what escapeQuteLiterals must produce. kind: literal = engine leaves the text as written; expression = engine evaluates it (renders it as nothing, or fails to parse); mention = a vault/vars/connection/caller reference, which LlmTask escapes itself; live = the Manager's own per-turn context syntax, deliberately evaluated. For literal, mention and live, escaped equals text. For literal and expression the engine must render `escaped` back to exactly `text`. Add a case here before changing the rule in qute-literal.ts; the Java test will say if the engine disagrees.",
+  "cases": [
+    {
+      "name": "empty braces",
+      "text": "send {} when you have no context",
+      "kind": "literal",
+      "escaped": "send {} when you have no context"
+    },
+    {
+      "name": "brace then space",
+      "text": "a { b } c",
+      "kind": "literal",
+      "escaped": "a { b } c"
+    },
+    {
+      "name": "JSON object, quoted key",
+      "text": "takes {\"input\": \"your message\"} as a body",
+      "kind": "literal",
+      "escaped": "takes {\"input\": \"your message\"} as a body"
+    },
+    {
+      "name": "JSON patch array",
+      "text": "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":[{\"name\":\"docs\"}]}]",
+      "kind": "literal",
+      "escaped": "[{\"op\":\"add\",\"path\":\"/tasks/0\",\"value\":[{\"name\":\"docs\"}]}]"
+    },
+    {
+      "name": "nested JSON",
+      "text": "{\"chat_template_kwargs\":{\"guardian_config\":{\"criteria_id\":\"jailbreak\"}}}",
+      "kind": "literal",
+      "escaped": "{\"chat_template_kwargs\":{\"guardian_config\":{\"criteria_id\":\"jailbreak\"}}}"
+    },
+    {
+      "name": "digit after brace",
+      "text": "{0} and {1a}",
+      "kind": "literal",
+      "escaped": "{0} and {1a}"
+    },
+    {
+      "name": "underscore after brace",
+      "text": "{_x}",
+      "kind": "literal",
+      "escaped": "{_x}"
+    },
+    {
+      "name": "punctuation after brace",
+      "text": "{-a} {.a} {@a} {$a} {(a)} {[a]} {'a'} {<a>} {%a} {:a} {;a} {=a} {?a} {*a} {+a} {&a} {^a} {~a} {,a} {>a}",
+      "kind": "literal",
+      "escaped": "{-a} {.a} {@a} {$a} {(a)} {[a]} {'a'} {<a>} {%a} {:a} {;a} {=a} {?a} {*a} {+a} {&a} {^a} {~a} {,a} {>a}"
+    },
+    {
+      "name": "double open brace",
+      "text": "{{a}}",
+      "kind": "literal",
+      "escaped": "{{a}}"
+    },
+    {
+      "name": "brace then newline",
+      "text": "{\nname }",
+      "kind": "literal",
+      "escaped": "{\nname }"
+    },
+    {
+      "name": "trailing brace",
+      "text": "ends with {",
+      "kind": "literal",
+      "escaped": "ends with {"
+    },
+    {
+      "name": "unpaired brace before an expression is a pair",
+      "text": "{{a}",
+      "kind": "literal",
+      "escaped": "{{a}"
+    },
+    {
+      "name": "tripled opener: a pair, then an expression",
+      "text": "{{{a}}}",
+      "kind": "expression",
+      "escaped": "{{{|{a}|}}}"
+    },
+    {
+      "name": "metric label",
+      "text": "eddi_cluster_nats_errors_total{cause}",
+      "kind": "expression",
+      "escaped": "eddi_cluster_nats_errors_total{|{cause}|}"
+    },
+    {
+      "name": "metric label with a value",
+      "text": "eddi_turn_rejected_total{reason=\"in_flight_limit\"}",
+      "kind": "expression",
+      "escaped": "eddi_turn_rejected_total{|{reason=\"in_flight_limit\"}|}"
+    },
+    {
+      "name": "label list with a comma",
+      "text": "eddi.guardrail.judge.duration{provider,outcome}",
+      "kind": "expression",
+      "escaped": "eddi.guardrail.judge.duration{|{provider,outcome}|}"
+    },
+    {
+      "name": "label list spanning lines",
+      "text": "total{kind=\"reply\", outcome sent,\n  retry}",
+      "kind": "expression",
+      "escaped": "total{|{kind=\"reply\", outcome sent,\n  retry}|}"
+    },
+    {
+      "name": "path parameter",
+      "text": "(/agents/{agentId}/profile, deployed version)",
+      "kind": "expression",
+      "escaped": "(/agents/{|{agentId}|}/profile, deployed version)"
+    },
+    {
+      "name": "template variable",
+      "text": "rendered with {input}, {output} and {risk}",
+      "kind": "expression",
+      "escaped": "rendered with {|{input}|}, {|{output}|} and {|{risk}|}"
+    },
+    {
+      "name": "field list with spaces",
+      "text": "Each entry is {type, action, maxRetries,\n  blockMessage, parameters}.",
+      "kind": "expression",
+      "escaped": "Each entry is {|{type, action, maxRetries,\n  blockMessage, parameters}|}."
+    },
+    {
+      "name": "the 6.7.0 forEach line (parses as a virtual method)",
+      "text": "forEach {pathToTargetArray (a plain dot path such as\n  properties.orderIds, required), iterationObjectName (default \"item\")} sends",
+      "kind": "expression",
+      "escaped": "forEach {|{pathToTargetArray (a plain dot path such as\n  properties.orderIds, required), iterationObjectName (default \"item\")}|} sends"
+    },
+    {
+      "name": "the 6.7.0 metric line (parses as a namespace)",
+      "text": "eddi_email_outbound_total{outcome: sent, retry}",
+      "kind": "expression",
+      "escaped": "eddi_email_outbound_total{|{outcome: sent, retry}|}"
+    },
+    {
+      "name": "section opener and closer",
+      "text": "{#each items}x{/each}",
+      "kind": "expression",
+      "escaped": "{|{#each items}|}x{|{/each}|}"
+    },
+    {
+      "name": "comment",
+      "text": "{! a comment !}",
+      "kind": "expression",
+      "escaped": "{|{! a comment !}|}"
+    },
+    {
+      "name": "no closing brace",
+      "text": "an opener {never closed",
+      "kind": "expression",
+      "escaped": "an opener {|{|}never closed"
+    },
+    {
+      "name": "closing brace doubled",
+      "text": "{a}}",
+      "kind": "expression",
+      "escaped": "{|{a}|}}"
+    },
+    {
+      "name": "pipe inside the span",
+      "text": "{a|}",
+      "kind": "expression",
+      "escaped": "{|{a|}|}"
+    },
+    {
+      "name": "nested opener",
+      "text": "{a {b} c}",
+      "kind": "expression",
+      "escaped": "{|{a {b}|} c}"
+    },
+    {
+      "name": "backslash-escaped brace (Qute eats the backslash)",
+      "text": "C:\\{a}",
+      "kind": "expression",
+      "escaped": "C:{|\\{|}a}"
+    },
+    {
+      "name": "vault reference",
+      "text": "write the key as ${vault:key-name}",
+      "kind": "mention",
+      "escaped": "write the key as ${vault:key-name}"
+    },
+    {
+      "name": "vars reference",
+      "text": "{vars:gemini-model}",
+      "kind": "mention",
+      "escaped": "{vars:gemini-model}"
+    },
+    {
+      "name": "caller reference",
+      "text": "Bearer ${caller:token}",
+      "kind": "mention",
+      "escaped": "Bearer ${caller:token}"
+    },
+    {
+      "name": "connection reference",
+      "text": "${connection:crm}",
+      "kind": "mention",
+      "escaped": "${connection:crm}"
+    },
+    {
+      "name": "legacy vault reference",
+      "text": "${eddivault:old}",
+      "kind": "mention",
+      "escaped": "${eddivault:old}"
+    },
+    {
+      "name": "context section",
+      "text": "{#if context.screen}viewing {context.screen}{/if}",
+      "kind": "live",
+      "escaped": "{#if context.screen}viewing {context.screen}{/if}"
+    },
+    {
+      "name": "context value",
+      "text": "(agent {context.agentId})",
+      "kind": "live",
+      "escaped": "(agent {context.agentId})"
+    }
+  ]
+}

@@ -23,6 +23,7 @@ import {
   grantsOversightReads,
   type OperatorScope,
 } from "./tool-scopes";
+import { escapeQuteLiterals } from "./qute-literal";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
 import { DEFAULT_BRAND, getBrand } from "@/lib/brand";
 
@@ -2179,9 +2180,13 @@ export function safetyPreambleForScope(scope: OperatorScope, productName?: strin
  * `scope` picks the preamble; it must be the same scope whose endpoint filter is
  * sent in the same request, or the agent is told about a capability boundary it
  * is not actually behind.
+ *
+ * The text is a Qute template on the server, so literal braces in it are escaped
+ * here, once, rather than reworded one mention at a time (see `qute-literal.ts`).
+ * The per-turn context block is the one thing left live.
  */
 export function buildOperatorSystemPrompt(body: string, scope: OperatorScope, productName?: string): string {
-  return `${safetyPreambleForScope(scope, productName)}\n\n---\n\n${body.trim()}`;
+  return escapeQuteLiterals(`${safetyPreambleForScope(scope, productName)}\n\n---\n\n${body.trim()}`);
 }
 
 /** Suggested opening questions, shown on the operator screen. */
