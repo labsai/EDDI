@@ -1405,9 +1405,9 @@ your tool schemas do not cover it, not as a routine first step:
   of a phrase match. An optional semanticFallback block (embeddingProvider and
   embeddingParameters as for a knowledge base, minScore, examples) maps input
   the dictionaries did not understand to the closest example: one embedding call
-  per such turn (metric eddi_parser_semantic_fallback_total{outcome: match,
-  no_match}); a provider failure only means no match, a malformed block fails the
-  deployment. Docs: "semantic-parser".
+  per such turn (metric eddi_parser_semantic_fallback_total, tagged outcome=match
+  or no_match); a provider failure only means no match, a malformed block fails
+  the deployment. Docs: "semantic-parser".
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.
