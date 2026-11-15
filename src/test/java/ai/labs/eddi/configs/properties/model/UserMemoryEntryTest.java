@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -305,6 +306,27 @@ class UserMemoryEntryTest {
     }
 
     @Test
+    void sourceEntryIds_absentReadsAsNone_andSurvivesAssessmentAndJson() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var legacy = mapper.readValue("""
+                {"id":"1","userId":"u","key":"k","value":"v","category":"fact","visibility":"self","sourceAgentId":"a"}
+                """, UserMemoryEntry.class);
+        assertEquals(List.of(), legacy.sourceEntryIds());
+
+        var consolidated = legacy.withSourceEntryIds(Arrays.asList("a1", null, "b2"));
+        assertEquals(List.of("a1", "b2"), consolidated.sourceEntryIds(), "nulls are dropped");
+        assertEquals(List.of("a1", "b2"), consolidated.withAssessment(Assessment.CONTESTED, null).sourceEntryIds());
+
+        String json = mapper.writeValueAsString(consolidated);
+        assertTrue(json.contains("\"sourceEntryIds\":[\"a1\",\"b2\"]"), json);
+        assertEquals(consolidated, mapper.readValue(json, UserMemoryEntry.class));
+
+        var fifteenArgs = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null,
+                Assessment.ACCEPTED, null);
+        assertEquals(List.of(), fifteenArgs.sourceEntryIds());
+    }
+
+    @Test
     void asStatement_clearsEveryVerdict() {
         var base = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null);
         assertSame(base, base.asStatement(), "an accepted entry is returned as is");
@@ -319,5 +341,14 @@ class UserMemoryEntryTest {
 
         var flaggedOnly = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, true, 0, null, null);
         assertFalse(flaggedOnly.asStatement().conflicted(), "conflicted without CONTESTED is not kept either");
+    }
+
+    @Test
+    void asStatement_keepsSourceEntryIds() {
+        var consolidated = new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.self, "a", List.of(), null, false, 0, null, null)
+                .withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.CONTESTED, null).asStatement().sourceEntryIds(),
+                "provenance is not a verdict: Dream's consolidation write goes through asStatement");
+        assertEquals(List.of("e1", "e2"), consolidated.withAssessment(Assessment.SUPERSEDED, "x").asStatement().sourceEntryIds());
     }
 }
