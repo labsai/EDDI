@@ -10953,12 +10953,12 @@
         {
           "id": 86,
           "type": "timeseries",
-          "title": "Summarization calls vs errors",
+          "title": "Summarization calls, errors and citation checks",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_summarization_calls_total` / `eddi_summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing.",
+          "description": "`eddi_summarization_calls_total` / `eddi_summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing. `eddi_summary_citation_checks_total{source,outcome}` — summaries checked under `citeSources` (zero while it is off): `passed`, `retried` (the retry passed), `kept` (failed, stored anyway) and `fallback` (failed, discarded).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -10987,6 +10987,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "errors"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (source, outcome) (rate(eddi_summary_citation_checks_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "citations {{source}} {{outcome}}"
             }
           ],
           "fieldConfig": {
