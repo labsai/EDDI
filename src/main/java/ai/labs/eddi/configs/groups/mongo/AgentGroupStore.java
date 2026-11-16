@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.validation.ApprovedResultActionValidation;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeValidation;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -57,6 +58,14 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
     @Inject
     ServiceJudgeVaultGrants serviceJudgeVaultGrants;
 
+    /**
+     * The {@code onApproved} reference rules (httpcalls exists, call shape, vault
+     * grants). Same field-injection pattern: null (a store built by hand) runs only
+     * the structural half.
+     */
+    @Inject
+    ApprovedResultActionValidation approvedResultActionValidation;
+
     @Inject
     public AgentGroupStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
         super(storageFactory, "groups", documentBuilder, AgentGroupConfiguration.class);
@@ -69,6 +78,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateMembersAndLimits(groupConfiguration);
         validateServiceJudgeGrants(groupConfiguration);
         validateConsolidationCredentials(null, null, groupConfiguration);
+        validateApprovedResultActions(groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
@@ -96,6 +106,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateServiceJudgeGrants(groupConfiguration);
         validateConsolidationCredentials(id, version, groupConfiguration);
         rejectNestingCycle(id, groupConfiguration);
+        validateApprovedResultActions(groupConfiguration);
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
@@ -183,6 +194,21 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         }
         List<String> problems = ServiceJudgeValidation.newModelParameterProblems("lessonConfig.consolidation.parameters", parameters,
                 stored);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A phase's {@code onApproved} must sit on an approval-gated EXECUTE phase of a
+     * TASK-granularity group and name an existing, single-request httpcalls call
+     * whose secrets are granted to all agents
+     * ({@link ApprovedResultActionValidation}).
+     */
+    void validateApprovedResultActions(AgentGroupConfiguration config) {
+        List<String> problems = approvedResultActionValidation != null
+                ? approvedResultActionValidation.problems(config)
+                : ApprovedResultActionValidation.structuralProblems(config);
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }

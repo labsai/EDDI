@@ -4,17 +4,17 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { QuickReplies } from "./QuickReplies";
-import { MessageBubble } from "./MessageBubble";
-import { ChatInput } from "./ChatInput";
-import { indicatorStatusText } from "./Indicators";
+import { QuickReplies } from "@eddi/conversation";
+import { Message as MessageBubble } from "@eddi/conversation";
+import { Composer as ChatInput } from "@eddi/conversation";
+import { indicatorStatusText } from "@eddi/conversation";
 import { ChatProvider, useChatDispatch } from "@/store/chat-store";
 import { stepsToMessages } from "@eddi/core";
-import { setLocale } from "@/i18n";
+import { setLocale, t } from "@/i18n";
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  setLocale("en");
+  await setLocale("en");
 });
 
 describe("QuickReplies", () => {
@@ -71,10 +71,10 @@ describe("MessageBubble", () => {
 });
 
 describe("indicator status text", () => {
-  it("is translated", () => {
-    setLocale("de");
-    expect(indicatorStatusText(false, null)).toBe("Denke nach…");
-    expect(indicatorStatusText(false, { text: "calculator", phrase: false })).toBe("Verwende Calculator…");
+  it("is translated", async () => {
+    await setLocale("de");
+    expect(indicatorStatusText(false, null, t)).toBe("Denke nach…");
+    expect(indicatorStatusText(false, { text: "calculator", phrase: false }, t)).toBe("Verwende Calculator…");
   });
 });
 

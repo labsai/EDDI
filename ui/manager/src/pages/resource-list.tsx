@@ -21,7 +21,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
 import { getResourceTypeIcon } from "@/lib/resource-type-icons";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { BackLink } from "@/components/shared/back-link";

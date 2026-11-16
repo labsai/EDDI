@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { BackLink } from "@/components/shared/back-link";
 import { ChipInput } from "@/components/shared/chip-input";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
