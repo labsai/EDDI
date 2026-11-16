@@ -685,9 +685,13 @@ group switches change that, both off by default:
   metrics as a completed run). Only the rest, including the tasks still
   waiting for a decision, return to `PENDING`, untouched and without retry
   feedback. A reject at a `PHASE` pause keeps today's rule — that person declined
-  the phase's whole output — and so does a discussion that can no longer be read.
-  The run itself still ends where it stopped: nothing continues unattended after
-  a timeout.
+  the phase's whole output — and so does a discussion that was deleted, which has
+  no task list to keep anything from. A discussion that fails to read for any
+  other reason is not treated as deleted: its run keeps its claim and its tasks
+  stay `IN_PROGRESS` while each fire retries the read; past the claim TTL it is
+  also cancelled, and it is written back once it reads as ended. Deleting such a
+  discussion releases its run. The run itself still ends where it stopped:
+  nothing continues unattended after a timeout.
 
 Both are read from the group's current version (an unreadable config reads as the
 defaults, logged), and both are validated on save.
