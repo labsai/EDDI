@@ -283,8 +283,9 @@ export function latestStepMark(snapshot: Partial<ConversationSnapshot> | null | 
   const steps = snapshot?.conversationSteps;
   if (!Array.isArray(steps) || steps.length === 0) return null;
   const step = steps[steps.length - 1];
-  const entries = Array.isArray(step?.conversationStep) ? step.conversationStep : [];
-  if (!step?.timestamp && entries.length === 0) return null;
+  if (!step) return null;
+  const entries = Array.isArray(step.conversationStep) ? step.conversationStep : [];
+  if (!step.timestamp && entries.length === 0) return null;
   return JSON.stringify([step.timestamp ?? null, entries.map((e) => [e.key, e.timestamp ?? null])]);
 }
 
