@@ -2,8 +2,10 @@ import { AppLink } from "../shared/app-link";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Hand } from "lucide-react";
+import { approvalDeadline } from "@eddi/core";
 import { useApprovalStatus } from "../../hooks/use-hitl";
 import { humanizeToolName } from "../../lib/tool-labels";
+import type { ApprovalStatusSummary } from "../../lib/api/hitl";
 
 export interface PauseNoticeProps {
   conversationId: string;
@@ -41,7 +43,7 @@ export function PauseNotice({
   testIdBase = "pause-notice",
   reviewTestId,
 }: PauseNoticeProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const status = useApprovalStatus(conversationId, true, pausedAt ?? null, {
     verifyPause: true,
     onResolved,
@@ -70,6 +72,7 @@ export function PauseNotice({
     fallbackReason ||
     t("hitl.chatPaused", "This conversation is awaiting human approval.");
   const href = reviewHref ?? `/manage/conversationview/${conversationId}?awaiting=1`;
+  const deadline = deadlineNotice(status.data, i18n.resolvedLanguage ?? i18n.language, t);
 
   return (
     <div
@@ -81,6 +84,11 @@ export function PauseNotice({
       {tools.length > 0 && (
         <span className="text-muted-foreground" data-testid={`${testIdBase}-tools`}>
           {t("hitl.noticeWaitingFor", "Waiting for approval: {{tools}}", { tools: tools.join(", ") })}
+        </span>
+      )}
+      {deadline && (
+        <span className="text-muted-foreground" data-testid={`${testIdBase}-deadline`}>
+          {deadline}
         </span>
       )}
       {status.detailsPending && (
@@ -97,4 +105,43 @@ export function PauseNotice({
       </AppLink>
     </div>
   );
+}
+
+type Translate = ReturnType<typeof useTranslation>["t"];
+
+/**
+ * By when the pause decides itself (T2.3): what its timeout policy does, and
+ * at what time — `pausedAt + approvalTimeout`, as docs/hitl.md says to render
+ * it. Null when it waits for a person indefinitely, or before the status is in.
+ */
+function deadlineNotice(status: ApprovalStatusSummary | undefined, locale: string, t: Translate): string | null {
+  if (!status?.pausedAt || !status.approvalTimeout) return null;
+  const policy = status.timeoutPolicy ?? "";
+  if (policy === "" || policy === "WAIT_INDEFINITELY") return null;
+  const deadline = approvalDeadline({
+    conversationId: status.conversationId,
+    state: "AWAITING_HUMAN",
+    pausedAt: status.pausedAt,
+    pauseReason: status.pauseReason ?? "",
+    timeoutPolicy: policy,
+    approvalTimeout: status.approvalTimeout,
+    pauseDetails: null,
+  });
+  if (deadline === null) return null;
+  let time: string;
+  try {
+    const when = new Date(deadline);
+    const sameDay = when.toDateString() === new Date().toDateString();
+    time = new Intl.DateTimeFormat(locale, sameDay ? { timeStyle: "short" } : { dateStyle: "medium", timeStyle: "short" }).format(when);
+  } catch {
+    time = new Date(deadline).toLocaleString();
+  }
+  switch (policy) {
+    case "AUTO_APPROVE":
+      return t("hitl.noticeAutoApprove", "Approved automatically at {{time}} unless someone decides first", { time });
+    case "AUTO_REJECT":
+      return t("hitl.noticeAutoReject", "Rejected automatically at {{time}} unless someone decides first", { time });
+    default:
+      return t("hitl.noticeAutoAbort", "Stopped automatically at {{time}} unless someone decides first", { time });
+  }
 }

@@ -9,6 +9,7 @@ import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { MockDataBanner } from "./mock-data-banner";
+import { UserEventBridge } from "@eddi/app-kit/components/layout/user-event-bridge";
 import { UpdateBanner } from "./update-banner";
 import { useBrand } from "@eddi/app-kit/hooks/use-brand";
 import { isUpdateUiVisible } from "@eddi/app-kit/lib/brand";
@@ -124,6 +125,9 @@ export function AppLayout() {
     // extends the document's scroll height, and focusing it scrolls the WHOLE
     // layout. The shell must never scroll — only <main> does.
     <div className="relative flex h-dvh overflow-hidden" data-testid="app-layout">
+      {/* The tab's user event stream: approvals, team progress, long jobs and
+          notifications refresh the moment they happen (docs/user-events.md). */}
+      <UserEventBridge />
       {/* Skip to main content — keyboard accessibility */}
       <a href="#main-content" className="skip-to-main">
         {t("common.skipToMain", "Skip to main content")}

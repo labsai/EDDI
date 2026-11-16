@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { MessageSquare, Pencil, Pin, PinOff, Trash2, Users } from "lucide-react";
+import { Hand, MessageSquare, Pencil, Pin, PinOff, Trash2, Users } from "lucide-react";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
@@ -22,6 +22,7 @@ import {
 } from "@/hooks/use-workforce-sessions";
 import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { ConversationSearch } from "@/components/workforce/conversation-search";
+import { useWorkforceApprovals } from "@/hooks/use-workforce-approvals";
 
 /**
  * The sidebar's list of the signed-in person's chats and team sessions
@@ -39,6 +40,9 @@ export function SessionList() {
   const patchChat = usePatchChat();
   const deleteChat = useDeleteChat();
   const deleteTeam = useDeleteTeamSession();
+  // The person's own paused chats and team sessions carry a marker (T2.3).
+  const { mine: pausedItems } = useWorkforceApprovals();
+  const pausedIds = new Set(pausedItems.map((item) => item.conversationId));
   const location = useLocation();
   const navigate = useNavigate();
   const activeHref = location.pathname + location.search;
@@ -147,6 +151,7 @@ export function SessionList() {
                   session={session}
                   label={sessionLabel(session, formatDate)}
                   active={activeHref === session.href}
+                  paused={pausedIds.has(session.id)}
                   renaming={renamingId === session.id}
                   onStartRename={() => setRenamingId(session.id)}
                   onRename={(title) => rename(session, title)}
@@ -182,6 +187,8 @@ interface SessionRowProps {
   session: WorkforceSession;
   label: string;
   active: boolean;
+  /** Waiting for an approval or a human member's turn. */
+  paused?: boolean;
   renaming: boolean;
   onStartRename: () => void;
   onRename: (title: string) => void;
@@ -194,6 +201,7 @@ function SessionRow({
   session,
   label,
   active,
+  paused = false,
   renaming,
   onStartRename,
   onRename,
@@ -265,6 +273,12 @@ function SessionRow({
         <span className="min-w-0 flex-1 truncate" dir="auto" data-testid={`${testId}-label`}>
           {label}
         </span>
+        {paused && (
+          <span className="flex shrink-0 items-center text-warn-500" data-testid={`${testId}-paused`}>
+            <Hand className="h-3.5 w-3.5" aria-hidden />
+            <span className="sr-only">{t("Workforce.approvals.pausedMarker", "Waiting for approval")}</span>
+          </span>
+        )}
       </Link>
       {/* Row actions: visible on hover and on keyboard focus, so a keyboard
           user reaches them by tabbing past the row. */}

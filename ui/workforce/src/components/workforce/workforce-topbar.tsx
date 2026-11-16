@@ -5,6 +5,7 @@ import { ChevronLeft, Menu, Sparkles } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
 import { cn } from "@eddi/app-kit/lib/utils";
+import { ApprovalsIndicator } from "@/components/workforce/approvals-indicator";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ export function WorkforceTopbar({
           business with an agent that operates the deployment. */}
       <div className="flex shrink-0 items-center gap-1">
         {rightContent}
+        {/* What waits on a human (T2.3), on every viewport. */}
+        <ApprovalsIndicator />
         {isAdmin && (
           <Button asChild variant="ghost" size="sm" className="gap-1.5">
             <AppLink to="/manage/operator" data-testid="workforce-operator-link">
