@@ -13,6 +13,7 @@ import {
   extractQuickReplies,
   extractActions,
   getConversationDescriptors,
+  searchConversations,
   getSimpleConversationLog,
   deleteConversation,
   getDetailedConversation,
@@ -467,6 +468,32 @@ describe("getConversationDescriptors", () => {
     await expect(getConversationDescriptors()).rejects.toMatchObject({
       status: 500,
     });
+  });
+});
+
+describe("searchConversations", () => {
+  it("finds the caller's conversations by title, case-insensitively", async () => {
+    const result = await searchConversations("ORDER 1042");
+    expect(result.map((c) => c.title)).toEqual(["Where is order 1042?"]);
+    expect(result[0]!.resource).toMatch(/\/conv1$/);
+  });
+
+  it("sends q, index and limit on the search path", async () => {
+    let seen: URL | null = null;
+    server.use(
+      http.get("*/conversationstore/conversations/search", ({ request }) => {
+        seen = new URL(request.url);
+        return HttpResponse.json([]);
+      }),
+    );
+    await expect(searchConversations("50% a_b", 2, 10)).resolves.toEqual([]);
+    expect(seen!.searchParams.get("q")).toBe("50% a_b");
+    expect(seen!.searchParams.get("index")).toBe("2");
+    expect(seen!.searchParams.get("limit")).toBe("10");
+  });
+
+  it("surfaces the 400 for a blank text", async () => {
+    await expect(searchConversations("   ")).rejects.toMatchObject({ status: 400 });
   });
 });
 

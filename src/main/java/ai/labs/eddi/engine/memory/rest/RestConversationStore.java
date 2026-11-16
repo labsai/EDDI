@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceFilter.ContainsIgnoreCase;
 import ai.labs.eddi.datastore.IResourceFilter.NotMatching;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
@@ -452,6 +453,115 @@ public class RestConversationStore implements IRestConversationStore {
 
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public List<ConversationDescriptor> searchConversations(String query, Integer index, Integer limit) {
+        PageBounds.require(index, limit);
+        String text = ConversationTitles.requireValidSearchQuery(query);
+        if (index == null) {
+            index = 0;
+        }
+        if (limit == null || limit < 1) {
+            limit = 20;
+        }
+        if ((long) index * limit > MAX_RESULT_OFFSET) {
+            throw new BadRequestException(format("index * limit must not exceed %d. Search with more of the title instead.",
+                    MAX_RESULT_OFFSET));
+        }
+
+        // "My conversations": the caller's own, for an administrator too. The owner is
+        // an exact match in the query, so the page the store returns is a page of
+        // results — no foreign row is read, so there is no owner-scan budget and no
+        // back-fill as in the listing. A legacy descriptor that records no owner is
+        // not searched: it predates titles (v5.1.6 started recording owners).
+        // With authorization off there is no owner: every caller sees everything.
+        final boolean authorizationEnabled = conversationAccessGuard.authorizationEnabled();
+        final String caller = authorizationEnabled ? conversationAccessGuard.callerActor(null) : null;
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        List<QueryFilters> restrictions = new ArrayList<>();
+        if (caller != null) {
+            restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_USER_ID, caller))));
+        } else if (authorizationEnabled) {
+            // No named caller and authorization on: nobody to scope to, nothing to find.
+            return List.of();
+        }
+        // Titles only — see IRestConversationStore#searchConversations for why.
+        restrictions.add(new QueryFilters(List.of(new QueryFilter(ConversationDescriptor.FIELD_TITLE, new ContainsIgnoreCase(text)))));
+
+        try {
+            // A page of results is a page of rows that can be opened, so rows with no
+            // readable memory (orphans) are counted out before the offset is applied:
+            // descriptor batches are read until the page is full or the matches end,
+            // and an empty page therefore always means "no more matches".
+            final long toSkip = (long) index * limit;
+            long skipped = 0;
+            List<ConversationDescriptor> results = new ArrayList<>(limit);
+            Map<String, String> agentNames = new HashMap<>();
+            for (int descriptorPage = 0; results.size() < limit && (long) descriptorPage * limit <= MAX_RESULT_OFFSET; descriptorPage++) {
+                List<ConversationDescriptor> matches = conversationDescriptorStore.readDescriptors(DESCRIPTOR_TYPE, null, descriptorPage, limit,
+                        false, restrictions);
+                List<ConversationDescriptor> candidates = new ArrayList<>();
+                List<String> candidateIds = new ArrayList<>();
+                for (var descriptor : matches) {
+                    // The query is the scope; this is the authority, as in the listing — a
+                    // row that is not the caller's is never returned, whatever the store did.
+                    if (caller != null && !caller.equals(descriptor.getUserId())) {
+                        continue;
+                    }
+                    String id = searchableConversationId(descriptor);
+                    if (id == null) {
+                        continue;
+                    }
+                    candidates.add(descriptor);
+                    candidateIds.add(id);
+                }
+
+                Set<String> unreadable = new HashSet<>();
+                Map<String, ConversationListingSummary> summaries = readListingSummaries(candidateIds, unreadable);
+                for (int i = 0; i < candidates.size() && results.size() < limit; i++) {
+                    var summary = summaries.get(candidateIds.get(i));
+                    // No memory: an orphan (or unreadable) — nothing to open, so not listed.
+                    if (summary == null) {
+                        continue;
+                    }
+                    var descriptor = candidates.get(i);
+                    if (!conversationAdmits(descriptor, summary, seesAllConversations, null, null, null, null)) {
+                        continue;
+                    }
+                    if (skipped < toSkip) {
+                        skipped++;
+                        continue;
+                    }
+                    fillAgentName(descriptor, summary, agentNames);
+                    results.add(descriptor);
+                }
+                if (matches.size() < limit) {
+                    break;
+                }
+            }
+            return results;
+        } catch (ResourceStoreException | ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * The conversation id a search match names, or {@code null} for a row that
+     * cannot be opened: no resource, or one that does not parse. A corrupt row
+     * costs only itself, never the page.
+     */
+    private static String searchableConversationId(ConversationDescriptor descriptor) {
+        if (descriptor.getResource() == null) {
+            return null;
+        }
+        try {
+            var resourceId = extractResourceId(descriptor.getResource());
+            return resourceId == null ? null : resourceId.getId();
+        } catch (IllegalArgumentException e) {
+            log.warn(format("Skipping a search match with an unparsable resource (%s)", descriptor.getResource()));
+            return null;
         }
     }
 
