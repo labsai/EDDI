@@ -543,6 +543,32 @@
       "noticePlaceholder": "与此智能体的对话可能会被其维护者阅读，以便改进它。",
       "versionNote": "适用于此次更改所创建版本及之后版本上的对话——绝不包括之前的内容。Slack、Teams 和 API 客户端无法显示此提示；如果用户通过这些渠道使用此智能体，请在问候语中说明。"
     },
+    "presentation": {
+      "title": "展示与标题",
+      "description": "聊天窗口如何显示此代理。所有项均为可选；留空的字段保持默认值。",
+      "displayName": "显示名称",
+      "accentColor": "强调色 (#rrggbb)",
+      "avatar": "头像（https URL 或小型 data:image URI）",
+      "starters": "对话开场白（每行一条，最多 {{count}} 条）",
+      "controls": "聊天控件",
+      "control": {
+        "undo": "撤销",
+        "redo": "重做",
+        "attachments": "附件",
+        "rating": "评分",
+        "quickReplies": "快捷回复",
+        "streaming": "流式输出",
+        "rawHtml": "在回复中渲染 HTML"
+      },
+      "rawHtmlNote": "默认关闭。聊天组件仅从其读取对话控制设置的版本起才应用此设置；在此之前，它会为所有代理渲染 HTML。请现在就为回复本应包含 HTML 的代理开启它。",
+      "titles": "对话标题",
+      "titlesEnable": "让模型撰写对话标题",
+      "titlesNote": "否则以对话的第一条消息作为标题。模型每个对话在后台运行一次，费用计入成本预算。用户设置的标题永远不会被替换。",
+      "titlesProvider": "提供商",
+      "titlesModel": "模型",
+      "titlesMaxLength": "标题最大长度",
+      "titlesCredentials": "凭据放在代理文档的 titleGeneration.parameters 中（例如引用 vault 密钥的 apiKey）；请参阅代理配置文档。"
+    },
     "copyUrl": "复制 URL",
     "liveElsewhere": "生效中：v{{live}} · 正在查看 v{{viewing}}（未部署）",
     "removeWorkflow": "从智能体中移除工作流",
@@ -993,7 +1019,11 @@
       "errDisabled": "此智能体版本不收集评价。",
       "errOwner": "只有进行此对话的人才能评价。",
       "errGeneric": "无法保存评价。"
-    }
+    },
+    "toolArgs": "参数",
+    "toolResult": "结果",
+    "toolArgsShowFields": "字段",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -1761,9 +1791,18 @@
     "grModeReplace": "仅使用额外模式",
     "grPiiKinds": "要查找的类别",
     "grPiiEmail": "电子邮件地址",
-    "grPiiSsn": "美国社会安全号码",
     "grPiiCard": "支付卡号（经 Luhn 校验）",
     "grPiiPhone": "电话号码",
+    "grPiiIban": "IBAN（已校验）",
+    "grPiiDateOfBirth": "出生日期（紧邻“出生”等关键词）",
+    "grPiiIpAddress": "IP 地址（IPv4 和 IPv6）",
+    "grPiiPassportMrz": "护照机读区（任何国家）",
+    "grPiiCountries": "国家身份标识",
+    "grPiiCountriesHint": "勾选一个国家以查找其全部标识，或单独勾选某些标识。每种标识都会按其自身格式和校验位进行检查；部分标识还需要号码前紧跟“PESEL”或“NHS”等关键词。",
+    "grPiiRegionEurope": "欧洲",
+    "grPiiRegionAmericas": "美洲",
+    "grPiiRegionAsiaPacific": "亚太",
+    "grPiiRegionAfrica": "非洲",
     "grReplacement": "替换内容",
     "grPiiReplacementHint": "默认为 [REDACTED:<kind>]。自定义值可包含 {kind}，它会被替换为所发现的类别。",
     "grPatterns": "模式",
@@ -3474,6 +3513,8 @@
     "hitlSection": "人工批准",
     "hitlApprovalPoints": "批准于",
     "hitlOnTaskRejection": "拒绝时",
+    "hitlApprovalCompletesBacklogTask": "审批通过即视为待办已完成",
+    "hitlApprovalCompletesBacklogTaskHelp": "常设团队：经人工审批通过的任务在节奏运行回写时保持完成状态，而不会返回待办列表再次执行。超时自动批准不计入。",
     "hitlEdit": "编辑",
     "hitlSaved": "审批设置已保存",
     "hitlEnable": "需要人工审批",
@@ -4584,7 +4625,12 @@
     "regularTruncated": "仅显示前 {{limit}} 个对话审批，还有更多待处理。处理部分审批后即可看到其余审批。",
     "conversationColumn": "对话",
     "groupReviewLoadError": "无法加载该讨论。",
-    "groupReviewNoEntries": "目前还没有任何发言。"
+    "groupReviewNoEntries": "目前还没有任何发言。",
+    "argsViewLabel": "参数显示方式",
+    "argsViewFields": "字段",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "原始",
+    "amendRedactedMarker": "修改后的参数仍包含 <REDACTED>。请替换为真实值，或不修改直接批准：修改内容会按原样发送。"
   },
   "hitlReview": {
     "approveEdited": "修改后批准",
@@ -6123,13 +6169,15 @@
       "static": "API 密钥",
       "basic": "用户名与密码",
       "clientCredentials": "OAuth 服务账户",
-      "authorizationCode": "OAuth 用户登录"
+      "authorizationCode": "OAuth 用户登录",
+      "jwtBearer": "签名密钥服务账号"
     },
     "choice": {
       "staticBody": "一个固定请求头，对所有人相同 —— X-Api-Key，或 Authorization: Bearer …",
       "basicBody": "HTTP Basic。编码由 {{productName}} 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
       "clientCredentialsBody": "智能体以自身身份登录。一个访问令牌供所有人共享，并自动续期。",
-      "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。"
+      "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。",
+      "jwtBearerBody": "代理使用私钥而非密钥以自身身份登录——例如 Google 服务账号。所有人共用一个访问令牌。"
     },
     "binding": {
       "perUser": "按用户",
@@ -6163,7 +6211,7 @@
     "clientId": "客户端 ID",
     "clientSecret": "客户端密钥",
     "clientAuthMethod": "客户端认证方式",
-    "clientAuthMethodHint": "客户端密钥以何种方式送达令牌端点。猜错时的表现与密钥错误完全一样，所以这是一项设置而不是自动回退。",
+    "clientAuthMethodHint": "客户端在令牌端点证明身份的方式：通过 Basic 或请求体发送客户端密钥，或使用 private_key_jwt——用保管库中的私钥签名的断言，适用于以证书注册的应用。选错的表现与密钥错误完全相同，因此这是一个设置而不是自动回退。",
     "discoveryUrl": "发现 URL（可选）",
     "pkceAlwaysOn": "用户登录始终启用 PKCE（S256）且无法关闭 —— 重定向目标是一条公开路径。",
     "scopes": "权限范围",
@@ -6249,7 +6297,9 @@
       "paramReserved": "其中一个参数由 {{productName}} 自行设置（client_id、redirect_uri、response_type、state、code_challenge……）。覆盖它会破坏流程。",
       "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
       "paramValueTooLong": "参数值最多 512 个字符。",
-      "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。"
+      "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。",
+      "thumbprintFormat": "指纹长度不正确：x5t#S256 需要 SHA-256 指纹，x5t 需要 SHA-1 指纹——以十六进制或 base64url 表示。",
+      "thumbprintRequiredEntra": "Microsoft Entra 仅通过证书指纹识别密钥。请粘贴您上传到应用注册中的证书的指纹。"
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -6272,7 +6322,30 @@
     "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，{{productName}} 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
     "confirmAuthChangeAccept": "更改",
     "deleted": "连接“{{name}}”已删除",
-    "confirmDeleteNamed": "删除连接“{{name}}”？"
+    "confirmDeleteNamed": "删除连接“{{name}}”？",
+    "privateKey": "私钥",
+    "privateKeyHint": "一个保管库条目，包含未加密的 PKCS#8 PEM（BEGIN PRIVATE KEY）RSA 密钥，或完整的 Google 服务账号 JSON 密钥文件。密钥永远不会离开 {{productName}}；只发送短期有效的签名断言。",
+    "certificateThumbprint": "证书指纹",
+    "certificateThumbprintHint": "上传到身份提供方的证书的指纹——可用门户显示的十六进制，或 base64url。它是公开的，不是机密。",
+    "certificateThumbprintHeader": "指纹头",
+    "thumbprintS256": "x5t#S256 — SHA-256（Entra 默认）",
+    "thumbprintSha1": "x5t — SHA-1 指纹",
+    "serviceAccountEmail": "服务账号（签发者）",
+    "serviceAccountEmailHint": "例如 agent@project.iam.gserviceaccount.com。如果私钥是 JSON 密钥文件则可选，因为该文件会写明自己的账号。",
+    "audience": "断言受众（可选）",
+    "audienceHint": "签名断言的 aud 声明。留空则使用令牌 URL，这正是 Google 所期望的。",
+    "preset": "从模板开始",
+    "presetNone": "无——填写所有字段",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "使用证书的 Microsoft Entra 应用",
+        "description": "使用证书而非客户端密钥进行身份验证的 Entra 应用注册（private_key_jwt）。替换令牌 URL 中的 <tenant-id>，填写应用程序（客户端）ID 和证书指纹，并将证书私钥以未加密的 PKCS#8 PEM 格式存入保险库。将 https://login.microsoftonline.com 添加到凭据端点允许列表。"
+      },
+      "google-service-account": {
+        "label": "Google 服务账号（JSON 密钥）",
+        "description": "以服务账号身份调用 Google API，并用其私钥签名（RFC 7523 JWT 持有者）。将下载的 JSON 密钥文件作为保险库中的一个条目存储，并将其作为私钥引用；签发者和密钥 ID 从中读取。将 https://oauth2.googleapis.com 添加到凭据端点允许列表。未启用全网域委派时，该账号只能看到与其共享的内容。"
+      }
+    }
   },
   "extensionTypes": {
     "parser": "输入解析器",
@@ -6280,7 +6353,6 @@
     "rules": "规则",
     "property": "属性设置器",
     "apicalls": "API 调用",
-    "httpcallsLegacy": "API 调用（旧版）",
     "llm": "大语言模型",
     "output": "输出",
     "templating": "模板",

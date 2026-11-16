@@ -474,7 +474,7 @@ void redoLastStep();
 void executeLifecycle(
     IConversationMemory conversationMemory,
     List<String> lifecycleTaskTypes
-) throws LifecycleException
+) throws LifecycleException, ConversationStopException, ConversationPauseException
 ```
 
 **How It Works**:
@@ -983,7 +983,7 @@ Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent
 | Layer | Component | What It Blocks |
 |-------|-----------|----------------|
 | **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
-| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and strips credentials (fixed names and any `${caller:...}`-derived header) on a cross-origin hop. Maximum 5 hops |
+| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and on a cross-origin hop keeps only an allow-list of headers (`Accept`, `Accept-Encoding`, `Accept-Language`, `User-Agent`, `Content-Type`, `Content-Language`, `Cache-Control`, `Pragma`) and strips every other one, including the trace context. Maximum 5 hops |
 | **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
 
 **Usage pattern:**
@@ -1031,9 +1031,9 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 2. **Turning signing on**: `identity` is engine-owned. An agent save (`PUT`, an import merge, a sync, a cascade, an autonomy change) keeps the stored `identity` whatever the body says, and a created agent gets none, exactly as `dynamicOrigin` is kept; only the two admin endpoints change keys, since whoever could write `identity.keys[]` could plant a key whose private half they hold, undo a revocation, or shrink the list a permanent delete sizes its vault sweep from. A save with `security.signInterAgentMessages=true` is refused (400) unless the agent can sign: every declared key that is not revoked is well-formed (a version from 1 to 1 000 000, declared once, an Ed25519 public key — peers trust every declared key, not only the newest), the key version that would sign (the highest well-formed one) has a public key, is not revoked and is inside its `validFromMs`/`validUntilMs` window, and the vault holds the private key that signs as it. A vault that cannot be asked is a 503. Creating an agent with signing on is refused for the same reason, since a new agent has no key yet. `requirePeerVerification` needs no key of the agent's own. The legacy unversioned key (`identity.publicKey` with `agent-signing-key:{agentId}`) is still read and checked, but no longer written
 3. **Key rotation and revocation**: generating a key again adds the next version; the agent signs with it from then on, and entries signed with an older version still verify against that version, which stays in `identity.keys[]`. To retire a leaked key, generate its replacement and then revoke it with `POST /agentstore/agents/{id}/signing-keys/{keyVersion}/revoke?version={current}` (`eddi-admin` only; **Revoke** next to the key in the Manager). That marks every entry of that version `revoked: true` in a new compatible agent version and deletes its private key from the vault; `keyVersion` 0 removes the legacy `identity.publicKey` and its vault entry. A revoked key is valid at no time (`AgentPublicKey.isValidAt`), whatever its window and whenever an entry claims to have been signed. Revoking the newest key stops the agent signing — it does not fall back to an older key — until a new one is generated. Audit-entry signing always uses the unversioned key, which provisioning does not write, so audit entries carry no agent signature
 4. **Caching**: each node keeps the vault's answer for an agent's key for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute; a key generated on a node is used there at once. Permanently deleting an agent deletes its keys from the vault and drops them from that node's cache at once
-5. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
+5. **Signing**: When `security.signInterAgentMessages=true`, the group engine (`GroupSigningGuard`, called by `GroupConversationService`) creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
 6. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
-7. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (5min default) and clock-skew (30s default) checks. Duplicate nonces are rejected
+7. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (`eddi.a2a.signing.nonce.max-age-ms`, 5 min default) and clock-skew (`eddi.a2a.signing.nonce.clock-skew-ms`, 30 s default) checks. A duplicate, stale or skewed nonce is rejected, and the entry is then stored unsigned
 8. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key. This is **detect-and-log, not a gate**: a failed or unsigned prior entry is recorded at ERROR (for security monitoring) but is **not currently dropped or blocked** — the transcript is still passed to the receiving agent. Hard enforcement (excluding unverified entries from the context the receiver sees) is a planned follow-up; do not rely on this flag to keep tampered peer content out of an agent's context today
 
 **What is NOT covered:** MCP invocation signing is not yet implemented — the `signMcpInvocations` config field has been removed until the feature is built.
@@ -1053,8 +1053,9 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 | Tool | Trigger | What It Checks |
 |------|---------|----------------|
-| **CodeQL** | Every PR + weekly schedule | Java semantic analysis (injection, SSRF, crypto misuse) |
-| **Trivy** | Docker image build | CVEs in OS packages and Java dependencies |
+| **CodeQL** | Every PR + weekly schedule | Semantic analysis of the Java backend and, in a separate job, the UIs (injection, SSRF, crypto misuse) |
+| **Trivy** | Every code PR (filesystem scan) + Docker image build (image scan) | CVEs in OS packages and Java dependencies; both scans block on fixable CRITICAL/HIGH |
+| **Gitleaks** (`Secret Scanning`) | Every PR | Committed credentials |
 | **Dependency Review** | Every PR | License compliance and known vulnerabilities in new dependencies |
 | **Jackson 3 Ban** | Every build (Maven Enforcer) | Prevents accidental Jackson 3.x introduction (incompatible with Quarkus) |
 

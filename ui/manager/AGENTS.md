@@ -27,7 +27,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | **UI** | React 19 + TypeScript 5 (strict) |
 | **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
 | **State (server)** | TanStack Query v5 |
-| **State (UI)** | Zustand (chat/debug), `useState` / `useCallback` elsewhere |
+| **State (UI)** | Zustand for cross-component UI state (chat, debug events, drawers, command palette, onboarding, navigation guard — `src/hooks/`), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
 | **i18n** | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)** | Vitest + React Testing Library + MSW |
@@ -52,11 +52,26 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 - **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
 - **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
+### Dependencies: one npm workspace, one lockfile
+
+`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the
+shared packages under `ui/packages/` install from **one `ui/package-lock.json`** into
+`ui/node_modules`. There is no `ui/manager/package-lock.json` any more.
+
+- **Install at `ui/`**: `cd ui && npm ci`. Scripts still run from this directory
+  (`npm run dev`, `test`, `build`, `lint`, ...), and `npx` finds the hoisted binaries.
+- **Change a dependency from `ui/` with `-w manager`**: `npm install <pkg> -w manager`
+  updates `package.json` here and the root lock.
+  A version both apps use should stay the same in both `package.json` files, so it is
+  installed once (`lucide-react`, `react`, the lint and test toolchain).
+- **`overrides` live in `ui/package.json`.** npm ignores them in a workspace's own
+  `package.json`.
+
 ### ⚠️ Dependency changes on Windows break CI's `npm ci`
 
 `@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
 on Windows never resolves its children and **prunes them from
-`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+`ui/package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
 then fails before it runs anything:
 
 ```
@@ -66,16 +81,19 @@ npm error Missing: @emnapi/core@1.11.3 from lock file
 ```
 
 Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
-After changing any dependency on Windows, check the lock still carries all four:
+After changing any dependency on Windows, check the lock at `ui/`:
 
 ```bash
-node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+npm run lockfile:check   # in ui/; CI's UI Manager Checks runs the same script
 ```
 
-Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
-`@napi-rs/wasm-runtime` nested under
-`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
-restore them from the last lockfile CI accepted rather than regenerating.
+It (`ui/scripts/check-lockfile-platforms.mjs`) expects `@emnapi/core`,
+`@emnapi/runtime`, `@emnapi/wasi-threads` and `@napi-rs/wasm-runtime` resolvable from
+`node_modules/@tailwindcss/oxide-wasm32-wasi`, and every other locked dependency
+resolvable too. If it fails, restore `ui/package-lock.json` from the last version CI
+accepted rather than regenerating, or make the dependency change on Linux (WSL or a
+`node:26` container with `ui/` copied in, then copy the lock back). Dependabot resolves
+on Linux, so its lockfile PRs are not affected.
 
 ### Quality Gates
 
@@ -110,7 +128,7 @@ that was broken while every test still passed. See CONTRIBUTING.md.
 The scope is `src/lib/operator/**`, `src/lib/api/updates.ts` and
 `src/lib/hitl-tool-approvals.ts`. Two exclusions are argued in
 `stryker.config.json`, each with the measurement behind it: `api-client.ts` (75
-importers, so each of its mutants replays most of the suite) and static mutants
+importers when measured, about 150 now, so each of its mutants replays most of the suite) and static mutants
 — module-level constants, which cost a full runner restart each. A constant you
 need guarded needs a unit test asserting its contents; this gate will not do it.
 (Tests themselves are excluded too, for the obvious reason.)
@@ -156,7 +174,8 @@ src/
 │                             # secrets, connections, groups, workflows, …
 ├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …)
+│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …);
+│   │                         # chat.ts binds @eddi/core's conversation API (ui/packages/core)
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
@@ -182,7 +201,7 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   rules:    (p, o, r) => <RulesEditor data={p} onChange={o} readOnly={r} />,
   llm:      (p, o, r) => <LlmEditor data={p} onChange={o} readOnly={r} />,
   apicalls: (p, o, r) => <ApiCallsEditor data={p} onChange={o} readOnly={r} />,
-  // ... output, dictionary, propertysetter, mcpcalls, rag, snippets, parser
+  // ... output, propertysetter, dictionary, mcpcalls, rag, snippets, parser, testsuite
 };
 ```
 
@@ -214,7 +233,7 @@ The resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPES`
 >
 > - Workflows reference a **parser** → parsers reference **dictionaries**
 > - The Manager's `dictionary` slug maps to `dictionarystore` (what users edit)
-> - `parserstore` **does** map to the `parser` slug in `pipeline-builder.tsx`, and `parser` is registered in `EDITOR_MAP`. A parser step with an embedded config is edited inline; one with a `config.uri` is edited as an ordinary resource
+> - `parserstore` **does** map to the `parser` slug (`STORE_TO_SLUG` in `src/lib/workflow-step-links.ts`, which `pipeline-builder.tsx` uses), and `parser` is registered in `EDITOR_MAP`. A parser step with an embedded config is edited inline; one with a `config.uri` is edited as an ordinary resource
 
 #### 3. MSW Mock Handlers
 
@@ -348,6 +367,14 @@ what it finds. Off by default. Worth knowing before touching it:
   blocked at activation when OIDC is on, because every tool call would 401.
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
+- **Activation is tested against a real backend, not MSW.** Every unit and
+  component test of the operator runs on mocks, which is how 6.7.0 shipped with
+  `setup-api` refusing the real prompt. `e2e/operator/` (CI: `Operator Activation
+  E2E`, part of `E2E Gate`) activates it through the shipped bundle against the
+  image under test with `llm-stub.mjs` as the model. A change to activation, the
+  canaries, the tool generator or a tool's argument shape can break the stub's
+  assumptions too: it calls `readAgentDescriptors` for "list the agents" and the
+  tool the write canary names, filling arguments from the tool's own schema.
 
 #### 4b. Router, navigation guard and route labels
 
@@ -414,9 +441,10 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
-- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- **The agent conversation protocol lives in `@eddi/core`** ([`ui/packages/core`](../packages/core/README.md), shared with the Chat UI): the SSE frame parser and reader (agent and group streams), the conversation endpoints, HITL status, attachment context, rating steps, the stream payload helpers (`UNCONSUMED_STREAM_ERROR_CODES`, `parseErrorEvent`) and the contract list, each rule with its test. `lib/api/chat.ts` is the Manager's binding of it: it keeps the signatures and message types the hooks are written against, and builds its `HttpClient` on `api.authorizedFetch` with `apiErrorFromResponse`, so a conversation call refreshes the token, retries a 401 once and fails with an `ApiClientError` like any `api.post`. The group reader in `groups.ts` is `readSseStream`. A contract change goes into the package with a test there; what the Manager *says* about it stays here
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`bearer-event-source.ts`; the conversation stream goes through `api.authorizedFetch`, above), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
-- `secrets.ts` is the exception that is *not* justified: its eight call sites are ordinary JSON CRUD on raw `fetch` for historical reasons. They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
+- `secrets.ts` is the exception that is *not* justified: its seven remaining raw `fetch` call sites are ordinary JSON CRUD for historical reasons (one more has already moved onto `ApiClient`). They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`
 - Server state via TanStack Query hooks in `src/hooks/`, with keys from `src/lib/query-keys.ts`
 
@@ -433,7 +461,7 @@ and what is next, and suggest a new conversation if the context is long.
 ## 5. Constraints
 
 - Do NOT use MUI, Redux, recompose, or legacy patterns
-- Do NOT use `moment.js` — use native `Intl` or `date-fns`
+- Do NOT use `moment.js` — use native `Intl` (`date-fns` is not a dependency either)
 - Do NOT hardcode the API URL, and do NOT add raw `fetch` for ordinary JSON — use `ApiClient` (the justified exceptions are listed under API Communication)
 - Do NOT use physical-direction utilities — `pl-*` / `pr-*` / `ml-*` / `mr-*` / `left-*` / `right-*` / `text-left` / `text-right`. Use the logical ones (`ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*` / `text-start` / `text-end`): the app ships Arabic, and `e2e/rtl.spec.ts` checks it
 - Do NOT mix component exports with utility function exports in the same file (`react-refresh/only-export-components`)

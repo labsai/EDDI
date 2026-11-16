@@ -102,6 +102,11 @@ public class AlertRuleStore implements IAlertRuleStore {
     }
 
     @Override
+    public long countAllAgents() {
+        return collection.countDocuments(eq("scope.allAgents", true));
+    }
+
+    @Override
     public List<AlertRule> findEnabledForAgent(String agentId) {
         List<AlertRule> rules = new ArrayList<>();
         collection.find(and(eq("enabled", true), or(eq("scope.allAgents", true), eq("scope.agentIds", agentId))))
