@@ -13,6 +13,9 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.cluster.NodeIdentity;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -26,6 +29,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -121,6 +125,52 @@ class GroupConversationServiceLiveDiscussionTest {
         verify(registry).register(gc);
         verify(registry).unregister("gc-2");
         assertTrue(registry.get("gc-2").isEmpty());
+    }
+
+    /**
+     * A cluster whose lease store cannot be read: no lease is taken, and no holder
+     * is known.
+     */
+    private void clusteredWithoutLeases() {
+        var leases = mock(IConversationLeaseManager.class);
+        when(leases.isClustered()).thenReturn(true);
+        when(leases.tryAcquireKey(anyString())).thenReturn(Optional.empty());
+        when(leases.peekKey(anyString())).thenReturn(Optional.empty());
+        var rpc = mock(IClusterRpc.class);
+        when(rpc.isClustered()).thenReturn(true);
+        service.leaseManager = leases;
+        service.clusterRpc = rpc;
+        service.nodeIdentity = new NodeIdentity("node-a", "boot-a");
+        service.groupLeaseRetryMillis = new long[]{1};
+    }
+
+    @Test
+    void executeDiscussion_requiresItsLease_failsInsteadOfRunningLeaseFree() throws Exception {
+        clusteredWithoutLeases();
+        var gc = gc("gc-4");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        gc.setRequiresGroupLease(true);
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of());
+        when(conversationStore.read("gc-4")).thenReturn(gc);
+
+        assertThrows(IGroupConversationService.GroupExecutionException.class,
+                () -> service.executeDiscussion(gc, config, List.of(), "Q?", null, 0));
+
+        assertEquals(GroupConversation.GroupConversationState.FAILED, gc.getState(),
+                "a cadence leg that cannot hold its lease must end, so its tasks go back to the backlog");
+        verify(registry).unregister("gc-4");
+    }
+
+    @Test
+    void executeDiscussion_withoutTheRequirement_stillRunsLeaseFree() {
+        clusteredWithoutLeases();
+        var gc = gc("gc-5");
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of());
+
+        assertDoesNotThrow(() -> service.executeDiscussion(gc, config, List.of(), "Q?", null, 0));
+        assertNotEquals(GroupConversation.GroupConversationState.FAILED, gc.getState());
     }
 
     @Test

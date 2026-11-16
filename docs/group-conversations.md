@@ -646,7 +646,10 @@ that stops the leg's next write, but not the work it already has in flight or it
 tool calls. Until that leg ends — its node's group lease is released, or expires
 if the node died — the claim, or the parked run, keeps its tasks `IN_PROGRESS`,
 so no later run picks them up while it is still working on them. When the lease
-store cannot be read the leg counts as running. A discussion that completed
+store cannot be read the leg counts as running, and a cadence run never runs
+without its lease: where NATS is unreachable at the start of a leg, the leg fails
+(its tasks return, a later fire retries) rather than run invisibly to this check.
+A discussion that completed
 normally may therefore be written back one fire later than before, while its
 leg finishes releasing the lease.
 

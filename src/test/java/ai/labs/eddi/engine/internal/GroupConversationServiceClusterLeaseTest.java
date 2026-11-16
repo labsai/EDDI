@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -208,6 +209,48 @@ class GroupConversationServiceClusterLeaseTest {
         assertTrue(service.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
         verify(conversationStore, never()).read(anyString());
     }
+    @Test
+    @DisplayName("a discussion that requires its lease is refused, not run lease-free, when the lease cannot be read")
+    void requiredLeaseIsNotSkipped() {
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+        when(leaseManager.peekKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+
+        var refused = assertThrows(IllegalStateException.class, () -> service.holdGroupLease(GC_ID, true));
+
+        assertTrue(refused.getMessage().contains("requires its group lease"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("a discussion that requires its lease runs normally once it holds it")
+    void requiredLeaseTaken() {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+
+        assertDoesNotThrow(() -> service.holdGroupLease(GC_ID, true));
+        service.releaseGroupLease(GC_ID);
+        verify(leaseManager).release(lease);
+    }
+
+    @Test
+    @DisplayName("a team cadence discussion is created requiring its group lease")
+    void cadenceDiscussionRequiresItsLease() throws Exception {
+        IAgentGroupStore groupStore = mock(IAgentGroupStore.class);
+        var cadenceService = new GroupConversationService(groupStore, conversationStore, mock(IConversationService.class),
+                mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(),
+                mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), null,
+                new CallerIdentityContext(null, null), "default", 3);
+        IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
+        when(resourceId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId("group-1")).thenReturn(resourceId);
+        when(groupStore.read("group-1", 1)).thenReturn(new AgentGroupConfiguration());
+        when(conversationStore.create(any())).thenReturn(GC_ID);
+
+        var prepared = cadenceService.prepareCadenceDiscussion("group-1", "What next?", "pm", List.of(), null, null);
+
+        assertTrue(prepared.conversation().isRequiresGroupLease());
+        prepared.abandon();
+    }
+
     @Test
     @DisplayName("isDiscussionLegRunning: a leg on this node is running, whatever the lease says")
     void legRunningLocally() throws Exception {

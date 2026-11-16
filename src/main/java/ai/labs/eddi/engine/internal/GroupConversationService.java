@@ -722,6 +722,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
         gc.setInheritedCostCeiling(maxCostPerRun);
+        gc.setRequiresGroupLease(true);
         discussionControls.put(gc.getId(), new DiscussionControlToken());
         final var discussionCaller = callerIdentityContext.captureOrCurrent();
         return new CadenceDiscussion() {
@@ -952,7 +953,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
                 liveDiscussionRegistry.register(gc);
-                holdGroupLease(gc.getId());
+                holdGroupLease(gc.getId(), gc.isRequiresGroupLease());
             }
 
             // Execute each phase
@@ -2880,6 +2881,18 @@ public class GroupConversationService implements IGroupConversationService, User
     long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
 
     void holdGroupLease(String groupConversationId) {
+        holdGroupLease(groupConversationId, false);
+    }
+
+    /**
+     * @param required
+     *            the discussion may not run without its lease
+     *            ({@link GroupConversation#isRequiresGroupLease()}): where the
+     *            lease could not be taken or read, the leg is refused instead of
+     *            running in degraded mode, so the lease stays a complete answer to
+     *            {@link #isDiscussionLegRunning}
+     */
+    void holdGroupLease(String groupConversationId, boolean required) {
         if (clustered()) {
             String key = IConversationLeaseManager.GROUP + groupConversationId;
             var lease = leaseManager.tryAcquireKey(key);
@@ -2909,6 +2922,14 @@ public class GroupConversationService implements IGroupConversationService, User
             if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
                 throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
                         new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
+            }
+            if (required) {
+                // A team cadence run: the next run takes over its backlog tasks once no
+                // leg of it holds the lease. A leg running without one would be invisible
+                // to that check after the lease service recovers. The leg fails instead;
+                // its tasks go back to the backlog and a later fire retries.
+                throw new IllegalStateException("Group discussion " + groupConversationId
+                        + " requires its group lease and could not take it (NATS unreachable or the lease could not be read)");
             }
             // No holder could be read (NATS unreachable): the discussion runs, as every
             // turn does in degraded mode; a cancel then takes the database path.
@@ -2940,6 +2961,11 @@ public class GroupConversationService implements IGroupConversationService, User
      * start to its {@code finally} — after its last write. A lease of a node that
      * died expires. When the lease store cannot be read the answer is {@code true}:
      * "unknown" must not be read as "stopped".
+     * <p>
+     * An absent lease proves the leg stopped only for a discussion that
+     * {@linkplain GroupConversation#isRequiresGroupLease() requires its lease}: any
+     * other may run lease-free while NATS is unreachable. Team cadence runs require
+     * it, and they are this method's caller.
      */
     public boolean isDiscussionLegRunning(String groupConversationId) {
         if (discussionControls.containsKey(groupConversationId)) {

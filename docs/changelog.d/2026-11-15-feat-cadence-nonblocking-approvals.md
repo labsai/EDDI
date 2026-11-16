@@ -51,6 +51,11 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   runs and the post-cancel read of a reclaim. A cancel whose forward to the holding node got no
   answer stores `CANCELLED` while that leg finishes its in-flight work; the run's tasks now stay
   `IN_PROGRESS` until it stops, so a later run cannot overlap it (CodeRabbit, cross-node).
+  Because an absent lease proves nothing for a leg that ran lease-free, a cadence discussion now
+  carries `GroupConversation.requiresGroupLease` (persisted, set by `prepareCadenceDiscussion`) and
+  `holdGroupLease` refuses such a leg instead of running it in degraded mode: while NATS is
+  unreachable, cadence legs fail (tasks return, a later fire retries). Other discussions keep the
+  degraded-mode behaviour. `docs/clustering.md` lists it in the degraded-mode table.
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).
