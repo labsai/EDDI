@@ -8,7 +8,7 @@
    ────────────────────────────────────────────── */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type ConversationSnapshot, type SSEEvent } from "@eddi/core";
+import { ApiError, type ConversationSnapshot, type SSEEvent, type ToolActivity } from "@eddi/core";
 import { AgentConversation, SECRET_BUBBLE } from "./agent-conversation";
 import type { AgentTransport } from "./transport";
 
@@ -216,7 +216,7 @@ describe("send — streaming", () => {
   });
 
   it("shows the tool in use until the next token, and escalation until text flows", async () => {
-    const seen: Array<[string | null, boolean]> = [];
+    const seen: Array<[ToolActivity | null, boolean]> = [];
     const transport = fakeTransport({
       stream: vi.fn(() =>
         events(ev("tool_call", { tool: "calculator" }), ev("cascade_escalation", {}), ev("token", "x"), done({ conversationState: "READY", conversationOutputs: [output("x")] })),
@@ -225,7 +225,7 @@ describe("send — streaming", () => {
     const c = await opened(transport);
     c.subscribe(() => seen.push([c.getSnapshot().activeTool, c.getSnapshot().isEscalating]));
     await c.send("calc");
-    expect(seen).toContainEqual(["calculator", false]);
+    expect(seen).toContainEqual([{ text: "calculator", phrase: false }, false]);
     expect(seen).toContainEqual([null, true]);
     expect(c.getSnapshot().activeTool).toBeNull();
     expect(c.getSnapshot().isEscalating).toBe(false);
