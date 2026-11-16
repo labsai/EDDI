@@ -703,10 +703,13 @@ public class GroupConversation {
      *            epoch milliseconds when the envelope was signed (null if unsigned)
      * @param signatureKeyVersion
      *            version of the signing key used (null if unsigned)
+     * @param signatureRound
+     *            the discussion round ({@link GroupConversation#getRound()}) the
+     *            signature binds the entry to (null if unsigned)
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
             TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
-            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion) {
+            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
 
         /**
          * Backward-compatible constructor without any signature fields.
@@ -714,7 +717,7 @@ public class GroupConversation {
         public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
                 TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
             this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
-                    type, timestamp, errorReason, targetAgentId, null, null, null, null);
+                    type, timestamp, errorReason, targetAgentId, null, null, null, null, null);
         }
 
         /**
@@ -723,7 +726,7 @@ public class GroupConversation {
         public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
                 TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature) {
             this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
-                    type, timestamp, errorReason, targetAgentId, signature, null, null, null);
+                    type, timestamp, errorReason, targetAgentId, signature, null, null, null, null);
         }
 
         /**
