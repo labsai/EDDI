@@ -106,6 +106,10 @@ export function QuotasPage() {
   // form has been re-initialised from the fresh quota (local edits are discarded, which
   // the toast says), and Save stays blocked meanwhile.
   const [resyncPending, setResyncPending] = useState(false);
+  // Each field keeps its own text (and bad-input flag). Remounting them on a resync
+  // drops invalid text that the parent never saw as a number, even when the
+  // refreshed value equals the one shown before, which no value-driven effect catches.
+  const [fieldsResetKey, setFieldsResetKey] = useState(0);
   useEffect(() => {
     if (staleQuota) {
       setResyncPending(true);
@@ -116,6 +120,7 @@ export function QuotasPage() {
     setForm(quota);
     setDirty(false);
     setInvalidFields(new Set());
+    setFieldsResetKey((k) => k + 1);
     setResyncPending(false);
     if (hadEdits) {
       toast.info(
@@ -285,7 +290,7 @@ export function QuotasPage() {
                   />
                 </div>
               ) : form ? (
-                <div className="space-y-4">
+                <div className="space-y-4" key={fieldsResetKey}>
                   <QuotaField
                     icon={<MessageSquare className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxConversationsPerDay", "Max Conversations / Day")}

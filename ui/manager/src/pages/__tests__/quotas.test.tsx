@@ -517,6 +517,9 @@ describe("QuotasPage", () => {
       await user.type(input, "123");
       expect(screen.getByTestId("quotas-save")).toBeDisabled();
       expect(putCalled).toBe(false);
+      // Invalid text (parent keeps the old number) must not survive the reload either.
+      await user.clear(input);
+      await user.type(input, "-5");
 
       // Once a refetch succeeds the notice goes away and Save works again.
       server.resetHandlers();
@@ -524,7 +527,8 @@ describe("QuotasPage", () => {
       await waitFor(() => expect(screen.queryByTestId("refetch-error-notice")).not.toBeInTheDocument());
       // The form is re-initialised from the fresh quota: the stale edit is gone and
       // there is nothing left to save over the approved limits.
-      await waitFor(() => expect(screen.getByTestId("quota-max-conversations")).not.toHaveValue(123));
+      await waitFor(() => expect(screen.getByTestId("quota-max-conversations")).not.toHaveValue(-5));
+      expect(screen.getByTestId("quota-max-conversations")).not.toHaveAttribute("aria-invalid");
       await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeDisabled());
       expect(screen.queryByTestId("quotas-dirty-indicator")).not.toBeInTheDocument();
       expect(toast.info).toHaveBeenCalled();
