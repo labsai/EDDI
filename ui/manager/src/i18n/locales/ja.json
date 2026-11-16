@@ -4782,6 +4782,22 @@
   "mockBanner": {
     "message": "デモモード — サンプルデータを表示しています。実際のデータには {{productName}} バックエンドを接続してください。"
   },
+  "spendControl": {
+    "title": "保留中の変更",
+    "description": "MCP 経由で提案され、未適用です。いずれも支出管理を緩めます。承認するとあなたの名前で適用されます。",
+    "proposedBy": "{{who}} が {{when}} に提案",
+    "loosening": "支出管理を緩める",
+    "allChanges": "すべての変更",
+    "approve": "承認",
+    "reject": "却下",
+    "approveTitle": "この変更を承認しますか？",
+    "rejectTitle": "この変更を却下しますか？",
+    "approveDesc": "あなたを実行者として今すぐ適用され、支出管理を緩めます: {{loosening}}",
+    "rejectDesc": "何も適用されません。提案者は再提出できます。",
+    "approved": "変更を承認して適用しました",
+    "rejected": "変更を却下しました。何も適用されていません",
+    "approveBlockedDirty": "先にクォータの編集を保存するか、ページを再読み込みして破棄してください。承認後に保存すると、承認されたクォータが上書きされます。"
+  },
   "modelPrices": {
     "nav": "モデル価格",
     "title": "モデル価格",
@@ -4870,6 +4886,8 @@
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
+    "editsDiscardedAfterRefresh": "クォータを再読み込みし、現在の上限を上書きしないよう未保存の編集を破棄しました。",
+    "refreshFailedSaveBlocked":"クォータを更新できなかったため、保存を一時停止しています。再試行して、まず現在の上限を読み込んでください。",
     "configuration": "設定",
     "conversationsToday": "本日の会話数",
     "description": "テナントごとにレート制限、使用上限、コスト予算を設定します。",
