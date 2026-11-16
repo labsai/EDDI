@@ -22,8 +22,13 @@ Two defects were reported on both 6.7.0 deployments. Both root causes were alrea
 
 Both guards fail without their fix: the Java tests when `listGroupOutcomes` is given the lessons id, and when the generator stops de-duplicating; the vitest when the prompt is no longer escaped, when the rule leaves a brace unescaped, splits no longer around a mention, or the context block is not matched exactly.
 
+### Bundle budget
+
+The escaper sits in the Manager's first-load chunk, together with the operator prompt module, and took the first load to 650.1 KB gzip, 0.1 KB over its 650 KB budget. By the owner's decision, `ui/bundle-budget.json` raises the three Manager pages to 655 KB. The longer-term fix is to lazy-load the 146 KB operator prompt module out of the first load (frontend-unification plan).
+
 ```decision-log
 | 2026-11-15 | Escape literal braces when the operator prompt is built, not reword them one by one | Rewording fixed the two spans somebody noticed in 6.7.0 and left twenty that silently rendered as nothing; every branch that edits the prompt would have to repeat it | Rewording each mention; a `{{…}}`-style convention authors must remember |
 | 2026-11-16 | Escape every brace except three named exceptions, instead of mirroring Qute's lexer | A mirrored rule (letters, `! # / \|`, `{@…}`, `{0}`, Unicode identifiers, backslash escapes) drifts and what it misses is dropped silently; the conservative rule needs no knowledge of the lexer | Keeping the lexer mirror and patching it per review finding |
 | 2026-11-15 | The prompt guard is a corpus shared by a Java test (real Qute) and a vitest, not a Java test that reads the prompt | The prompt is assembled in TypeScript from template literals, so a Java test would parse TS or need a committed generated copy that ~20 open PRs would conflict on | A golden copy of the prompt; a JS Qute port in the browser |
+| 2026-11-16 | Raise the Manager first-load budget 650 -> 655 KB rather than lazy-load the operator prompt in this PR | The escaper overshot by 0.1 KB; moving the prompt module behind a dynamic import is a larger change that belongs to its own PR |
 ```
