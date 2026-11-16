@@ -158,8 +158,11 @@ function newestSigningKey(keys: AgentPublicKey[]): AgentPublicKey | undefined {
   let newest: AgentPublicKey | undefined;
   for (const k of keys) {
     const version = k.version ?? 0;
-    // `>`, not `>=`: of a version declared twice, the backend takes the first.
-    if (version >= 1 && version <= MAX_KEY_VERSION && version > (newest?.version ?? 0)) newest = k;
+    if (version < 1 || version > MAX_KEY_VERSION) continue;
+    // Of a version declared twice, the backend takes a revoked entry if there is
+    // one (`AgentIdentity.signingKey()`), else the first.
+    const newestVersion = newest?.version ?? 0;
+    if (version > newestVersion || (version === newestVersion && k.revoked && !newest?.revoked)) newest = k;
   }
   return newest;
 }
@@ -290,9 +293,14 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
                     {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
                   </span>
                   {k.revoked ? (
-                    <span className="text-[9px] text-destructive font-medium" data-testid={`signing-key-revoked-${k.version}`}>
-                      {t("agentDetail.keyRevoked", "Revoked")}
-                    </span>
+                    <>
+                      <span className="text-[9px] text-destructive font-medium" data-testid={`signing-key-revoked-${k.version}`}>
+                        {t("agentDetail.keyRevoked", "Revoked")}
+                      </span>
+                      {/* Deleting the private half is best effort: revoking again
+                          retries it, as the confirmation dialog says. */}
+                      {k.version != null && revokeButton(k.version)}
+                    </>
                   ) : (
                     <>
                       {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (

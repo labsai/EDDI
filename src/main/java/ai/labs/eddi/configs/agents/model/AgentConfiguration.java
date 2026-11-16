@@ -827,15 +827,30 @@ public class AgentConfiguration {
 
         /**
          * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
-         * would sign with the legacy {@code publicKey}. Not a getter, so it stays out
-         * of the stored JSON.
+         * would sign with the legacy {@code publicKey}. When that version is declared
+         * more than once and any of its entries is revoked, the revoked one is
+         * returned, whatever the order: the version is revoked, as
+         * {@code GroupSigningGuard} treats it when it refuses to sign. Not a getter, so
+         * it stays out of the stored JSON.
          */
         public AgentPublicKey signingKey() {
             int version = signingKeyVersion();
             if (version == 0) {
                 return null;
             }
-            return keys.stream().filter(k -> k.version() == version).findFirst().orElse(null);
+            AgentPublicKey first = null;
+            for (AgentPublicKey key : keys) {
+                if (key.version() != version) {
+                    continue;
+                }
+                if (key.revoked()) {
+                    return key;
+                }
+                if (first == null) {
+                    first = key;
+                }
+            }
+            return first;
         }
 
         /**

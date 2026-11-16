@@ -6,7 +6,7 @@ import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
-import { useState, useEffect, useCallback, useMemo, useId } from "react";
+import { useState, useEffect, useCallback, useMemo, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useBrand } from "@/hooks/use-brand";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -148,7 +148,10 @@ export function AgentDetailPage() {
 
   // Reset version when navigating to a different agent (React reuses
   // the component, so useState values persist across route param changes).
+  /** The agent on screen now, for async completions started on another one. */
+  const currentIdRef = useRef(id);
   useEffect(() => {
+    currentIdRef.current = id;
     setVersion(undefined);
     setDraft(null);
     setRebaseFrom(null);
@@ -300,11 +303,17 @@ export function AgentDetailPage() {
   const changedFields = useMemo(() => changedAgentFields(draft, agent), [draft, agent]);
   const isSaving = updateAgentMutation.isPending;
   /**
+   * A key generate or revoke in flight. It writes a new version the page then
+   * follows, so an edit made meanwhile would build a draft on the version
+   * before it and hide the key change until that draft is saved or discarded.
+   */
+  const keyChangePending = generateSigningKeyMutation.isPending || revokeSigningKeyMutation.isPending;
+  /**
    * Each section's own `disabled`. A viewer's sections are disabled one by one,
    * not through the fieldset: a disabled fieldset also disables the headers
    * that expand a section, and a viewer must still be able to open one to read it.
    */
-  const sectionsDisabled = isSaving || readOnly;
+  const sectionsDisabled = isSaving || keyChangePending || readOnly;
   /** Whether any of these top-level fields holds an unsaved edit. */
   const touched = (...fields: string[]) => fields.some((f) => changedFields.has(f));
 
@@ -312,12 +321,12 @@ export function AgentDetailPage() {
     (next) => {
       // No draft for a viewer: the backend refuses their save (EDIT), so there
       // is nothing to hold an edit for.
-      if (!agent || !editable || configPending || readOnly) return;
+      if (!agent || !editable || configPending || keyChangePending || readOnly) return;
       // Applied onto the latest draft, not taken wholesale: an edit built from
       // a slightly older render must not undo the one before it.
       setDraft((prev) => applyChangedFields(prev ?? agent, editable, next));
     },
-    [agent, editable, configPending, readOnly],
+    [agent, editable, configPending, keyChangePending, readOnly],
   );
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
@@ -510,10 +519,14 @@ export function AgentDetailPage() {
 
   /** Generates a signing key; the backend saves it as a new version, which the page then follows. */
   async function handleGenerateSigningKey() {
+    const agentId = id!;
     try {
-      const result = await generateSigningKeyMutation.mutateAsync({ id: id!, version: resolvedVersion });
+      const result = await generateSigningKeyMutation.mutateAsync({ id: agentId, version: resolvedVersion });
       const created = parseVersionFromLocation(result?.location);
-      if (created !== null) setVersion(created);
+      // The version belongs to the agent the key was made for: if the page has
+      // moved to another agent meanwhile, following it would select a version
+      // that agent may not have.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
       toast.success(
         t("agentDetail.signingKeyGenerated", "Signing key v{{version}} generated and saved as a new agent version.", {
           version: result?.version,
@@ -526,10 +539,12 @@ export function AgentDetailPage() {
 
   /** Revokes a signing key; the backend saves that as a new version, which the page then follows. */
   async function handleRevokeSigningKey(keyVersion: number) {
+    const agentId = id!;
     try {
-      const result = await revokeSigningKeyMutation.mutateAsync({ id: id!, keyVersion, version: resolvedVersion });
+      const result = await revokeSigningKeyMutation.mutateAsync({ id: agentId, keyVersion, version: resolvedVersion });
       const created = parseVersionFromLocation(result?.location);
-      if (created !== null) setVersion(created);
+      // As for generation: only follow the new version on the agent it belongs to.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
       toast.success(t("agentDetail.signingKeyRevoked", "Signing key v{{version}} revoked.", { version: keyVersion }));
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -1118,8 +1133,8 @@ export function AgentDetailPage() {
           is standing in for the one being loaded (see `configPending`); a
           viewer's are disabled section by section (see `sectionsDisabled`). */}
       <fieldset
-        disabled={configPending || isSaving}
-        aria-busy={configPending || isSaving}
+        disabled={configPending || isSaving || keyChangePending}
+        aria-busy={configPending || isSaving || keyChangePending}
         className="contents"
         data-testid="agent-config-sections"
       >

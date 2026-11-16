@@ -11,6 +11,7 @@ import { renderPage } from "@/test/test-utils";
 import { AgentDetailPage } from "@/pages/agent-detail";
 import { http, HttpResponse } from "msw";
 import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 /** The page's draft setter; a section only ever reports an edit through it. */
 const onChange = vi.fn();
@@ -134,6 +135,84 @@ describe("SecurityIdentitySection — Flag UX", () => {
 });
 
 describe("AgentDetailPage — Generate signing key", () => {
+  // The key lands as a new version the page then follows; an edit made while
+  // the request is in flight would build a draft on the version before it.
+  it("locks the editable sections while a key request is in flight", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys", async () => {
+        await released;
+        return HttpResponse.json(
+          { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAnewKey", validFromMs: 1, validUntilMs: 0 },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" } },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage("/manage/agentview/agent1", <AgentDetailPage />, "/manage/agentview/:id");
+
+    const button = await screen.findByTestId("generate-signing-key");
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.getByTestId("agent-config-sections")).toBeEnabled();
+    await user.click(button);
+
+    await waitFor(() => expect(screen.getByTestId("agent-config-sections")).toBeDisabled());
+    release();
+    await waitFor(() => expect(screen.getByTestId("agent-config-sections")).toBeEnabled());
+  });
+
+  it("does not move another agent's page to the version a key request created", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let answered = false;
+    const loaded: string[] = [];
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys", async () => {
+        await released;
+        answered = true;
+        return HttpResponse.json(
+          { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAnewKey", validFromMs: 1, validUntilMs: 0 },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=9" } },
+        );
+      }),
+      http.get("*/agentstore/agents/:id", ({ request, params }) => {
+        const version = new URL(request.url).searchParams.get("version");
+        if (version) loaded.push(`${params.id}@${version}`);
+      }),
+    );
+    function GoToAgent2() {
+      const navigate = useNavigate();
+      return <button type="button" data-testid="go-agent2" onClick={() => navigate("/manage/agentview/agent2")} />;
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <MemoryRouter initialEntries={["/manage/agentview/agent1"]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-security-nav">
+            <GoToAgent2 />
+            <Routes>
+              <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
+            </Routes>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+
+    const button = await screen.findByTestId("generate-signing-key");
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await user.click(screen.getByTestId("go-agent2"));
+    await waitFor(() => expect(loaded.some((l) => l.startsWith("agent2@"))).toBe(true));
+    release();
+    await waitFor(() => expect(answered).toBe(true));
+
+    // Give a wrongly applied setVersion(9) the chance to fetch it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(loaded).not.toContain("agent2@9");
+  });
+
   it("generates a key for the version on screen, then follows the version the key was saved as", async () => {
     let postedVersion: string | null = null;
     const loadedVersions: string[] = [];
