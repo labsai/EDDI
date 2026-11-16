@@ -1717,9 +1717,10 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
-- Approved-result actions: phases[n].onApproved = {action: {type HTTPCALL
-  (default, the only kind), uri (an httpcalls URI with an explicit ?version=),
-  call (a call name in it)}, onFailure FAIL_TASK (default) | KEEP_COMPLETED}.
+- Approved-result actions: phases[n].onApproved is an object with action (an
+  object of type HTTPCALL (default, the only kind), uri (an httpcalls URI with
+  an explicit ?version=) and call (a call name in it)) and onFailure FAIL_TASK
+  (default) | KEEP_COMPLETED.
   Valid only on an EXECUTE phase with requiresApproval in a group with
   hitlConfig.granularity TASK (else a 400 at save). On each task a PERSON
   approves (or approves with an edit) the group makes that one call with the
@@ -1759,7 +1760,7 @@ your tool schemas do not cover it, not as a routine first step:
   is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
   responseUrl, summary), audit task id group.approved_action, metric
   eddi_group_approved_action_total{outcome}. The call's \${vault:…} secrets
-  must be granted to all agents; \${connection:…}, \${caller:…}, \${context:…},
+  must be granted to all agents; \${connection:…}, \${caller:…}, context references,
   fire-and-forget, batch and forEach calls are refused. Not in the Manager's
   phase editor (JSON only). This is the answer when a team must publish only
   human-approved text: a member's own gated tool call is rejected in a group
