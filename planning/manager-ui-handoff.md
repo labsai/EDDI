@@ -192,7 +192,7 @@ These fields live on the **agent** object itself.
 | `requirePeerVerification` | `boolean` | `false` | Toggle |
 
 > [!IMPORTANT]
-> Enabling `signInterAgentMessages` requires a key the agent can sign with: a save is refused unless the newest declared key's private half is in the vault. `requirePeerVerification` needs no key of the agent's own, and today logs failed or unsigned peer messages rather than withholding them. The Manager warns when signing is on and no key is declared.
+> Enabling `signInterAgentMessages` requires a key the agent can sign with: a save is refused unless the newest declared key's private half is in the vault. `requirePeerVerification` needs no key of the agent's own; another agent's message that does not verify is withheld from that agent's prompt and context (`[withheld: ...]`). The Manager warns when signing is on and no key is declared.
 
 ---
 
