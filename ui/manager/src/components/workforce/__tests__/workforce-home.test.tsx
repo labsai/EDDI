@@ -8,6 +8,8 @@ import { createTestQueryClient } from "@/test/test-utils";
 import { MOCK_CATALOG_AGENTS } from "@/test/mocks/catalog-fixtures";
 import { EndUserCatalog } from "@/components/workforce/catalog-view";
 import { readInitialChatMessage } from "@/lib/workforce-chat-start";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
 
 /**
  * Workforce Home for an end user (T1.4): a composer first with an agent
@@ -93,9 +95,34 @@ describe("Workforce Home", () => {
     const input = await screen.findByTestId("home-composer-input");
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.change(input, { target: { value: "line one" } });
+    // Only once sending is possible (agent picked, profile answered) does a
+    // Shift+Enter that sends nothing prove anything: before that, a plain Enter
+    // would send nothing either.
+    await waitFor(() => expect(screen.getByTestId("home-composer-send")).not.toBeDisabled());
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(screen.queryByTestId("chat-probe")).toBeNull();
     expect(screen.getByTestId("home-composer-send")).toBeInTheDocument();
+  });
+
+  it("falls back to the profile's starters when the catalog has none for the agent", async () => {
+    // An author's picker also offers deployed agents that are not listed in the
+    // catalog; the same fallback covers an entry without an appearance.
+    server.use(
+      http.get("*/catalog/agents", () =>
+        HttpResponse.json(MOCK_CATALOG_AGENTS.map((a) => ({ ...a, appearance: null }))),
+      ),
+      http.get("*/agents/:agentId/profile", ({ params }) =>
+        HttpResponse.json({
+          agentId: String(params.agentId),
+          reviewNotice: null,
+          appearance: { starters: ["Ask from the profile"] },
+          conversationControls: null,
+        }),
+      ),
+    );
+    renderHome();
+    const starters = await screen.findByTestId("home-starters");
+    expect(within(starters).getAllByRole("button").map((b) => b.textContent)).toEqual(["Ask from the profile"]);
   });
 
   it("lists the recent conversations from the sidebar's data", async () => {

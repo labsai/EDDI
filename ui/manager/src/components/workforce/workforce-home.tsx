@@ -64,12 +64,14 @@ export function HomeComposer() {
   }, [sessions, agents]);
   const agentId = picked && agents.some((a) => a.id === picked) ? picked : defaultAgentId;
   const agent = agents.find((a) => a.id === agentId) ?? null;
-  const starters = (agentId ? appearanceById.get(agentId)?.appearance?.starters : undefined) ?? [];
-
   // The chat sends what is typed here without showing its own notice first, so
   // the agent's review notice is shown here, and nothing is sent before the
   // lookup has answered (the same rule the chat keeps).
-  const { pending: profilePending } = useAgentReviewProfile(agentId);
+  const { pending: profilePending, appearance: profileAppearance } = useAgentReviewProfile(agentId);
+  // The catalog entry first (no extra request); an agent an author can use but
+  // that is not listed in the catalog has its starters from the profile.
+  const catalogStarters = agentId ? appearanceById.get(agentId)?.appearance?.starters : undefined;
+  const starters = catalogStarters ?? profileAppearance?.starters ?? [];
 
   const start = (message: string) => {
     const trimmed = message.trim();

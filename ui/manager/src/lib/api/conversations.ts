@@ -415,6 +415,26 @@ export async function getConversationDescriptors(
   return items.map(normalizeDescriptor);
 }
 
+/**
+ * The caller's own chats, newest first: `mine=true` keeps the owner filter for
+ * an admin too (in the database query, so everyone else's conversations cannot
+ * page them out), and `excludeGroupMembers=true` leaves out the conversations a
+ * team session holds for its members.
+ */
+export async function getMyChatDescriptors(limit = 20, index = 0): Promise<ConversationDescriptor[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    index: String(index),
+    mine: "true",
+    excludeGroupMembers: "true",
+  });
+  const raw = await api.get<ConversationDescriptorRaw[] | { value: ConversationDescriptorRaw[]; Count?: number }>(
+    `/conversationstore/conversations?${params.toString()}`
+  );
+  const items = Array.isArray(raw) ? raw : (raw?.value ?? []);
+  return items.map(normalizeDescriptor);
+}
+
 /** Highest page size the backend will honour (it clamps `limit` to this). */
 export const MAX_CONVERSATION_LIMIT = 100;
 

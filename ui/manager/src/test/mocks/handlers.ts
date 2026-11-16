@@ -1615,6 +1615,12 @@ export const handlers = [
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
+    // excludeGroupMembers=true: the backend leaves out descriptors that record a
+    // groupConversationId (member threads of a team session). `mine` is not
+    // modelled — the mock has a single user.
+    if (url.searchParams.get("excludeGroupMembers") === "true") {
+      result = result.filter((c) => !(c as { groupConversationId?: string }).groupConversationId);
+    }
     // RestConversationStore.readConversationDescriptors defaults `limit` to 20
     // and CLAMPS it to 100 — a caller asking for 1000 gets 100, and a mock that
     // returned everything hid that the dashboard reported the clamp as a total.

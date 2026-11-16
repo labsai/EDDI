@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { MessageSquare, Pencil, Pin, PinOff, Trash2, Users } from "lucide-react";
@@ -20,6 +20,7 @@ import {
   usePatchChat,
   useWorkforceSessions,
 } from "@/hooks/use-workforce-sessions";
+import { useChatStore } from "@/hooks/use-chat";
 
 /**
  * The sidebar's list of the signed-in person's chats and team sessions
@@ -38,6 +39,7 @@ export function SessionList() {
   const deleteChat = useDeleteChat();
   const deleteTeam = useDeleteTeamSession();
   const location = useLocation();
+  const navigate = useNavigate();
   const activeHref = location.pathname + location.search;
 
   const formatDate = (ms: number) =>
@@ -91,8 +93,22 @@ export function SessionList() {
     if (!session) return;
     const onError = (err: unknown) =>
       toast.error(t("Workforce.sessions.deleteFailed", "Couldn't delete: {{error}}", { error: getErrorMessage(err) }));
-    if (session.kind === "chat") deleteChat.mutate({ conversationId: session.id }, { onError });
-    else deleteTeam.mutate({ groupId: session.ownerId, conversationId: session.id }, { onError });
+    // The deleted conversation must not stay on screen: leave its page for Home
+    // and drop it from the chat store (which would otherwise keep showing it, and
+    // send the next message into a conversation that no longer exists).
+    const leaveIfOpen = () => {
+      const openInChat =
+        session.kind === "chat" &&
+        location.pathname.startsWith("/workforce/chat") &&
+        useChatStore.getState().conversationId === session.id;
+      if (!openInChat && activeHref !== session.href) return;
+      navigate("/workforce", { replace: true });
+      if (session.kind === "chat" && useChatStore.getState().conversationId === session.id) {
+        useChatStore.getState().clearMessages();
+      }
+    };
+    if (session.kind === "chat") deleteChat.mutate({ conversationId: session.id }, { onError, onSuccess: leaveIfOpen });
+    else deleteTeam.mutate({ groupId: session.ownerId, conversationId: session.id }, { onError, onSuccess: leaveIfOpen });
   };
 
   return (

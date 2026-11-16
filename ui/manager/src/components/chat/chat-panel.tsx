@@ -312,7 +312,11 @@ export function ChatPanel({
   useEffect(() => {
     if (!initialMessage || initialTakenRef.current) return;
     if (deployedAgents === undefined || reviewPending) return;
-    if (useChatStore.getState().selectedAgentId !== initialMessage.agentId) return;
+    // This render's agent, not the live store's: `reviewPending` (and the
+    // controls) were computed for this render's agent, so reading the store
+    // here could pair a just-switched agent with the previous one's settled
+    // profile and send before the new one's review notice and controls answered.
+    if (selectedAgentId !== initialMessage.agentId) return;
     initialTakenRef.current = true;
     onInitialMessageConsumed?.();
     useChatStore.getState().clearMessages();

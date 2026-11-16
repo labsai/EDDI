@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   deleteConversation,
-  getConversationDescriptors,
+  getMyChatDescriptors,
   parseConversationUri,
   patchConversation,
   type ConversationDescriptor,
@@ -16,7 +16,6 @@ import {
   teamSession,
   type WorkforceSession,
 } from "@/lib/workforce-sessions";
-import { useAuth } from "@/hooks/use-auth";
 import { useDeployedAgents } from "@/hooks/use-chat";
 import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { useCatalogGroups } from "@/hooks/use-catalog";
@@ -26,12 +25,11 @@ import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
  * The Workforce sidebar's data (T1.1): the signed-in person's chats and team
  * sessions. Reads only endpoints an `eddi-user` may call:
  *
- * - `GET /conversationstore/conversations` — owner-scoped by the backend for
- *   everyone but an admin, who sees every user's conversations; for an admin
- *   the list is narrowed to their own here, by the owner the descriptor records.
- * - `GET /groups/{groupId}/conversations` for each team the person can see
- *   (the catalog for an end user, the group store for an author) — owner-scoped
- *   the same way.
+ * - `GET /conversationstore/conversations?mine=true&excludeGroupMembers=true` —
+ *   the caller's own chats, an admin's too, without team members' threads; the
+ *   backend applies both in its query.
+ * - `GET /groups/{groupId}/conversations?mine=true` for each team the person can
+ *   see (the catalog for an end user, the group store for an author).
  *
  * Writes go to the owner endpoints: `PATCH` and `DELETE
  * /conversationstore/conversations/{id}`, `DELETE
@@ -50,20 +48,18 @@ interface TeamSessionsData {
   names: Record<string, string>;
 }
 
-/** The person's own chats, as descriptors. */
+/**
+ * The person's own chats, as descriptors. `mine=true` makes the backend apply
+ * the owner filter for an admin too, in its query (so everyone else's
+ * conversations cannot page an admin's own out of the 100 read), and
+ * `excludeGroupMembers=true` leaves out the conversations team sessions hold
+ * for their members. No client-side owner comparison: the principal name the
+ * server records need not be the token's `preferred_username`.
+ */
 export function useMyChatDescriptors() {
-  const { method, user } = useAuth();
-  const { isAdmin } = useWorkforceAccess();
-  // An admin's listing holds every user's conversations; the sidebar is "mine".
-  // With auth off there is no owner to compare with — everything is the user's.
-  const ownOnly = method !== "none" && isAdmin && !!user?.username;
-  const username = user?.username ?? "";
   return useQuery({
     queryKey: workforceKeys.chats,
-    queryFn: async () => {
-      const all = await getConversationDescriptors(SIDEBAR_CHAT_LIMIT, 0);
-      return ownOnly ? all.filter((d) => !d.userId || d.userId === username) : all;
-    },
+    queryFn: () => getMyChatDescriptors(SIDEBAR_CHAT_LIMIT, 0),
     staleTime: 15_000,
   });
 }
@@ -82,23 +78,18 @@ export function useMyTeamSessions() {
     [canAuthor, storeGroups, catalogGroups],
   );
   const teamIds = teams.map((t) => t.id).join(",");
-  const { method, user } = useAuth();
-  const { isAdmin } = useWorkforceAccess();
-  const ownOnly = method !== "none" && isAdmin && !!user?.username;
-  const username = user?.username ?? "";
 
   return useQuery<TeamSessionsData>({
     queryKey: [...workforceKeys.teams, teamIds],
     queryFn: async () => {
       const names: Record<string, string> = {};
       for (const team of teams) names[team.id] = team.name;
-      // One failing team must not empty the whole list.
+      // One failing team must not empty the whole list. `mine`: an admin's
+      // listing is otherwise every user's sessions.
       const results = await Promise.allSettled(
-        teams.map((team) => listGroupConversations(team.id, SIDEBAR_SESSIONS_PER_TEAM, 0)),
+        teams.map((team) => listGroupConversations(team.id, SIDEBAR_SESSIONS_PER_TEAM, 0, true)),
       );
-      const sessions = results
-        .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
-        .filter((gc) => !ownOnly || !gc.userId || gc.userId === username);
+      const sessions = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
       return { sessions, names };
     },
     enabled: teams.length > 0,
@@ -107,8 +98,9 @@ export function useMyTeamSessions() {
 }
 
 /**
- * Chats and team sessions as one list, newest first. Member conversations of
- * a team session are left out of the chats (see `memberConversationIds`).
+ * Chats and team sessions as one list, newest first. The backend leaves member
+ * conversations of a team session out of the chats; `memberConversationIds`
+ * still hides the ones started before their descriptor recorded the group.
  */
 export function useWorkforceSessions(): {
   sessions: WorkforceSession[];

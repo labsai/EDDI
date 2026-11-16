@@ -3,7 +3,14 @@ import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
+import { useLocation } from "react-router-dom";
 import { SessionList } from "@/components/workforce/session-list";
+import { useChatStore } from "@/hooks/use-chat";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="location-probe">{location.pathname + location.search}</span>;
+}
 
 /**
  * The Workforce sidebar's conversations (T1.1), against the MSW backend:
@@ -22,6 +29,7 @@ let seen: Seen[];
 
 beforeEach(() => {
   seen = [];
+  useChatStore.getState().reset();
   server.events.removeAllListeners();
   server.events.on("request:start", async ({ request }) => {
     const url = new URL(request.url);
@@ -124,6 +132,38 @@ describe("SessionList", () => {
     fireEvent.click(await screen.findByTestId("alert-dialog-confirm"));
     await waitFor(() => expect(screen.queryByTestId("session-chat-conv2")).toBeNull());
     expect(seen).toContainEqual({ method: "DELETE", path: "/conversationstore/conversations/conv2", body: undefined });
+  });
+
+  it("leaves the chat page for Home and clears the chat when the open chat is deleted", async () => {
+    useChatStore.getState().setConversationId("conv2");
+    renderWithProviders(
+      <>
+        <SessionList />
+        <LocationProbe />
+      </>,
+      { initialRoute: "/workforce/chat?agentId=agent1&conversationId=conv2" },
+    );
+    fireEvent.click(await screen.findByTestId("session-chat-conv2-delete"));
+    fireEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(screen.getByTestId("location-probe")).toHaveTextContent(/^\/workforce$/));
+    expect(useChatStore.getState().conversationId).toBeNull();
+  });
+
+  it("stays put when a chat other than the open one is deleted", async () => {
+    useChatStore.getState().setConversationId("conv3");
+    renderWithProviders(
+      <>
+        <SessionList />
+        <LocationProbe />
+      </>,
+      { initialRoute: "/workforce/chat?agentId=agent1&conversationId=conv3" },
+    );
+    fireEvent.click(await screen.findByTestId("session-chat-conv2-delete"));
+    fireEvent.click(await screen.findByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(seen.some((s) => s.method === "DELETE")).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("session-chat-conv2")).toBeNull());
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/workforce/chat?agentId=agent1&conversationId=conv3");
+    expect(useChatStore.getState().conversationId).toBe("conv3");
   });
 
   it("brings a chat back when the delete is refused", async () => {
