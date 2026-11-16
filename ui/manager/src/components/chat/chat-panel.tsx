@@ -31,7 +31,7 @@ import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "@/hooks/use-chat-ratings";
-import { lastStepIndex, ratableSteps } from "@/lib/chat-rating-steps";
+import { lastStepIndex, ratableSteps } from "@eddi/core";
 import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";

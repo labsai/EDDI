@@ -154,7 +154,7 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
     ]);
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].images).toEqual([{ uri: "https://cdn.example/x.png", alt: "X" }]);
+    expect(msgs[0]!.images).toEqual([{ uri: "https://cdn.example/x.png", alt: "X" }]);
   });
 
   it("masks a user input the caller knows was sent as a secret", () => {
@@ -165,7 +165,7 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
       new Set(["hunter2"]),
     );
 
-    expect(msgs[0].content).toBe("●●●●●●●●");
+    expect(msgs[0]!.content).toBe("●●●●●●●●");
     expect(msgs.some((m) => m.content.includes("hunter2"))).toBe(false);
   });
 
@@ -194,7 +194,7 @@ describe("stepsToMessages — secret turns must never be re-rendered in clear", 
       new Set(["hunter2"]),
     );
 
-    expect(msgs[0].content).toBe("what is 2+2");
+    expect(msgs[0]!.content).toBe("what is 2+2");
   });
 
   it("masks the backend placeholder after a reload, without the session set", () => {
