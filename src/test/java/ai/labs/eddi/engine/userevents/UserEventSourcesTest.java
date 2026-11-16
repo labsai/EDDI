@@ -197,6 +197,20 @@ class UserEventSourcesTest {
         }
 
         @Test
+        @DisplayName("a nested discussion announces neither its start nor its end: it is a step of its parent")
+        void nestedDiscussionIsSilent() {
+            var started = gc(GroupConversationState.IN_PROGRESS);
+            started.setDepth(1);
+            var ended = gc(GroupConversationState.COMPLETED);
+            ended.setDepth(1);
+
+            GroupUserEvents.started(publisher, started, config());
+            GroupUserEvents.afterLeg(publisher, ended, config());
+
+            verify(publisher, never()).publish(any(), any());
+        }
+
+        @Test
         @DisplayName("a still-running state raises nothing")
         void running() {
             GroupUserEvents.afterLeg(publisher, gc(GroupConversationState.IN_PROGRESS), config());

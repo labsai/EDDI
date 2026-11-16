@@ -325,6 +325,25 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("a schedule that cannot be written ends the job, and its owner hears so: job.finished with schedule_failed")
+        void storeFailureAnnouncesFinished() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            continuations.userEventPublisher = publisher;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createSchedule(any());
+
+            continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production);
+
+            var event = ArgumentCaptor.forClass(UserEvent.class);
+            var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+            verify(publisher).publish(event.capture(), audience.capture());
+            assertEquals(UserEvent.KIND_JOB_FINISHED, event.getValue().kind());
+            assertEquals(ConversationContinuations.REASON_SCHEDULE_FAILED, event.getValue().state());
+            assertEquals(UserEventAudience.principal("user-1"), audience.getValue());
+        }
+
+        @Test
         @DisplayName("a write that fails for a moment is retried, and the continuation is armed")
         void transientStoreFailure() throws Exception {
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);

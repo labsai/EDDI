@@ -51,7 +51,8 @@ public record ClusterEvent(int v, String id, String type, String originNode, Str
      * another node: {@code {event, audience}}, ids and hashed principals only. Not
      * an eviction, but a hint of the same kind: delivered twice or late it changes
      * nothing a client's refetch would not, and a node that missed it loses nothing
-     * durable.
+     * durable. Published transiently (core NATS, outside the event stream and the
+     * outbox), never on the stream.
      */
     public static final String USER_EVENT = "user.event";
 
