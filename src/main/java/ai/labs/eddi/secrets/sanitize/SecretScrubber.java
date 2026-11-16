@@ -160,13 +160,16 @@ public class SecretScrubber {
      * {@code jdbc:postgresql://app:${vault:db-password}@db:5432/eddi}. The scheme
      * is one of the connection schemes by name — a grammar would also admit
      * {@code hunter2://…}, and a password cannot be told from a scheme by its
-     * shape. After the slot only a host name, an optional port and an optional
-     * single database name may follow: no further path, no query, no fragment, no
-     * further {@code @}, reference or template. Possessive or bounded throughout,
-     * so it is linear on any input.
+     * shape. That holds for the JDBC subprotocol too ({@code jdbc:hunter2://…}), so
+     * it is listed as well: only the drivers that take a
+     * {@code //user:password@host} URL (PostgreSQL, MySQL, MariaDB). After the slot
+     * only a host name, an optional port and an optional single database name may
+     * follow: no further path, no query, no fragment, no further {@code @},
+     * reference or template. Possessive or bounded throughout, so it is linear on
+     * any input.
      */
     private static final Pattern VAULT_PASSWORD_SLOT_URL = Pattern.compile(
-            "\\s*+(?:jdbc:[a-z][a-z0-9]{0,20}+|mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|rediss|amqps?|nats|https?)"
+            "\\s*+(?:jdbc:(?:postgresql|mysql|mariadb)|mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|rediss|amqps?|nats|https?)"
                     + "://[A-Za-z0-9._-]{0,200}+:\\$\\{(?:vault|eddivault):[A-Za-z0-9._/-]{1,200}+}"
                     + "@[A-Za-z0-9.-]{1,253}+(?::[0-9]{1,5}+)?+(?:/[A-Za-z0-9_.-]{1,128}+)?+/?+\\s*+",
             Pattern.CASE_INSENSITIVE);

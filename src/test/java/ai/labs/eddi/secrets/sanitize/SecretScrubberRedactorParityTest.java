@@ -188,6 +188,8 @@ class SecretScrubberRedactorParityTest {
     @ValueSource(strings = {
             // a literal before "://" that only looks like a scheme
             "hunter2!://${vault:k}", "hunter2://${vault:k}", "hunter2://app:${vault:k}@db.internal/eddi",
+            // ...including after "jdbc:", where the subprotocol is just as free-form
+            "jdbc:hunter2://app:${vault:k}@db/eddi",
             // the reference is the username, the password slot a literal
             "jdbc:postgresql://${vault:u}:plainliteral@db.internal/eddi",
             // a literal in a query value, the fragment, a second path segment or the host
