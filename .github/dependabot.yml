@@ -114,15 +114,22 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
-  # The two frontends under ui/. They ran Renovate in their own repos (automerge
-  # of minor/patch once CI was green); the Renovate app is not installed on this
-  # repository, and two bots on one repo is the one clearly wrong option.
+  # The frontends under ui/: the Manager, the Chat UI and the shared packages are
+  # one npm workspace (ui/package.json) with a single ui/package-lock.json, so one
+  # entry covers all of them and a dependency both apps use moves in one PR. They
+  # ran Renovate in their own repos (automerge of minor/patch once CI was green);
+  # the Renovate app is not installed on this repository, and two bots on one repo
+  # is the one clearly wrong option.
+  #
+  # Dependabot resolves on Linux, so its lockfile keeps the wasm32-wasi children
+  # that npm on Windows prunes (ui/manager/AGENTS.md); CI's `npm run
+  # lockfile:check` catches a hand-made lock that lost them.
   - package-ecosystem: npm
-    directory: /ui/manager
+    directory: /ui
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 6
     labels:
       - dependencies
       - chore
@@ -183,56 +190,12 @@ updates:
       # test and every covered mutant "survives" (updates.ts: 0.00, against 81.85
       # on Vitest 4 with the same runner) — stryker-mutator/stryker-js#6210.
       # Remove once a fixed runner ships.
-      # ui/chat has no Stryker and is already on Vitest 5. update-types limits
-      # this to version updates; security updates are not affected.
+      # The rule covers the whole workspace, ui/chat included, because both apps
+      # resolve one hoisted vitest. update-types limits this to version updates;
+      # security updates are not affected.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@vitest/*"
-        update-types: ["version-update:semver-major"]
-      # TypeScript 7 is the Go-native compiler. typescript-eslint peers typescript <6.1.0, so the
-      # major makes `npm ci` fail with ERESOLVE. Revisit when typescript-eslint supports TS 7.
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
-
-  - package-ecosystem: npm
-    directory: /ui/chat
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 3
-    labels:
-      - dependencies
-      - chore
-    # Let a release settle before proposing it; security updates are not delayed.
-    cooldown:
-      default-days: 3
-      semver-major-days: 14
-    groups:
-      # Security-update twin of the vitest group; see the Manager entry above.
-      vitest-security:
-        applies-to: security-updates
-        patterns:
-          - "vitest"
-          - "@vitest/*"
-      # One PR for every other open advisory instead of one per package.
-      security-updates:
-        applies-to: security-updates
-        patterns:
-          - "*"
-      # vitest and @vitest/* must move together; see the Manager entry above.
-      vitest:
-        patterns:
-          - "vitest"
-          - "@vitest/*"
-      minor-and-patch:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    ignore:
-      # Same as the Manager: a react-router v8 major needs a manual migration.
-      - dependency-name: "react-router*"
         update-types: ["version-update:semver-major"]
       # TypeScript 7 is the Go-native compiler. typescript-eslint peers typescript <6.1.0, so the
       # major makes `npm ci` fail with ERESOLVE. Revisit when typescript-eslint supports TS 7.

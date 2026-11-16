@@ -181,12 +181,12 @@ describe("ChatActivity", () => {
 
     const toolRow = screen.getByTestId("tool-call-row");
     expect(toolRow).toBeInTheDocument();
-    expect(screen.getByText("calculator")).toBeInTheDocument();
+    expect(screen.getByText("Calculator")).toBeInTheDocument();
     expect(screen.getByText("(2+2)")).toBeInTheDocument();
 
     // Click toolRow to expand details
     await user.click(toolRow);
-    expect(screen.getByText("Args")).toBeInTheDocument();
+    expect(screen.getByText("Arguments")).toBeInTheDocument();
     expect(screen.getByText("Result")).toBeInTheDocument();
 
     // Copy buttons are rendered. Let's find copy buttons
@@ -378,7 +378,7 @@ describe("ChatActivity — end-user live status line", () => {
 
     renderWithProviders(<ChatActivity events={events} isLive={true} />);
 
-    expect(screen.getByText(/readAgent/)).toBeInTheDocument();
+    expect(screen.getByText(/Read agent/)).toBeInTheDocument();
     expect(screen.getByText(/1 tool call/)).toBeInTheDocument();
   });
 
@@ -475,8 +475,8 @@ describe("ChatActivity — end-user resting flat tool list", () => {
 
     // The calls themselves, directly — no "langchain" row to expand again.
     expect(screen.getAllByTestId("tool-call-row")).toHaveLength(2);
-    expect(screen.getByText("readAgentDescriptors")).toBeInTheDocument();
-    expect(screen.getByText("readGroups")).toBeInTheDocument();
+    expect(screen.getByText("Read agent descriptors")).toBeInTheDocument();
+    expect(screen.getByText("Read groups")).toBeInTheDocument();
     expect(screen.queryByText("langchain")).not.toBeInTheDocument();
   });
 
@@ -509,6 +509,9 @@ describe("ChatActivity — end-user resting flat tool list", () => {
  * is the end of the turn. Without the live list the status line said
  * "Thinking…" through an entire tool-using conversation.
  */
+/** Live tool calls recorded as identifiers (no toolDisplay label). */
+const ids = (...names: string[]) => names.map((text) => ({ text, phrase: false }));
+
 describe("ChatActivity — live tool_call events", () => {
   const start = (taskType: string, index: number): PipelineEvent => ({
     type: "task_start",
@@ -523,11 +526,11 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[start("langchain", 0)]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors"]}
+        liveToolCalls={ids("readAgentDescriptors")}
       />,
     );
 
-    expect(screen.getByText(/readAgentDescriptors/)).toBeInTheDocument();
+    expect(screen.getByText(/Read agent descriptors/)).toBeInTheDocument();
     expect(screen.getByText(/1 tool call\b/)).toBeInTheDocument();
   });
 
@@ -543,22 +546,22 @@ describe("ChatActivity — live tool_call events", () => {
     ];
 
     renderWithProviders(
-      <ChatActivity events={events} isLive={true} liveToolCalls={["oldTool", "newTool"]} />,
+      <ChatActivity events={events} isLive={true} liveToolCalls={ids("oldTool", "newTool")} />,
     );
 
-    expect(screen.getByText(/newTool/)).toBeInTheDocument();
-    expect(screen.queryByText(/Using oldTool/)).not.toBeInTheDocument();
+    expect(screen.getByText(/New tool/)).toBeInTheDocument();
+    expect(screen.queryByText(/Using Old tool/)).not.toBeInTheDocument();
     // Count comes from the live list (2), not the lagging trace (1).
     expect(screen.getByText(/2 tool calls\b/)).toBeInTheDocument();
   });
 
   it("renders the status line from live calls alone — before any task event arrives", () => {
-    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} />);
+    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={ids("readGroups")} />);
 
     // events=[] used to be an early-return null; the live list must count as
     // activity or the panel falls back to the bare dots indicator.
     expect(screen.getByTestId("chat-activity-live-status")).toBeInTheDocument();
-    expect(screen.getByText(/readGroups/)).toBeInTheDocument();
+    expect(screen.getByText(/Read groups/)).toBeInTheDocument();
   });
 
   it("expands to the full running list of calls, newest still spinning", async () => {
@@ -567,7 +570,7 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors", "readGroups", "readConversations"]}
+        liveToolCalls={ids("readAgentDescriptors", "readGroups", "readConversations")}
       />,
     );
 
@@ -575,16 +578,16 @@ describe("ChatActivity — live tool_call events", () => {
     await user.click(screen.getByTestId("chat-activity-live-status"));
 
     const list = screen.getByTestId("chat-activity-live-list");
-    expect(list).toHaveTextContent("readAgentDescriptors");
-    expect(list).toHaveTextContent("readGroups");
-    expect(list).toHaveTextContent("readConversations");
+    expect(list).toHaveTextContent("Read agent descriptors");
+    expect(list).toHaveTextContent("Read groups");
+    expect(list).toHaveTextContent("Read conversations");
     // Collapses again on a second click.
     await user.click(screen.getByTestId("chat-activity-live-status"));
     expect(screen.queryByTestId("chat-activity-live-list")).not.toBeInTheDocument();
   });
 
   it("a pill with no calls yet is disabled — no focusable no-op, no phantom disclosure", () => {
-    renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={[]} />);
+    renderWithProviders(<ChatActivity events={[start("langchain", 0)]} isLive={true} liveToolCalls={ids()} />);
 
     const pill = screen.getByTestId("chat-activity-live-status");
     expect(pill).toBeDisabled();
@@ -604,13 +607,13 @@ describe("ChatActivity — live tool_call events", () => {
       <ChatActivity
         events={[]}
         isLive={true}
-        liveToolCalls={["readAgentDescriptors", "readGroups"]}
+        liveToolCalls={ids("readAgentDescriptors", "readGroups")}
         liveToolsSettled
       />,
     );
 
     // The header stops claiming a tool is in use.
-    expect(screen.queryByText(/Using readGroups/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Using Read groups/)).not.toBeInTheDocument();
     expect(screen.getByText(/Thinking/)).toBeInTheDocument();
 
     await user.click(screen.getByTestId("chat-activity-live-status"));
@@ -622,11 +625,72 @@ describe("ChatActivity — live tool_call events", () => {
   it("still spins the newest call while the tools are actually running", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <ChatActivity events={[]} isLive={true} liveToolCalls={["readGroups"]} liveToolsSettled={false} />,
+      <ChatActivity events={[]} isLive={true} liveToolCalls={ids("readGroups")} liveToolsSettled={false} />,
     );
 
-    expect(screen.getByText(/readGroups/)).toBeInTheDocument();
+    expect(screen.getByText(/Read groups/)).toBeInTheDocument();
     await user.click(screen.getByTestId("chat-activity-live-status"));
     expect(screen.getByTestId("chat-activity-live-list").querySelectorAll(".animate-spin")).toHaveLength(1);
+  });
+
+  it("shows a designer's toolDisplay label as written, not wrapped in 'Using'", () => {
+    renderWithProviders(
+      <ChatActivity events={[]} isLive={true} liveToolCalls={[{ text: "Creating an action: Renew the contract", phrase: true }]} />,
+    );
+    const status = screen.getByTestId("chat-activity-live-status");
+    expect(status).toHaveTextContent("Creating an action: Renew the contract…");
+    expect(status).not.toHaveTextContent("Using");
+  });
+
+  // The kind is carried by the producer, never guessed from the string's shape.
+  it("shows a one-word designer label as written — it is not an identifier", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ChatActivity events={[]} isLive={true} liveToolCalls={[{ text: "Searching", phrase: true }]} />,
+    );
+    const status = screen.getByTestId("chat-activity-live-status");
+    expect(status).toHaveTextContent("Searching…");
+    expect(status).not.toHaveTextContent("Using");
+    await user.click(status);
+    expect(screen.getByTestId("chat-activity-live-list")).toHaveTextContent("Searching");
+  });
+
+  it("puts a prefixed MCP identifier into words even though it is not camel or snake case", () => {
+    renderWithProviders(<ChatActivity events={[]} isLive={true} liveToolCalls={ids("github.search-code")} />);
+    expect(screen.getByTestId("chat-activity-live-status")).toHaveTextContent("Using Github search code…");
+  });
+});
+
+describe("ChatActivity — readable tool rows", () => {
+  it("names a generated tool in words and shows its arguments as fields, raw JSON one click away", async () => {
+    const user = userEvent.setup();
+    const args = JSON.stringify({ requestBody: JSON.stringify({ agentName: "Support" }) });
+    const events: PipelineEvent[] = [
+      {
+        type: "task_complete",
+        taskType: "ai.labs.llm",
+        taskId: "1",
+        index: 0,
+        durationMs: 5,
+        timestamp: Date.now(),
+        toolTrace: [
+          { type: "tool_call", tool: "getAgentDescriptors", arguments: args },
+          { type: "tool_result", tool: "getAgentDescriptors", result: "[]" },
+        ],
+      },
+    ];
+    renderWithProviders(<ChatActivity events={events} isLive={false} />);
+    await user.click(screen.getByTestId("chat-activity-toggle"));
+    const label = screen.getByTestId("tool-call-row-label");
+    expect(label).toHaveTextContent("Get agent descriptors");
+    expect(label).toHaveAttribute("title", "getAgentDescriptors");
+    await user.click(screen.getByTestId("tool-call-row"));
+    expect(screen.getByTestId("tool-call-row-args-fields")).toHaveTextContent("Agent name");
+    expect(screen.getByTestId("tool-call-row-args-fields")).toHaveTextContent("Support");
+    await user.click(screen.getByTestId("tool-call-row-args-toggle"));
+    expect(screen.queryByTestId("tool-call-row-args-fields")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-call-row-args-toggle")).toHaveAttribute("aria-pressed", "true");
+    // The JSON view, next to the one-line preview in the row header.
+    expect(screen.getAllByText(/"requestBody"/).some((el) => el.tagName === "PRE")).toBe(true);
   });
 });

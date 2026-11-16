@@ -232,6 +232,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     AgentConfigurationCache agentConfigurationCache;
 
     /**
+     * Titles each conversation from its first usable message (see
+     * {@link ConversationTitleService}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} means no titles are written.
+     */
+    @Inject
+    ConversationTitleService conversationTitleService;
+
+    /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
      * reason as {@link #attachmentStore}; {@code null} (a directly constructed
      * instance) means the feature is off.
@@ -650,6 +658,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
+
     /**
      * Rejects new work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
@@ -662,12 +676,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
      */
-    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    final ConversationHitlService conversationHitlService;
-
-    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
-    private final ConversationStepRunner conversationStepRunner;
-
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(
@@ -1753,6 +1761,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                             reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            // Titles the conversation on the turn of its first usable message;
+                            // a model-written title is generated in the background. Never throws.
+                            if (conversationTitleService != null) {
+                                conversationTitleService.afterTurn(returnConversationMemory, rerunOnly);
+                            }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
