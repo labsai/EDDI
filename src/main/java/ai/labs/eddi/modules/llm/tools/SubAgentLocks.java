@@ -10,6 +10,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -122,14 +123,16 @@ public final class SubAgentLocks {
                 return body.apply(new Guard(null, null));
             }
             LeaseHandle lease;
+            CompletableFuture<LeaseHandle> pending = leaseManager.acquireKey(LEASE_PREFIX + agentId, WAIT).toCompletableFuture();
             try {
-                lease = leaseManager.acquireKey(LEASE_PREFIX + agentId, WAIT).toCompletableFuture().get(WAIT.toMillis() + 1_000,
-                        TimeUnit.MILLISECONDS);
+                lease = pending.get(WAIT.toMillis() + 1_000, TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                releaseWhenGranted(leaseManager, pending);
                 return ifUnavailable.get();
             } catch (Exception e) {
                 LOGGER.debugf("[DYNAMIC] Lease of sub-agent '%s' not acquired: %s", sanitize(agentId), e.getMessage());
+                releaseWhenGranted(leaseManager, pending);
                 return ifUnavailable.get();
             }
             try {
@@ -142,6 +145,20 @@ public final class SubAgentLocks {
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * A wait given up on (interrupted, timed out) can still be granted later: the
+     * lease manager's waiter stays registered. Such a lease is released at once, or
+     * it would be renewed and block that agent's retain and teardown until the node
+     * stops. {@code release} is idempotent.
+     */
+    private static void releaseWhenGranted(IConversationLeaseManager leaseManager, CompletableFuture<LeaseHandle> pending) {
+        pending.thenAccept(handle -> {
+            if (handle != null) {
+                leaseManager.release(handle);
+            }
+        });
     }
 
     /** The in-node lock guarding {@code agentId}. */

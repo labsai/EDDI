@@ -166,8 +166,7 @@ public class StandaloneDynamicAgents {
         try {
             live = liveStandaloneAgents(userId) + pendingCreations;
         } catch (Exception e) {
-            LOGGER.warnf("[DYNAMIC] Could not count the standalone sub-agents of user '%s' — refusing creation: %s", sanitize(userId),
-                    sanitize(e.getMessage()));
+            LOGGER.warnf("[DYNAMIC] Could not count a user's standalone sub-agents — refusing creation: %s", sanitize(e.getMessage()));
             return "⚠️ Your deployed sub-agents could not be counted right now, so no new one was created. Try again later.";
         }
         if (live >= maxLivePerUser) {

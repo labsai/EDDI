@@ -694,6 +694,27 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("an unreadable start-turn cost is not charged: the initial message is not sent and nothing is charged")
+        void createSubAgent_unreadableStartCostIsNotCharged() throws Exception {
+            var budget = new RecordingBudget(0.5);
+            var budgeted = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
+                    createdAgentIds, retainedAgentIds, "conv-parent", null, budget);
+            when(agentSetupService.resolveParentLlmProfile("parent-agent-1"))
+                    .thenReturn(new AgentSetupService.ParentLlmProfile("anthropic", "claude-sonnet-4-6", "${vault:parent.apiKey}"));
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class), any()))
+                    .thenReturn(SetupResult.builder().action("setup_complete").agentId("sub-agent-1").build());
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenReturn(new ConversationResult("conv-123", null));
+            when(conversationService.getConversationMemorySnapshot("conv-123")).thenThrow(new IllegalStateException("store down"));
+
+            String result = budgeted.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertTrue(result.contains("could not be read"), result);
+            assertEquals(0.0, budget.charged, 1e-9, "unknown is not charged");
+            verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
         @DisplayName("with the creator's ceiling reached, the initial message is not sent")
         void createSubAgent_initialMessage_notSentPastCeiling() throws Exception {
             var budgeted = new CreateSubAgentTool(agentSetupService, conversationService, "parent-agent-1", "user-1", config,
@@ -1427,13 +1448,18 @@ class DynamicAgentToolsTest {
         @Test
         @DisplayName("retain_agent and unretain_agent write the flag on the agent itself — the authority cleanup reads")
         void retainAndUnretainWriteTheAgentsFlag() throws Exception {
-            tool.retainAgent("created-1");
-            var written = ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).update(eq("created-1"), eq(1), written.capture(), eq(true));
-            assertTrue(written.getValue().getDynamicOrigin().isRetained());
+            // The flag as each update carried it, captured at the call: the configuration
+            // object is mutable, so a captor would show only its latest state.
+            List<Boolean> writtenFlags = new ArrayList<>();
+            doAnswer(invocation -> {
+                writtenFlags.add(invocation.<AgentConfiguration>getArgument(2).getDynamicOrigin().getRetained());
+                return 2;
+            }).when(agentStore).update(eq("created-1"), eq(1), any(AgentConfiguration.class), eq(true));
 
+            tool.retainAgent("created-1");
             tool.unretainAgent("created-1");
-            assertFalse(written.getValue().getDynamicOrigin().isRetained(), "un-retained on the agent too");
+
+            assertEquals(List.of(true, false), writtenFlags, "retained, then un-retained on the agent too");
             assertFalse(retainedAgentIds.contains("created-1"));
         }
 

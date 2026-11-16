@@ -595,6 +595,50 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
+    @DisplayName("a search matching only somebody else's legacy (ownerless) conversation answers like one matching nothing")
+    void agentSearchIsNoExistenceOracleOverLegacyConversations() throws Exception {
+        String agent = "0000000000000000000000a1";
+        URI agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=1");
+        var mine = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
+        mine.setAgentResource(agentResource);
+        String legacyId = "0a0a0a0a0a0a0a0a0a0a0a02";
+        var legacy = descriptor(legacyId, "");
+        legacy.setAgentResource(agentResource);
+        // Its owner is known only to its memory: another user.
+        var foreignMemory = new ConversationMemorySnapshot();
+        foreignMemory.setConversationState(ConversationState.READY);
+        foreignMemory.setConversationSteps(new ArrayList<>());
+        foreignMemory.setUserId("victim-principal");
+        when(conversationMemoryStore.loadConversationMemorySnapshot(legacyId)).thenReturn(foreignMemory);
+        List<ConversationDescriptor> store = List.of(mine, legacy);
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(invocation -> {
+                    if ((Integer) invocation.getArgument(2) != 0) {
+                        return List.of();
+                    }
+                    String text = invocation.getArgument(1);
+                    List<IResourceFilter.QueryFilters> restrictions = invocation.getArgument(5);
+                    String ownerOnly = restrictions == null
+                            ? null
+                            : restrictions.stream().filter(group -> group.getQueryFilters().size() == 1)
+                                    .flatMap(group -> group.getQueryFilters().stream())
+                                    .filter(f -> "userId".equals(f.getField()) && f.isExact())
+                                    .map(f -> (String) f.getFilter()).findFirst().orElse(null);
+                    return store.stream()
+                            .filter(d -> text == null || d.getResource().toString().contains(text))
+                            .filter(d -> ownerOnly == null || ownerOnly.equals(d.getUserId()))
+                            .toList();
+                });
+
+        // The legacy conversation's id matches; "ffffffff" matches nothing.
+        var probeHit = asOwner().readConversationDescriptors(0, 20, legacyId, null, agent, null, null, null);
+        var probeMiss = asOwner().readConversationDescriptors(0, 20, "ffffffff", null, agent, null, null, null);
+
+        assertEquals(probeMiss.size(), probeHit.size(), "the two searches must not be told apart");
+        assertTrue(probeHit.stream().noneMatch(d -> d.getResource().toString().contains(legacyId)), "the foreign row is never listed");
+    }
+
+    @Test
     @DisplayName("an admin listing pushes no owner filter")
     @SuppressWarnings("unchecked")
     void adminListingIsNotOwnerFiltered() throws Exception {

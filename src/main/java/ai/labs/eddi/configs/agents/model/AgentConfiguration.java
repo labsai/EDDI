@@ -381,10 +381,15 @@ public class AgentConfiguration {
          */
         private Boolean retained;
 
+        // @JsonProperty on both accessors: isRetained() below names the same bean
+        // property, and its @JsonIgnore would otherwise drop "retained" from every
+        // stored and exported agent.
+        @JsonProperty("retained")
         public Boolean getRetained() {
             return retained;
         }
 
+        @JsonProperty("retained")
         public void setRetained(Boolean retained) {
             this.retained = retained;
         }

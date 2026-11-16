@@ -230,18 +230,21 @@ public class LlmSpendGate {
      */
     public Admission admit(IConversationMemory memory, double pendingUsd, double expectedUsd) {
         double pending = Double.isFinite(pendingUsd) && pendingUsd > 0.0 ? pendingUsd : 0.0;
-        OptionalDouble ceiling = memory != null ? effectiveCeiling(memory) : OptionalDouble.empty();
         SpendReservations.Reservation reservation = null;
-        if (memory != null && ceilingApplies(ceiling)) {
+        SpendReservations reservations = memory != null ? memory.getSpendReservations() : null;
+        if (reservations != null) {
+            // Ceiling, recorded spend and the reservation from one view: under the
+            // monitor a delegation's charge-back and release take, so neither can land
+            // between the read and the check.
+            CeilingAdmission decided = reservations.computeExclusively(() -> admitUnderLock(memory, reservations, pending, expectedUsd));
+            if (decided.refusal() != null) {
+                return Admission.refused(refused(memory, decided.refusal()));
+            }
+            reservation = decided.reservation();
+        } else if (memory != null) {
+            OptionalDouble ceiling = effectiveCeiling(memory);
             double spent = conversationCost(memory) + pending;
-            SpendReservations reservations = memory.getSpendReservations();
-            if (reservations != null) {
-                var held = reservations.tryReserve(spent, ceiling.getAsDouble(), expectedUsd);
-                if (held.isEmpty()) {
-                    return Admission.refused(refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent + reservations.heldUsd())));
-                }
-                reservation = held.get();
-            } else if (spent >= ceiling.getAsDouble()) {
+            if (ceilingApplies(ceiling) && spent >= ceiling.getAsDouble()) {
                 return Admission.refused(refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent)));
             }
         }
@@ -253,6 +256,24 @@ public class LlmSpendGate {
             return Admission.refused(refused(memory, tenant));
         }
         return new Admission(null, reservation);
+    }
+
+    /** The conversation-ceiling part of an admission, decided under the monitor. */
+    private record CeilingAdmission(Refusal refusal, SpendReservations.Reservation reservation) {
+    }
+
+    private static CeilingAdmission admitUnderLock(IConversationMemory memory, SpendReservations reservations, double pending,
+                                                   double expectedUsd) {
+        OptionalDouble ceiling = effectiveCeiling(memory);
+        if (!ceilingApplies(ceiling)) {
+            return new CeilingAdmission(null, null);
+        }
+        double spent = conversationCost(memory) + pending;
+        var held = reservations.tryReserve(spent, ceiling.getAsDouble(), expectedUsd);
+        if (held.isEmpty()) {
+            return new CeilingAdmission(ceilingRefusal(ceiling.getAsDouble(), spent + reservations.heldUsd()), null);
+        }
+        return new CeilingAdmission(null, held.get());
     }
 
     /** Whether the opt-in tenant cost reservation (hard ceiling) is on. */

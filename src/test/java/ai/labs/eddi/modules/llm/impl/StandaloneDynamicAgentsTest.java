@@ -569,4 +569,27 @@ class StandaloneDynamicAgentsTest {
         verify(agentFactory).undeployAgent(Environment.production, "sub-2", null);
         assertEquals(Set.of(SubAgentLocks.LEASE_PREFIX + "sub-1"), held, "the other node's lease is untouched, ours released");
     }
+
+    @Test
+    @DisplayName("a lease granted after the guard gave up waiting (interrupted) is released, not left held and renewed")
+    void lateGrantIsReleased() throws Exception {
+        IConversationLeaseManager leases = mock(IConversationLeaseManager.class);
+        var pending = new CompletableFuture<LeaseHandle>();
+        when(leases.acquireKey(anyString(), any(Duration.class))).thenReturn(pending);
+        var reply = new AtomicReference<String>();
+        var waiter = new Thread(() -> reply.set(SubAgentLocks.withGuard(leases, "sub-late", held -> "ran", () -> "unavailable")));
+        waiter.start();
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (waiter.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) {
+            Thread.sleep(1);
+        }
+
+        waiter.interrupt();
+        waiter.join(5_000);
+        LeaseHandle late = mock(LeaseHandle.class);
+        pending.complete(late);
+
+        assertEquals("unavailable", reply.get());
+        verify(leases).release(late);
+    }
 }

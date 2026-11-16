@@ -355,7 +355,17 @@ public class ConverseWithAgentTool {
                 // One allowance for both turns: what the start turn spent is not handed
                 // to the message turn again.
                 if (remaining.isPresent()) {
-                    double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
+                    double startCost = DelegationBudget.costOf(conversationService, conversationId, Double.NaN);
+                    if (Double.isNaN(startCost)) {
+                        // The start turn's spend could not be read. Fail closed on the message
+                        // (the start may have used the whole allowance), but charge nothing:
+                        // unknown is not spent. The allowance stays held for the rest of this
+                        // turn instead, as for a delegation that timed out.
+                        hold.keep(remaining.getAsDouble());
+                        settled = true;
+                        return "⚠️ What agent '%s' spent starting could not be read, so the message was not sent. Try again later."
+                                .formatted(agentId);
+                    }
                     messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
                     if (!(messageAllowance.getAsDouble() > 0.0)) {
                         budget.charge(startCost);

@@ -2304,8 +2304,6 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             resolvedType = stepModel.modelType();
             processedParams = stepModel.params();
         }
-        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
-
         // R12: the recovery policies a resumed turn shares with a live one. The model
         // phase below runs under the same onError guard, the final answer is re-asked
         // on the same model when responseValidation says "retry" (a single call over
@@ -2346,10 +2344,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
                 || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
-        var resumeBridge = bufferOutput
-                ? null
-                : createToolLoopStreamingBridge(memory.getEventSink(),
-                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+        // The models are built inside the guarded phase below: a provider the registry
+        // refuses (a variable re-pointed to a restricted type while the call awaited
+        // approval) is a failure of the model phase, so onError and the pause cleanup
+        // apply to it like to any other.
+        ChatModel chatModel = null;
+        ToolLoopStreamingChatModel resumeBridge = null;
 
         // Spend gate: the same preflight as the live path, asked before the approved
         // tools run and before the first resumed model request. A conversation (or a
@@ -2368,6 +2368,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             if (spendRefusal != null) {
                 throw new LlmSpendGate.SpendRefusedException(spendRefusal);
             }
+            chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+            resumeBridge = bufferOutput
+                    ? null
+                    : createToolLoopStreamingBridge(memory.getEventSink(),
+                            "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
             result = reaskResumedAnswer(result, retryPolicy, retryListener, chatModel, task, memory, jsonPolicy, currentStep);

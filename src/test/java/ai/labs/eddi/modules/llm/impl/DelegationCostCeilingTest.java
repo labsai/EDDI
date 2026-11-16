@@ -412,6 +412,44 @@ class DelegationCostCeilingTest {
         assertEquals(0.5, reservations.heldUsd(), 1e-9, "never above the ceiling");
     }
 
+    @Test
+    @DisplayName("the spend gate's admission reads the recorded spend inside the reservations lock")
+    void gateAdmissionReadsSpendUnderTheLock() {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        SpendReservations reservations = memory.getSpendReservations();
+        ConversationMemory probe = spy(memory);
+        var readUnderLock = new AtomicBoolean();
+        var readOutsideLock = new AtomicBoolean();
+        doAnswer(invocation -> {
+            (Thread.holdsLock(reservations) ? readUnderLock : readOutsideLock).set(true);
+            return invocation.callRealMethod();
+        }).when(probe).getAllSteps();
+
+        var admission = new LlmSpendGate(null, null).admit(probe, 0.0, 0.1);
+
+        assertNull(admission.refusal());
+        assertTrue(readUnderLock.get(), "spend read under the monitor");
+        assertFalse(readOutsideLock.get(), "and nowhere else");
+        assertEquals(0.1, reservations.heldUsd(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("an unreadable start-turn cost is not charged as spent: the message is refused, nothing is charged, the allowance stays held")
+    void unreadableStartCostIsNotCharged() throws Exception {
+        memory.setConversationCostCeilingUsd(1.0);
+        spent(0.5);
+        when(conversationService.getConversationMemorySnapshot("conv-b")).thenThrow(new IllegalStateException("store down"));
+
+        String result = tool().converseWithAgent("agent-b", "hello", null);
+
+        assertTrue(result.contains("could not be read"), result);
+        assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_DELEGATED_COST), "unknown is not charged");
+        assertEquals(0.5, LlmSpendGate.conversationCost(memory), 1e-9);
+        assertEquals(0.0, new MemoryDelegationBudget(memory).remainingUsd().getAsDouble(), 1e-9, "the allowance stays held");
+        verify(conversationService, never()).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
     /** A callee conversation: earlier turns spent 2.00, this turn carries 0.25. */
     private static ConversationMemory delegatedCallee() {
         var callee = new ConversationMemory("abcdef0123456789abcdef01", "agent-b", 1, "user-1");

@@ -198,8 +198,9 @@ public interface DelegationBudget {
 
     /**
      * The spend a conversation has recorded so far. When it cannot be read,
-     * {@code ifUnknown} — the caller passes the whole allowance, so an unreadable
-     * start turn leaves nothing for the next turn (fail closed).
+     * {@code ifUnknown}: {@code NaN} lets the caller tell unknown from spent (a
+     * start turn whose cost is unreadable refuses the next turn without charging
+     * anything).
      */
     static double costOf(IConversationService conversationService, String conversationId, double ifUnknown) {
         try {

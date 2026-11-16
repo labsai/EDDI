@@ -101,6 +101,8 @@ public class RestConversationStore implements IRestConversationStore {
      * auth-disabled callers are not filtered and never reach this bound.
      */
     private static final int MAX_OWNER_SCAN = 500;
+    /** How many matching legacy rows the search's existence check reads at most. */
+    private static final int MAX_LEGACY_EXISTENCE_SCAN = 100;
 
     /** Smallest descriptor batch of a listing past its first page. */
     private static final int SCAN_BATCH = 100;
@@ -320,6 +322,12 @@ public class RestConversationStore implements IRestConversationStore {
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
         final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, agentId, viewState);
+        // Whether the listing query itself is confined to the caller's conversations
+        // (theirs, plus the legacy ones that record no owner). For such a caller a
+        // first page of only legacy rows can still hold nothing they may list: whose
+        // a legacy row is, only its memory says.
+        final boolean ownerScoped = !seesAllConversations && onlyOwner == null
+                && (isNullOrEmpty(agentId) || !conversationAccessGuard.maintainsAgent(agentId));
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -347,7 +355,8 @@ public class RestConversationStore implements IRestConversationStore {
 
             do {
                 conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
-                if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)
+                if (descriptorPage == 0 && !isNullOrEmpty(textFilter)
+                        && (conversationDescriptors.isEmpty() || ownerScoped && onlyLegacyRows(conversationDescriptors))
                         && searchMatchesNothing(textFilter, restrictions, seesAllConversations, onlyOwner)) {
                     // A search that matches no conversation at all lists everything
                     // instead — decided once, on the first descriptor page, so every
@@ -666,6 +675,12 @@ public class RestConversationStore implements IRestConversationStore {
      * <em>anybody's</em> conversation matched — an existence oracle over other
      * users' ids, names and agent names. A conversation the caller may not list
      * must not change what the caller is shown.
+     * <p>
+     * For the same reason the check counts only conversations that <em>record</em>
+     * the caller as owner, not the legacy ones that record none: whose such a row
+     * is, only its memory says, so a foreign legacy match would again tell an empty
+     * listing from an unfiltered one. A legacy row of the caller's own that matches
+     * is on the listing's first page anyway, so it never needs the fallback.
      */
     private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions, boolean seesAllConversations,
                                          String onlyOwner)
@@ -673,7 +688,55 @@ public class RestConversationStore implements IRestConversationStore {
         if (restrictions.isEmpty()) {
             return true;
         }
-        return readConversationDescriptors(0, 1, textFilter, ownerScope(seesAllConversations, onlyOwner)).isEmpty();
+        if (!readConversationDescriptors(0, 1, textFilter, recordedOwnerScope(seesAllConversations, onlyOwner)).isEmpty()) {
+            return false;
+        }
+        return seesAllConversations || onlyOwner != null || !matchesOwnLegacyConversation(textFilter);
+    }
+
+    /**
+     * Whether a legacy conversation (no owner on its descriptor) that matches the
+     * search belongs to the caller by its memory. Bounded: at most
+     * {@value #MAX_LEGACY_EXISTENCE_SCAN} such rows are read, in one projected
+     * summary read; the outcome never depends on anybody else's rows, only on
+     * whether one of the caller's own is among them.
+     */
+    private boolean matchesOwnLegacyConversation(String textFilter) throws ResourceStoreException, ResourceNotFoundException {
+        var legacyRows = readConversationDescriptors(0, MAX_LEGACY_EXISTENCE_SCAN, textFilter,
+                List.of(new QueryFilters(List.of(new QueryFilter(FIELD_USER_ID, new NotMatching(NOT_BLANK))))));
+        List<String> ids = new ArrayList<>();
+        for (var row : legacyRows) {
+            var resourceId = row.getResource() != null ? extractResourceId(row.getResource()) : null;
+            if (resourceId != null && resourceId.getId() != null) {
+                ids.add(resourceId.getId());
+            }
+        }
+        for (var summary : readListingSummaries(ids, new HashSet<>()).values()) {
+            if (summary != null && !isNullOrEmpty(summary.userId()) && conversationAccessGuard.canAccessConversation(summary.userId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether every row records no owner (pre-v5.1.6 conversations). */
+    private static boolean onlyLegacyRows(List<ConversationDescriptor> rows) {
+        return rows.stream().allMatch(row -> isNullOrEmpty(row.getUserId()));
+    }
+
+    /**
+     * {@link #ownerScope} without the legacy rows that record no owner: the
+     * conversations whose descriptor alone proves the caller may list them.
+     */
+    private List<QueryFilters> recordedOwnerScope(boolean seesAllConversations, String onlyOwner) {
+        if (onlyOwner != null || seesAllConversations) {
+            return ownerScope(seesAllConversations, onlyOwner);
+        }
+        String caller = conversationAccessGuard.callerActor(null);
+        if (caller == null) {
+            return List.of();
+        }
+        return List.of(new QueryFilters(List.of(QueryFilter.exact(FIELD_USER_ID, caller))));
     }
 
     /**

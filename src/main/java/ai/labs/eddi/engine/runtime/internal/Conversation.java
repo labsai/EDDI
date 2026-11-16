@@ -1306,7 +1306,10 @@ public class Conversation implements IConversation {
                     || MemoryKeys.PROPERTIES_EXTRACTED.key().equals(key)) {
                 writable.setResult(List.of());
                 writable.setPossibleResults(null);
-            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":")) {
+            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":") && !ACCOUNTING_KEYS.contains(key)) {
+                // Accounting records are numbers the engine wrote, not client text: a
+                // secret that happens to read "0.125" must not turn a recorded cost into
+                // a placeholder every spend reader then skips.
                 Object cleaned = scrubSecretInputFrom(datum.getResult(), needles, tokens);
                 if (cleaned != null) {
                     writable.setResult(cleaned);

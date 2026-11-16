@@ -524,7 +524,14 @@ public class CreateSubAgentTool {
                     // One allowance for both turns: the start turn's spend is not handed to
                     // the message turn again.
                     if (remaining.isPresent()) {
-                        double startCost = DelegationBudget.costOf(conversationService, conversationId, remaining.getAsDouble());
+                        double startCost = DelegationBudget.costOf(conversationService, conversationId, Double.NaN);
+                        if (Double.isNaN(startCost)) {
+                            // Unreadable start spend: the message is not sent, nothing is
+                            // charged, and the allowance stays held for the rest of this turn.
+                            hold.keep(remaining.getAsDouble());
+                            charged = true;
+                            throw new IllegalStateException("what the sub-agent spent starting could not be read");
+                        }
                         messageAllowance = DelegationBudget.remainderAfter(remaining, startCost);
                         if (!(messageAllowance.getAsDouble() > 0.0)) {
                             budget.charge(startCost);
