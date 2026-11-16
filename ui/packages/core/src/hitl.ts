@@ -109,8 +109,12 @@ export function parseIsoDuration(value: string): number | null {
  * `pausedAt` is `Instant.toString()` on the summary endpoint (ISO-8601), but
  * the `detail=full` snapshot serializes instants as epoch millis, so both
  * forms are accepted.
+ *
+ * A `WAIT_INDEFINITELY` pause is never scheduled, so a stored
+ * `approvalTimeout` says nothing about when it ends and is ignored.
  */
 export function approvalDeadline(status: ApprovalStatus): number | null {
+  if (status.timeoutPolicy === "WAIT_INDEFINITELY") return null;
   const timeout = parseIsoDuration(status.approvalTimeout);
   if (timeout === null || !status.pausedAt) return null;
 

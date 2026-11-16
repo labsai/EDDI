@@ -95,6 +95,10 @@ export function GroupHitlEditor({
         // TASK granularity only applies to TASK_FORCE (the only EXECUTE style).
         granularity: isTaskForce ? hitl.granularity : "PHASE",
         onTaskRejection: hitl.onTaskRejection,
+        // Only meaningful at TASK granularity, where approval is per task; undefined
+        // (dropped from the JSON) reads as the backend default, false.
+        approvalCompletesBacklogTask:
+          isTaskForce && hitl.granularity === "TASK" && hitl.approvalCompletesBacklogTask ? true : undefined,
         approvalContext: hitl.approvalContext ?? null,
       };
     } else {
@@ -244,6 +248,26 @@ export function GroupHitlEditor({
                     <option value="FAIL">{t("hitl.rejectionFail", "Fail the task")}</option>
                     <option value="RETRY">{t("hitl.rejectionRetry", "Retry the task")}</option>
                   </select>
+                </div>
+              )}
+              {hitl.granularity === "TASK" && (
+                <div>
+                  <label className="flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!!hitl.approvalCompletesBacklogTask}
+                      onChange={(e) => patchHitl({ approvalCompletesBacklogTask: e.target.checked })}
+                      className="h-3 w-3 rounded border-input accent-primary"
+                      data-testid="group-hitl-approval-completes-backlog"
+                    />
+                    {t("groups.hitlApprovalCompletesBacklogTask", "Approval counts as done for the backlog")}
+                  </label>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {t(
+                      "groups.hitlApprovalCompletesBacklogTaskHelp",
+                      "Standing teams: a task a person approves stays done when the cadence run is written back, instead of returning to the backlog and running again. Timeout auto-approvals do not count.",
+                    )}
+                  </p>
                 </div>
               )}
             </>
