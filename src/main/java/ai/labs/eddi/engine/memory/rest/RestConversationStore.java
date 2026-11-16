@@ -101,7 +101,7 @@ public class RestConversationStore implements IRestConversationStore {
      * auth-disabled callers are not filtered and never reach this bound.
      */
     private static final int MAX_OWNER_SCAN = 500;
-    /** How many matching legacy rows the search's existence check reads at most. */
+    /** How many matching rows the search's existence check reads at most. */
     private static final int MAX_LEGACY_EXISTENCE_SCAN = 100;
 
     /** Smallest descriptor batch of a listing past its first page. */
@@ -322,12 +322,6 @@ public class RestConversationStore implements IRestConversationStore {
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
         final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, agentId, viewState);
-        // Whether the listing query itself is confined to the caller's conversations
-        // (theirs, plus the legacy ones that record no owner). For such a caller a
-        // first page of only legacy rows can still hold nothing they may list: whose
-        // a legacy row is, only its memory says.
-        final boolean ownerScoped = !seesAllConversations && onlyOwner == null
-                && (isNullOrEmpty(agentId) || !conversationAccessGuard.maintainsAgent(agentId));
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -356,8 +350,8 @@ public class RestConversationStore implements IRestConversationStore {
             do {
                 conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
                 if (descriptorPage == 0 && !isNullOrEmpty(textFilter)
-                        && (conversationDescriptors.isEmpty() || ownerScoped && onlyLegacyRows(conversationDescriptors))
-                        && searchMatchesNothing(textFilter, restrictions, seesAllConversations, onlyOwner)) {
+                        && (conversationDescriptors.isEmpty() || !seesAllConversations)
+                        && searchMatchesNothing(textFilter, restrictions, seesAllConversations, onlyOwner, agentId, reviewable)) {
                     // A search that matches no conversation at all lists everything
                     // instead — decided once, on the first descriptor page, so every
                     // result page of the listing agrees on which rows it is paging through.
@@ -683,7 +677,7 @@ public class RestConversationStore implements IRestConversationStore {
      * is on the listing's first page anyway, so it never needs the fallback.
      */
     private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions, boolean seesAllConversations,
-                                         String onlyOwner)
+                                         String onlyOwner, String agentId, Map<URI, Boolean> reviewable)
             throws ResourceStoreException, ResourceNotFoundException {
         if (restrictions.isEmpty()) {
             return true;
@@ -691,46 +685,58 @@ public class RestConversationStore implements IRestConversationStore {
         if (!readConversationDescriptors(0, 1, textFilter, recordedOwnerScope(seesAllConversations, onlyOwner)).isEmpty()) {
             return false;
         }
-        return seesAllConversations || onlyOwner != null || !matchesOwnLegacyConversation(textFilter);
+        return seesAllConversations || !matchesAdmittedConversation(textFilter, restrictions, onlyOwner, agentId, reviewable);
     }
 
     /**
-     * Whether a legacy conversation (no owner on its descriptor) that matches the
-     * search belongs to the caller by its memory. Bounded: at most
-     * {@value #MAX_LEGACY_EXISTENCE_SCAN} such rows are read, in one projected
-     * summary read; the outcome never depends on anybody else's rows, only on
-     * whether one of the caller's own is among them.
+     * Whether the search matches a conversation the caller would actually be listed
+     * — the one rule for every scoped caller, owner-scoped or reviewing an agent
+     * they maintain. A matching row the listing's checks would reject (a legacy row
+     * whose memory names another owner, or a row without an agent whose memory
+     * names another agent) must not tell a matching search from one that matches
+     * nothing, so each candidate goes through the same descriptor and conversation
+     * checks the listing applies. The listing's own filters (version, state) are
+     * left out: they are not access. Bounded: at most
+     * {@value #MAX_LEGACY_EXISTENCE_SCAN} rows of the listing's query are read,
+     * with one projected summary read for them.
      */
-    private boolean matchesOwnLegacyConversation(String textFilter) throws ResourceStoreException, ResourceNotFoundException {
-        var legacyRows = readConversationDescriptors(0, MAX_LEGACY_EXISTENCE_SCAN, textFilter,
-                List.of(new QueryFilters(List.of(new QueryFilter(FIELD_USER_ID, new NotMatching(NOT_BLANK))))));
+    private boolean matchesAdmittedConversation(String textFilter, List<QueryFilters> restrictions, String onlyOwner, String agentId,
+                                                Map<URI, Boolean> reviewable)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var rows = readConversationDescriptors(0, MAX_LEGACY_EXISTENCE_SCAN, textFilter, restrictions);
+        List<ConversationDescriptor> candidates = new ArrayList<>();
         List<String> ids = new ArrayList<>();
-        for (var row : legacyRows) {
-            var resourceId = row.getResource() != null ? extractResourceId(row.getResource()) : null;
-            if (resourceId != null && resourceId.getId() != null) {
-                ids.add(resourceId.getId());
+        for (var stored : rows) {
+            // A copy: the checks fill a legacy row from its conversation, and the row
+            // read here may be the same object the listing reads next.
+            var row = new ConversationDescriptor();
+            row.setResource(stored.getResource());
+            row.setUserId(stored.getUserId());
+            row.setAgentResource(stored.getAgentResource());
+            String id = recordedOwnerAdmits(row, false, onlyOwner, agentId, reviewable);
+            if (id != null) {
+                candidates.add(row);
+                ids.add(id);
             }
         }
-        for (var summary : readListingSummaries(ids, new HashSet<>()).values()) {
-            if (summary != null && !recordsNoOwner(summary.userId()) && conversationAccessGuard.canAccessConversation(summary.userId())) {
+        Map<String, ConversationListingSummary> summaries = readListingSummaries(ids, new HashSet<>());
+        for (int i = 0; i < candidates.size(); i++) {
+            var summary = summaries.get(ids.get(i));
+            if (summary != null && conversationAdmits(candidates.get(i), summary, false, agentId, null, null, null)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** Whether every row records no owner (pre-v5.1.6 conversations). */
-    private static boolean onlyLegacyRows(List<ConversationDescriptor> rows) {
-        return rows.stream().allMatch(row -> recordsNoOwner(row.getUserId()));
-    }
-
     /**
      * Whether a descriptor's {@code userId} records no owner: null, empty or only
      * whitespace. The one definition of a legacy row, shared by the owner query
      * (which matches a userId without a non-whitespace character,
-     * {@link #NOT_BLANK}), the per-row checks and the search's fallback decision.
-     * Two definitions let a whitespace-only owner be legacy to the query and owned
-     * to the checks, which rejected the row without the fallback running.
+     * {@link #NOT_BLANK}) and the per-row checks, which the search's fallback
+     * decision runs too. Two definitions let a whitespace-only owner be legacy to
+     * the query and owned to the checks, which rejected the row without the
+     * fallback running.
      */
     static boolean recordsNoOwner(String userId) {
         return userId == null || userId.isBlank();

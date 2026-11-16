@@ -141,6 +141,9 @@ class RestConversationStoreOwnershipTest {
         var guard = spy(new ConversationAccessGuard(identity, new OwnershipValidator(true),
                 mock(IConversationDescriptorStore.class)));
         lenient().doReturn(maintainer).when(guard).maintainsAgent(anyString());
+        if (maintainer) {
+            lenient().doReturn(true).when(guard).canReview(any());
+        }
         return new RestConversationStore(documentDescriptorStore, conversationDescriptorStore,
                 conversationMemoryStore, conversationService, userMemoryStore, runtime, guard, mock(ResourceAccessGuard.class),
                 30, 90, attachmentStorageInstance);
@@ -646,6 +649,105 @@ class RestConversationStoreOwnershipTest {
 
         assertEquals(probeMiss.size(), probeHit.size(), "the two searches must not be told apart");
         assertTrue(probeHit.stream().noneMatch(d -> d.getResource().toString().contains(legacyId)), "the foreign row is never listed");
+    }
+
+    @Test
+    @DisplayName("an agent maintainer's search matching only a legacy conversation of another agent answers like one matching nothing")
+    void maintainerSearchIsNoOracleOverAnotherAgentsLegacyConversation() throws Exception {
+        maintainerLegacySearchAnswersLikeNoMatch("0000000000000000000000b2");
+    }
+
+    @Test
+    @DisplayName("an agent maintainer's search matching only somebody else's legacy conversation of that agent answers like one matching nothing")
+    void maintainerSearchIsNoOracleOverAnotherUsersLegacyConversation() throws Exception {
+        maintainerLegacySearchAnswersLikeNoMatch("0000000000000000000000a1");
+    }
+
+    @Test
+    @DisplayName("an agent maintainer still finds another user's conversation of that agent by search: review access is kept")
+    void maintainerSearchStillFindsReviewableConversations() throws Exception {
+        String agent = "0000000000000000000000a1";
+        URI agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=1");
+        var theirs = descriptor("0a0a0a0a0a0a0a0a0a0a0a03", "other-user");
+        theirs.setAgentResource(agentResource);
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(invocation -> (Integer) invocation.getArgument(2) == 0
+                        && (invocation.getArgument(1) == null || theirs.getResource().toString().contains((String) invocation.getArgument(1)))
+                        && !hasExactOwner(invocation.getArgument(5))
+                                ? List.of(theirs)
+                                : List.of());
+
+        var found = storeAs(OWNER, true, "eddi-viewer").readConversationDescriptors(0, 20, "0a0a0a0a0a0a0a0a0a0a0a03", null, agent, null,
+                null, null);
+
+        assertEquals(1, found.size(), "a maintainer reviews the agent's conversations, search included");
+    }
+
+    /**
+     * A fresh copy per read, as the descriptor store returns: the listing fills
+     * rows in place.
+     */
+    private static ConversationDescriptor copyOf(ConversationDescriptor stored) {
+        var copy = new ConversationDescriptor();
+        copy.setResource(stored.getResource());
+        copy.setUserId(stored.getUserId());
+        copy.setAgentResource(stored.getAgentResource());
+        copy.setAgentName(stored.getAgentName());
+        copy.setLastModifiedOn(stored.getLastModifiedOn());
+        return copy;
+    }
+
+    private static boolean hasExactOwner(List<IResourceFilter.QueryFilters> restrictions) {
+        return restrictions != null && restrictions.stream().flatMap(group -> group.getQueryFilters().stream())
+                .anyMatch(f -> "userId".equals(f.getField()) && f.isExact());
+    }
+
+    /**
+     * A maintainer of the agent lists it; a legacy row with neither owner nor agent
+     * on its descriptor matches the search, and its memory names another user and
+     * {@code memoryAgent}.
+     */
+    private void maintainerLegacySearchAnswersLikeNoMatch(String memoryAgent) throws Exception {
+        String agent = "0000000000000000000000a1";
+        URI agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=1");
+        var mine = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
+        mine.setAgentResource(agentResource);
+        String legacyId = "0a0a0a0a0a0a0a0a0a0a0a02";
+        var legacy = descriptor(legacyId, null);
+        var foreignMemory = new ConversationMemorySnapshot();
+        foreignMemory.setConversationState(ConversationState.READY);
+        foreignMemory.setConversationSteps(new ArrayList<>());
+        foreignMemory.setUserId("victim-principal");
+        foreignMemory.setAgentId(memoryAgent);
+        foreignMemory.setAgentVersion(1);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(legacyId)).thenReturn(foreignMemory);
+        List<ConversationDescriptor> store = List.of(mine, legacy);
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(invocation -> {
+                    if ((Integer) invocation.getArgument(2) != 0) {
+                        return List.of();
+                    }
+                    String text = invocation.getArgument(1);
+                    List<IResourceFilter.QueryFilters> restrictions = invocation.getArgument(5);
+                    String ownerOnly = restrictions == null
+                            ? null
+                            : restrictions.stream().filter(group -> group.getQueryFilters().size() == 1)
+                                    .flatMap(group -> group.getQueryFilters().stream())
+                                    .filter(f -> "userId".equals(f.getField()) && f.isExact())
+                                    .map(f -> (String) f.getFilter()).findFirst().orElse(null);
+                    return store.stream()
+                            .filter(d -> text == null || d.getResource().toString().contains(text))
+                            .filter(d -> ownerOnly == null || ownerOnly.equals(d.getUserId()))
+                            .map(RestConversationStoreOwnershipTest::copyOf)
+                            .toList();
+                });
+        var maintainer = storeAs(OWNER, true, "eddi-viewer");
+
+        var probeHit = maintainer.readConversationDescriptors(0, 20, legacyId, null, agent, null, null, null);
+        var probeMiss = maintainer.readConversationDescriptors(0, 20, "ffffffff", null, agent, null, null, null);
+
+        assertEquals(probeMiss.size(), probeHit.size(), "the two searches must not be told apart");
+        assertTrue(probeHit.stream().noneMatch(d -> d.getResource().toString().contains(legacyId)), "the rejected row is never listed");
     }
 
     @Test
