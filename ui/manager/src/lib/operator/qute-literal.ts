@@ -63,6 +63,17 @@ interface Segment {
   kept: boolean;
 }
 
+/**
+ * True when the brace at `index` is backslash-escaped: preceded by an ODD number
+ * of backslashes. Qute consumes only the last one, and reads an even run
+ * (`\\{`) as plain backslashes in front of a live brace; the corpus records both.
+ */
+function isEscaped(text: string, index: number): boolean {
+  let slashes = 0;
+  while (index - slashes > 0 && text[index - slashes - 1] === "\\") slashes++;
+  return slashes % 2 === 1;
+}
+
 /** `text` cut at the spans the escape never touches. */
 function segments(text: string): Segment[] {
   const out: Segment[] = [];
@@ -71,10 +82,17 @@ function segments(text: string): Segment[] {
     const at = rest.indexOf(BODY_APP_CONTEXT);
     const head = at < 0 ? rest : rest.slice(0, at);
     let last = 0;
-    for (const match of head.matchAll(KEPT)) {
+    const kept = new RegExp(KEPT.source, "g");
+    for (let match = kept.exec(head); match; match = kept.exec(head)) {
+      if (isEscaped(head, match.index)) {
+        // `\{` is a literal brace to Qute, so this is not an opener: look again one character on.
+        kept.lastIndex = match.index + 1;
+        continue;
+      }
       if (match.index > last) out.push({ text: head.slice(last, match.index), kept: false });
       out.push({ text: match[0], kept: true });
       last = match.index + match[0].length;
+      kept.lastIndex = last;
     }
     if (last < head.length) out.push({ text: head.slice(last), kept: false });
     if (at < 0) break;

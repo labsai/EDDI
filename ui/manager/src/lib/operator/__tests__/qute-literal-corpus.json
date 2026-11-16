@@ -312,6 +312,48 @@
       "text": "{||before |} {input} after||} then {a}",
       "kind": "raw",
       "escaped": "{||before |} {input} after||} then {|{|}a}"
+    },
+    {
+      "name": "backslash-escaped raw opener is a literal brace, not a block",
+      "text": "\\{||example {input}||}",
+      "kind": "expression",
+      "escaped": "{|\\{|}||example {|{|}input}||}"
+    },
+    {
+      "name": "double backslash before a raw opener leaves the block real",
+      "text": "\\\\{||example {input}||}",
+      "kind": "raw",
+      "escaped": "\\\\{||example {input}||}"
+    },
+    {
+      "name": "backslash-escaped expression",
+      "text": "\\{input}",
+      "kind": "expression",
+      "escaped": "{|\\{|}input}"
+    },
+    {
+      "name": "double backslash before an expression",
+      "text": "\\\\{input}",
+      "kind": "expression",
+      "escaped": "{|\\\\{|}input}"
+    },
+    {
+      "name": "triple backslash before an expression",
+      "text": "\\\\\\{input}",
+      "kind": "expression",
+      "escaped": "{|\\\\\\{|}input}"
+    },
+    {
+      "name": "backslash before a reference mention",
+      "text": "\\{vault:key}",
+      "kind": "expression",
+      "escaped": "{|\\{|}vault:key}"
+    },
+    {
+      "name": "double backslash before a closer",
+      "text": "\\\\}",
+      "kind": "inert",
+      "escaped": "{|\\\\}|}"
     }
   ]
 }
