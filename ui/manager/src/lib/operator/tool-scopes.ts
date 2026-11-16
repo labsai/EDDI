@@ -155,6 +155,9 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /workflowstore/workflows/{id}",
   "GET /groupstore/groups/descriptors",
   "GET /groupstore/groups/{id}",
+  // The end-user catalog — "what do my users see in Workforce?" (IRestCatalog).
+  "GET /catalog/agents",
+  "GET /catalog/groups",
   // Workflow extensions — the by-id read half of every authoring pair below.
   // Each is reached by navigating agent -> workflow -> the exact id+version a
   // step's resourceUri names, never by browsing a store's full contents, so no
