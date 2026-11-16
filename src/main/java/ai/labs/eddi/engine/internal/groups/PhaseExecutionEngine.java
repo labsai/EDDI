@@ -351,16 +351,12 @@ public class PhaseExecutionEngine {
                 if (content == null || content.isBlank() || AbstentionDetector.isAbstention(content)) {
                     continue;
                 }
-                // Carries the envelope executeAgentTurn already computed rather than
-                // rebuilding bare: a DISSENT is a real member-authored contribution
-                // peers can read, so dropping its signature would make it the one
-                // entry type a signing-enabled group cannot verify — the same defect
-                // the tool-rejection path documents at MemberTurnExecutor's
-                // tryResolveMemberToolPause.
-                var dissentEntry = new TranscriptEntry(
+                // Signed as what it is: a DISSENT is a real member-authored contribution
+                // peers can read, and the signature covers the entry type, so the
+                // reply's own signature (made for the turn's type) would not verify.
+                var dissentEntry = memberTurnExecutor.sign(gc, new TranscriptEntry(
                         member.agentId(), member.displayName(), content,
-                        phaseIdx, phase.name(), TranscriptEntryType.DISSENT, Instant.now(), null, null,
-                        reply.signature(), reply.signatureNonce(), reply.signatureTimestampMs(), reply.signatureKeyVersion());
+                        phaseIdx, phase.name(), TranscriptEntryType.DISSENT, Instant.now(), null, null));
                 gc.getTranscript().add(dissentEntry);
                 collected.add(new Dissent(member.agentId(), member.displayName(), content));
                 if (listener != null) {

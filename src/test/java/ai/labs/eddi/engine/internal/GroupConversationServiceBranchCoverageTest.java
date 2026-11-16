@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -75,8 +74,6 @@ class GroupConversationServiceBranchCoverageTest {
     private AgentSigningService agentSigningService;
     @Mock
     private IAgentStore agentStore;
-    @Mock
-    private NonceCacheService nonceCacheService;
 
     private GroupConversationService service;
     private GroupConversationService serviceWithSigning;
@@ -93,13 +90,13 @@ class GroupConversationServiceBranchCoverageTest {
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         // Service with signing infrastructure
         serviceWithSigning = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                agentSigningService, agentStore, null, nonceCacheService, null, new CallerIdentityContext(null, null), "default", 3);
+                agentSigningService, agentStore, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -464,8 +461,6 @@ class GroupConversationServiceBranchCoverageTest {
                     .thenReturn(signedEnvelope);
             when(agentSigningService.verifyEnvelope(any(), eq("test-pub-key")))
                     .thenReturn(true);
-            when(nonceCacheService.validate(anyString(), anyLong()))
-                    .thenReturn(NonceCacheService.NonceValidation.VALID);
 
             stubAgent("a1", "Opinion A");
 
@@ -514,50 +509,6 @@ class GroupConversationServiceBranchCoverageTest {
             // Self-verify fails
             when(agentSigningService.verifyEnvelope(any(), anyString()))
                     .thenReturn(false);
-
-            stubAgent("a1", "Opinion");
-
-            var modResourceId = mock(IResourceStore.IResourceId.class);
-            when(modResourceId.getVersion()).thenReturn(1);
-            when(agentStore.getCurrentResourceId("mod")).thenReturn(modResourceId);
-            when(agentStore.read("mod", 1)).thenReturn(new AgentConfiguration());
-            stubAgent("mod", "Synthesis");
-
-            var result = serviceWithSigning.discuss(GROUP_ID, QUESTION, USER_ID, 0);
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
-        }
-
-        @Test
-        @DisplayName("should fall back when nonce validation fails")
-        void fallsBackOnNonceValidationFailure() throws Exception {
-            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
-                    new GroupMember("a1", "Alice", 1, null));
-            cfg.setModeratorAgentId("mod");
-            setupStore(cfg);
-
-            var agentCfg = new AgentConfiguration();
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignInterAgentMessages(true);
-            agentCfg.setSecurity(security);
-            var identity = new AgentConfiguration.AgentIdentity();
-            identity.setKeys(List.of(new AgentPublicKey(0, "pub-key", Instant.now().toEpochMilli(), 0)));
-            agentCfg.setIdentity(identity);
-
-            var agentResourceId = mock(IResourceStore.IResourceId.class);
-            when(agentResourceId.getVersion()).thenReturn(1);
-            when(agentStore.getCurrentResourceId("a1")).thenReturn(agentResourceId);
-            when(agentStore.read("a1", 1)).thenReturn(agentCfg);
-
-            var signedEnvelope = new SignedEnvelope("a1", GROUP_ID,
-                    Map.of("content", "Opinion", "phase", "Discuss"),
-                    "nonce-1", System.currentTimeMillis(), "sig", 0);
-            when(agentSigningService.signEnvelope(any(), eq("a1"), any(), anyInt()))
-                    .thenReturn(signedEnvelope);
-            when(agentSigningService.verifyEnvelope(any(), anyString()))
-                    .thenReturn(true);
-            // Nonce validation fails
-            when(nonceCacheService.validate(anyString(), anyLong()))
-                    .thenReturn(NonceCacheService.NonceValidation.TOO_OLD);
 
             stubAgent("a1", "Opinion");
 
@@ -624,15 +575,6 @@ class GroupConversationServiceBranchCoverageTest {
             when(agentStore.getCurrentResourceId("a1")).thenReturn(agentResourceId);
             when(agentStore.read("a1", 1)).thenReturn(agentCfg);
 
-            var signedEnvelope = new SignedEnvelope("a1", GROUP_ID,
-                    Map.of("content", "Opinion", "phase", "Discuss"),
-                    "nonce-1", System.currentTimeMillis(), "sig", 0);
-            when(agentSigningService.signEnvelope(any(), eq("a1"), any(), eq(0)))
-                    .thenReturn(signedEnvelope);
-            // No public key => self-verify skipped, but nonce validation still happens
-            when(nonceCacheService.validate(anyString(), anyLong()))
-                    .thenReturn(NonceCacheService.NonceValidation.VALID);
-
             stubAgent("a1", "Opinion");
 
             var modResourceId = mock(IResourceStore.IResourceId.class);
@@ -643,6 +585,11 @@ class GroupConversationServiceBranchCoverageTest {
 
             var result = serviceWithSigning.discuss(GROUP_ID, QUESTION, USER_ID, 0);
             assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // No key declared: nothing is signed, and the entry goes out unsigned.
+            verify(agentSigningService, never()).signEnvelope(any(), any(), any(), anyInt());
+            assertTrue(result.getTranscript().stream()
+                    .filter(e -> "a1".equals(e.speakerAgentId()))
+                    .allMatch(e -> e.signature() == null));
         }
     }
 
