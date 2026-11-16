@@ -36,8 +36,13 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
 - Stale-claim reclaim (review fix, also present before this branch): the writeback now reads the
   discussion after the cancel instead of the snapshot taken before it. If an approval resumed the
   run in between, the cancel only signals the live leg, so the claim stays held and the run is
-  settled from its final task list once the leg ends; before, the tasks it finished went back to
-  `PENDING`. `eddi_team_cadence_claims_reclaimed_total` now counts only claims actually released.
+  written back from its final task list, by the ordinary rule for the state it ended in, once the
+  leg ends (a PHASE rejection keeps its rule; a cancel keeps finished tasks only with
+  `stoppedRunKeepsFinishedTasks`). `eddi_team_cadence_claims_reclaimed_total` now counts only
+  claims actually released.
+- A cadence discussion that cannot be read is no longer treated as deleted: only
+  `ResourceNotFoundException` releases its run at once. Any other read failure keeps the run until
+  its claim TTL, so a transient store error cannot hand its tasks to a second run.
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).

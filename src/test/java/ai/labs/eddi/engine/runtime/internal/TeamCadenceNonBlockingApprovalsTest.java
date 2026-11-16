@@ -366,31 +366,51 @@ class TeamCadenceNonBlockingApprovalsTest {
 
         private TaskItem task;
         private GroupWorkspace workspace;
-        private GroupConversation gc;
 
         @BeforeEach
-        void stale() throws Exception {
+        void stale() {
             task = new TaskItem("Draft the post", "", 5);
             workspace = workspace(task);
             claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), task);
-            gc = discussion(PAUSED_ID, GroupConversationState.AWAITING_APPROVAL);
-            // An approval landed between the reclaim's read and its cancel: the run is
-            // IN_PROGRESS again, so the cancel only signals the live leg and the stored
-            // discussion is not ended.
-            when(groupConversationService.cancelDiscussion(eq(PAUSED_ID), any())).thenAnswer(inv -> {
-                gc.setState(GroupConversationState.IN_PROGRESS);
-                return true;
-            });
+        }
+
+        /** One stored version of the discussion; each read returns its own copy. */
+        private GroupConversation snapshot(GroupConversationState state, HitlPauseType pauseType,
+                                           boolean taskVerified) {
+            var gc = new GroupConversation();
+            gc.setId(PAUSED_ID);
+            gc.setGroupId(GROUP_ID);
+            gc.setState(state);
+            gc.setHitlPauseType(pauseType);
+            var tasks = new SharedTaskList();
+            if (taskVerified) {
+                verified(tasks, "Draft the post");
+            }
+            gc.setTaskList(tasks);
+            return gc;
+        }
+
+        private GroupConversation paused() {
+            return snapshot(GroupConversationState.AWAITING_APPROVAL, HitlPauseType.TASK, false);
+        }
+
+        private TaskStatus status() {
+            return workspace.getBacklog().findById(task.id()).status();
         }
 
         @Test
         @DisplayName("a run an approval resumed keeps its claim and its tasks — nothing is written from the pre-cancel snapshot")
         void resumedRunKeepsTheClaim() throws Exception {
+            // The approval landed between the reclaim's read and its cancel: the run is
+            // IN_PROGRESS again, so the cancel only signalled the live leg.
+            when(conversationStore.read(PAUSED_ID)).thenReturn(paused(),
+                    snapshot(GroupConversationState.IN_PROGRESS, null, false));
+
             assertFalse(service.reconcile(workspace));
 
             verify(groupConversationService).cancelDiscussion(PAUSED_ID, ControlSignal.CANCEL_GRACEFUL);
             assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
-            assertEquals(TaskStatus.IN_PROGRESS, workspace.getBacklog().findById(task.id()).status());
+            assertEquals(TaskStatus.IN_PROGRESS, status());
             verify(workspaceStore, never()).casRunningDiscussion(any());
             assertEquals(0, meters.counter("eddi_team_cadence_claims_reclaimed_total").count(),
                     "no claim was released");
@@ -399,17 +419,90 @@ class TeamCadenceNonBlockingApprovalsTest {
         @Test
         @DisplayName("once the resumed leg ends, the run is settled from its final task list")
         void resumedRunIsSettledFromItsFinalState() throws Exception {
-            service.reconcile(workspace);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(paused(),
+                    snapshot(GroupConversationState.IN_PROGRESS, null, false),
+                    snapshot(GroupConversationState.COMPLETED, null, true));
 
-            gc.setState(GroupConversationState.COMPLETED);
-            var tasks = new SharedTaskList();
-            verified(tasks, "Draft the post");
-            gc.setTaskList(tasks);
+            assertFalse(service.reconcile(workspace));
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.VERIFIED, status(), "the task the resumed leg finished is not run again");
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+        }
+
+        @Test
+        @DisplayName("on: a task finished before the cancel ended the run is kept — read from the post-cancel state")
+        void cancelledRunKeepsWhatItFinished() throws Exception {
+            configure(null, true, false);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(paused(),
+                    snapshot(GroupConversationState.CANCELLED, HitlPauseType.TASK, true));
 
             assertTrue(service.reconcile(workspace));
-            assertEquals(TaskStatus.VERIFIED, workspace.getBacklog().findById(task.id()).status(),
-                    "the task the resumed leg finished is not run again");
+
+            assertEquals(TaskStatus.VERIFIED, status());
+            assertEquals(1, meters.counter("eddi_team_cadence_claims_reclaimed_total").count());
+        }
+
+        @Test
+        @DisplayName("on: a PHASE rejection that lands before the post-cancel read keeps its rule — everything returns")
+        void phaseRejectionKeepsItsRule() throws Exception {
+            configure(null, true, false);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(paused(),
+                    snapshot(GroupConversationState.REJECTED, HitlPauseType.PHASE, true));
+
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.PENDING, status(), "the person declined the phase's whole output");
+        }
+    }
+
+    @Nested
+    @DisplayName("a discussion that cannot be read")
+    class UnreadableDiscussion {
+
+        private TaskItem task;
+        private GroupWorkspace workspace;
+
+        @BeforeEach
+        void unreadable() throws Exception {
+            task = new TaskItem("Draft the post", "", 5);
+            workspace = workspace(task);
+            when(conversationStore.read(PAUSED_ID)).thenThrow(new IResourceStore.ResourceStoreException("timeout"));
+        }
+
+        @Test
+        @DisplayName("is not treated as deleted: the run keeps its claim and its tasks")
+        void keepsTheRun() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
+
+            assertFalse(service.reconcile(workspace));
+
+            assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.IN_PROGRESS, workspace.getBacklog().findById(task.id()).status());
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+        }
+
+        @Test
+        @DisplayName("a parked run keeps its place too")
+        void keepsTheParkedRun() throws Exception {
+            workspace.setParkedRuns(List.of(new ParkedRun(PAUSED_ID, Instant.now().minus(Duration.ofHours(1)),
+                    hold(workspace, task))));
+
+            assertTrue(service.reconcile(workspace), "nothing was lost; the claim slot is free");
+
+            assertEquals(1, workspace.getParkedRuns().size());
+            assertEquals(TaskStatus.IN_PROGRESS, workspace.getBacklog().findById(task.id()).status());
+        }
+
+        @Test
+        @DisplayName("past the claim TTL it is released, so a document that never reads again cannot wedge the team")
+        void releasedPastTheTtl() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), task);
+
+            assertTrue(service.reconcile(workspace));
+
             assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(task.id()).status());
         }
     }
 
@@ -700,19 +793,18 @@ class TeamCadenceNonBlockingApprovalsTest {
     void keepsFinishedTasksMatrix() {
         var gc = new GroupConversation();
         gc.setState(GroupConversationState.FAILED);
-        assertTrue(TeamCadenceService.keepsFinishedTasks(gc, false));
+        assertTrue(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setState(GroupConversationState.CANCELLED);
-        assertTrue(TeamCadenceService.keepsFinishedTasks(gc, false));
+        assertTrue(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setState(GroupConversationState.REJECTED);
         gc.setHitlPauseType(HitlPauseType.TASK);
-        assertTrue(TeamCadenceService.keepsFinishedTasks(gc, false));
+        assertTrue(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setHitlPauseType(HitlPauseType.PHASE);
-        assertFalse(TeamCadenceService.keepsFinishedTasks(gc, false));
+        assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setHitlPauseType(null);
-        assertFalse(TeamCadenceService.keepsFinishedTasks(gc, false));
+        assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
         gc.setState(GroupConversationState.AWAITING_APPROVAL);
-        assertFalse(TeamCadenceService.keepsFinishedTasks(gc, false));
-        assertTrue(TeamCadenceService.keepsFinishedTasks(gc, true), "a reclaim is a stop whatever the last state");
+        assertFalse(TeamCadenceService.keepsFinishedTasks(gc));
     }
 
     @Test

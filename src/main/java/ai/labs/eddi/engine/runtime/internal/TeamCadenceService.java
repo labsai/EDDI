@@ -530,12 +530,26 @@ public class TeamCadenceService {
         GroupConversation gc;
         try {
             gc = conversationStore.read(run.discussionId());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Deleted — release the claim and return the pulled tasks; holding the
+            // workspace hostage to a vanished discussion would stall every future fire.
+            LOGGER.warnf("Cadence discussion %s for group %s is gone — releasing the claim",
+                    run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()));
+            return written(writebackFailure(workspace, run, null, 0));
         } catch (Exception e) {
-            // Deleted or unreadable — release the claim and return the pulled
-            // tasks; holding the workspace hostage to a vanished discussion would
-            // stall every future fire.
-            LOGGER.warnf("Cadence discussion %s for group %s is gone (%s) — releasing the claim",
-                    run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+            // Unreadable is not gone: the discussion may still be running, and
+            // returning its tasks to PENDING would let another run execute them
+            // alongside it. Keep the run and retry at the next fire -- unless the
+            // claim is past its TTL, so a document that never reads again cannot
+            // wedge the team.
+            if (!pastTtl(run)) {
+                LOGGER.warnf("Could not read cadence discussion %s for group %s (%s) — keeping the claim",
+                        run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+                return Settled.IN_FLIGHT;
+            }
+            LOGGER.warnf("Cadence discussion %s for group %s is unreadable (%s) past the %s claim TTL — releasing the claim",
+                    run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName(),
+                    claimTtl);
             return written(writebackFailure(workspace, run, null, 0));
         }
         return switch (gc.getState()) {
@@ -579,18 +593,10 @@ public class TeamCadenceService {
      * path. A parked run is measured from its original claim, the same way.
      */
     private Settled reclaimIfStale(GroupWorkspace workspace, Run run, GroupConversation gc) {
-        if (claimTtl == null || claimTtl.isZero() || claimTtl.isNegative()) {
+        if (!pastTtl(run)) {
             return Settled.IN_FLIGHT;
         }
         Instant claimedAt = run.claimedAt();
-        if (claimedAt == null) {
-            // A workspace written before the stamp existed. Reclaiming on a missing
-            // timestamp would be a guess; it gets a stamp on its next claim.
-            return Settled.IN_FLIGHT;
-        }
-        if (Instant.now().isBefore(claimedAt.plus(claimTtl))) {
-            return Settled.IN_FLIGHT;
-        }
 
         LOGGER.warnf("Cadence claim on group %s has been held since %s (past the %s TTL) by %sdiscussion %s in state %s — "
                 + "cancelling it and releasing the claim so the team's cadences can fire again",
@@ -621,12 +627,26 @@ public class TeamCadenceService {
             return Settled.IN_FLIGHT;
         }
         cadenceClaimsReclaimed.increment();
-        // The ordinary writeback for the state the run ended in. A graceful cancel
-        // lets the current phase finish, so a run can still end COMPLETED; anything
-        // else is a stop (reclaimed = true), whatever the pre-cancel state was.
+        // The ordinary writeback for the state the run ended in, by the same rules as
+        // any other ended run: a graceful cancel lets the current phase finish, so a
+        // run can still end COMPLETED; a person can still have rejected it, and a
+        // rejection at a PHASE pause keeps that rule rather than counting as a stop.
         return after.getState() == GroupConversationState.COMPLETED
                 ? written(writebackCompleted(workspace, run, after, 0))
-                : written(writebackFailure(workspace, run, after, 0, true));
+                : written(writebackFailure(workspace, run, after, 0));
+    }
+
+    /**
+     * Whether {@code run}'s claim is older than {@link #claimTtl}. Never for a
+     * non-positive TTL (reclaiming disabled) or a missing stamp: a workspace
+     * written before the stamp existed gets one on its next claim, not a guessed
+     * expiry.
+     */
+    private boolean pastTtl(Run run) {
+        if (claimTtl == null || claimTtl.isZero() || claimTtl.isNegative() || run.claimedAt() == null) {
+            return false;
+        }
+        return !Instant.now().isBefore(run.claimedAt().plus(claimTtl));
     }
 
     /** States a discussion does not leave: no leg runs, and none will. */
@@ -795,19 +815,9 @@ public class TeamCadenceService {
     }
 
     private boolean writebackFailure(GroupWorkspace workspace, Run run, GroupConversation gc, int attempt) {
-        return writebackFailure(workspace, run, gc, attempt, false);
-    }
-
-    /**
-     * @param reclaimed
-     *            the run is being stopped by the claim TTL, so {@code gc}'s state
-     *            is its last in-flight one rather than a terminal one
-     */
-    private boolean writebackFailure(GroupWorkspace workspace, Run run, GroupConversation gc, int attempt,
-                                     boolean reclaimed) {
         boolean keepFinished = false;
         boolean approvalCountsAsDone = false;
-        if (gc != null && !run.pulledTaskIds().isEmpty() && keepsFinishedTasks(gc, reclaimed)) {
+        if (gc != null && !run.pulledTaskIds().isEmpty() && keepsFinishedTasks(gc)) {
             HitlConfig hitl = hitlConfig(workspace.getGroupId());
             keepFinished = hitl != null && hitl.isStoppedRunKeepsFinishedTasks();
             approvalCountsAsDone = keepFinished && hitl.isApprovalCompletesBacklogTask();
@@ -826,22 +836,20 @@ public class TeamCadenceService {
         }
         return settle(workspace, run, gc, attempt, fresh -> {
             Run freshRun = run.in(fresh);
-            return freshRun != null && writebackFailure(fresh, freshRun, gc, attempt + 1, reclaimed);
+            return freshRun != null && writebackFailure(fresh, freshRun, gc, attempt + 1);
         });
     }
 
     /**
      * Which stopped runs {@code stoppedRunKeepsFinishedTasks} applies to: every
      * stop nobody decided against the work — a failure, a cancel (an ABORT timeout,
-     * a person's cancel), a claim-TTL reclaim — and a rejection at a TASK pause,
-     * which is a decision about the undecided tasks only (an AUTO_REJECT timeout,
-     * or a person's phase-level "reject" while tasks waited). A rejection at a
-     * PHASE pause is not: the person declined the phase's whole output.
+     * a person's cancel, a claim-TTL reclaim, which is written back from the
+     * CANCELLED state it ends in — and a rejection at a TASK pause, which is a
+     * decision about the undecided tasks only (an AUTO_REJECT timeout, or a
+     * person's phase-level "reject" while tasks waited). A rejection at a PHASE
+     * pause is not: the person declined the phase's whole output.
      */
-    static boolean keepsFinishedTasks(GroupConversation gc, boolean reclaimed) {
-        if (reclaimed) {
-            return true;
-        }
+    static boolean keepsFinishedTasks(GroupConversation gc) {
         return switch (gc.getState()) {
             case FAILED, CANCELLED -> true;
             case REJECTED -> gc.getHitlPauseType() == HitlPauseType.TASK;
