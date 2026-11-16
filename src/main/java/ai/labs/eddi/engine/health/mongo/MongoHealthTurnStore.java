@@ -7,7 +7,12 @@ package ai.labs.eddi.engine.health.mongo;
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
+import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
+import ai.labs.eddi.engine.health.model.HealthUsage;
+import ai.labs.eddi.engine.health.model.HealthUsagePoint;
+import ai.labs.eddi.engine.health.model.HealthUsageQuery;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
@@ -31,18 +36,23 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
+import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.ne;
@@ -69,7 +79,10 @@ import static com.mongodb.client.model.Filters.or;
  * </ul>
  * {@code day} is stored as an ISO {@code yyyy-MM-dd} string, which sorts and
  * range-compares in day order. A discard marker carries {@code discardedAt} and
- * no {@code timestamp}; reads skip it.
+ * no {@code timestamp}; reads skip it. A late write's stamp is
+ * {@code writtenAt}, set by the write that carries it and removed
+ * ({@code $$REMOVE}) by every other applied write, so its sparse index holds
+ * the late rows only.
  */
 @ApplicationScoped
 @DefaultBean
@@ -108,6 +121,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     static final String FIELD_ACTIONS = "actions";
     static final String FIELD_DISCARDED = "discarded";
     static final String FIELD_DISCARDED_AT = "discardedAt";
+    static final String FIELD_WRITTEN_LATE = "writtenAt";
 
     private final MongoCollection<Document> turns;
 
@@ -126,6 +140,9 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         turns.createIndex(Indexes.ascending(FIELD_DISCARDED_AT),
                 new IndexOptions().name("idx_health_turns_discarded_at").sparse(true).background(true));
         turns.createIndex(Indexes.ascending(FIELD_UPDATED), new IndexOptions().name("idx_health_turns_updated").background(true));
+        // Late rows only: the self-heal finds them by when they were written.
+        turns.createIndex(Indexes.ascending(FIELD_WRITTEN_LATE),
+                new IndexOptions().name("idx_health_turns_written_late").sparse(true).background(true));
     }
 
     /** For tests: a collection without index creation. */
@@ -147,15 +164,15 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
      * ignored.
      */
     @Override
-    public void upsert(HealthTurn turn) {
+    public void upsert(HealthTurn turn, Instant lateWrittenAt) {
         try {
-            guardedUpsert(turn);
+            guardedUpsert(turn, lateWrittenAt);
         } catch (MongoException e) {
             if (!isDuplicateKey(e)) {
                 throw new HealthStoreException("Could not store a health turn", e);
             }
             try {
-                guardedUpsert(turn);
+                guardedUpsert(turn, lateWrittenAt);
             } catch (MongoException retry) {
                 if (!isDuplicateKey(retry)) {
                     throw new HealthStoreException("Could not store a health turn", retry);
@@ -165,8 +182,8 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         }
     }
 
-    private void guardedUpsert(HealthTurn turn) {
-        turns.updateOne(guardedFilter(turn), replacePipeline(turn), new UpdateOptions().upsert(true));
+    private void guardedUpsert(HealthTurn turn, Instant lateWrittenAt) {
+        turns.updateOne(guardedFilter(turn), replacePipeline(turn, lateWrittenAt), new UpdateOptions().upsert(true));
     }
 
     private static boolean isDuplicateKey(MongoException e) {
@@ -180,6 +197,14 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     static List<Bson> replacePipeline(HealthTurn turn) {
+        return replacePipeline(turn, null);
+    }
+
+    /**
+     * The replace; {@code lateWrittenAt} sets the late-write stamp, null removes
+     * it.
+     */
+    static List<Bson> replacePipeline(HealthTurn turn, Instant lateWrittenAt) {
         Document values = toDocument(turn);
         Document set = new Document();
         values.forEach((field, value) -> {
@@ -189,6 +214,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 default -> set.put(field, literal(value));
             }
         });
+        set.put(FIELD_WRITTEN_LATE, lateWrittenAt == null ? "$$REMOVE" : literal(date(lateWrittenAt)));
         return List.of(new Document("$set", set));
     }
 
@@ -197,11 +223,14 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public void insertIfAbsent(HealthTurn turn) {
+    public void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt) {
         try {
             Document values = toDocument(turn);
-            List<Bson> inserts = new ArrayList<>(values.size());
+            List<Bson> inserts = new ArrayList<>(values.size() + 1);
             values.forEach((field, value) -> inserts.add(Updates.setOnInsert(field, value)));
+            if (lateWrittenAt != null) {
+                inserts.add(Updates.setOnInsert(FIELD_WRITTEN_LATE, date(lateWrittenAt)));
+            }
             turns.updateOne(eq("_id", id(turn.conversationId(), turn.executionId())), Updates.combine(inserts), new UpdateOptions().upsert(true));
         } catch (MongoException e) {
             if (ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY) {
@@ -212,18 +241,15 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt) {
         if (replacing == null || replacing.conversationId() == null || executionIds == null || executionIds.isEmpty()) {
             return 0L;
         }
         try {
-            Date now = date(replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now());
+            Date now = date(lateWrittenAt != null ? lateWrittenAt : replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now());
             List<WriteModel<Document>> writes = new ArrayList<>();
             for (String executionId : new LinkedHashSet<>(executionIds)) {
-                writes.add(new UpdateOneModel<>(eq("_id", id(replacing.conversationId(), executionId)),
-                        Updates.combine(Updates.set(FIELD_DISCARDED, true), Updates.setOnInsert(FIELD_CONVERSATION, replacing.conversationId()),
-                                Updates.setOnInsert(FIELD_EXECUTION, executionId), Updates.setOnInsert(FIELD_AGENT, replacing.agentId()),
-                                Updates.setOnInsert(FIELD_USER, replacing.userId()), Updates.setOnInsert(FIELD_DISCARDED_AT, now)),
+                writes.add(new UpdateOneModel<>(eq("_id", id(replacing.conversationId(), executionId)), discardPipeline(replacing, executionId, now),
                         new UpdateOptions().upsert(true)));
             }
             turns.bulkWrite(writes);
@@ -231,6 +257,28 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         } catch (MongoException e) {
             throw new HealthStoreException("Could not mark health turns discarded", e);
         }
+    }
+
+    /**
+     * Marks a row discarded, or inserts a marker. {@code discardedAt} is when the
+     * row first became discarded — set once, so the rollup's self-heal finds the
+     * day of an existing row discarded since its last pass; {@code updatedAt}, the
+     * write-ordering guard, is left alone. The other fields are set only on insert.
+     */
+    static List<Bson> discardPipeline(HealthTurn replacing, String executionId, Date now) {
+        Document set = new Document();
+        set.put(FIELD_DISCARDED_AT, new Document("$cond", List.of(new Document("$eq", List.of("$" + FIELD_DISCARDED, true)),
+                new Document("$ifNull", List.of("$" + FIELD_DISCARDED_AT, literal(now))), literal(now))));
+        set.put(FIELD_DISCARDED, literal(true));
+        set.put(FIELD_CONVERSATION, ifNull(FIELD_CONVERSATION, replacing.conversationId()));
+        set.put(FIELD_EXECUTION, ifNull(FIELD_EXECUTION, executionId));
+        set.put(FIELD_AGENT, ifNull(FIELD_AGENT, replacing.agentId()));
+        set.put(FIELD_USER, ifNull(FIELD_USER, replacing.userId()));
+        return List.of(new Document("$set", set));
+    }
+
+    private static Document ifNull(String field, Object value) {
+        return new Document("$ifNull", Arrays.asList("$" + field, literal(value)));
     }
 
     @Override
@@ -258,6 +306,273 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         } catch (MongoException e) {
             throw new HealthStoreException("Could not read the health turns of an agent's day", e);
         }
+    }
+
+    @Override
+    public Set<LocalDate> daysOf(String conversationId, Collection<String> executionIds) {
+        if (conversationId == null || executionIds == null || executionIds.isEmpty()) {
+            return Set.of();
+        }
+        try {
+            List<String> ids = new LinkedHashSet<>(executionIds).stream().map(e -> id(conversationId, e)).toList();
+            Set<LocalDate> days = new TreeSet<>();
+            for (Document d : turns.find(and(in("_id", ids), ne(FIELD_DAY, null))).projection(new Document(FIELD_DAY, 1))) {
+                String day = d.getString(FIELD_DAY);
+                if (day != null) {
+                    days.add(LocalDate.parse(day));
+                }
+            }
+            return days;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of health turns", e);
+        }
+    }
+
+    /** The rows an adoption count reads: recorded, not discarded, in range. */
+    static Bson usageFilter(HealthUsageQuery query, LocalDate from) {
+        List<Bson> filters = new ArrayList<>();
+        filters.add(eq(FIELD_AGENT, query.agentId()));
+        filters.add(gte(FIELD_DAY, from.toString()));
+        filters.add(lte(FIELD_DAY, query.to().toString()));
+        filters.add(ne(FIELD_TIMESTAMP, null));
+        filters.add(ne(FIELD_DISCARDED, true));
+        filters.add(in(FIELD_ORIGIN, query.origins()));
+        if (query.version() != null) {
+            filters.add(eq(FIELD_AGENT_VERSION, query.version()));
+        }
+        return and(filters);
+    }
+
+    /**
+     * A conversation is engaged when its last turn with a person's input comes
+     * after its first turn with output ({@code HealthTurnFactory} engagement rule).
+     */
+    private static Document conversationSummary(Object groupId) {
+        return new Document("_id", groupId)
+                .append("minOut", new Document("$min", new Document("$cond", Arrays.asList("$" + FIELD_AGENT_OUTPUT, "$" + FIELD_STEP, null))))
+                .append("maxIn", new Document("$max", new Document("$cond", Arrays.asList("$" + FIELD_USER_INPUT, "$" + FIELD_STEP, null))))
+                .append("turns", new Document("$sum", 1)).append("users", new Document("$addToSet", "$" + FIELD_USER));
+    }
+
+    private static Document engagedExpression() {
+        return new Document("$cond",
+                List.of(new Document("$and",
+                        List.of(new Document("$ne", Arrays.asList("$minOut", null)), new Document("$ne", Arrays.asList("$maxIn", null)),
+                                new Document("$gt", List.of("$maxIn", "$minOut")))),
+                        1, 0));
+    }
+
+    @Override
+    public HealthUsage usage(HealthUsageQuery query, LocalDate lookbackFrom) {
+        if (query.origins().isEmpty()) {
+            return HealthUsage.EMPTY;
+        }
+        try {
+            long sessions = 0;
+            long engaged = 0;
+            long turnCount = 0;
+            List<Document> conversations = List.of(new Document("$match", usageFilter(query, query.from())),
+                    new Document("$group", conversationSummary("$" + FIELD_CONVERSATION)),
+                    new Document("$group", new Document("_id", null).append("sessions", new Document("$sum", 1))
+                            .append("engaged", new Document("$sum", engagedExpression())).append("turns", new Document("$sum", "$turns"))));
+            for (Document d : turns.aggregate(conversations).allowDiskUse(true)) {
+                sessions = number(d.get("sessions"));
+                engaged = number(d.get("engaged"));
+                turnCount = number(d.get("turns"));
+            }
+            LocalDate lookback = lookbackFrom == null || lookbackFrom.isAfter(query.from()) ? query.from() : lookbackFrom;
+            long users = 0;
+            long returning = 0;
+            List<Document> people = List.of(new Document("$match", and(usageFilter(query, lookback), ne(FIELD_USER, null))),
+                    new Document("$group",
+                            new Document("_id", "$" + FIELD_USER).append("first", new Document("$min", "$" + FIELD_DAY)).append("last",
+                                    new Document("$max", "$" + FIELD_DAY))),
+                    new Document("$match", gte("last", query.from().toString())),
+                    new Document("$group", new Document("_id", null).append("users", new Document("$sum", 1)).append("returning",
+                            new Document("$sum",
+                                    new Document("$cond", List.of(new Document("$lt", List.of("$first", query.from().toString())), 1, 0))))));
+            for (Document d : turns.aggregate(people).allowDiskUse(true)) {
+                users = number(d.get("users"));
+                returning = number(d.get("returning"));
+            }
+            return new HealthUsage(sessions, engaged, turnCount, users, returning);
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the usage of an agent", e);
+        }
+    }
+
+    @Override
+    public List<HealthUsagePoint> dailyUsage(HealthUsageQuery query, String groupBy) {
+        if (query.origins().isEmpty()) {
+            return List.of();
+        }
+        Object group = switch (groupBy == null ? "none" : groupBy) {
+            case "version" -> "$" + FIELD_AGENT_VERSION;
+            case "origin" -> "$" + FIELD_ORIGIN;
+            default -> null;
+        };
+        try {
+            Document conversationKey = new Document("c", "$" + FIELD_CONVERSATION).append("d", "$" + FIELD_DAY).append("g", group);
+            List<Document> pipeline = List.of(new Document("$match", usageFilter(query, query.from())),
+                    new Document("$group", conversationSummary(conversationKey)),
+                    new Document("$group",
+                            new Document("_id", new Document("d", "$_id.d").append("g", "$_id.g")).append("sessions", new Document("$sum", 1))
+                                    .append("engaged", new Document("$sum", engagedExpression()))
+                                    .append("turns", new Document("$sum", "$turns")).append("users", new Document("$push", "$users"))),
+                    new Document("$project", new Document("sessions", 1).append("engaged", 1).append("turns", 1).append("users",
+                            new Document("$size", new Document("$setDifference", List.of(new Document("$reduce",
+                                    new Document("input", "$users").append("initialValue", List.of()).append("in",
+                                            new Document("$setUnion", List.of("$$value", "$$this")))),
+                                    Arrays.asList((Object) null)))))));
+            List<HealthUsagePoint> points = new ArrayList<>();
+            for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
+                Document key = d.get("_id", Document.class);
+                Object g = key.get("g");
+                points.add(new HealthUsagePoint(LocalDate.parse(key.getString("d")), g == null ? null : String.valueOf(g), number(d.get("sessions")),
+                        number(d.get("engaged")), number(d.get("turns")), number(d.get("users"))));
+            }
+            return points;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the daily usage of an agent", e);
+        }
+    }
+
+    @Override
+    public Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom,
+                                                                  LocalDate to, Collection<String> interactive, Collection<String> origins) {
+        if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            Document inWindow = new Document("$gte", List.of("$" + FIELD_DAY, windowFrom.toString()));
+            Document interactiveOrigin = new Document("$in", List.of("$" + FIELD_ORIGIN, List.copyOf(interactive == null ? List.of() : interactive)));
+            List<Document> pipeline = List.of(
+                    new Document("$match",
+                            and(in(FIELD_AGENT, agentIds), gte(FIELD_DAY, baselineFrom.toString()), lte(FIELD_DAY, to.toString()),
+                                    ne(FIELD_TIMESTAMP, null), ne(FIELD_DISCARDED, true), in(FIELD_ORIGIN, origins))),
+                    // One document per (agent, conversation), flagged with where it had turns.
+                    new Document("$group", new Document("_id", new Document("a", "$" + FIELD_AGENT).append("c", "$" + FIELD_CONVERSATION))
+                            .append("iNow", flag(new Document("$and", List.of(inWindow, interactiveOrigin))))
+                            .append("aNow", flag(inWindow))
+                            .append("iBefore", flag(new Document("$and", List.of(new Document("$not", List.of(inWindow)), interactiveOrigin))))
+                            .append("aBefore", flag(new Document("$not", List.of(inWindow))))),
+                    new Document("$group", new Document("_id", "$_id.a").append("iNow", new Document("$sum", "$iNow"))
+                            .append("aNow", new Document("$sum", "$aNow")).append("iBefore", new Document("$sum", "$iBefore"))
+                            .append("aBefore", new Document("$sum", "$aBefore"))));
+            Map<String, HealthPortfolioSessions> sessions = new LinkedHashMap<>();
+            for (Document d : turns.aggregate(pipeline).allowDiskUse(true)) {
+                sessions.put(d.getString("_id"), new HealthPortfolioSessions(number(d.get("iNow")), number(d.get("aNow")),
+                        number(d.get("iBefore")), number(d.get("aBefore"))));
+            }
+            return sessions;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the sessions of agents", e);
+        }
+    }
+
+    private static Document flag(Document condition) {
+        return new Document("$max", new Document("$cond", List.of(condition, 1, 0)));
+    }
+
+    @Override
+    public void forEachAgentDayUpdatedSince(Instant since, Instant until, int limit, BiConsumer<String, LocalDate> consumer) {
+        // Rows written, discarded, or written late in the window: a discard leaves
+        // updatedAt as it was, and a late row's updatedAt is its capture time.
+        Bson inWindow = or(and(gte(FIELD_UPDATED, date(since)), lt(FIELD_UPDATED, date(until))),
+                and(gte(FIELD_DISCARDED_AT, date(since)), lt(FIELD_DISCARDED_AT, date(until))),
+                and(gte(FIELD_WRITTEN_LATE, date(since)), lt(FIELD_WRITTEN_LATE, date(until))));
+        List<Bson> pipeline = List.of(Aggregates.match(and(inWindow, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
+                Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                consumer.accept(key.getString("a"), LocalDate.parse(key.getString("d")));
+            }
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of recent health turns", e);
+        }
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfUser(String userId, int limit) {
+        return agentDays(eq(FIELD_USER, userId), limit);
+    }
+
+    @Override
+    public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
+        return agentDays(eq(FIELD_CONVERSATION, conversationId), Integer.MAX_VALUE);
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+        // MongoDB has no delete that returns the deleted documents in bulk: read the
+        // pairs first, then delete — and delete even when the read fails.
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_CONVERSATION, conversationId));
+        return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationIfDaysKnown(String conversationId) {
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_CONVERSATION, conversationId));
+        if (days == null) {
+            return null; // kept for the orphan sweep
+        }
+        return new HealthDeletedRows(deleteByConversationId(conversationId), days);
+    }
+
+    @Override
+    public HealthDeletedRows deleteByUserIdReturningDays(String userId) {
+        // Read first, then delete; the days are null when the read fails.
+        Map<String, Set<LocalDate>> days = daysOrNull(eq(FIELD_USER, userId));
+        return new HealthDeletedRows(deleteByUserId(userId), days);
+    }
+
+    /**
+     * The (agent, day)s of the matching rows, or {@code null} when they cannot be
+     * read.
+     */
+    private Map<String, Set<LocalDate>> daysOrNull(Bson filter) {
+        try {
+            return agentDays(filter, Integer.MAX_VALUE);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Override
+    public void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer) {
+        Date at = date(since);
+        List<Bson> pipeline = List.of(Aggregates.match(or(gte(FIELD_UPDATED, at), gte(FIELD_DISCARDED_AT, at))),
+                Aggregates.group(new Document("c", "$" + FIELD_CONVERSATION).append("a", "$" + FIELD_AGENT)), Aggregates.limit(Math.max(1, limit)));
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                if (key.get("c") != null) {
+                    consumer.accept(key.get("c").toString(), key.getString("a"));
+                }
+            }
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
+    }
+
+    private Map<String, Set<LocalDate>> agentDays(Bson filter, int limit) {
+        List<Bson> pipeline = List.of(Aggregates.match(and(filter, ne(FIELD_DAY, null), ne(FIELD_AGENT, null))),
+                Aggregates.group(new Document("a", "$" + FIELD_AGENT).append("d", "$" + FIELD_DAY)), Aggregates.limit(Math.max(1, limit)));
+        Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
+        try (MongoCursor<Document> cursor = turns.aggregate(pipeline).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Document key = cursor.next().get("_id", Document.class);
+                days.computeIfAbsent(key.getString("a"), k -> new TreeSet<>()).add(LocalDate.parse(key.getString("d")));
+            }
+            return days;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the days of health turns", e);
+        }
+    }
+
+    private static long number(Object value) {
+        return value instanceof Number n ? n.longValue() : 0L;
     }
 
     @Override

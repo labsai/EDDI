@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
 import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.health.HealthRollupService;
+import ai.labs.eddi.engine.health.HealthSchedules;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomyMaintenanceService;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.HitlAutonomySchedules;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
@@ -68,6 +70,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * maintenance ({@link DreamService})</li>
  * <li>{@code alertType=alert_maintenance} — alert delivery retries, digests and
  * retention ({@link AlertMaintenanceService})</li>
+ * <li>{@code healthType=rollup} — the Agent Health daily rollup
+ * ({@link HealthRollupService})</li>
  * <li>{@code continuationType=conversation_continuation} — the next turn of a
  * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
  * one whose input, identity and once-only check are the engine's, not a
@@ -116,6 +120,9 @@ public class ScheduleFireExecutor {
 
     @Inject
     HitlAutonomyMaintenanceService hitlAutonomyMaintenanceService;
+
+    @Inject
+    HealthRollupService healthRollupService;
 
     @Inject
     ContinuationFireHandler continuationFireHandler;
@@ -244,6 +251,11 @@ public class ScheduleFireExecutor {
             // runs before the creator check. The poller's claim and lease make one
             // node run it at a time.
             return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
+        if (HealthSchedules.isRollup(md)) {
+            // Agent Health rollup fast-path — a system job like alert maintenance:
+            // recomputes the daily rows of dirty agent days.
+            return fireHealthRollup(schedule, instanceId, attemptNumber);
         }
         if (HitlAutonomySchedules.isMaintenance(md)) {
             // HITL oversight maintenance fast-path (sample expiry, earned-autonomy
@@ -847,6 +859,34 @@ public class ScheduleFireExecutor {
             return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
         }
         return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "alert maintenance", false);
+    }
+
+    /**
+     * One pass of the Agent Health rollup. Like alert maintenance, a pass that did
+     * nothing writes no fire log.
+     */
+    private ScheduleFireLog fireHealthRollup(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            HealthRollupService.Result result = healthRollupService.run();
+            worthLogging = !result.isEmpty();
+            if (worthLogging) {
+                LOGGER.debugf("[SCHEDULE] Health rollup: days=%d, rows=%d, skipped=%d, failed=%d, pending=%d", result.days(), result.rows(),
+                        result.skipped(), result.failed(), result.pending());
+            }
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] Health rollup failed (schedule %s)", schedule.getId());
+        }
+        if (!worthLogging) {
+            return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        }
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "health rollup", false);
     }
 
     private ScheduleFireLog fireHitlAutonomyMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {

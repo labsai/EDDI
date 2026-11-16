@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -29,8 +30,24 @@ import java.util.function.Consumer;
  * {@link #result()}, so MongoDB and PostgreSQL produce bit-identical aggregates
  * from the same rows, and a re-roll of a day is the same computation as the
  * first roll. Not thread-safe — one instance per rollup.
+ * <p>
+ * Durations go into fixed buckets ({@link #DURATION_BOUNDS_MS}), from which a
+ * percentile can be read approximately, and into the two Apdex counts for the
+ * threshold T the aggregator was built with.
  */
 public final class HealthTurnAggregator implements Consumer<HealthTurn> {
+
+    /**
+     * Upper bounds (inclusive, ms) of the duration buckets; one more bucket holds
+     * everything above the last bound. Never reorder or remove a bound: stored
+     * daily rows are read by position. Appending changes the bucket count, which
+     * the reader tolerates (a shorter stored list is padded with zeros).
+     */
+    public static final long[] DURATION_BOUNDS_MS = {100, 250, 500, 1_000, 2_000, 3_000, 4_000, 5_000, 7_500, 10_000, 15_000, 20_000, 30_000,
+            60_000, 120_000, 300_000};
+
+    /** The default Apdex threshold T. */
+    public static final long DEFAULT_APDEX_T_MS = 4_000;
 
     private record Key(String agentId, Integer agentVersion, String origin, LocalDate day) {
     }
@@ -53,9 +70,41 @@ public final class HealthTurnAggregator implements Consumer<HealthTurn> {
         long toolFailures;
         long toolRefusals;
         long guardrailTrips;
+        long agentFailedTurns;
+        long platformFailedTurns;
+        long platformAffectedTurns;
+        long tokenTurns;
+        final long[] durationBuckets = new long[DURATION_BOUNDS_MS.length + 1];
+        long apdexSatisfied;
+        long apdexTolerating;
     }
 
     private final Map<Key, Sums> sums = new LinkedHashMap<>();
+    private final long apdexTMs;
+
+    /** With the default Apdex threshold. */
+    public HealthTurnAggregator() {
+        this(DEFAULT_APDEX_T_MS);
+    }
+
+    /**
+     * @param apdexTMs
+     *            the Apdex threshold T in ms; a turn of at most T satisfies, one of
+     *            at most 4T is tolerated
+     */
+    public HealthTurnAggregator(long apdexTMs) {
+        this.apdexTMs = apdexTMs > 0 ? apdexTMs : DEFAULT_APDEX_T_MS;
+    }
+
+    /** The bucket a duration falls into. */
+    public static int bucketOf(long durationMs) {
+        for (int i = 0; i < DURATION_BOUNDS_MS.length; i++) {
+            if (durationMs <= DURATION_BOUNDS_MS[i]) {
+                return i;
+            }
+        }
+        return DURATION_BOUNDS_MS.length;
+    }
 
     @Override
     public void accept(HealthTurn turn) {
@@ -79,6 +128,14 @@ public final class HealthTurnAggregator implements Consumer<HealthTurn> {
         if (turn.errorKind() != null) {
             s.failedTurns++;
             s.errorKinds.merge(turn.errorKind(), 1L, Long::sum);
+            if (HealthAttribution.attribute(turn) == HealthAttribution.Party.PLATFORM) {
+                s.platformFailedTurns++;
+            } else {
+                s.agentFailedTurns++;
+            }
+        }
+        if (HealthAttribution.platformAffected(turn)) {
+            s.platformAffectedTurns++;
         }
         if (turn.paused()) {
             s.pausedTurns++;
@@ -94,10 +151,20 @@ public final class HealthTurnAggregator implements Consumer<HealthTurn> {
         }
         if (turn.totalTokens() != null && turn.totalTokens() > 0) {
             s.totalTokens += turn.totalTokens();
+            s.tokenTurns++;
         }
-        if (turn.durationMs() != null && turn.durationMs() >= 0) {
-            s.durationMsTotal += turn.durationMs();
+        // A paused turn's duration is its run up to the pause; its resume replaces
+        // the row, so the paused version is not a latency sample.
+        if (turn.durationMs() != null && turn.durationMs() >= 0 && !turn.paused()) {
+            long duration = turn.durationMs();
+            s.durationMsTotal += duration;
             s.durationCount++;
+            s.durationBuckets[bucketOf(duration)]++;
+            if (duration <= apdexTMs) {
+                s.apdexSatisfied++;
+            } else if (duration <= 4 * apdexTMs) {
+                s.apdexTolerating++;
+            }
         }
         s.toolCalls += turn.toolCalls();
         s.toolFailures += turn.toolFailures();
@@ -111,7 +178,8 @@ public final class HealthTurnAggregator implements Consumer<HealthTurn> {
         sums.forEach((k, s) -> out.add(new HealthTurnAggregate(k.agentId(), k.agentVersion(), k.origin(), k.day(), s.turns,
                 s.conversations.size(), s.userInputTurns, s.failedTurns, s.errorKinds, s.pausedTurns, s.fallbackTurns, s.failuresByClass,
                 s.recoveredFailures, s.costUsd, s.totalTokens, s.durationMsTotal, s.durationCount, s.toolCalls, s.toolFailures, s.toolRefusals,
-                s.guardrailTrips)));
+                s.guardrailTrips, s.agentFailedTurns, s.platformFailedTurns, s.platformAffectedTurns, s.tokenTurns,
+                Arrays.stream(s.durationBuckets).boxed().toList(), apdexTMs, s.apdexSatisfied, s.apdexTolerating)));
         out.sort(Comparator.comparing(HealthTurnAggregate::day, Comparator.nullsFirst(Comparator.naturalOrder()))
                 .thenComparing(HealthTurnAggregate::agentVersion, Comparator.nullsFirst(Comparator.naturalOrder()))
                 .thenComparing(a -> Objects.toString(a.origin(), "")));
