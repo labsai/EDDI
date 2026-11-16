@@ -1909,6 +1909,26 @@ public class AgentGroupConfiguration {
         private HitlGranularity granularity = HitlGranularity.PHASE;
         private HitlRejectionPolicy onTaskRejection = HitlRejectionPolicy.FAIL;
 
+        /**
+         * Strict plan binding: a human decision on this group's pauses must carry the
+         * pause's {@code planHash} (from approval-status), or it is refused with a 400
+         * and the pause stays. Absent or {@code false} = a decision without the hash is
+         * accepted and logged, as clients that predate plan hashing send it. The
+         * deployment property {@code eddi.hitl.plan-hash.strict} turns it on for every
+         * group. Automated decisions (timeouts) are never refused for it.
+         *
+         * @since 6.8.0
+         */
+        private Boolean requirePlanHash;
+
+        public Boolean getRequirePlanHash() {
+            return requirePlanHash;
+        }
+
+        public void setRequirePlanHash(Boolean requirePlanHash) {
+            this.requirePlanHash = requirePlanHash;
+        }
+
         public String getApprovalTimeout() {
             return approvalTimeout;
         }
@@ -1974,6 +1994,34 @@ public class AgentGroupConfiguration {
 
         public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
             this.approvalContext = approvalContext;
+        }
+
+        /**
+         * Standing teams only: whether a backlog task that a person approved at a
+         * TASK-granularity gate counts as done when its cadence run is written back.
+         * <p>
+         * {@code false} (the default, and what every stored config reads as) keeps the
+         * original rule — only a {@code VERIFIED} outcome stays done; an approved task
+         * is merely {@code COMPLETED} and returns to {@code PENDING}, so the next run
+         * executes it again. {@code true} keeps it done as well, with the approver's
+         * edited result when there was one. Only an approval somebody gave counts: a
+         * timeout auto-approval ({@code decidedBy system:*}) does not, and neither does
+         * a task that completed in an ungated phase.
+         * <p>
+         * A switch (not a default) on {@code hitlConfig} rather than on the cadence: it
+         * is versioned with the group and sits next to the gate it qualifies. Ignored
+         * by a group without a workspace.
+         *
+         * @since 6.7.0
+         */
+        private boolean approvalCompletesBacklogTask;
+
+        public boolean isApprovalCompletesBacklogTask() {
+            return approvalCompletesBacklogTask;
+        }
+
+        public void setApprovalCompletesBacklogTask(boolean approvalCompletesBacklogTask) {
+            this.approvalCompletesBacklogTask = approvalCompletesBacklogTask;
         }
     }
 

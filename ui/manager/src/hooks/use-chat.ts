@@ -49,10 +49,12 @@ import {
   type AgentDescriptor,
   parseResourceUri,
 } from "@/lib/api/agents";
+import { UNCONSUMED_STREAM_ERROR_CODES, parseErrorEvent } from "@eddi/core";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
 import { chatKeys } from "@/lib/query-keys";
+import { parseToolCallEvent, toolCallActivity } from "@/lib/tool-labels";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -558,26 +560,13 @@ class SendBlockedError extends Error {
 
 /**
  * Stream error codes that mean the input was refused BEFORE the turn started,
- * so it was never consumed. They are the codes
- * `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` emits for the
- * conditions the non-streaming twin answers with a status (409, 410, 404, 413,
- * 429, 403, 503). A failure DURING a turn arrives as an opaque error without a
- * code and keeps the error bubble, because that turn did run.
+ * so it was never consumed — `@eddi/core`'s list, shared with the Chat UI. A
+ * failure DURING a turn arrives as an opaque error without a code and keeps the
+ * error bubble, because that turn did run.
  *
- * Exported for tests, which pin the list against the backend's.
+ * Re-exported for tests, which pin the list against the backend's.
  */
-export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
-  "awaiting_approval",
-  "conversation_not_found",
-  "input_too_large",
-  "conversation_ended",
-  "agent_not_ready",
-  "agent_mismatch",
-  "quota_accounting_unavailable",
-  "quota_exceeded",
-  "processing_restricted",
-  "restriction_status_unavailable",
-]);
+export { UNCONSUMED_STREAM_ERROR_CODES };
 
 /**
  * How long a stream detached from the transcript on screen is left to finish
@@ -587,19 +576,6 @@ export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
  * open for good, one more per switch.
  */
 export const DETACHED_STREAM_GRACE_MS = 120_000;
-
-/** The `{message, code}` an SSE `error` frame carries; raw text when it is not JSON. */
-function parseStreamError(data: string): { message: string; code?: string } {
-  try {
-    const parsed = JSON.parse(data);
-    return {
-      message: parsed && typeof parsed.message === "string" ? parsed.message : data,
-      code: parsed && typeof parsed.code === "string" ? parsed.code : undefined,
-    };
-  } catch {
-    return { message: data };
-  }
-}
 
 /**
  * Turn a 409 on a send into a {@link RejectedSendError}, reading the
@@ -787,7 +763,7 @@ export function useSendMessage() {
                 continue;
               }
               if (event.type === "error") {
-                const { message: reason, code } = parseStreamError(event.data);
+                const { message: reason, code } = parseErrorEvent(event.data);
                 // The streaming twins of the non-streaming refusals: the input
                 // was NOT consumed, so it is rolled back like a refused status
                 // instead of staying in the transcript above an error bubble.
@@ -1264,14 +1240,18 @@ function handleSSEEvent(
       // Live "Using {tool}…" signal — the backend emits the NAME right before
       // each tool executes (arguments arrive later, redacted, in the
       // task_complete toolTrace). Feeds the status line only, not the turns.
-      try {
-        const parsed = JSON.parse(event.data);
-        if (typeof parsed.tool === "string" && parsed.tool) {
-          debug.addToolCall(parsed.tool);
-        }
-      } catch {
-        // Malformed payload — the status line just keeps saying "Thinking…".
-      }
+      // Since 6.7 the event may carry the designer's `toolDisplay` label and a few
+      // allow-listed values; the status line shows those, else the humanised name.
+      const call = parseToolCallEvent(event.data);
+      // Malformed payload — the status line just keeps saying "Thinking…".
+      if (call) debug.addToolCall(toolCallActivity(call));
+      return false;
+    }
+    case "tool_result": {
+      // 6.7: `{tool, callId, status, durationMs}` once per call, right after it
+      // ran. Calls run one after another, so a result settles the newest call:
+      // its spinner stops instead of turning only when the model writes again.
+      debug.markToolsSettled();
       return false;
     }
     case "task_start": {
@@ -1522,11 +1502,21 @@ export function undoRedoFlags(
   ];
 }
 
-/** Fetch conversation history for the selected agent. */
+/**
+ * The caller's own conversations with an agent — what the chat panel lists and
+ * resumes from. Own only (`mine`), for an admin too: an admin's listing holds
+ * every user's, and the resume below continues the newest one it is handed.
+ * Browsing everybody's conversations is the Conversations page's job.
+ */
+function getOwnConversationHistory(agentId: string) {
+  return getConversationDescriptors(50, 0, "", agentId, undefined, undefined, undefined, { mine: true });
+}
+
+/** Fetch the caller's conversation history with the selected agent. */
 export function useConversationHistory(agentId: string | null) {
   return useQuery({
     queryKey: chatKeys.history(agentId),
-    queryFn: () => getConversationDescriptors(50, 0, "", agentId ?? ""),
+    queryFn: () => getOwnConversationHistory(agentId ?? ""),
     enabled: !!agentId,
     staleTime: 30_000,
   });
@@ -1755,8 +1745,10 @@ export function useResumeOrStartConversation() {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
+          // The same query as useConversationHistory, which shares this cache
+          // entry: the caller's own conversations, never another user's.
           queryKey: chatKeys.history(agentId),
-          queryFn: () => getConversationDescriptors(50, 0, "", agentId),
+          queryFn: () => getOwnConversationHistory(agentId),
           staleTime: 30_000,
         });
         resumable = pickResumableConversation(descriptors, environment);

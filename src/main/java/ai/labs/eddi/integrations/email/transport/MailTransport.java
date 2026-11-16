@@ -16,7 +16,9 @@ import java.util.Optional;
  * conversation-mode integration only — send raw bytes. The one input format is
  * the raw RFC 5322 message; parsing, sender authentication and every guard are
  * transport-independent. IMAP in + SMTP out is the only implementation so far
- * ({@link ImapMailTransport}).
+ * ({@link ImapMailTransport}); where a poll stands is an opaque
+ * {@link MailboxCursor}, so an API transport (Gmail history, Graph delta) fits
+ * without a poller change.
  */
 public interface MailTransport {
 
@@ -31,25 +33,42 @@ public interface MailTransport {
      */
     MailboxSession open(String integrationId, EmailChannelSettings settings) throws MailboxException;
 
-    /** One open mailbox. Not thread-safe; closed by the poll that opened it. */
+    /**
+     * One open mailbox. Not thread-safe; closed by the poll that opened it.
+     * <p>
+     * Everything the poller needs to know about where it stands is a
+     * {@link MailboxCursor} it cannot read: IMAP keeps {@code UIDVALIDITY} and a
+     * UID in it ({@link UidFolderSession}), an API transport a history id or a
+     * delta link. A new transport is one implementation of this interface; the
+     * poller does not change.
+     */
     interface MailboxSession extends AutoCloseable {
 
-        /** The folder's {@code UIDVALIDITY}. */
-        long uidValidity() throws MailboxException;
-
-        /** The folder's {@code UIDNEXT}: the UID the next delivered mail gets. */
-        long uidNext() throws MailboxException;
-
         /**
-         * Envelope data of up to {@code max} messages with a UID greater than
-         * {@code lastUid}, ascending by UID. No body is fetched.
+         * The cursor of a first poll: after everything already in the folder, so
+         * connecting an integration to a full mailbox does not process old mail.
          */
-        List<MailboxMessage> messagesAfter(long lastUid, int max) throws MailboxException;
+        MailboxCursor startCursor() throws MailboxException;
 
         /**
-         * Marks a message processed: the {@value #PROCESSED_KEYWORD} keyword where the
-         * server allows keywords, and a move to {@code settings.moveToFolder()} when
-         * configured. Never deletes. Called only after the ledger row is written.
+         * Envelope data of up to {@code max} messages after {@code cursor}, in the
+         * order their cursors advance. No body is fetched.
+         * <p>
+         * A cursor this session cannot continue from — the folder was rebuilt (IMAP
+         * {@code UIDVALIDITY} changed), the history expired, or another transport wrote
+         * it — is not an error: the batch comes back with {@link Batch#cursorReset()}
+         * set, starting over from a cursor the transport chooses, and the message
+         * ledger deduplicates what was seen before.
+         */
+        Batch messagesAfter(MailboxCursor cursor, int max) throws MailboxException;
+
+        /**
+         * Marks a message processed as {@code settings.processedAction()} says
+         * ({@code flag}, {@code move:<folder>} or {@code label:<name>}, each as far as
+         * the transport supports it — the save-time validation refuses what it cannot
+         * do). IMAP: the {@value #PROCESSED_KEYWORD} keyword where the server allows
+         * keywords, and a move for {@code move:}. Never deletes. Called only after the
+         * ledger row is written.
          *
          * @return what was done, for logs and tests
          */
@@ -105,6 +124,39 @@ public interface MailTransport {
         }
     }
 
+    /**
+     * One listing of {@link MailboxSession#messagesAfter(MailboxCursor, int)}.
+     *
+     * @param entries
+     *            the messages, each with the cursor that settles it and everything
+     *            before it
+     * @param start
+     *            the cursor to keep when nothing is settled: the one asked for, or
+     *            after a reset the cursor the rescan starts from
+     * @param end
+     *            the cursor once every entry is settled; for a transport whose
+     *            position moves without messages (an API history), past what was
+     *            listed
+     * @param cursorReset
+     *            the cursor asked for could not be continued from, and the entries
+     *            are a rescan
+     */
+    record Batch(List<Entry> entries, MailboxCursor start, MailboxCursor end, boolean cursorReset) {
+        public Batch {
+            entries = List.copyOf(entries);
+            if (start == null || end == null) {
+                throw new IllegalArgumentException("A batch needs a start and an end cursor.");
+            }
+        }
+    }
+
+    /**
+     * A listed message and the cursor that is settled once it and every entry
+     * before it are.
+     */
+    record Entry(MailboxMessage message, MailboxCursor settles) {
+    }
+
     /** What {@link MailboxSession#markProcessed} did. */
     enum MarkResult {
         FLAGGED, MOVED, FLAGGED_NOT_MOVED, NOTHING
@@ -112,7 +164,14 @@ public interface MailTransport {
 
     /** One message as the envelope describes it; the body is fetched on demand. */
     interface MailboxMessage {
-        long uid();
+        /**
+         * The message's UID where the transport has numeric ids (IMAP), else -1. For
+         * logs and the UID-based sessions only; the poller goes by
+         * {@link Entry#settles()}.
+         */
+        default long uid() {
+            return -1;
+        }
 
         /** The raw Message-ID header value from the envelope, or null. */
         String envelopeMessageId();
@@ -127,7 +186,9 @@ public interface MailTransport {
         boolean alreadyProcessed();
 
         /**
-         * {@code <transport>:<folder>:<uidvalidity>:<uid>}, for the ledger's sourceRef.
+         * Where the message was found, for the ledger's sourceRef:
+         * {@code <transport>:...}, e.g. IMAP's
+         * {@code imap:<folder>:<uidvalidity>:<uid>}.
          */
         String sourceRef();
 

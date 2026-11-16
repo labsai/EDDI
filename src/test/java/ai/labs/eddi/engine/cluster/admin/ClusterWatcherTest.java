@@ -22,9 +22,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -37,6 +39,11 @@ class ClusterWatcherTest {
     private ClusterPresence presence;
     private ClusterWatcher watcher;
     private final List<Map<String, Object>> members = new ArrayList<>();
+    /**
+     * How long ago this node saw each member's record change, on its own clock; a
+     * member not listed has a fresh record.
+     */
+    private final Map<String, Long> heartbeatAges = new HashMap<>();
 
     @SuppressWarnings("unchecked")
     private static <T> Instance<T> instance(T value) {
@@ -61,6 +68,10 @@ class ClusterWatcherTest {
         when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
         presence = mock(ClusterPresence.class);
         when(presence.members()).thenAnswer(i -> List.copyOf(members));
+        when(presence.heartbeatAgeMillis(anyString())).thenAnswer(i -> {
+            Long age = heartbeatAges.getOrDefault(i.<String>getArgument(0), 0L);
+            return age < 0 ? OptionalLong.empty() : OptionalLong.of(age);
+        });
         watcher = new ClusterWatcher(ClusterConfig.defaults().withMessagingType("nats").withPresenceInterval(Duration.ofSeconds(10)),
                 activity, instance(connections), instance(presence), instance(mock(NatsLeaseManager.class)),
                 instance(mock(ClusterConversationCoordinator.class)), mock(IClusterEventBus.class));
@@ -158,10 +169,37 @@ class ClusterWatcherTest {
         members.add(member("n1", "b1", now));
         members.add(member("n2", "b2", now));
         watcher.pollMembers();
-        members.set(1, member("n2", "b2", now - 25_000));
+        heartbeatAges.put("n2", 25_000L); // not rewritten since this node saw it 25 s ago
         watcher.pollMembers();
         watcher.pollMembers();
         assertEquals(1, types().stream().filter("node.stale"::equals).count());
+        ActivityEvent stale = activity.recent(100, List.of()).stream().filter(e -> e.type().equals("node.stale")).findFirst()
+                .orElseThrow();
+        assertEquals(25_000L, ((Number) stale.payload().get("heartbeatAgeMs")).longValue());
+        assertEquals("node.stale:n2:" + now, stale.id(), "keyed by the record's own timestamp, so every node's report collapses into one");
+    }
+
+    @Test
+    @DisplayName("OPS-1: a member whose clock runs behind is not stale while this node sees its record rewritten")
+    void skewedClockIsNotStale() {
+        long now = System.currentTimeMillis();
+        members.add(member("n1", "b1", now));
+        members.add(member("n2", "b2", now - 60_000)); // its wall clock is a minute behind
+        watcher.pollMembers();
+        watcher.pollMembers();
+        assertTrue(types().isEmpty(), types().toString());
+    }
+
+    @Test
+    @DisplayName("OPS-1: a member whose heartbeat age this node cannot tell yet is not reported stale")
+    void unknownAgeIsNotReported() {
+        long now = System.currentTimeMillis();
+        members.add(member("n1", "b1", now));
+        members.add(member("n2", "b2", now - 60_000));
+        heartbeatAges.put("n2", -1L);
+        watcher.pollMembers();
+        watcher.pollMembers();
+        assertTrue(types().isEmpty(), types().toString());
     }
 
     @Test

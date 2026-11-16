@@ -6,10 +6,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
-import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
 import { t } from "@/i18n";
+import { useChatRoute } from "@/location";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { SecretInput } from "./SecretInput";
@@ -31,8 +31,29 @@ import {
   rerunLastStep,
   endManagedConversation,
   setBaseUrl,
-} from "@/api/chat-api";
-import { setAuthToken } from "@/api/http";
+  setAuthToken,
+  ApiError,
+  parseRatingProfile,
+  lastStepIndex,
+  ratableSteps,
+  buildAttachmentContext,
+  outputsCarryStepIndexes,
+  stepsToMessages,
+  cancelConversation,
+  parseDoneSnapshot,
+  parseErrorEvent,
+  isSkippedTurn,
+  isPausedState,
+  extractOutputTexts,
+  extractOutputImages,
+  findInputField,
+  isTurnPaused,
+  parseToolCallActivity,
+  UNCONSUMED_STREAM_ERROR_CODES,
+  type ApprovalStatus,
+  type DoneSnapshot,
+  type OutputImage,
+} from "@eddi/core";
 import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
 import { readUrlToken } from "@/api/chat-config";
 import {
@@ -43,31 +64,12 @@ import {
   demoRatingClient,
   DEMO_RATING_PROFILE,
 } from "@/api/demo-api";
-import { httpRatingClient, parseRatingProfile } from "@/api/rating-api";
+import { httpRatingClient } from "@/api/rating-api";
 import { useRatings } from "@/hooks/useRatings";
-import { lastStepIndex, ratableSteps } from "@/rating-steps";
 import { RatingCard } from "./RatingCard";
-import { buildAttachmentContext } from "@/api/attachments-api";
-import { outputsCarryStepIndexes, stepsToMessages } from "@/api/snapshot";
-import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import { PausedCard } from "./PausedCard";
-import { ApiError } from "@/api/http";
-import {
-  parseDoneSnapshot,
-  parseErrorEvent,
-  isSkippedTurn,
-  skippedTurnMessage,
-  isPausedState,
-  extractOutputTexts,
-  extractOutputImages,
-  findInputField,
-  isTurnPaused,
-  parseToolCallName,
-  UNCONSUMED_STREAM_ERROR_CODES,
-  type DoneSnapshot,
-  type OutputImage,
-} from "@/api/sse-events";
+import { skippedTurnMessage } from "@/turn-notices";
 import type {
   ChatMessage,
   SSEEvent,
@@ -345,8 +347,11 @@ export function ChatWidget() {
   const state = useChatState();
   const dispatch = useChatDispatch();
 
-  const { environment, agentId, userId: userIdParam, intent } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    params: { environment, agentId, userId: userIdParam, intent },
+    searchParams,
+    replaceSearch,
+  } = useChatRoute();
   /**
    * `?token=` is read ONCE and then removed from the address bar. Left there,
    * a bearer token sat in the visible URL, the history entry, and anything the
@@ -375,15 +380,10 @@ export function ChatWidget() {
   }, [tokenReady]);
   useEffect(() => {
     if (!searchParams.has("token")) return;
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("token");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, setSearchParams]);
+    const next = new URLSearchParams(searchParams);
+    next.delete("token");
+    replaceSearch(next);
+  }, [searchParams, replaceSearch]);
 
   const userId =
     userIdParam ?? searchParams.get("userId") ?? undefined;
@@ -681,10 +681,19 @@ export function ChatWidget() {
         // tool, and the silence while that tool runs is exactly the wait worth
         // explaining. The next token clears it again.
         case "tool_call": {
-          const tool = parseToolCallName(event.data);
+          const tool = parseToolCallActivity(event.data);
           if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
           return false;
         }
+
+        // EDDI 6.7: `{tool, callId, status, durationMs}` once per call, right
+        // after it ran (never its arguments or result). Calls run one after
+        // another, so the call on screen is finished: back to "Thinking…"
+        // rather than naming a tool that is no longer running.
+        case "tool_result":
+          dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
+          if (turn.tokenCount === 0) dispatch({ type: "SET_THINKING", value: true });
+          return false;
 
         // Step starts are pure observability — task_start already raised the
         // thinking indicator, and it is guarded on tokenCount so it cannot come
@@ -968,7 +977,7 @@ export function ChatWidget() {
           dispatch({ type: "SET_CONVERSATION_ID", id: convId });
 
           // GET to pick up welcome message
-          const snapshot = await readConversation(environment, agentId, convId);
+          const snapshot = await readConversation(convId);
           if (gen !== generationRef.current) return;
           processSnapshot(snapshot, { fullHistory: true });
           loadAgentName(snapshot, gen);
@@ -1023,9 +1032,11 @@ export function ChatWidget() {
   const [profileSettled, setProfileSettled] = useState(false);
   // Read at click time by handleSend, which quick replies and the secret input
   // call directly: gating only the composer let a quick reply through before the
-  // notice appeared. Synced after commit, like the refs above.
+  // notice appeared. Synced in the commit that renders the notice (a layout
+  // effect runs before the browser paints or handles the next click), so there
+  // is no moment where the notice is on screen and a click is still dropped.
   const profileSettledRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     profileSettledRef.current = profileSettled;
   }, [profileSettled]);
   // The agent behind a managed route, which names an intent rather than an agent.
@@ -1061,9 +1072,13 @@ export function ChatWidget() {
         // Absent on an older server, or when the deployed version asks for no
         // ratings: no rating control is shown.
         dispatch({ type: "SET_RATING_PROFILE", profile: parseRatingProfile(profile?.rating) });
+        // In the same batch as the notice, so both land in one commit: settling a
+        // microtask later (in a finally) let the notice show while clicks were
+        // still refused.
+        setProfileSettled(true);
       })
-      .catch(() => { /* no profile endpoint: no notice, no ratings */ })
-      .finally(() => {
+      .catch(() => {
+        // No profile endpoint: no notice, no ratings, and nothing to wait for.
         if (!cancelled) setProfileSettled(true);
       });
     return () => {
@@ -1250,14 +1265,7 @@ export function ChatWidget() {
           const gen = generationRef.current;
           let streamDone = false;
 
-          const events = sendMessageStreaming(
-            environment,
-            agentId,
-            state.conversationId,
-            text,
-            context,
-            abort.signal,
-          );
+          const events = sendMessageStreaming(state.conversationId, text, { context, signal: abort.signal });
 
           try {
             for await (const event of events) {
@@ -1294,12 +1302,7 @@ export function ChatWidget() {
           // redoAvailable are absent, so without this re-read the undo/redo
           // buttons stay permanently greyed out on the streaming path.
           try {
-            const after = await readConversation(
-              "",
-              "",
-              state.conversationId,
-              true,
-            );
+            const after = await readConversation(state.conversationId, true);
             if (gen !== generationRef.current) return;
             // The `done` payload could not be read, so nothing of the turn's
             // outcome has been applied yet. This read of the current step
@@ -1357,15 +1360,7 @@ export function ChatWidget() {
           }
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
-          const snapshot = await sendMessage(
-            environment,
-            agentId,
-            state.conversationId,
-            text,
-            userId,
-            context,
-            abort.signal,
-          );
+          const snapshot = await sendMessage(state.conversationId, text, { userId, context, signal: abort.signal });
           if (sendGen !== generationRef.current || stopped()) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
@@ -1405,12 +1400,7 @@ export function ChatWidget() {
           // refused, leaving the composer live against a paused conversation.
           if (state.conversationId) {
             try {
-              const snap = await readConversation(
-                environment ?? "",
-                agentId ?? "",
-                state.conversationId,
-                true,
-              );
+              const snap = await readConversation(state.conversationId, true);
               if (sendGen !== generationRef.current) return;
               if (snap.conversationState) {
                 dispatch({
@@ -1432,12 +1422,7 @@ export function ChatWidget() {
           // the conversation's version gets its own footer.
           let endReason: string | null = null;
           try {
-            const snap = await readConversation(
-              environment ?? "",
-              agentId ?? "",
-              state.conversationId,
-              true,
-            );
+            const snap = await readConversation(state.conversationId, true);
             endReason = snap.endReason ?? null;
           } catch {
             // best effort — the generic ended footer still applies
@@ -1503,12 +1488,7 @@ export function ChatWidget() {
         });
         if (state.conversationId) {
           try {
-            const after = await readConversation(
-              "",
-              "",
-              state.conversationId,
-              true,
-            );
+            const after = await readConversation(state.conversationId, true);
             if (sendGen !== generationRef.current || stopped()) return;
             dispatch({
               type: "SET_UNDO_REDO",
@@ -1611,8 +1591,8 @@ export function ChatWidget() {
       dispatch({ type: "SET_PROCESSING", value: true });
       setHistoryBusy(true);
       // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await undoConversation("", "", state.conversationId);
-      const snapshot = await readConversation("", "", state.conversationId);
+      await undoConversation(state.conversationId);
+      const snapshot = await readConversation(state.conversationId);
 
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
@@ -1652,8 +1632,8 @@ export function ChatWidget() {
       dispatch({ type: "SET_PROCESSING", value: true });
       setHistoryBusy(true);
       // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await redoConversation("", "", state.conversationId);
-      const snapshot = await readConversation("", "", state.conversationId);
+      await redoConversation(state.conversationId);
+      const snapshot = await readConversation(state.conversationId);
 
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
@@ -1757,12 +1737,7 @@ export function ChatWidget() {
     // the widget in a paused state it can never leave.
     if (!state.conversationId) return false;
     try {
-      const snapshot = await readConversation(
-        environment ?? "",
-        agentId ?? "",
-        state.conversationId,
-        true,
-      );
+      const snapshot = await readConversation(state.conversationId, true);
       // The watch may have been torn down while this read was in flight (a
       // restart, an unmount). Applying the snapshot then would graft the old
       // conversation's transcript onto the new one.
@@ -1774,7 +1749,7 @@ export function ChatWidget() {
       console.error("Failed to refresh after approval:", err);
       return false;
     }
-  }, [environment, agentId, state.conversationId, processSnapshot]);
+  }, [state.conversationId, processSnapshot]);
 
   useHitlPolling({
     conversationId: state.conversationId,
@@ -1831,7 +1806,7 @@ export function ChatWidget() {
     try {
       await rerunLastStep(state.conversationId);
       if (gen === generationRef.current && rerunStep !== null) clearRatedStep(rerunStep);
-      const snapshot = await readConversation("", "", state.conversationId, true);
+      const snapshot = await readConversation(state.conversationId, true);
       if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
         dispatch({

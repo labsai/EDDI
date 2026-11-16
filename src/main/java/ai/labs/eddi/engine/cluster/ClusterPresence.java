@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +52,22 @@ import java.nio.charset.StandardCharsets;
  * answers {@link #members()} and {@link #currentMembers()} from what it
  * delivered: polling cost every node one key listing plus one get per member
  * every few seconds, O(N²) for the cluster. A watch does not see a value
- * expire, so a record is dropped locally once it is older than the bucket TTL.
- * While the watch is not running (before its initial values, after a
- * disconnect) the bucket is read as before.
+ * expire, so a record is dropped locally once this node has not seen it
+ * rewritten for the bucket TTL. While the watch is not running (before its
+ * initial values, after a disconnect) the bucket is read as before.
+ * <p>
+ * <b>Ages on this node's clock (OPS-1).</b> How old a record is — for the
+ * expiry above and for {@link #heartbeatAgeMillis} — is measured on this node's
+ * monotonic clock from the moment it saw that revision arrive, never by
+ * comparing a writer's {@code updatedAt} or the server's write time with this
+ * node's wall clock: a node whose clock ran 20 s ahead dropped every member
+ * between two rewrites, and a peer whose clock ran 10 s behind looked stale to
+ * the drain guards. The price is paid at the start: a record delivered with the
+ * watch's initial values, or found by the first bucket read, was written at
+ * some unknown moment within the TTL. It is listed, kept for at most one TTL
+ * after it arrived, and has no known age until it is rewritten (one presence
+ * interval for a live node). {@code updatedAt} stays in the record, for
+ * display.
  * <p>
  * <b>Duplicate node ids (C6).</b> Two JVMs with one node id see each other's
  * leases as "our earlier boot" and delete or steal them, so mutual exclusion is
@@ -102,12 +116,23 @@ public class ClusterPresence {
     private volatile long cachedAt;
     private volatile int lastKnownMembers = 1;
 
-    /** Watched records: key → (record, write time in epoch millis). */
-    private final Map<String, Watched> watched = new ConcurrentHashMap<>();
+    /** Watched records by key. */
+    private final Map<String, Seen> watched = new ConcurrentHashMap<>();
     private volatile boolean watchReady;
     private volatile Connection watchedOn;
+    /** What the last bucket read found, by key: the dating without a watch. */
+    private final Map<String, Seen> polled = new ConcurrentHashMap<>();
+    /**
+     * When the bucket was last read, on {@link #clock}; 0 before the first read.
+     */
+    private volatile long polledAt;
 
-    private record Watched(Map<String, Object> record, long writtenAt) {
+    /**
+     * A record as this node received it: its revision, when this node saw that
+     * revision on {@link #clock}, and whether that moment is when it was written —
+     * false for a record that was already there when this node started looking.
+     */
+    private record Seen(Map<String, Object> record, long revision, long seenAt, boolean dated) {
     }
 
     /** The revision of this node's own last write, 0 before the first. */
@@ -125,7 +150,6 @@ public class ClusterPresence {
     private volatile long foreignSeenAt;
     private LongSupplier clock = () -> System.nanoTime() / 1_000_000L;
     private volatile boolean duplicate;
-    private volatile String duplicateDetail;
     /** Run once each time this node's ownership of its id becomes confirmed. */
     private final List<Runnable> identityConfirmedListeners = new CopyOnWriteArrayList<>();
     private volatile boolean identityConfirmedAnnounced;
@@ -151,8 +175,8 @@ public class ClusterPresence {
     }
 
     /**
-     * For tests: the monotonic millisecond clock the takeover interval is measured
-     * with.
+     * For tests: the monotonic millisecond clock the takeover interval and the
+     * record ages are measured with.
      */
     ClusterPresence withClock(LongSupplier clock) {
         this.clock = clock;
@@ -242,7 +266,6 @@ public class ClusterPresence {
             if (duplicate) {
                 LOGGER.infof("The other JVM using node id %s is gone — this node takes the id back", connections.node().nodeId());
                 duplicate = false;
-                duplicateDetail = null;
             }
             foreignRevisionSeen = 0;
             // A lost create leaves this node unconfirmed: the record belongs to whoever
@@ -311,7 +334,6 @@ public class ClusterPresence {
 
     private void flagDuplicate(String otherBoot, String evidence) {
         duplicate = true;
-        duplicateDetail = "boot " + otherBoot + " (" + evidence + ")";
         LOGGER.errorf("Another live JVM uses node id '%s' (boot %s, %s). Two nodes with one id break lease mutual exclusion "
                 + "and RPC routing. This node stops announcing itself and reports NOT READY until the other one is gone. Give "
                 + "every replica a unique eddi.cluster.node-id (the pod name).", connections.node().nodeId(), otherBoot, evidence);
@@ -320,13 +342,6 @@ public class ClusterPresence {
     /** True while another live JVM uses this node's id. */
     public boolean isDuplicate() {
         return duplicate;
-    }
-
-    /**
-     * Who the other JVM is and how it was detected, while {@link #isDuplicate()}.
-     */
-    public String duplicateDetail() {
-        return duplicateDetail;
     }
 
     private static String bootOf(byte[] value) {
@@ -393,8 +408,7 @@ public class ClusterPresence {
             connections.keyValue(bucketName).watch(KEY_PREFIX + ">", new KeyValueWatcher() {
                 @Override
                 public void watch(KeyValueEntry entry) {
-                    onWatched(entry.getKey(), entry.getValue(), entry.getOperation() == KeyValueOperation.PUT,
-                            entry.getCreated() == null ? System.currentTimeMillis() : entry.getCreated().toInstant().toEpochMilli());
+                    onWatched(entry.getKey(), entry.getValue(), entry.getOperation() == KeyValueOperation.PUT, entry.getRevision());
                 }
 
                 @Override
@@ -411,8 +425,12 @@ public class ClusterPresence {
         }
     }
 
-    /** Applies one delivered change of the watch. Package-private for tests. */
-    void onWatched(String key, byte[] value, boolean put, long writtenAt) {
+    /**
+     * Applies one delivered change of the watch, stamped with when this node
+     * received it. A value delivered before the end of the initial data was written
+     * at some unknown time and stays undated. Package-private for tests.
+     */
+    void onWatched(String key, byte[] value, boolean put, long revision) {
         if (key == null || !key.startsWith(KEY_PREFIX)) {
             return;
         }
@@ -421,8 +439,8 @@ public class ClusterPresence {
             return;
         }
         try {
-            watched.put(key, new Watched(JSON.readValue(value, new TypeReference<Map<String, Object>>() {
-            }), writtenAt));
+            watched.put(key, new Seen(JSON.readValue(value, new TypeReference<Map<String, Object>>() {
+            }), revision, clock.getAsLong(), watchReady));
         } catch (IOException e) {
             LOGGER.debugf("Unreadable presence record %s", key);
         }
@@ -441,10 +459,10 @@ public class ClusterPresence {
     }
 
     private List<Map<String, Object>> fromWatch() {
-        long now = System.currentTimeMillis();
-        // A watch does not see a value expire: anything older than the TTL is gone,
-        // and is dropped here, or the records of crashed nodes would pile up.
-        watched.entrySet().removeIf(e -> now - e.getValue().writtenAt() >= ttlMillis);
+        long now = clock.getAsLong();
+        // A watch does not see a value expire: anything not rewritten for the TTL is
+        // gone, and is dropped here, or the records of crashed nodes would pile up.
+        watched.entrySet().removeIf(e -> now - e.getValue().seenAt() >= ttlMillis);
         List<Map<String, Object>> members = new ArrayList<>();
         watched.values().forEach(w -> members.add(w.record()));
         return members;
@@ -488,21 +506,56 @@ public class ClusterPresence {
         if (watchUsable()) {
             return remember(fromWatch());
         }
+        long now = clock.getAsLong();
+        // A record that is new, or at a new revision, since a read less than one TTL
+        // ago was written in between, and is dated now. On a first read, or after a
+        // longer gap, when it was written is unknown.
+        boolean bracketed = polledAt > 0 && now - polledAt < ttlMillis;
         List<Map<String, Object>> members = new ArrayList<>();
+        Set<String> found = new HashSet<>();
         for (String key : nodes.keys()) {
             if (!key.startsWith(KEY_PREFIX)) {
                 continue;
             }
             nodes.get(key).ifPresent(v -> {
                 try {
-                    members.add(JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
-                    }));
+                    Map<String, Object> record = JSON.readValue(v.value(), new TypeReference<Map<String, Object>>() {
+                    });
+                    members.add(record);
+                    found.add(key);
+                    Seen before = polled.get(key);
+                    if (before == null || before.revision() != v.revision()) {
+                        polled.put(key, new Seen(record, v.revision(), now, bracketed));
+                    }
                 } catch (IOException e) {
                     LOGGER.debugf("Unreadable presence record %s", key);
                 }
             });
         }
+        polled.keySet().retainAll(found);
+        polledAt = now;
         return remember(members);
+    }
+
+    /**
+     * How long ago this node saw {@code nodeId}'s presence record written, on its
+     * own monotonic clock — never the writer's {@code updatedAt} against this
+     * node's wall clock, which misjudges every member whose clock is skewed. Read
+     * it after {@link #members()} or {@link #currentMembers()}: it dates the
+     * records those delivered. Empty when there is no such record, or when it was
+     * already there when this node started looking and has not been rewritten
+     * since; a caller deciding something must treat that as "cannot vouch for it".
+     * This node's own record is always 0.
+     */
+    public OptionalLong heartbeatAgeMillis(String nodeId) {
+        if (connections.node().nodeId().equals(nodeId)) {
+            return OptionalLong.of(0);
+        }
+        Seen seen = (watchUsable() ? watched : polled).get(KEY_PREFIX + nodeId);
+        if (seen == null || !seen.dated()) {
+            return OptionalLong.empty();
+        }
+        return OptionalLong.of(Math.max(0, clock.getAsLong() - seen.seenAt()));
     }
 
     private List<Map<String, Object>> remember(List<Map<String, Object>> members) {

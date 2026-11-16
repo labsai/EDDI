@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -193,7 +194,7 @@ public class SecretResolver {
                         "Parameter '%s' of %s references %s, which could not be resolved — the secret does not exist, the vault "
                                 + "failed, or the vault is not configured (EDDI_VAULT_MASTER_KEY). Refusing to send the "
                                 + "unresolved reference to the provider.",
-                        entry.getKey(), usedFor, reference));
+                        entry.getKey(), usedFor, SecretReference.describe(reference)));
             }
         }
         return resolvedParams;
@@ -206,6 +207,109 @@ public class SecretResolver {
     public static class UnresolvedSecretReferenceException extends IllegalStateException {
         public UnresolvedSecretReferenceException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Why {@link #resolveValue} left a reference in place. Only
+     * {@link #PROVIDER_FAILED} can be the server's fault; the others are fixed in
+     * the configuration or the vault.
+     */
+    public enum UnresolvedReason {
+        /** No vault is configured ({@code EDDI_VAULT_MASTER_KEY} unset). */
+        VAULT_NOT_CONFIGURED,
+        /** The name is in an EDDI-internal namespace no configuration may read. */
+        RESERVED,
+        /** No secret of that name exists in the tenant the reference names. */
+        NOT_FOUND,
+        /** The secret exists, or may, but the vault could not be read. */
+        PROVIDER_FAILED
+    }
+
+    /**
+     * Why {@code reference} did not resolve, for an error message and for telling a
+     * configuration error from a vault outage. Reads the secret's metadata only,
+     * never its value, and only on the failure path. A secret that exists now
+     * counts as {@link UnresolvedReason#PROVIDER_FAILED}: either the vault could
+     * not decrypt it, or it was created since — neither is the configuration's
+     * fault.
+     */
+    public UnresolvedReason diagnoseUnresolved(SecretReference reference) {
+        if (!secretProvider.isAvailable()) {
+            return UnresolvedReason.VAULT_NOT_CONFIGURED;
+        }
+        if (SecretReference.isReservedKeyName(reference.keyName())) {
+            return UnresolvedReason.RESERVED;
+        }
+        try {
+            secretProvider.getMetadata(reference);
+            return UnresolvedReason.PROVIDER_FAILED;
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            return UnresolvedReason.NOT_FOUND;
+        } catch (ISecretProvider.SecretProviderException | RuntimeException e) {
+            return UnresolvedReason.PROVIDER_FAILED;
+        }
+    }
+
+    /**
+     * The exception for a request that would carry an unresolved vault reference: a
+     * {@link MisconfiguredVaultReferenceException} when {@code reason} says the
+     * configuration (or the vault's contents) is at fault, a plain
+     * {@link IllegalArgumentException} otherwise — a vault outage is not a
+     * misconfiguration, and must not be reported as one. The message names the
+     * reference and the tenant it was looked up in, never a value.
+     *
+     * @param location
+     *            where the reference sits, e.g. {@code "header 'X-Api-Key'"}
+     * @param reference
+     *            the reference as written
+     * @param reason
+     *            from {@link #diagnoseUnresolved}; {@code null} when unknown
+     */
+    public static IllegalArgumentException unresolvedReferenceFailure(String location, String reference, UnresolvedReason reason) {
+        String prefix = location + " references " + SecretReference.describe(reference) + ", which could not be resolved";
+        String suffix = ". Refusing to send the unresolved reference.";
+        if (reason == null) {
+            return new IllegalArgumentException(prefix
+                    + " — the secret does not exist, the vault failed, or the vault is not configured (EDDI_VAULT_MASTER_KEY)" + suffix);
+        }
+        String message = prefix + switch (reason) {
+            case VAULT_NOT_CONFIGURED -> ": the vault is not configured (set EDDI_VAULT_MASTER_KEY)";
+            case RESERVED -> ": the name is reserved for EDDI-internal keys and cannot be referenced from a configuration";
+            case NOT_FOUND -> notFoundExplanation(reference);
+            case PROVIDER_FAILED -> ": the vault could not read it (see the server log)";
+        } + suffix;
+        return reason == UnresolvedReason.PROVIDER_FAILED ? new IllegalArgumentException(message) : new MisconfiguredVaultReferenceException(message);
+    }
+
+    private static String notFoundExplanation(String reference) {
+        ReferenceScanner.Match match = VAULT_REFERENCES.findFirst(reference);
+        if (match == null) {
+            return ": no such secret exists";
+        }
+        SecretReference ref = SecretReference.of(match);
+        String explanation = ": no secret named '" + ref.keyName() + "' exists in tenant '" + ref.tenantId() + "'";
+        if (match.tenant() == null) {
+            explanation += ". A reference without a tenant always looks in tenant '" + SecretReference.DEFAULT_TENANT
+                    + "'; for a secret stored in another tenant write ${vault:<tenant>/" + ref.keyName() + "}";
+        }
+        return explanation;
+    }
+
+    /**
+     * A vault reference in a configuration that cannot be resolved because of the
+     * configuration or the vault's contents — no such secret in the tenant looked
+     * up, a reserved name, or no vault at all — rather than because the vault
+     * failed. An {@link IllegalArgumentException}, as the unmarked refusal it
+     * replaces was. See {@link #unresolvedReferenceFailure}.
+     */
+    public static class MisconfiguredVaultReferenceException extends IllegalArgumentException implements AgentConfigurationRefusal {
+        public MisconfiguredVaultReferenceException(String message) {
+            super(message);
+        }
+
+        public MisconfiguredVaultReferenceException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
@@ -298,7 +402,7 @@ public class SecretResolver {
             try {
                 return secretProvider.resolve(ref);
             } catch (ISecretProvider.SecretNotFoundException e) {
-                LOGGER.warnf("Vault reference not found: %s — passing through unchanged", fullMatch);
+                LOGGER.warnf("Vault reference not found: %s — passing through unchanged", SecretReference.describe(fullMatch));
                 resolveErrorCounter.increment();
                 return null;
             } catch (ISecretProvider.SecretProviderException e) {

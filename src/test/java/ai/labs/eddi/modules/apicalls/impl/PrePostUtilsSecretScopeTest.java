@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
+import ai.labs.eddi.configs.apicalls.model.PreRequest;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +19,6 @@ import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,7 +70,7 @@ class PrePostUtilsSecretScopeTest {
         jsonSerialization = mock(IJsonSerialization.class);
         var templatingEngine = mock(ITemplatingEngine.class);
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(invocation -> invocation.getArgument(0));
-        prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), templatingEngine, new DataFactory(),
+        prePostUtils = new PrePostUtils(jsonSerialization, templatingEngine, new DataFactory(),
                 new SecretPropertyVault(secretProvider, new DataFactory()));
         memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
         templateData = new HashMap<>();
@@ -119,6 +120,28 @@ class PrePostUtilsSecretScopeTest {
         assertEquals(Set.of(TOKEN), vaulted);
     }
 
+    /**
+     * A pre-request instruction updates the caller's template data in place, so the
+     * plaintext it read from that data must be scrubbed there too — the request
+     * templates render from this map next. (Rebuilding the map from memory used to
+     * drop the plaintext by accident, together with everything else the caller had
+     * put in it.)
+     */
+    @Test
+    @DisplayName("a pre-request secret instruction leaves the caller's map in place, minus the plaintext it vaulted")
+    void preRequestSecretIsScrubbedFromTheCallersMap() throws Exception {
+        var preRequest = new PreRequest();
+        preRequest.setPropertyInstructions(List.of(secret("accessToken", "tokenResponse.access_token")));
+        templateData.put("id", "42");
+
+        Map<String, Object> result = prePostUtils.executePreRequestPropertyInstructions(memory, templateData, preRequest);
+
+        assertSame(templateData, result, "the caller's map is updated, not replaced");
+        assertEquals("42", result.get("id"));
+        assertNotNull(result.get("tokenResponse"), "the response the token came from stays, scrubbed");
+        assertFalse(result.toString().contains(TOKEN), "the vaulted plaintext must not stay in the template data: " + result);
+    }
+
     @Test
     @DisplayName("a secret instruction that yields a non-string is refused")
     void nonStringRefused() throws Exception {
@@ -139,7 +162,7 @@ class PrePostUtilsSecretScopeTest {
     @DisplayName("a postResponse output rendered from the response never carries the token the same postResponse vaulted")
     void outputBuiltAfterVaultingIsScrubbed() throws Exception {
         var realEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
-        var rendering = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), realEngine, new DataFactory(),
+        var rendering = new PrePostUtils(jsonSerialization, realEngine, new DataFactory(),
                 new SecretPropertyVault(secretProvider, new DataFactory()));
         var output = new OutputBuildingInstruction();
         output.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));

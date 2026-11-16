@@ -26,7 +26,12 @@ import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * @author ginccc
@@ -170,6 +175,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
             throw new BadRequestException("A patch body must be a PatchInstruction: "
                     + "{\"operation\":\"SET|DELETE\",\"document\":{\"name\":\"…\",\"description\":\"…\"}}");
         }
+        requireOnlyNameAndDescription(patchInstruction.getDocument());
 
         try {
             version = patchTargetVersion(id, version);
@@ -208,6 +214,98 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Refuses a patch whose document sets anything besides {@code name} and
+     * {@code description}.
+     * <p>
+     * Those two are all this endpoint applies, and everything else used to be
+     * dropped with a 204 — so a client sending {@code visibility: "private"} was
+     * told the change had gone through while the resource stayed exactly as visible
+     * as before. A declared field counts as set when it is non-null
+     * ({@code deleted}, a primitive, when it is {@code true}): none of the others
+     * has a deserialisation default, so a body that does not mention them leaves
+     * them null, and every in-process caller builds its patch from an empty
+     * descriptor. A key the model does not declare at all counts as set too — see
+     * {@link DocumentDescriptor#unmodeledFields()}. The answer names each field and
+     * says where it is changed instead.
+     */
+    private static void requireOnlyNameAndDescription(DocumentDescriptor patch) {
+        if (patch == null) {
+            return; // SET answers its own 400; DELETE without a document clears both
+        }
+        Set<String> declared = new LinkedHashSet<>();
+        addIfSet(declared, "resource", patch.getResource());
+        addIfSet(declared, "createdBy", patch.getCreatedBy());
+        addIfSet(declared, "createdOn", patch.getCreatedOn());
+        addIfSet(declared, "lastModifiedBy", patch.getLastModifiedBy());
+        addIfSet(declared, "lastModifiedOn", patch.getLastModifiedOn());
+        addIfSet(declared, "deleted", patch.isDeleted() ? Boolean.TRUE : null);
+        addIfSet(declared, "originId", patch.getOriginId());
+        addIfSet(declared, "syncedVersion", patch.getSyncedVersion());
+        addIfSet(declared, "ownerId", patch.getOwnerId());
+        addIfSet(declared, "spaceId", patch.getSpaceId());
+        addIfSet(declared, "visibility", patch.getVisibility());
+        addIfSet(declared, "grants", patch.getGrants());
+        addIfSet(declared, "accessIndex", patch.getAccessIndex());
+        Set<String> unmodeled = patch.unmodeledFields();
+        if (declared.isEmpty() && unmodeled.isEmpty()) {
+            return;
+        }
+
+        List<String> named = new ArrayList<>(declared);
+        // Keys the model does not declare are the caller's own text: sanitised,
+        // shortened and capped before they are echoed.
+        unmodeled.stream().limit(MAX_ECHOED_UNMODELED_FIELDS).map(key -> "'" + sanitize(abbreviate(key)) + "'").forEach(named::add);
+        if (unmodeled.size() > MAX_ECHOED_UNMODELED_FIELDS) {
+            named.add((unmodeled.size() - MAX_ECHOED_UNMODELED_FIELDS) + " more");
+        }
+
+        String shares = "/descriptorstore/descriptors/{id}/shares";
+        StringBuilder message = new StringBuilder("This PATCH changes only name and description, but the document also sets ")
+                .append(String.join(", ", named)).append(", so nothing was changed. Send only name and/or description.");
+        if (declared.contains("visibility")) {
+            message.append(" To change visibility: PUT ").append(shares).append("/visibility?visibility=private|space|internal|published.");
+        }
+        if (declared.contains("spaceId")) {
+            message.append(" To move the resource to another of your spaces: PUT ").append(shares).append("/space?spaceId=….");
+        }
+        if (declared.contains("ownerId")) {
+            message.append(" To transfer ownership (administrators): PUT ").append(shares).append("/owner?ownerId=….");
+        }
+        if (declared.contains("grants")) {
+            message.append(" To share or stop sharing: POST or DELETE ").append(shares).append("?subject=….");
+        }
+        if (declared.contains("deleted")) {
+            message.append(" To delete the resource: DELETE it on its own store.");
+        }
+        if (declared.stream().anyMatch(MAINTAINED_FIELDS::contains)) {
+            message.append(" ").append(String.join(", ", MAINTAINED_FIELDS)).append(" are maintained by EDDI and cannot be set.");
+        }
+        if (!unmodeled.isEmpty()) {
+            message.append(" Quoted names are not descriptor fields.");
+        }
+        throw new BadRequestException(message.toString());
+    }
+
+    /** How many undeclared keys a refusal names before it counts the rest. */
+    private static final int MAX_ECHOED_UNMODELED_FIELDS = 10;
+
+    private static final int MAX_ECHOED_FIELD_NAME_LENGTH = 64;
+
+    /** Fields EDDI writes itself; no endpoint sets them. In wire order. */
+    private static final List<String> MAINTAINED_FIELDS = List.of("resource", "createdBy", "createdOn", "lastModifiedBy", "lastModifiedOn",
+            "originId", "syncedVersion", "accessIndex");
+
+    private static void addIfSet(Set<String> fields, String field, Object value) {
+        if (value != null) {
+            fields.add(field);
+        }
+    }
+
+    private static String abbreviate(String key) {
+        return key.length() <= MAX_ECHOED_FIELD_NAME_LENGTH ? key : key.substring(0, MAX_ECHOED_FIELD_NAME_LENGTH) + "…";
     }
 
     /**

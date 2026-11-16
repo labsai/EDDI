@@ -650,6 +650,19 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /**
+     * Assembles the turn's tools exactly as {@link #executeIfToolsEnabled} does and
+     * reports whether any of them is not the reply tool.
+     *
+     * @see IAgentOrchestrator#offersTools
+     */
+    @Override
+    public boolean offersTools(LlmConfiguration.Task task, IConversationMemory memory) {
+        ToolSetup setup = buildToolSetup(task, memory);
+        String replyTool = setup.answerToolName();
+        return setup.toolSpecs().stream().anyMatch(spec -> !spec.name().equals(replyTool));
+    }
+
+    /**
      * @see IAgentOrchestrator#reaskFinalAnswer
      */
     @Override

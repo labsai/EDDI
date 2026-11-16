@@ -88,7 +88,7 @@ public class TenantQuotaService {
     /**
      * Opt-in hard ceiling: hold a call's maximum cost against the monthly budget
      * before the call, instead of only charging it afterwards. Off by default. See
-     * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation}.
+     * {@code docs/tenant-quotas.md#hard-ceiling-cost-reservation-opt-in}.
      */
     @ConfigProperty(name = "eddi.tenant.quota.cost-reservation.enabled", defaultValue = "false")
     boolean costReservationEnabled;
@@ -648,9 +648,9 @@ public class TenantQuotaService {
 
     /**
      * The {@code type} tags {@link #recordDenial} uses for a store that cannot
-     * answer.
+     * answer — one per gate, the deploy gate's {@code agent} included.
      */
-    private static final List<String> UNAVAILABLE_TYPES = List.of("conversation", "api_call", "cost");
+    private static final List<String> UNAVAILABLE_TYPES = List.of("conversation", "api_call", "agent", "cost");
 
     /**
      * Registers {@code eddi.tenant.quota.unavailable} at 0 for the default tenant.

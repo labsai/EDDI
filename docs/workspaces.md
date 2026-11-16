@@ -116,12 +116,12 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" \
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/descriptorstore/descriptors/{id}/shares` | Owner, space, visibility, grants, and the caller's effective level. |
-| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level`. The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
-| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke a subject's grant. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `private` / `space` / `internal` / `published`. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces — personal work becoming team work. Ownership does not change. |
-| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership. **Administrators only.** |
-| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, optional `message`). See [Notifications](#notifications-and-access-requests). |
+| `POST` | `/descriptorstore/descriptors/{id}/shares` | Grant `subject` a `level` (default `VIEW`). The subject is a person (principal, username or verified email, with or without `user:`) or a team (`team:…`). |
+| `DELETE` | `/descriptorstore/descriptors/{id}/shares` | Revoke the grant of `subject`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/visibility` | Set `visibility` to `private` / `space` / `internal` / `published`. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/space` | File a resource you own under another of your spaces (`spaceId`) — personal work becoming team work. Ownership does not change. |
+| `PUT` | `/descriptorstore/descriptors/{id}/shares/owner` | Transfer ownership to `ownerId`, optionally into `spaceId`. **Administrators only.** |
+| `POST` | `/descriptorstore/descriptors/{id}/shares/requests` | Ask the owner for access (`level`, default `USE`; optional `message`, cut to 500 characters). See [Notifications](#notifications-and-access-requests). |
 
 Every change except a request takes `dryRun=true`, which answers with the same
 `updated` / `skipped` lists and changes nothing. The Manager uses it to show what
@@ -167,7 +167,7 @@ what sharing with an email address used to do. An unverified email is never a
 way to find somebody: whoever can set their own address could otherwise collect
 shares meant for someone else.
 
-`GET /workspaces/directory?q=` powers the share box's suggestions. The share
+`GET /workspaces/directory?q=&limit=` (default 10, at most 25) powers the share box's suggestions. The share
 dialog labels each grant with the person's name, and flags grants that match no
 recorded user (typically ones made before the directory existed) so an owner can
 remove them. The directory is covered by GDPR erasure and export. Set
@@ -216,8 +216,11 @@ A default team never files somebody's work in a team they are not in: their
 work would otherwise be readable and editable by people they never chose to
 share it with.
 
-A header naming a space the caller is not a member of is refused with 403
-before anything is created.
+A header naming none of the caller's spaces is refused with 403 before
+anything is created. The value must be one of the ids `GET /workspaces` lists,
+exactly: it is compared case-sensitively (group names are case-sensitive) and
+only surrounding whitespace is ignored, so `TEAM:engineering` or
+`team:engineering/` is refused as well. The refusal quotes the value received.
 
 ### Notifications and access requests
 
@@ -241,7 +244,7 @@ every notification that names the person, at any age.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first. |
+| `GET` | `/workspaces/notifications?unreadOnly=&limit=` | The caller's notifications, newest first (`limit` default 50, at most 200). |
 | `GET` | `/workspaces/notifications/count` | `{"unread": n}` — cheap enough to poll. |
 | `POST` | `/workspaces/notifications/read` | Mark `{"ids": [...]}` read, or all of them with `{}`. |
 
@@ -440,6 +443,12 @@ administrator — in the Manager's **Workspaces** page, or:
 | `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. A create under `enforce` carries `allowedAgents` and `allowedHosts` (`["*"]` for "any"), as on [the tenant vault](secrets-vault.md#required-on-a-create). |
 | `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
 
+Space ids are opaque and may contain `%` — a group `a|b` is `team:a%7Cb` — so
+`space` is sent URL-encoded, exactly as `GET /workspaces` lists it
+(`encodeURIComponent(id)`, here `team%3Aa%257Cb`). Sent raw, the id is decoded
+once on the way in, arrives as `team:a|b`, and is refused with 403: it matches
+none of the caller's spaces.
+
 Agents reference them explicitly: `${vault:<tenant>/openai-key}` and
 `${vars:<tenant>/model}`, where every response names the tenant. Membership is
 what authorizes, and it is checked where a human acts: **deploying an agent that
@@ -508,7 +517,26 @@ from:
 - **`STORED`** — changed at runtime; kept in the database.
 - **`DEFAULT`** — neither.
 
-Changes reach every node within seconds.
+Changes reach every node within seconds. A stored `legacy-visibility` other than
+`shared` or `admin-only` — the API refuses one, so only a direct database edit
+can store it — is ignored: the default applies, the setting reports `DEFAULT`,
+and a single `WARN` names the value.
+
+### Resources that predate ownership
+
+A resource created before ownership was recorded has a descriptor with no owner
+and no space. Under `legacy-visibility=shared` every user may **read, use, edit
+and deploy** it, so an upgrade hides nothing and stops no one's work. Nobody but
+an administrator **owns** it: deleting it, sharing it or revoking a share,
+changing its visibility (publishing it), moving it to another space, and reading
+its grant list all need `OWN`, so a non-admin is refused them and the Manager
+does not offer them. An absent owner is not a grant of ownership; otherwise any
+user could publish a colleague's pre-upgrade agent to anonymous callers, or move
+it into their own space and so take it from everyone else.
+
+An explicit share still counts in full: a user granted `OWN` on a legacy
+resource holds it. To hand a resource over for good, assign an owner with
+`PUT /descriptorstore/descriptors/{id}/shares/owner`.
 
 ### Resources with no descriptor at all
 
@@ -546,9 +574,12 @@ configuration would break every shared agent.
 2. Leave `eddi.workspaces.enabled=false`. New resources are attributed to their
    creators from this point on.
 3. Check the owners look right.
-4. Set `eddi.workspaces.enabled=true`.
-5. Optionally move to `legacy-visibility=admin-only` once the pre-existing
-   resources have been assigned owners with the ownership-transfer endpoint.
+4. Set `eddi.workspaces.enabled=true`. Pre-existing resources stay readable and
+   editable by everyone, but deleting, sharing, publishing or moving one is
+   admin-only until it has an owner — see
+   [Resources that predate ownership](#resources-that-predate-ownership).
+5. Assign owners to the pre-existing resources with the ownership-transfer
+   endpoint, then optionally move to `legacy-visibility=admin-only`.
 
 Rolling back is setting the flag to `false`. The recorded ownership is inert
 while enforcement is off.

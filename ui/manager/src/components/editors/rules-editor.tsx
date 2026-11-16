@@ -134,7 +134,7 @@ function defaultConfigsFor(type: string): Record<string, string> {
     case "occurrence":
       return { maxTimesOccurred: "1", behaviorRuleName: "" };
     case "deploymentContext":
-      return { when: "production", tagMatches: "" };
+      return { when: "production" };
     case "capabilityMatch":
       return { skill: "", strategy: "highest_confidence", attributes: "" };
     case "contextmatcher":

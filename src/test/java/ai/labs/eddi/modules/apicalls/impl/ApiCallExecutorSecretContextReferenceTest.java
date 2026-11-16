@@ -16,7 +16,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
@@ -95,7 +94,7 @@ class ApiCallExecutorSecretContextReferenceTest {
                 .build();
         dataFactory = mock(IDataFactory.class);
         when(dataFactory.createData(anyString(), any())).thenAnswer(inv -> new Data<>(inv.getArgument(0), inv.getArgument(1)));
-        var prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class), new TemplatingEngine(engine), dataFactory,
+        var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(engine), dataFactory,
                 mock(SecretPropertyVault.class));
         memory = mock(IConversationMemory.class);
         step = mock(IWritableConversationStep.class);

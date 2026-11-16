@@ -65,7 +65,7 @@ public interface IRestParserStore extends IRestVersionInfo {
      * "eddi://ai.labs.parser.dictionaries.time" }, { "type":
      * "eddi://ai.labs.parser.dictionaries.ordinalNumber" }, { "type":
      * "eddi://ai.labs.parser.dictionaries.regular", "config": { "uri":
-     * "eddi://ai.labs.dictionary/regulardictionarystore/regulardictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
+     * "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<INSERT_ID_OF_DICTIONARY>?version=<VERSION_NUMBER>"
      * } } ], "corrections": [ { "type":
      * "eddi://ai.labs.parser.corrections.levenshtein", "config": { "distance": "2"
      * } }, { "type": "eddi://ai.labs.parser.corrections.mergedTerms" } ]} }
@@ -73,7 +73,7 @@ public interface IRestParserStore extends IRestVersionInfo {
      * @param parserConfiguration
      *            configuration of parser (which dictionaries and which corrections
      *            algorithms in which order)
-     * @return an array of expressions representing the found solutions
+     * @return 201 Created, with the URI of the new parser in the Location header
      */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
