@@ -99,7 +99,7 @@
   "attach.maxFiles": "Sie können höchstens {{max}} Dateien pro Nachricht anhängen.",
   "attach.notAttached": "Nicht angehängt: {{files}}",
   "attach.done": "{{file}} angehängt.",
-  "attach.doneLarge": "{{file}} angehängt, ist aber zu groß für den direkten Versand – der Assistent kann sie möglicherweise nicht lesen.",
+  "attach.doneLarge": "{{file}} angehängt. Die Datei ist zu groß, um sie direkt in die Nachricht aufzunehmen, deshalb erhält der Assistent sie stattdessen als Verweis.",
   "attach.removed": "{{file}} entfernt.",
   "attach.remove": "{{file}} entfernen",
   "attach.removeNth": "{{file}} entfernen ({{n}} von {{total}})",

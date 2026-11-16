@@ -99,7 +99,7 @@
   "attach.maxFiles": "คุณแนบไฟล์ได้สูงสุด {{max}} ไฟล์ต่อข้อความ",
   "attach.notAttached": "ไม่ได้แนบ: {{files}}",
   "attach.done": "แนบ {{file}} แล้ว",
-  "attach.doneLarge": "แนบ {{file}} แล้ว แต่มีขนาดใหญ่เกินกว่าจะส่งโดยตรง — ผู้ช่วยอาจอ่านไฟล์นี้ไม่ได้",
+  "attach.doneLarge": "แนบ {{file}} แล้ว ไฟล์มีขนาดใหญ่เกินกว่าจะใส่ไว้ในข้อความโดยตรง ผู้ช่วยจึงได้รับไฟล์นี้เป็นการอ้างอิงแทน",
   "attach.removed": "ลบ {{file}} ออกแล้ว",
   "attach.remove": "ลบ {{file}} ออก",
   "attach.removeNth": "ลบ {{file}} ออก ({{n}} จาก {{total}})",

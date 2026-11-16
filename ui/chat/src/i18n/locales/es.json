@@ -99,7 +99,7 @@
   "attach.maxFiles": "Puedes adjuntar como máximo {{max}} archivos por mensaje.",
   "attach.notAttached": "No adjuntados: {{files}}",
   "attach.done": "{{file}} adjuntado.",
-  "attach.doneLarge": "{{file}} adjuntado, pero es demasiado grande para enviarlo directamente: puede que el asistente no pueda leerlo.",
+  "attach.doneLarge": "{{file}} adjuntado. Es demasiado grande para incluirlo en el propio mensaje, así que el asistente lo recibe como referencia.",
   "attach.removed": "{{file}} eliminado.",
   "attach.remove": "Quitar {{file}}",
   "attach.removeNth": "Quitar {{file}} ({{n}} de {{total}})",

@@ -99,7 +99,7 @@
   "attach.maxFiles": "1 つのメッセージに添付できるファイルは最大 {{max}} 個です。",
   "attach.notAttached": "添付されなかったファイル: {{files}}",
   "attach.done": "{{file}} を添付しました。",
-  "attach.doneLarge": "{{file}} を添付しましたが、大きすぎるため直接送信できません。アシスタントが読み取れない可能性があります。",
+  "attach.doneLarge": "{{file}} を添付しました。メッセージに直接含めるには大きすぎるため、アシスタントには参照として渡されます。",
   "attach.removed": "{{file}} を削除しました。",
   "attach.remove": "{{file}} を削除",
   "attach.removeNth": "{{file}} を削除({{total}} 件中 {{n}} 件目)",
