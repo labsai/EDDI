@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
