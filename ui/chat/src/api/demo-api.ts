@@ -12,7 +12,7 @@ import {
   type RatingInput,
   type RatingProfile,
   type StoredRating,
-} from "./rating-api";
+} from "@eddi/core";
 
 /** Simulated delay */
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));

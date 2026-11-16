@@ -263,7 +263,10 @@ class ConfigurationReferenceCoverageTest {
             // The host address the compose files publish EDDI's ports on (127.0.0.1 by
             // default), and the acknowledgement docker-compose.yml's bind-guard reads
             // before it lets an unauthenticated EDDI_BIND leave loopback.
-            "EDDI_BIND", "EDDI_I_UNDERSTAND_PUBLIC");
+            "EDDI_BIND", "EDDI_I_UNDERSTAND_PUBLIC",
+            // The backend the Manager's Vite dev server proxies to
+            // (ui/manager/vite.config.ts).
+            "EDDI_BACKEND_URL");
 
     /**
      * Names a document quotes deliberately because they do <em>not</em> work.

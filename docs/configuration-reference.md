@@ -27,7 +27,7 @@ and replace **every character that is not a letter or a digit** with `_`. Both
 eddi.schedule.poll-interval         →  EDDI_SCHEDULE_POLL_INTERVAL
 eddi.vault.master-key               →  EDDI_VAULT_MASTER_KEY
 eddi.openai-compat.api-key          →  EDDI_OPENAI_COMPAT_API_KEY
-eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
+eddi.tools.websearch.brave.api-key  →  EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY
 ```
 
 > **Getting this wrong fails silently.** An unrecognised environment variable is
@@ -37,7 +37,7 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > `scope: "secret"` property setter then fails the whole turn. Nothing in the
 > startup log mentions the variable you set.
 >
-> To check what actually bound, read the value back from the Dev UI at `/q/dev`,
+> To check what actually bound, read the value back from the Dev UI at `/q/dev-ui`,
 > or compare against the spellings already used in `docker-compose.yml`,
 > `.env.example` and `k8s/`.
 
@@ -200,6 +200,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are ended after this many days without a turn. A daily sweep does it, first run five minutes after boot; it only changes the state to `ENDED` and deletes nothing, and a conversation paused for human approval is never ended. **`-1` (or `0`) disables it**: no conversation is ended for idleness, and startup logs that it is off. The same sweep still undeploys an old agent version once no conversation on it is active, whatever this is set to |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
+| `eddi.conversations.title-max-length` | `80` | Longest default conversation title, in characters (clamped to 10–200). A conversation is titled with its first user message that was not secret (no `secretInput`, nothing vaulted by a `scope: "secret"` property, not withheld by a guardrail), whitespace collapsed and cut at a word. An owner's rename (`PATCH /conversationstore/conversations/{conversationId}`) and an agent's model-written title (`titleGeneration`, see [agent-config-authoring.md](agent-config-authoring.md#conversation-titles-titlegeneration)) are not bound by it |
 | `eddi.expressions.max-length` | `32768` | Longest expression string, in characters, the expression parser accepts — a `context` entry of type `expressions`, a dictionary's `expressions`, a rule's `inputmatcher`/`contextmatcher` text. A client-sent context entry over it is refused with **413** `input_too_large` (the same refusal as a too-long input); one the engine meets inside a turn fails that task. `0` or negative disables the bound. See [security.md](security.md#parser-and-matcher-bounds) |
 | `eddi.expressions.max-depth` | `32` | Deepest parenthesis nesting the expression parser accepts, counted the same way and refused the same way as `eddi.expressions.max-length`. Each level is one recursion; the shipped agent configs use three |
 | `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
@@ -280,6 +281,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
 
 ---
 
@@ -288,6 +290,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.rag.in-memory.max-segments` | `50000` | Most segments all `in-memory` knowledge bases may hold together. In-memory stores are never evicted, so this is what bounds their heap use — at 1536 dimensions, 50,000 segments are roughly 300 MB of vectors plus their text. A write past it fails (an ingestion run reports `FAILED` naming this setting) and nothing is evicted to make room. `0` or negative disables the cap — see [rag.md](rag.md#vector-stores) |
+| `eddi.rag.pgvector.pool.max-size` | `10` | Most connections one pgvector connection pool opens. EDDI keeps one pool per PostgreSQL server and login (host, port, database, user, password), shared by every knowledge base that uses it; each starts empty and closes idle connections after two minutes. Applies when a pool is created — see [rag.md](rag.md#pgvector-at-scale) |
 | `eddi.rag.evaluation.max-queries` | `100` | Most golden queries one `POST /ragstore/rags/{id}/evaluate` request may run; more is refused with a 400 naming this setting. Each query costs one embedding call and the request is synchronous, so this bounds both the provider bill and how long one request holds a worker — see [rag.md](rag.md#evaluating-retrieval) |
 
 ---
@@ -463,9 +466,11 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
 | `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
-| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
-| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
-| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
+| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key), `brave` (Brave Search API, $5 per 1,000 requests) or `google` (deprecated — Google shuts the Custom Search JSON API down on 2027-01-01; a startup WARN says so). A paid provider without its key falls back to `duckduckgo`. See [langchain.md → Web Search Tool](langchain.md#web-search-tool) |
+| `eddi.tools.websearch.brave.api-key` | *(empty)* | Required for the `brave` provider. A plain key or a `${vault:...}` reference; sent in the `X-Subscription-Token` header |
+| `eddi.tools.websearch.price-per-call` | *(empty)* | Dollars one `websearch` call costs in cost tracking, replacing the provider default (`0.005` for `brave` and `google`, `0.001` for `duckduckgo`). Empty uses the provider default; a negative or non-numeric value is ignored with a startup WARN. A per-agent `toolPricing` still wins |
+| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the deprecated `google` provider |
+| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID, for the deprecated `google` provider |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
