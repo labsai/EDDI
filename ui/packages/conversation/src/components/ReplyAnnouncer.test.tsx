@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { nextAnnouncement, ReplyAnnouncer, speakable, type AnnouncedMessage } from "./ReplyAnnouncer";
 import { indicatorStatusText, ThinkingIndicator } from "./ActivityIndicator";
 
@@ -59,5 +59,35 @@ describe("reconnecting", () => {
     expect(indicatorStatusText(true, "calculator", undefined, true, true)).toBe("Connection lost. Reconnecting…");
     render(<ThinkingIndicator tool="calculator" reconnecting />);
     expect(screen.getByTestId("reconnecting-indicator")).toHaveTextContent("Connection lost. Reconnecting…");
+  });
+});
+
+describe("ReplyAnnouncer — rebuilt transcripts and repeated words", () => {
+  const user = (id: string, content: string): AnnouncedMessage => ({ id, role: "user", content });
+
+  it("announces only the new reply of a transcript rebuilt with fresh ids (a rerun)", () => {
+    const seen = new Set<string>();
+    const before = [user("u1", "Q1"), agent("a1", "A1"), user("u2", "Q2"), agent("a2", "old answer")];
+    nextAnnouncement(before, seen, speaker);
+    const rebuilt = [user("x1", "Q1"), agent("x2", "A1"), user("x3", "Q2"), agent("x4", "new answer")];
+    expect(nextAnnouncement(rebuilt, seen, speaker, before)).toBe("Bot said: new answer");
+    const undone = [user("y1", "Q1"), agent("y2", "A1")];
+    expect(nextAnnouncement(undone, seen, speaker, rebuilt)).toBeNull();
+  });
+
+  it("treats a short transcript of another conversation as history", () => {
+    const { rerender } = render(<ReplyAnnouncer messages={[agent("a", "One")]} speaker={speaker} historyKey="c1" />);
+    act(() => rerender(<ReplyAnnouncer messages={[user("u", "Hi"), agent("b", "Old reply")]} speaker={speaker} historyKey="c2" />));
+    expect(screen.getByTestId("reply-announcer")).toHaveTextContent("");
+  });
+
+  it("re-announces a second reply with the same words", async () => {
+    const { rerender } = render(<ReplyAnnouncer messages={[]} speaker={speaker} />);
+    const region = screen.getByTestId("reply-announcer");
+    act(() => rerender(<ReplyAnnouncer messages={[agent("a", "OK")]} speaker={speaker} />));
+    expect(region).toHaveTextContent("Bot said: OK");
+    act(() => rerender(<ReplyAnnouncer messages={[agent("a", "OK"), agent("b", "OK")]} speaker={speaker} />));
+    expect(region).toHaveTextContent("");
+    await waitFor(() => expect(region).toHaveTextContent("Bot said: OK"));
   });
 });

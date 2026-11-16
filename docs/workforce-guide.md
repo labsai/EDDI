@@ -99,8 +99,11 @@ missing, that is the agent's setting, not a fault.
   you open the conversation again.
 - If the connection drops while a reply comes in, the conversation says **Reconnecting…** and
   checks with the server for about half a minute. The agent usually keeps working meanwhile; when
-  the reply is ready it replaces the part you saw. Only if the server cannot be reached does the
-  reply end with "Connection lost".
+  the reply is ready it replaces the part you saw. If no check shows the reply finished in that
+  time — the server could not be reached, or the turn is simply still running — the reply ends
+  with "Connection lost". The turn may still finish: open the conversation again to see whether
+  it did before you send the message again, since sending it again can repeat what the agent did
+  (a tool call, a booking).
 
 ### Changing what you asked
 

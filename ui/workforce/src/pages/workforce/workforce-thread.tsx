@@ -1089,7 +1089,10 @@ function WorkforceThread() {
       // A stream that ended without `done` or `error` — a dropped connection,
       // a proxy timing out — presented a truncated reply as a finished one.
       // Say so; what arrived stays.
-      if (result.outcome === "sent" && !turn.done && !turn.error && !turn.stopped) {
+      // A turn the controller recovered after a drop (a re-read showed it
+      // settled) finished: its reply and state are applied, and a pause it
+      // reached has its own notice.
+      if (result.outcome === "sent" && !result.recovered && !turn.done && !turn.error && !turn.stopped) {
         hooksRef.current?.failed(
           t(
             "Workforce.thread.streamEnded",

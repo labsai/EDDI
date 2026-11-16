@@ -60,6 +60,15 @@ export function MermaidDiagram({ source, fallback }: { source: string; fallback:
         dangerouslySetInnerHTML={{ __html: svg }}
       />
       <CopyButton getText={() => source} label={t("conversation.copy.code")} className="code-block__copy" />
+      {/* An image is one name to a screen reader: its text and description are
+          not read. The source stays one disclosure away, so a diagram-only
+          answer can still be read. */}
+      <details className="mermaid-diagram__source" data-testid="mermaid-diagram-source">
+        <summary>{t("conversation.diagram.source")}</summary>
+        <pre>
+          <code>{source}</code>
+        </pre>
+      </details>
     </div>
   );
 }

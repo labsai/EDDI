@@ -238,10 +238,15 @@ export function useAttachmentStaging(
     },
     [],
   );
-  // Abort whatever is still uploading when the surface unmounts.
+  // Abort whatever is still uploading when the surface unmounts. A stageFiles
+  // still waiting on ensureConversation has no controller yet; the flag stops
+  // it from starting an upload nothing could remove afterwards.
+  const unmountedRef = useRef(false);
   useEffect(() => {
     const uploads = uploadsRef.current;
+    unmountedRef.current = false;
     return () => {
+      unmountedRef.current = true;
       uploads.forEach((c) => c.abort());
       uploads.clear();
     };
@@ -300,6 +305,7 @@ export function useAttachmentStaging(
         if (!ensureConversation) return;
         try {
           targetId = await ensureConversation();
+          if (unmountedRef.current) return;
           conversationIdRef.current = targetId;
           lazyCreatedIdRef.current = targetId;
         } catch {
@@ -344,12 +350,24 @@ export function useAttachmentStaging(
       const entry = pendingRef.current.find((a) => a.id === id && a.status === "error");
       const targetId = conversationIdRef.current;
       if (!entry || !targetId) return;
+      // The cap holds on a retry too: a chip that failed gave its slot up, and
+      // another file may have taken it since. Past the cap the file would show
+      // as attached but never reach the agent.
+      const activeCount = pendingRef.current.filter((a) => a.status !== "error").length;
+      if (activeCount >= MAX_ATTACHMENTS_PER_TURN) {
+        toast.error(
+          t("chat.attachLimit", "You can attach up to {{max}} files per message.", {
+            max: MAX_ATTACHMENTS_PER_TURN,
+          }),
+        );
+        return;
+      }
       const again: PendingAttachment = { ...entry, status: "uploading", progress: 0, error: undefined };
       pendingRef.current = pendingRef.current.map((a) => (a.id === id ? again : a));
       setPendingAttachments((prev) => prev.map((a) => (a.id === id ? again : a)));
       void uploadEntry(targetId, again);
     },
-    [uploadEntry],
+    [t, uploadEntry],
   );
 
   const handleFileInput = useCallback(

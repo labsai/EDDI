@@ -529,7 +529,7 @@ describe("send — reconnecting after a dropped stream", () => {
     const cut = fakeTransport({ stream: vi.fn(() => events(ev("token", "Part of"))) });
     const d = await opened(cut, { reconnectDelaysMs: [0] });
     cut.read.mockReset().mockResolvedValue(previousStep());
-    expect(await d.send("question")).toEqual({ outcome: "sent" });
+    expect(await d.send("question")).toEqual({ outcome: "failed", failure: expect.objectContaining({ partial: true }) });
     expect(texts(d).slice(-1)[0]).toContain("Part of\n\n⚠️ Connection lost");
     expect(d.getSnapshot().isProcessing).toBe(false);
   });

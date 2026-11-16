@@ -12,7 +12,10 @@ let counter = 0;
 export async function renderMermaid(source: string, dark: boolean): Promise<string> {
   const theme = dark ? "dark" : "default";
   if (initialisedFor !== theme) {
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme });
+    // suppressErrorRendering: a source that does not parse (a reply still
+    // streaming its diagram) throws, and MermaidDiagram keeps the code block;
+    // without it Mermaid also appends its error diagram to document.body.
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme, suppressErrorRendering: true });
     initialisedFor = theme;
   }
   counter += 1;

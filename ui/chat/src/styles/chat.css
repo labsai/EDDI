@@ -1611,6 +1611,16 @@ a:hover { opacity: 0.85; }
   height: auto;
 }
 
+.mermaid-diagram__source {
+  padding: 0 4px 4px;
+  font-size: 0.75rem;
+  color: var(--chat-text-muted);
+}
+
+.mermaid-diagram__source pre {
+  overflow-x: auto;
+}
+
 /* ─── Header text title ─── */
 
 .chat-header__title {

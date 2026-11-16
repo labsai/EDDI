@@ -625,14 +625,18 @@ export function ChatPanel({
   const handleEditLast = useCallback(() => {
     if (!canEditLast || !lastUser) return;
     const text = lastUser.content;
+    // The conversation the Edit belongs to: one opened while the undo was in
+    // flight must not get this conversation's message in its composer.
+    const editedConversation = conversationId;
     undoConversation.mutate(undefined, {
       onSuccess: (moved) => {
         if (moved === false) return;
+        if (useChatStore.getState().conversationId !== editedConversation) return;
         setDraft({ text, nonce: Date.now() });
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
-  }, [canEditLast, lastUser, undoConversation]);
+  }, [canEditLast, lastUser, undoConversation, conversationId]);
 
   const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
@@ -1116,7 +1120,13 @@ export function ChatPanel({
           )}
           </div>
 
-          <ReplyAnnouncer messages={messages as AnnouncedMessage[]} speaker={speaker} className="sr-only" />
+          <ReplyAnnouncer
+            messages={messages as AnnouncedMessage[]}
+            speaker={speaker}
+            // A conversation opened (or its history finishing loading) is history, not news.
+            historyKey={`${conversationId ?? ""}${isLoadingConversation ? ":loading" : ""}`}
+            className="sr-only"
+          />
 
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
@@ -1314,11 +1324,15 @@ function ChatInputWithSecretToggle({
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   }, []);
 
-  // An edited message comes back into the composer, caret at its end.
+  // An edited message comes back into the composer, caret at its end. A
+  // message the person had typed and not sent (before the Edit, or while its
+  // undo ran) is kept below it rather than overwritten.
   const draftNonce = draft?.nonce;
   useEffect(() => {
     if (!draft) return;
-    setValue(draft.text);
+    setValue((unsent) => (unsent.trim() && unsent !== draft.text ? `${draft.text}
+
+${unsent}` : draft.text));
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;

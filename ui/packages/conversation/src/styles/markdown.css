@@ -57,6 +57,16 @@
   height: auto;
 }
 
+.eddi-markdown .mermaid-diagram__source {
+  padding: 0 8px 8px;
+  font-size: 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.eddi-markdown .mermaid-diagram__source pre {
+  overflow-x: auto;
+}
+
 .eddi-markdown .table-scroll {
   overflow-x: auto;
 }

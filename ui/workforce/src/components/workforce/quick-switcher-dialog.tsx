@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bot, MessageSquare, MessageSquarePlus, Search, Users } from "lucide-react";
@@ -67,6 +67,12 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
 
   const current = Math.min(active, Math.max(items.length - 1, 0));
 
+  // Focus stays in the box, so the list does not follow the arrow keys by
+  // itself: keep the selected option in view.
+  useEffect(() => {
+    document.getElementById(`${listId}-${current}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [listId, current]);
+
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (isImeComposing(e)) return;
     if (e.key === "ArrowDown") {
@@ -93,8 +99,9 @@ export function QuickSwitcherDialog({ onClose }: { onClose: (restoreFocus: boole
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/40" onClick={() => onClose(true)} aria-hidden="true" />
-      <div className="pointer-events-none fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]">
+      {/* Above everything else at z-50, the tablet drawer included: Ctrl+K can open it over an open drawer. */}
+      <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => onClose(true)} aria-hidden="true" />
+      <div className="pointer-events-none fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]">
         <div
           role="dialog"
           aria-modal="true"

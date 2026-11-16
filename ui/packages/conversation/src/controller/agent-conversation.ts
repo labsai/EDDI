@@ -1162,16 +1162,12 @@ export class AgentConversation {
     // conversation abandons it, safety net included.
     if (!this.isCurrent(sendGen)) return { outcome: "sent" };
     // The stream closed cleanly after part of the reply, but without its
-    // `done`: a proxy cut it, say. That reply may be truncated, and the turn may
-    // still be running — follow it as a dropped stream, rather than let the
-    // part on screen pass for the whole answer.
+    // `done`: a proxy cut it, say. That reply may be truncated and the turn may
+    // still be running, so it is a dropped stream like any other — followed,
+    // and reported if it never settles — rather than the part on screen
+    // passing for the whole answer.
     if (!streamDone && !stopped() && turn.tokenCount > 0 && !turn.failure && this.options.reconnectDelaysMs?.length) {
-      const followed = await this.followDroppedTurn(conversationId, sendGen, turn, stopped);
-      if (followed !== "unsettled") return followed === "applied" ? { outcome: "sent", recovered: true } : { outcome: "sent" };
-      if (!this.isCurrent(sendGen) || stopped()) return { outcome: "sent" };
-      dispatch({ type: "FINISH_STREAMING" });
-      dispatch({ type: "APPEND_TO_LAST_AGENT", token: `\n\n⚠️ ${t("conversation.send.connectionLost")}` });
-      return { outcome: "sent" };
+      throw new TypeError("The stream closed before the turn finished");
     }
     if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
 
