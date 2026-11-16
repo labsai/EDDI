@@ -372,6 +372,18 @@ export interface DiscussionPhase {
   voteConfig?: VoteConfig | null;
   /** Skip this phase entirely when the condition already holds (I11). `null`/absent = never skip. */
   skipIf?: PhaseSkipCondition | null;
+  /**
+   * Approved-result action: one httpcalls call made with each task this EXECUTE
+   * phase gets approved (docs/group-approved-result-actions.md). Not editable in
+   * the phase editor — set in the group JSON; the editor carries it through
+   * unchanged. `null`/absent = nothing runs.
+   */
+  onApproved?: OnApprovedConfig | null;
+}
+
+export interface OnApprovedConfig {
+  action: { type?: "HTTPCALL"; uri: string; call: string };
+  onFailure?: "FAIL_TASK" | "KEEP_COMPLETED";
 }
 
 export interface ProtocolConfig {
