@@ -315,6 +315,7 @@ eddi_team_cadence_runs_started_total        # Cadence fires that started a discu
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
+eddi_team_cadence_runs_parked_total         # Paused runs parked so a new run could start (hitlConfig.maxPausedCadenceRuns)
 eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
 eddi_group_outcomes_total{outcome}  # Team outcome reports: recorded, duplicate, disabled, invalid, not_found, subject_full (see team-learning-loop.md)
 eddi_group_lessons_total{outcome}  # Team lesson consolidation: merged, retired, rejected, skipped_changed, run_completed, run_skipped, run_failed (see team-learning-loop.md)
