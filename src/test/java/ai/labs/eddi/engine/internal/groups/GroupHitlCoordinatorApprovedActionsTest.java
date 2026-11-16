@@ -222,6 +222,76 @@ class GroupHitlCoordinatorApprovedActionsTest {
         verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
+    /**
+     * The paused phase renamed while the discussion waited: the bookmark no longer
+     * matches.
+     */
+    private void renamePausedPhase() {
+        var renamed = new DiscussionPhase("Redraft", PhaseType.EXECUTE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1,
+                true, null, false, null, null, new OnApprovedConfig(new ApprovedAction(null, URI, "postComment"), null));
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(renamed));
+    }
+
+    @Test
+    void aRenamedPausedPhase_refusesATaskApproval_beforeCompletingTheTask() throws Exception {
+        // Recording would be skipped for the drifted phase, while the completion would
+        // persist with the resume CAS; the resumed leg restores the pause but not the
+        // task, so a retry after the fix would find nothing awaiting and owe nothing.
+        renamePausedPhase();
+        var real = new GroupApprovedResultActions(null, null, null, null, new SimpleMeterRegistry());
+        coordinator.setApprovedResultActions(real);
+        var request = approvedByAlice();
+        request.setTaskApprovals(Map.of(task.id(), "APPROVED"));
+
+        var refused = assertThrows(IResourceStore.ResourceStoreException.class, () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertTrue(refused.getMessage().contains("changed while paused"), refused.getMessage());
+        assertEquals(SharedTaskList.TaskStatus.AWAITING_APPROVAL, gc.getTaskList().findById(task.id()).status(),
+                "the task still awaits a decision");
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+        assertEquals("Draft", gc.getPausedPhaseName(), "the bookmark is untouched");
+        assertTrue(gc.getTaskList().getApprovedActions().isEmpty());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+        verify(conversationStore, never()).updateIfState(any(), any());
+        verify(executorService, never()).submit(any(Runnable.class));
+    }
+
+    @Test
+    void aRemovedPausedPhase_refusesTheApproveAllShortcut() throws Exception {
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of());
+        var request = approvedByAlice();
+
+        var refused = assertThrows(IResourceStore.ResourceStoreException.class, () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertTrue(refused.getMessage().contains("no phase at index 0"), refused.getMessage());
+        assertEquals(SharedTaskList.TaskStatus.AWAITING_APPROVAL, gc.getTaskList().findById(task.id()).status());
+        verify(actions, never()).recordApprovals(any(), any(), anyInt(), any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+    }
+
+    @Test
+    void aRenamedPausedPhase_stillAppliesATaskRejection_whichOwesNoAction() throws Exception {
+        renamePausedPhase();
+        var request = approvedByAlice();
+        request.setTaskApprovals(Map.of(task.id(), "REJECTED"));
+
+        coordinator.resumeDiscussion(GC_ID, request, null);
+
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
+        verify(actions, never()).recordApprovals(any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
+    void bookmarkedPhaseDrift_checksIndexAndName() {
+        var draft = config.getPhases().getFirst();
+        assertNull(GroupHitlCoordinator.bookmarkedPhaseDrift(gc, List.of(draft)));
+        gc.setPausedPhaseName(null);
+        assertNull(GroupHitlCoordinator.bookmarkedPhaseDrift(gc, List.of(draft)), "a nameless pause is checked by index only");
+        assertNotNull(GroupHitlCoordinator.bookmarkedPhaseDrift(gc, List.of()));
+        gc.setPausedPhaseName("Other");
+        assertNotNull(GroupHitlCoordinator.bookmarkedPhaseDrift(gc, List.of(draft)));
+    }
+
     @Test
     void anUnreadableGroupConfig_stillAppliesATaskRejection_whichOwesNoAction() throws Exception {
         when(groupStore.read(GROUP_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("store down"));

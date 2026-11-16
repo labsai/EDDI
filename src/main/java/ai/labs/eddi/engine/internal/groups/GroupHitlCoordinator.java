@@ -753,6 +753,20 @@ public class GroupHitlCoordinator {
                     + " could not be read, so the approved-result actions this approval may owe are unknown — the approval was "
                     + "not applied; retry it");
         }
+        // The same holds when the configuration was read but the paused phase is no
+        // longer at its bookmark (renamed, moved or removed while paused): the action
+        // record would be skipped, while the task completion persists with the resume
+        // CAS — and the resumed leg's drift guard restores the pause but not the tasks,
+        // so a retry after the config is fixed finds nothing awaiting and the action
+        // never runs. Refuse before anything is mutated, like the unreadable config.
+        if (phasesConfig != null && approvesAwaitingTasks(gc, request, hasTaskApprovals, awaitingBeforeDecision)) {
+            String drift = bookmarkedPhaseDrift(gc, groupConversationService.effectivePhases(gc, phasesConfig));
+            if (drift != null) {
+                throw new IResourceStore.ResourceStoreException("The group configuration of " + LogSanitizer.sanitize(groupConversationId)
+                        + " changed while paused (" + drift + "), so the approved-result actions this approval may owe are unknown — "
+                        + "the approval was not applied; fix the config and retry it, or cancel");
+            }
+        }
         if (hasTaskApprovals && gc.getTaskList() != null) {
             // #13: validate the WHOLE map up front — unknown taskIds, tasks not
             // awaiting approval, and unknown decision VALUES must fail as a
@@ -1165,6 +1179,26 @@ public class GroupHitlCoordinator {
     }
 
     /**
+     * Why the pause's bookmarked phase is no longer at its bookmark in
+     * {@code phases} — no phase at that index, or one with another name than the
+     * one paused — or {@code null} when it still is. A pause without a phase name
+     * is checked by index only.
+     */
+    static String bookmarkedPhaseDrift(GroupConversation gc, List<DiscussionPhase> phases) {
+        int phaseIdx = gc.getPausedAtPhaseIndex();
+        if (phaseIdx < 0 || phaseIdx >= phases.size()) {
+            return "no phase at index " + phaseIdx;
+        }
+        String actual = phases.get(phaseIdx).name();
+        String paused = gc.getPausedPhaseName();
+        if (paused != null && !paused.equals(actual)) {
+            return "expected phase '" + LogSanitizer.sanitize(paused) + "' at index " + phaseIdx + " but found '"
+                    + LogSanitizer.sanitize(actual) + "'";
+        }
+        return null;
+    }
+
+    /**
      * Records the approved-result action each task approved by this decision owes,
      * when the paused phase configures one. A TASK pause is mid-phase, so the
      * approved tasks belong to the bookmarked phase; a phase list that no longer
@@ -1176,12 +1210,14 @@ public class GroupHitlCoordinator {
             return;
         }
         List<DiscussionPhase> phases = groupConversationService.effectivePhases(gc, config);
-        int phaseIdx = gc.getPausedAtPhaseIndex();
-        if (phaseIdx < 0 || phaseIdx >= phases.size()) {
+        if (bookmarkedPhaseDrift(gc, phases) != null) {
+            // Unreachable for an approval — resumeDiscussion refused it before any task
+            // was completed; kept so this method never records against the wrong phase.
             return;
         }
+        int phaseIdx = gc.getPausedAtPhaseIndex();
         DiscussionPhase phase = phases.get(phaseIdx);
-        if (phase.onApproved() == null || (gc.getPausedPhaseName() != null && !gc.getPausedPhaseName().equals(phase.name()))) {
+        if (phase.onApproved() == null) {
             return;
         }
         String approvedBy = decision != null ? decision.getDecidedBy() : null;

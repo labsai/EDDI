@@ -142,7 +142,12 @@ states `runAs: group:<groupId>`.
    (`409`) and records nothing. A task is approved once per discussion (see
    *When it runs* above); were it approved again, it
    would get a new record only when its earlier action ended without an
-   accepted publish (`FAILED`, `SKIPPED`, `NOT_SENT`).
+   accepted publish (`FAILED`, `SKIPPED`, `NOT_SENT`). An approval that cannot
+   know which action it owes is refused before any task is completed: when the
+   group configuration cannot be read, or when the paused phase is no longer at
+   its bookmark (renamed, moved or removed while the discussion waited). The
+   pause and its awaiting tasks stay; fix the configuration and approve again,
+   or cancel. Rejections still apply — they owe no action.
 2. **Claimed before it is sent.** The resumed leg marks the record `RUNNING` and
    persists that *before* the request goes out. A record found `RUNNING` belongs
    to a run that died mid-call (pod crash, failover): it becomes
