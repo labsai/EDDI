@@ -51,7 +51,7 @@ public class OperatorRevisionCheck {
     static final String REVISION_RESOURCE = "eddi-manager/operator-revision.json";
 
     /** The global variable the Manager keeps the operator's configuration in. */
-    static final String OPERATOR_VARIABLE = "platform.operator";
+    public static final String OPERATOR_VARIABLE = "platform.operator";
 
     /**
      * What a check concluded. Returned rather than only logged, so it can be
