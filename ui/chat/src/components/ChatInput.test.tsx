@@ -9,7 +9,13 @@ import {
   act,
   within,
 } from "@testing-library/react";
-import { ChatInput, discardAttachment, DISCARD_RETRY_MS } from "./ChatInput";
+import {
+  Composer as ChatInput,
+  ConversationProvider,
+  discardAttachment,
+  DISCARD_RETRY_MS,
+  initialConversationState,
+} from "@eddi/conversation";
 import { ChatProvider, useChatState } from "@/store/chat-store";
 import {
   uploadAttachment,
@@ -268,6 +274,41 @@ describe("ChatInput — attachments", () => {
 
       await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith("conv-1", "ref-held"));
       expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+    });
+
+    it("discards it when the conversation changes while no composer is mounted", async () => {
+      // The provider's record followed only a mounted composer, so an upload
+      // settling before any composer came back for conv-2 was staged into it
+      // (CodeRabbit on #1280).
+      let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+      vi.mocked(uploadAttachment).mockImplementationOnce(
+        () => new Promise((resolve) => { finish = resolve; }),
+      );
+      const dispatch = vi.fn();
+      const ui = (show: boolean, conversationId: string) => (
+        <ConversationProvider state={{ ...initialConversationState, conversationId }} dispatch={dispatch}>
+          {show ? <ChatInput onSend={vi.fn()} conversationId={conversationId} /> : <p />}
+        </ConversationProvider>
+      );
+      const { rerender } = render(ui(true, "conv-1"));
+      fireEvent.change(screen.getByTestId("chat-file-input"), {
+        target: { files: [pdf("held.pdf")] },
+      });
+      await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith("conv-1", expect.anything()));
+      rerender(ui(false, "conv-1"));
+      rerender(ui(false, "conv-2"));
+      await act(async () => {
+        finish({
+          storageRef: "ref-held",
+          fileName: "held.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 3,
+          forwardableInline: true,
+        });
+      });
+
+      await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith("conv-1", "ref-held"));
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "ADD_ATTACHMENT" }));
     });
   });
 

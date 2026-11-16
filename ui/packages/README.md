@@ -7,11 +7,13 @@ through a workspace link, with no build or publish step:
 | Package | Contents | Status |
 | --- | --- | --- |
 | [`@eddi/core`](core/README.md) | Framework-free TypeScript: HTTP, the SSE frame parser, the conversation API, HITL status, attachments, ratings, contract types | in use by both apps |
-| `@eddi/ui` | Design tokens, primitives, theme, i18n setup | planned (phase 3) |
-| `@eddi/conversation` | Controllers and components for every kind of conversation | planned (phase 3) |
+| [`@eddi/ui`](ui/README.md) | Design tokens, the theme provider, the i18next setup with lazy locales and per-locale fonts, the primitives both apps share | in use by both apps (phase 3a) |
+| [`@eddi/conversation`](conversation/README.md) | Controllers and components for every kind of conversation: `AgentConversation`, the one markdown renderer, the shared `conversation.*` strings | phase 3b: the agent kind; 3c: host hooks, the Manager chat on it |
 
 Apps may import packages; packages never import apps; `@eddi/core` imports neither
-React nor `@eddi/ui`. `sharedPackage` in `ui/eslint.config.base.js` enforces this at
+React nor `@eddi/ui`; `@eddi/ui` makes no API call (no `@eddi/core`, no `fetch`, no
+`window.__EDDI_*__`); `@eddi/conversation` imports no router and reads no
+`window.__EDDI_*__`, and neither of the other two imports it. `sharedPackage` in `ui/eslint.config.base.js` enforces this at
 lint time, and `core/src/boundaries.test.ts` checks it again and fails on an import
 cycle across every package here.
 
