@@ -11,8 +11,8 @@ import {
   extractOutputTexts,
   isTurnPaused,
   parseToolCallActivity,
-} from "./sse-events";
-import { humanizeToolName } from "@/tool-labels";
+} from "./stream-events";
+import { humanizeToolName } from "./tool-labels";
 
 describe("parseErrorMessage", () => {
   it("extracts the message from the backend's JSON error payload", () => {

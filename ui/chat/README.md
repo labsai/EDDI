@@ -230,8 +230,8 @@ The main files (the full map, with the backend contract the widget relies on, is
 
 ```
 src/
-├── api/              # API layer (fetch + SSE streaming)
-│   ├── chat-api.ts       # Real EDDI backend API
+├── api/              # Widget-side API code; the backend calls themselves are @eddi/core (ui/packages/core)
+│   ├── embed-auth.ts     # Token hand-off with the embedding page
 │   └── demo-api.ts       # Mock API for demo mode
 ├── components/       # React components
 │   ├── ChatWidget.tsx    # Main orchestrator (lifecycle, SSE, query params)
