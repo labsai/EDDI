@@ -28,6 +28,9 @@
   "proves nothing"; peer verification (`GroupSigningGuard`, via `getKeyForVersion`) does not check
   the revoked flag yet. It now says revocation stops the agent signing, and what verification still
   accepts, as the Manager's confirmation dialog already did.
+- **A revoke dialog does not survive a change of agent.** `SecurityIdentitySection` is keyed by
+  agent id, so its pending-confirmation state resets and a confirm can never revoke a key of the
+  agent the page moved to.
 - The Generate button uses the shared `Button` (outline, small) instead of a hand-styled one.
 
 No new UI strings.

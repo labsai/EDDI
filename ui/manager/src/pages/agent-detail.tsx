@@ -1150,7 +1150,9 @@ export function AgentDetailPage() {
       />
 
       {/* Security & Identity */}
+      {/* Keyed by agent: a revoke dialog left open must not carry over to another agent. */}
       <SecurityIdentitySection
+        key={`security-${id}`}
         agent={doc}
         onChange={editAgent}
         disabled={sectionsDisabled}

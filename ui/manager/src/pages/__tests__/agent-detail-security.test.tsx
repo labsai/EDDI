@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -160,6 +160,45 @@ describe("AgentDetailPage — Generate signing key", () => {
     await waitFor(() => expect(screen.getByTestId("agent-config-sections")).toBeDisabled());
     release();
     await waitFor(() => expect(screen.getByTestId("agent-config-sections")).toBeEnabled());
+  });
+
+  it("closes an open revoke dialog when the page moves to another agent", async () => {
+    let revoked = false;
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys/:keyVersion/revoke", () => {
+        revoked = true;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    function GoToAgent2() {
+      const navigate = useNavigate();
+      return <button type="button" data-testid="go-agent2" onClick={() => navigate("/manage/agentview/agent2")} />;
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <MemoryRouter initialEntries={["/manage/agentview/agent1"]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-security-dialog">
+            <GoToAgent2 />
+            <Routes>
+              <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
+            </Routes>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+
+    const revoke = await screen.findByTestId("revoke-signing-key-1");
+    await waitFor(() => expect(revoke).toBeEnabled());
+    await user.click(revoke);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    // A modal blocks pointer events outside it; navigation from elsewhere (the
+    // browser's back button) is what this stands in for.
+    fireEvent.click(screen.getByTestId("go-agent2"));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(revoked).toBe(false);
   });
 
   it("does not move another agent's page to the version a key request created", async () => {
