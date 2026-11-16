@@ -89,9 +89,12 @@ public final class HealthDefaults {
                 Direction.LOWER, 30, "timed turns", null));
         put(m, new Definition("fallbackRate", RELIABILITY, "Fallback answers", SCORED, false, "ratio", Direction.LOWER, 30, "turns",
                 new Thresholds(0.02, 0.1, false)));
-        // Effectiveness: needs outcomes (H3).
+        // Effectiveness: over the engaged, closed sessions of judged origins (H3).
+        // Resolution keeps the plan's support thresholds; escalation and abandonment
+        // have none until health profiles (H4) — what is normal differs too much
+        // between agents to guess.
         put(m, new Definition("resolutionRate", EFFECTIVENESS, "Resolution", SCORED, true, "ratio", Direction.HIGHER, 30, "engaged sessions",
-                null));
+                new Thresholds(0.7, 0.4, true)));
         put(m, new Definition("escalationRate", EFFECTIVENESS, "Escalation", SCORED, false, "ratio", Direction.LOWER, 30, "engaged sessions",
                 null));
         put(m, new Definition("abandonmentRate", EFFECTIVENESS, "Abandonment", SCORED, false, "ratio", Direction.LOWER, 30, "engaged sessions",
@@ -99,7 +102,7 @@ public final class HealthDefaults {
         put(m, new Definition("deflectionRate", EFFECTIVENESS, "Deflection", INFORMATIONAL, false, "ratio", Direction.NONE, 30,
                 "engaged sessions", null));
         put(m, new Definition("outcomeCoverage", EFFECTIVENESS, "Outcome coverage", SCORED, false, "ratio", Direction.HIGHER, 30,
-                "engaged sessions", null));
+                "engaged sessions", new Thresholds(0.8, 0.5, true)));
         // Quality: from ratings.
         put(m, new Definition("ratingScore", QUALITY, "Rating (lower confidence bound)", SCORED, false, "score", Direction.HIGHER, 10,
                 "conversation ratings", new Thresholds(0.7, 0.5, true)));

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.model.AgentCascadeRequest;
@@ -18,6 +19,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.health.HealthConfigValidator;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -171,6 +173,7 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
         RatingConfigValidator.validate(agentConfiguration);
+        HealthConfigValidator.validate(agentConfiguration);
         // The agent's own EDIT check first: the workflow lookup below answers "exists
         // / does not exist", which a caller with no rights to this agent must not be
         // able to use as an oracle for arbitrary workflow ids — and the signing-key
@@ -327,6 +330,7 @@ public class RestAgentStore implements IRestAgentStore {
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(null, agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
+        HealthConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
         // A new agent's identity is not the caller's to declare either: no vault key
         // can exist for an id that does not exist yet, so any key in the body is one
@@ -360,6 +364,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             RatingConfigValidator.validate(agentConfig);
+            HealthConfigValidator.validate(agentConfig);
             // The copy is an agent a person made, not one create_sub_agent
             // provisioned: it must not inherit the original's provenance.
             agentConfig.setDynamicOrigin(null);
@@ -865,6 +870,34 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return agentStore.getCurrentResourceId(id);
+    }
+
+    /**
+     * Every check {@link #updateAgent} — here and in {@code AgentStore.update} —
+     * applies to an agent's own settings, as opposed to its workflow list, other
+     * than the signing check: {@code ratingConfig}, {@code healthConfig}, the HITL
+     * config, the Dream settings, the continuation bounds and the presentation
+     * blocks. Whether {@code signInterAgentMessages} can stay on depends on the
+     * target's own keys, so {@code UpgradeExecutor} turns it off with a warning
+     * instead ({@link #signingKeyProblem(String)}).
+     * <p>
+     * An upgrade or a sync ({@code UpgradeExecutor}) writes snippets, extensions
+     * and workflows before the agent, so it runs these on the settings it is about
+     * to adopt before its first write. Otherwise a refusal came only at the agent
+     * update, wrapped into a 500, with everything before it left in place.
+     *
+     * @throws BadRequestException
+     *             naming the offending field
+     */
+    public static void validateSettings(AgentConfiguration config) {
+        RatingConfigValidator.validate(config);
+        HealthConfigValidator.validate(config);
+        try {
+            AgentStore.validateSettings(config);
+        } catch (IllegalArgumentException e) {
+            // A 400 like the one IllegalArgumentExceptionMapper gives the update.
+            throw new BadRequestException(e.getMessage(), ErrorResponses.badRequest(e.getMessage()));
+        }
     }
 
     @Override

@@ -61,10 +61,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         validateWorkflowUris(agentConfiguration);
-        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
-        validateUserMemoryConfig(agentConfiguration);
-        validateContinuation(agentConfiguration);
-        AgentPresentationValidator.validate(agentConfiguration);
+        validateSettings(agentConfiguration);
         // Store-owned: whatever the body claims is replaced. A new agent — including a
         // duplicate or an import — starts its own chain, compatible with nothing.
         agentConfiguration.setCompatibilityGeneration(FIRST_COMPATIBILITY_GENERATION);
@@ -85,10 +82,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
         validateWorkflowUris(agentConfiguration);
-        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
-        validateUserMemoryConfig(agentConfiguration);
-        validateContinuation(agentConfiguration);
-        AgentPresentationValidator.validate(agentConfiguration);
+        validateSettings(agentConfiguration);
         // Only the current version can be updated (the historized store refuses any
         // other), so the version replaced here always carries the agent's highest
         // generation and this rule keeps generations monotonic without looking at
@@ -138,6 +132,25 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
                         + WORKFLOW_RESOURCE_URI + "<id>" + VERSION_QUERY_PARAM + "<version>, got: " + uri);
             }
         }
+    }
+
+    /**
+     * The checks {@link #create} and {@link #update} apply to the agent's own
+     * settings — everything but its workflow list: the HITL config, the Dream
+     * consolidation settings, the continuation bounds and the presentation blocks
+     * ({@code appearance}, {@code titleGeneration}). Public so that a path which
+     * writes other resources before the agent (an upgrade or a sync,
+     * {@code UpgradeExecutor}) can refuse settings the update would refuse before
+     * its first write.
+     *
+     * @throws IllegalArgumentException
+     *             naming the offending field
+     */
+    public static void validateSettings(AgentConfiguration agentConfiguration) {
+        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
+        validateUserMemoryConfig(agentConfiguration);
+        validateContinuation(agentConfiguration);
+        AgentPresentationValidator.validate(agentConfiguration);
     }
 
     /**

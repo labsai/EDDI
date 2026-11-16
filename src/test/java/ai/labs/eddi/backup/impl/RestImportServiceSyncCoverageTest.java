@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.MediaType;
@@ -426,6 +427,26 @@ class RestImportServiceSyncCoverageTest {
             verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_B), any(), any(), eq(false));
         }
 
+        /**
+         * The upgrade refuses agent settings the agent update would refuse before it
+         * writes anything. That refusal is the caller's to fix, so it has to reach them
+         * as the 400 the agent sync guide documents, with the field named in the body,
+         * not repackaged as the 500 "Sync failed" every other exception becomes.
+         */
+        @Test
+        @DisplayName("refused agent settings are a 400 naming the field, not a 500")
+        void refusedAgentSettingsAreABadRequest() {
+            String reason = "healthConfig.outcomes.order_done must be one of RESOLVED, ESCALATED, DEFLECTED, FAILED, ABANDONED";
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean()))
+                    .thenThrow(new BadRequestException(reason, ErrorResponses.badRequest(reason)));
+
+            var thrown = assertThrows(BadRequestException.class, this::sync);
+
+            assertEquals(400, thrown.getResponse().getStatus());
+            assertTrue(String.valueOf(thrown.getResponse().getEntity()).contains("healthConfig.outcomes"),
+                    "the body names the field, was: " + thrown.getResponse().getEntity());
+        }
+
         /** See {@code PreviewSyncTests#preview()} for why construction is stubbed. */
         private Response sync() {
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
@@ -557,6 +578,29 @@ class RestImportServiceSyncCoverageTest {
                 // Never leak the flag into the next test on this thread.
                 Thread.interrupted();
             }
+        }
+
+        /**
+         * A batch reports each agent's failure on its own row. An agent whose settings
+         * the upgrade refused is one row carrying the field, while the others still
+         * sync, and the batch answers 207 because part of it landed.
+         */
+        @Test
+        @DisplayName("an agent whose settings are refused is one failed row naming the field")
+        void refusedAgentSettingsAreOneFailedRow() {
+            String reason = "maxContinuations must be between 0 and 10000, got: 1000000";
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean()))
+                    .thenReturn(cleanResult(TARGET_A));
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any(), anyBoolean()))
+                    .thenThrow(new BadRequestException(reason, ErrorResponses.badRequest(reason)));
+
+            Response response = executeBatch();
+
+            assertEquals(207, response.getStatus());
+            var refused = (RestImportService.BatchSyncResult) ((List<?>) response.getEntity()).get(1);
+            assertEquals(TARGET_B, refused.targetAgentId());
+            assertNull(refused.result());
+            assertEquals(reason, refused.error());
         }
 
         /**

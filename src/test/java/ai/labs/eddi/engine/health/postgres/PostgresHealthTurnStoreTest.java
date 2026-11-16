@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.health.model.HealthTurn;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.sql.DataSource;
 import java.sql.Array;
@@ -31,7 +33,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -50,10 +54,27 @@ class PostgresHealthTurnStoreTest {
     }
 
     @Test
+    @DisplayName("the self_reported_outcome check looks at the health_turns the search path resolves, not a namesake in another schema")
+    void selfReportedColumnOnResolvedTable() {
+        String sql = PostgresHealthTurnStore.HAS_SELF_REPORTED_COLUMN;
+        assertTrue(sql.contains("attrelid = to_regclass('health_turns')"), sql);
+        assertFalse(sql.contains("information_schema"), sql);
+    }
+
+    @Test
+    @DisplayName("the feed after a (time, conversation) pair binds since twice more and the id, in HAVING, keeping the order")
+    void feedAfterPair() {
+        String sql = PostgresHealthTurnStore.CONVERSATIONS_UPDATED_AFTER;
+        assertEquals(placeholders(PostgresHealthTurnStore.CONVERSATIONS_UPDATED_BETWEEN) + 3, placeholders(sql));
+        assertTrue(sql.contains("HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?)"), sql);
+        assertTrue(sql.endsWith("ORDER BY last, conversation_id LIMIT ?"), sql);
+    }
+
+    @Test
     @DisplayName("the upsert binds every column once, replaces on conflict, keeps the first day, guards on updated_at, discard sticky")
     void upsertShape() {
         String sql = PostgresHealthTurnStore.UPSERT;
-        assertEquals(30, PostgresHealthTurnStore.WRITTEN.size());
+        assertEquals(31, PostgresHealthTurnStore.WRITTEN.size(), "H3 added self_reported_outcome");
         // Every column once, then the late-write stamp.
         assertEquals(PostgresHealthTurnStore.WRITTEN.size() + 1, placeholders(sql));
         assertTrue(sql.contains("ON CONFLICT (conversation_id, execution_id) DO UPDATE SET"));
@@ -192,10 +213,39 @@ class PostgresHealthTurnStoreTest {
         assertTrue(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE.contains("OR (written_at_ms >= ? AND written_at_ms < ?))"));
         assertEquals(7, placeholders(PostgresHealthTurnStore.AGENT_DAYS_UPDATED_SINCE));
         assertTrue(PostgresHealthTurnStore.CREATE_TABLE.contains("written_at_ms BIGINT"));
-        assertEquals(List.of("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"),
-                List.of(PostgresHealthTurnStore.ADD_COLUMNS));
+        assertEquals("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT", PostgresHealthTurnStore.ADD_WRITTEN_AT_COLUMN);
+        assertTrue(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN.contains("attrelid = to_regclass('health_turns')"));
+        assertTrue(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN.contains("attname = 'written_at_ms'"));
         assertTrue(String.join(" ", PostgresHealthTurnStore.CREATE_INDEXES)
                 .contains("idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"), "late rows only");
+    }
+
+    @ParameterizedTest(name = "present={0}")
+    @ValueSource(booleans = {true, false})
+    @SuppressWarnings("unchecked")
+    @DisplayName("a column the catalog already has is not altered again: no ACCESS EXCLUSIVE lock on every node start")
+    void addedColumnsCheckedInTheCatalog(boolean present) throws Exception {
+        Instance<DataSource> instance = mock(Instance.class);
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        Statement ddl = mock(Statement.class);
+        ResultSet catalog = mock(ResultSet.class);
+        when(instance.get()).thenReturn(dataSource);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.createStatement()).thenReturn(ddl);
+        when(ddl.executeQuery(anyString())).thenReturn(catalog);
+        when(catalog.next()).thenReturn(present);
+        when(connection.prepareStatement(anyString())).thenReturn(mock(PreparedStatement.class));
+
+        new PostgresHealthTurnStore(instance).upsert(turn());
+
+        var order = inOrder(ddl);
+        order.verify(ddl).execute(PostgresHealthTurnStore.CREATE_TABLE);
+        order.verify(ddl).executeQuery(PostgresHealthTurnStore.HAS_WRITTEN_AT_COLUMN);
+        order.verify(ddl, times(present ? 0 : 1)).execute(PostgresHealthTurnStore.ADD_WRITTEN_AT_COLUMN);
+        order.verify(ddl).executeQuery(PostgresHealthTurnStore.HAS_SELF_REPORTED_COLUMN);
+        order.verify(ddl, times(present ? 0 : 1)).execute(PostgresHealthTurnStore.ADD_SELF_REPORTED_COLUMN);
+        order.verify(ddl).execute(PostgresHealthTurnStore.CREATE_INDEXES[0]);
     }
 
     @Test
@@ -224,11 +274,11 @@ class PostgresHealthTurnStoreTest {
         Instant written = Instant.parse("2026-11-10T11:05:00Z");
 
         store.upsert(turn(), written);
-        verify(upsert).setLong(31, written.toEpochMilli());
+        verify(upsert).setLong(PostgresHealthTurnStore.WRITTEN.size() + 1, written.toEpochMilli());
         store.upsert(turn());
-        verify(upsert).setNull(31, Types.BIGINT);
+        verify(upsert).setNull(PostgresHealthTurnStore.WRITTEN.size() + 1, Types.BIGINT);
         store.insertIfAbsent(turn(), written);
-        verify(insert).setLong(31, written.toEpochMilli());
+        verify(insert).setLong(PostgresHealthTurnStore.WRITTEN.size() + 1, written.toEpochMilli());
         verify(ddl).execute("ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT");
 
         store.markDiscarded(turn(), List.of("old"), written);

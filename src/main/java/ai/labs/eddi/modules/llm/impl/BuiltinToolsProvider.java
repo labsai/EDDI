@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool;
 import ai.labs.eddi.modules.llm.tools.impl.DateTimeTool;
 import ai.labs.eddi.modules.llm.tools.impl.FetchToolResponsePageTool;
 import ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool;
+import ai.labs.eddi.modules.llm.tools.impl.ReportConversationOutcomeTool;
 import ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool;
 import ai.labs.eddi.modules.llm.tools.impl.WeatherTool;
 import ai.labs.eddi.modules.llm.tools.impl.WebScraperTool;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The nine plain built-in tool beans — calculator, datetime, web search, data
@@ -79,9 +81,28 @@ class BuiltinToolsProvider implements ToolSourceProvider {
 
     private final List<CatalogEntry> catalog;
 
+    /**
+     * Agent Health's {@code report_conversation_outcome}, offered after the catalog
+     * when the conversation's agent version enables it
+     * ({@code healthConfig.selfReportTool}) — a second, agent-level gate on top of
+     * {@code enableBuiltInTools} and the whitelist, like the user-memory tool's. A
+     * supplier, because the bean is field-injected into the orchestrator after this
+     * provider is built; it supplies null under direct construction.
+     */
+    private final Supplier<ReportConversationOutcomeTool> outcomeTool;
+
     BuiltinToolsProvider(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool,
             DataFormatterTool dataFormatterTool, WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool,
             PdfReaderTool pdfReaderTool, WeatherTool weatherTool, FetchToolResponsePageTool fetchToolResponsePageTool) {
+        this(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool, () -> null);
+    }
+
+    BuiltinToolsProvider(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool,
+            DataFormatterTool dataFormatterTool, WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool,
+            PdfReaderTool pdfReaderTool, WeatherTool weatherTool, FetchToolResponsePageTool fetchToolResponsePageTool,
+            Supplier<ReportConversationOutcomeTool> outcomeTool) {
+        this.outcomeTool = outcomeTool == null ? () -> null : outcomeTool;
         // Declaration order == the old if-chain's order. Do not sort.
         this.catalog = List.of(
                 new CatalogEntry(Set.of("calculator"), calculatorTool),
@@ -142,6 +163,11 @@ class BuiltinToolsProvider implements ToolSourceProvider {
                         ? pageTool.boundTo(conversationId)
                         : entry.bean());
             }
+        }
+        ReportConversationOutcomeTool reporter = outcomeTool.get();
+        if (reporter != null && ctx.memory() != null && (ctx.hasNoWhitelist() || ctx.isWhitelisted(ReportConversationOutcomeTool.WHITELIST_KEY))
+                && reporter.enabledFor(ctx.memory())) {
+            tools.add(reporter.boundTo(ctx.memory()));
         }
         return tools;
     }

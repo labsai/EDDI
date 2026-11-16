@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.ratings.ConversationRatingMetrics;
 import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
+import ai.labs.eddi.engine.ratings.ConversationRatingWithdrawn;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.RatingLimits;
 import ai.labs.eddi.engine.ratings.RatingScales;
@@ -86,6 +87,13 @@ public class RestConversationRating implements IRestConversationRating {
      */
     @Inject
     Event<ConversationRatingSaved> ratingSaved;
+
+    /**
+     * Tells Agent Health a rating was withdrawn, so a session judged with it is
+     * judged again. Field-injected for the same reason as {@link #ratingSaved}.
+     */
+    @Inject
+    Event<ConversationRatingWithdrawn> ratingWithdrawn;
 
     /**
      * Blanks the comment excerpts alerts copied from a rating before the rating is
@@ -203,6 +211,14 @@ public class RestConversationRating implements IRestConversationRating {
         }
         if (ratingStore.delete(conversationId, stepIndex)) {
             metrics.recordWithdrawal(stepIndex == ConversationRating.CONVERSATION_STEP_INDEX);
+            Event<ConversationRatingWithdrawn> event = ratingWithdrawn;
+            if (event != null) {
+                try {
+                    event.fire(new ConversationRatingWithdrawn(conversationId, stepIndex));
+                } catch (RuntimeException e) {
+                    LOGGER.debugf("Withdrawal hook for a rating of %s failed: %s", sanitize(conversationId), e.getMessage());
+                }
+            }
         }
         return Response.noContent().build();
     }

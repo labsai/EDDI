@@ -874,8 +874,8 @@ public class ScheduleFireExecutor {
             HealthRollupService.Result result = healthRollupService.run();
             worthLogging = !result.isEmpty();
             if (worthLogging) {
-                LOGGER.debugf("[SCHEDULE] Health rollup: days=%d, rows=%d, skipped=%d, failed=%d, pending=%d", result.days(), result.rows(),
-                        result.skipped(), result.failed(), result.pending());
+                LOGGER.debugf("[SCHEDULE] Health rollup: sessions=%d, days=%d, rows=%d, skipped=%d, failed=%d, pending=%d", result.sessions(),
+                        result.days(), result.rows(), result.skipped(), result.failed(), result.pending());
             }
         } catch (Exception e) {
             status = ScheduleConfiguration.FireStatus.FAILED.name();

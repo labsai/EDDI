@@ -350,6 +350,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile GuardrailService guardrailService;
 
     /**
+     * Agent Health's {@code report_conversation_outcome}, handed to
+     * {@link BuiltinToolsProvider} through a supplier. Field-injected for the same
+     * reason as the fields above; null under direct construction, where the tool is
+     * never offered.
+     */
+    @Inject
+    volatile ReportConversationOutcomeTool reportConversationOutcomeTool;
+
+    /**
      * Hands the {@code toolCallGuardrails} engine to the tool loop, which is not a
      * CDI bean; an initializer rather than a constructor parameter for the same
      * reason as the fields above. Never called under direct construction, where the
@@ -498,7 +507,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
-                fetchToolResponsePageTool);
+                fetchToolResponsePageTool, () -> reportConversationOutcomeTool);
     }
 
     /**

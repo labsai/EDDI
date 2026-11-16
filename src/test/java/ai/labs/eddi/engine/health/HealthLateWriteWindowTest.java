@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthDirtyDay;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -273,6 +274,18 @@ class HealthLateWriteWindowTest {
         }
 
         private final Map<String, Row> rows = new LinkedHashMap<>();
+
+        @Override
+        public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
+            // The outcome feed's read (H3); the recorder and the rollup never use it.
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit) {
+            // The outcome evaluation's read (H3); the recorder and the rollup never use it.
+            throw new UnsupportedOperationException();
+        }
         Runnable beforeWrite = () -> {
         };
         Runnable afterUpsert = () -> {

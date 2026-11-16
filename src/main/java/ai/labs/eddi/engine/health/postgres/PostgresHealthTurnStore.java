@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health.postgres;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
+import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -108,6 +109,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 actions TEXT[],
                 discarded BOOLEAN NOT NULL DEFAULT FALSE,
                 discarded_at_ms BIGINT,
+                self_reported_outcome VARCHAR(32),
                 written_at_ms BIGINT,
                 PRIMARY KEY (conversation_id, execution_id)
             )
@@ -130,14 +132,32 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             // Late rows only: the self-heal finds them by when they were written.
             "CREATE INDEX IF NOT EXISTS idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"};
 
-    /** Columns added after the table first shipped on development branches. */
-    static final String[] ADD_COLUMNS = {"ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT"};
+    /**
+     * The late-write stamp, added after the table first shipped on development
+     * branches; checked in the catalog first, like
+     * {@link #HAS_SELF_REPORTED_COLUMN}.
+     */
+    static final String HAS_WRITTEN_AT_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'written_at_ms' AND NOT attisdropped";
+    static final String ADD_WRITTEN_AT_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT";
+
+    /**
+     * Added in H3; a table created before lacks it. Checked in the catalog first:
+     * even with {@code IF NOT EXISTS} an {@code ALTER TABLE} takes an ACCESS
+     * EXCLUSIVE lock, on every node start. The table checked is the one the search
+     * path resolves {@code health_turns} to — the one the statements use — not a
+     * namesake in another schema.
+     */
+    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'self_reported_outcome' AND NOT attisdropped";
+    static final String ADD_SELF_REPORTED_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)";
 
     /** The columns a row write binds, in bind order. */
     static final List<String> WRITTEN = List.of("conversation_id", "execution_id", "step_index", "agent_id", "agent_version",
             "previous_agent_version", "user_id", "origin", "day", "recorded_at_ms", "updated_at_ms", "cost_usd", "discarded_cost_usd",
             "input_tokens", "output_tokens", "total_tokens", "duration_ms", "error_kind", "paused", "failures", "fallback_served", "tool_calls",
-            "tool_failures", "tool_refusals", "guardrail_trips", "user_input", "agent_output", "last_output_question", "actions", "discarded");
+            "tool_failures", "tool_refusals", "guardrail_trips", "user_input", "agent_output", "last_output_question", "actions", "discarded",
+            "self_reported_outcome");
 
     /** Columns a replace does not overwrite with the written value. */
     private static final Set<String> NOT_REPLACED = Set.of("conversation_id", "execution_id", "day", "recorded_at_ms", "discarded");
@@ -170,6 +190,16 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
 
     static final String BY_CONVERSATION = SELECT
             + "WHERE conversation_id = ? AND recorded_at_ms IS NOT NULL ORDER BY step_index, recorded_at_ms LIMIT ?";
+    static final String BY_CONVERSATION_STEPS = SELECT
+            + "WHERE conversation_id = ? AND step_index >= ? AND step_index < ? AND recorded_at_ms IS NOT NULL ORDER BY step_index, recorded_at_ms "
+            + "LIMIT ?";
+    static final String CONVERSATIONS_UPDATED_BETWEEN = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
+            + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
+            + "ORDER BY last, conversation_id LIMIT ?";
+    /** As above, after the pair (since, conversation id) in its order. */
+    static final String CONVERSATIONS_UPDATED_AFTER = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
+            + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
+            + "HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?) ORDER BY last, conversation_id LIMIT ?";
     static final String BY_AGENT_DAYS = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ? ORDER BY day, recorded_at_ms LIMIT ?";
     static final String BY_AGENT_DAY = SELECT + "WHERE agent_id = ? AND day = ?";
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
@@ -193,15 +223,31 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         this.dataSourceInstance = dataSourceInstance;
     }
 
+    /**
+     * Adds a column only when the catalog lacks it: even with {@code IF NOT EXISTS}
+     * an {@code ALTER TABLE} waits for an ACCESS EXCLUSIVE lock, and a node
+     * starting during a long streaming read would queue every later reader behind
+     * it.
+     */
+    private static void addColumnIfMissing(Statement statement, String hasColumn, String addColumn) throws SQLException {
+        boolean present;
+        try (ResultSet column = statement.executeQuery(hasColumn)) {
+            present = column != null && column.next();
+        }
+        if (!present) {
+            statement.execute(addColumn);
+        }
+    }
+
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
-            for (String column : ADD_COLUMNS) {
-                statement.execute(column);
-            }
+            // Before the indexes: one of them is on written_at_ms.
+            addColumnIfMissing(statement, HAS_WRITTEN_AT_COLUMN, ADD_WRITTEN_AT_COLUMN);
+            addColumnIfMissing(statement, HAS_SELF_REPORTED_COLUMN, ADD_SELF_REPORTED_COLUMN);
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
             }
@@ -265,7 +311,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         s.setBoolean(i++, turn.agentOutput());
         s.setBoolean(i++, turn.lastOutputWasQuestion());
         s.setArray(i++, connection.createArrayOf("text", turn.actions().toArray(new String[0])));
-        s.setBoolean(i, turn.discarded());
+        s.setBoolean(i++, turn.discarded());
+        s.setString(i, turn.selfReportedOutcome());
     }
 
     private static Long millis(Instant instant) {
@@ -333,6 +380,43 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             s.setString(1, conversationId);
             s.setInt(2, Math.max(1, limit));
         });
+    }
+
+    @Override
+    public List<HealthTurn> findByConversationSteps(String conversationId, int fromStep, Integer toStep, int limit) {
+        return query(BY_CONVERSATION_STEPS, "Could not read the health turns of a conversation", s -> {
+            s.setString(1, conversationId);
+            s.setInt(2, fromStep);
+            s.setInt(3, toStep == null ? Integer.MAX_VALUE : toStep);
+            s.setInt(4, Math.max(1, limit));
+        });
+    }
+
+    @Override
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection
+                        .prepareStatement(afterConversationId == null ? CONVERSATIONS_UPDATED_BETWEEN : CONVERSATIONS_UPDATED_AFTER)) {
+            int i = 1;
+            statement.setLong(i++, since.toEpochMilli());
+            statement.setLong(i++, until.toEpochMilli());
+            if (afterConversationId != null) {
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setString(i++, afterConversationId);
+            }
+            statement.setInt(i, Math.max(1, limit));
+            List<ConversationActivity> found = new ArrayList<>();
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    found.add(new ConversationActivity(r.getString(1), Instant.ofEpochMilli(r.getLong(2))));
+                }
+            }
+            return found;
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     @Override
@@ -786,7 +870,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 longValue(r, "input_tokens"), longValue(r, "output_tokens"), longValue(r, "total_tokens"), longValue(r, "duration_ms"),
                 r.getString("error_kind"), r.getBoolean("paused"), failuresOf(r.getString("failures")), r.getBoolean("fallback_served"),
                 r.getInt("tool_calls"), r.getInt("tool_failures"), r.getInt("tool_refusals"), r.getInt("guardrail_trips"), r.getBoolean("user_input"),
-                r.getBoolean("agent_output"), r.getBoolean("last_output_question"), actions, r.getBoolean("discarded"));
+                r.getBoolean("agent_output"), r.getBoolean("last_output_question"), actions, r.getBoolean("discarded"),
+                r.getString("self_reported_outcome"));
     }
 
     private static Integer integer(ResultSet r, String column) throws SQLException {

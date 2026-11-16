@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.health.HealthDirtyDays;
+import ai.labs.eddi.engine.health.IHealthOutcomeStore;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -82,6 +83,13 @@ public class ConversationPurgeService {
      */
     @Inject
     Instance<HealthDirtyDays> healthDirtyDays;
+
+    /**
+     * Agent Health session outcomes of the conversation, deleted with its turn
+     * rows; null when built by hand.
+     */
+    @Inject
+    Instance<IHealthOutcomeStore> healthOutcomeStore;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -261,6 +269,15 @@ public class ConversationPurgeService {
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not delete the Agent Health rows of deleted conversation %s; they expire with the health retention: %s",
                     sanitize(conversationId), sanitize(e.getMessage()));
+        }
+        if (healthOutcomeStore == null || !healthOutcomeStore.isResolvable()) {
+            return;
+        }
+        try {
+            healthOutcomeStore.get().deleteByConversationId(conversationId);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not delete the Agent Health sessions of deleted conversation %s; the orphan sweep or the health retention "
+                    + "removes them: %s", sanitize(conversationId), sanitize(e.getMessage()));
         }
     }
 
