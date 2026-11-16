@@ -99,11 +99,41 @@ describe("ChatPanel — Stop, Esc, reconnect, announcements", () => {
   });
 
   it("says so when the turn finished anyway on the server, and shows its whole reply", async () => {
+    // As the backend answers a current-step read: the latest STORED step. A say
+    // turn is stored only when it completes, so the first read (taken as Stop
+    // is pressed) shows the step before it; the turn, run on to its end on
+    // another pod, is the step that follows.
+    const step = (stamp: string, text: string) => ({
+      conversationState: "READY",
+      conversationSteps: [{ timestamp: stamp, conversationStep: [{ key: "output:text:0", value: text, timestamp: stamp }] }],
+      conversationOutputs: [{ output: [{ type: "text", text }] }],
+    });
+    let stopped = false;
+    let readsSinceStop = 0;
+    server.use(
+      http.get("*/agents/conv1", () => {
+        if (!stopped) return HttpResponse.json(step("t1", "Earlier"));
+        readsSinceStop += 1;
+        return HttpResponse.json(readsSinceStop === 1 ? step("t1", "Earlier") : step("t2", "The whole reply, from another pod"));
+      }),
+    );
+    renderWithProviders(<ChatPanel />);
+    turnRunning();
+    stopped = true;
+    fireEvent.click(screen.getByTestId("chat-stop"));
+
+    expect(await screen.findByTestId("chat-notice")).toHaveTextContent(/Stop came too late/);
+    expect(await screen.findByText("The whole reply, from another pod")).toBeInTheDocument();
+    expect(screen.queryByText("Half a re")).not.toBeInTheDocument();
+  });
+
+  it("does not take the step before the turn, still READY while it runs, for a finished one", async () => {
     server.use(
       http.get("*/agents/conv1", () =>
         HttpResponse.json({
           conversationState: "READY",
-          conversationOutputs: [{ output: [{ type: "text", text: "The whole reply, from another pod" }] }],
+          conversationSteps: [{ timestamp: "t1", conversationStep: [{ key: "output:text:0", value: "Earlier", timestamp: "t1" }] }],
+          conversationOutputs: [{ output: [{ type: "text", text: "Earlier" }] }],
         }),
       ),
     );
@@ -111,9 +141,9 @@ describe("ChatPanel — Stop, Esc, reconnect, announcements", () => {
     turnRunning();
     fireEvent.click(screen.getByTestId("chat-stop"));
 
-    expect(await screen.findByTestId("chat-notice")).toHaveTextContent(/Stop came too late/);
-    expect(await screen.findByText("The whole reply, from another pod")).toBeInTheDocument();
-    expect(screen.queryByText("Half a re")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("chat-notice")).toHaveTextContent(/still running/);
+    expect(screen.queryByText(/Stop came too late/)).not.toBeInTheDocument();
+    expect(screen.getByText("Half a re")).toBeInTheDocument();
   });
 
   it("shows that it is reconnecting while a dropped turn is followed", () => {

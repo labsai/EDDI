@@ -1608,6 +1608,15 @@ export class AgentConversation {
     let finished = false;
     // A new conversation, or a turn sent after Stop: neither is the turn stopped.
     const moved = () => !this.isCurrent(gen) || this.turnsSent !== turns;
+    // The step stored before the stopped turn: read as the turn was sent or,
+    // for a turn this controller did not send (a host's own), now — before the
+    // cancel. Any read issued after the send sees either the step before the
+    // turn or the turn's own; the second only makes every check unprovable.
+    const baseline = this.options.stopVerifyDelaysMs?.length
+      ? stoppedTurn?.baselineRead
+        ? stoppedTurn.baselineRead.then(() => stoppedTurn.baseline)
+        : this.transport.read(conversationId, true).then(latestStepMark, () => null)
+      : Promise.resolve(null);
     try {
       await this.transport.cancel(conversationId);
       if (moved()) return;
@@ -1623,7 +1632,13 @@ export class AgentConversation {
         return;
       }
     }
-    await this.verifyStop(conversationId, { moved, finished, partialId, turn: stoppedTurn });
+    await this.verifyStop(conversationId, {
+      moved,
+      finished,
+      partialId,
+      baseline,
+      stateBefore: stoppedTurn ? stoppedTurn.stateBeforeSend : null,
+    });
   }
 
   /**
@@ -1637,7 +1652,7 @@ export class AgentConversation {
    * A read settles it only when it is provably about THIS turn. The backend
    * stores a say turn only when it completes, so a read while it runs answers
    * READY with the previous step. A read whose latest step differs from the one
-   * stored before the turn (`turn.baseline`) holds the turn's own step: it ran
+   * stored before the turn (`baseline`) holds the turn's own step: it ran
    * on, and its reply replaces the part Stop left. A cancelled turn is never
    * stored; its settlement records EXECUTION_INTERRUPTED over the previous
    * step, so a stopped state the turn did not start in, over that step, says
@@ -1645,14 +1660,21 @@ export class AgentConversation {
    */
   private async verifyStop(
     conversationId: string,
-    stop: { moved: () => boolean; finished: boolean; partialId: string | null; turn: TurnContext | null },
+    stop: {
+      moved: () => boolean;
+      finished: boolean;
+      partialId: string | null;
+      /** The mark of the step stored before the stopped turn (null: unknown). */
+      baseline: Promise<string | null>;
+      /** The state the stopped turn was sent in, when this controller sent it. */
+      stateBefore: ConversationState | null;
+    },
   ): Promise<void> {
-    const { moved, finished, partialId, turn } = stop;
+    const { moved, finished, partialId, stateBefore } = stop;
     const delays = this.options.stopVerifyDelaysMs ?? [];
     if (!delays.length) return;
-    await turn?.baselineRead;
+    const baseline = await stop.baseline;
     if (moved()) return;
-    const baseline = turn?.baseline ?? null;
     let running = false;
     for (const delay of delays) {
       await sleep(delay);
@@ -1678,7 +1700,7 @@ export class AgentConversation {
         this.applySnapshot(snapshot ?? {}, { dedupe: true });
         return;
       }
-      if (!ownStep && baseline !== null && STOPPED_STATES.has(state) && state !== turn?.stateBeforeSend) {
+      if (!ownStep && baseline !== null && STOPPED_STATES.has(state) && state !== stateBefore) {
         // Stop took (or the conversation was ended meanwhile): record what the server says.
         this.dispatch({ type: "SET_CONVERSATION_STATE", state, endReason: snapshot?.endReason ?? null });
         return;
