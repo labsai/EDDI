@@ -139,8 +139,8 @@ docs: [`group-conversations.md`](../group-conversations.md), [`passing-context-i
   regression repair.
 - **Platform Operator:** the system prompt states the `onUnparseableVerdict`
   option and that a nested child is closed and cannot be continued or followed
-  up; operator revision **77** (renumbered on each merge with `main`, which took
-  61–76 meanwhile; 78 is PR #1396).
+  up; operator revision **78** (renumbered on each merge with `main`, which took
+  61–77 meanwhile; 79 is PR #1396).
 - **Quoting:** the bid prompt puts each task's subject (on one line) and
   description in one fenced block; `parseBids` matches on the same one-line form.
   The window summarizer fences the previous rolling summary.
