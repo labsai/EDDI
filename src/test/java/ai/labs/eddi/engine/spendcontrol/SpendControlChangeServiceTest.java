@@ -108,6 +108,19 @@ class SpendControlChangeServiceTest {
         service = new SpendControlChangeService(store, catalogService, quotaService, audit, new SimpleMeterRegistry(), true, clock);
     }
 
+    @Test
+    void everyKindAndResultSeriesExistsAtZeroBeforeTheFirstChange() {
+        var registry = new SimpleMeterRegistry();
+        new SpendControlChangeService(store, catalogService, quotaService, audit, registry, true, clock);
+        for (String kind : List.of("MODEL_PRICES", "TENANT_QUOTA")) {
+            for (String result : List.of("APPLIED", "PROPOSED", "APPROVED", "REJECTED", "WITHDRAWN", "STALE", "FAILED", "EXPIRED")) {
+                var counter = registry.find("eddi.spendcontrol.changes").tags("kind", kind, "result", result).counter();
+                assertNotNull(counter, kind + "/" + result);
+                assertEquals(0d, counter.count());
+            }
+        }
+    }
+
     private static ModelPriceEntry entry(String provider, String model, Double in, Double out) {
         return new ModelPriceEntry(provider, model, in, out, null, null, null, null, SRC, null);
     }

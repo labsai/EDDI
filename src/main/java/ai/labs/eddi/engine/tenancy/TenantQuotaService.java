@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.OptionalDouble;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.List;
 
 /**
@@ -81,6 +82,10 @@ public class TenantQuotaService {
      * {@code ConcurrentMap} cannot hold a null anyway.
      */
     private ICache<String, TenantQuota> quotaCache;
+
+    /** Bumped on every invalidation; a cache fill publishes only under its own. */
+    private final AtomicLong quotaGeneration = new AtomicLong();
+    private final Object quotaFillLock = new Object();
 
     @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default")
     String defaultTenantId;
@@ -169,9 +174,17 @@ public class TenantQuotaService {
         if (cached != null) {
             return cached;
         }
+        // A fill that read the store before a concurrent write must not publish its
+        // (now stale) value after that write's invalidation: it publishes only if no
+        // invalidation happened since it started. Reads stay lock-free.
+        long generation = quotaGeneration.get();
         TenantQuota resolved = quotaStore.getQuota(tenantId);
         if (resolved != null) {
-            quotaCache.put(tenantId, resolved);
+            synchronized (quotaFillLock) {
+                if (quotaGeneration.get() == generation) {
+                    quotaCache.put(tenantId, resolved);
+                }
+            }
         }
         return resolved;
     }
@@ -221,7 +234,10 @@ public class TenantQuotaService {
      */
     public void invalidateQuotaCache(String tenantId) {
         if (quotaCache != null && tenantId != null) {
-            quotaCache.remove(tenantId);
+            synchronized (quotaFillLock) {
+                quotaGeneration.incrementAndGet();
+                quotaCache.remove(tenantId);
+            }
         }
     }
 

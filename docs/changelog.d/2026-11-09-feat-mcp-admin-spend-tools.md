@@ -101,6 +101,9 @@ approver as actor. See [Spend-Control Changes](../spend-control-changes.md).
   real-database test.
 - The Manager shows only `PENDING` changes; an `APPLYING` or `FAILED` one is visible over REST and
   `list_spend_control_changes`, not yet on the page.
+- Review fixes: the `eddi.spendcontrol.changes` series are pre-registered at zero so the first change after
+  startup shows in the panel's `rate()`; `TenantQuotaService.quotaFor` publishes a cache fill only if no
+  invalidation happened since it began, so a CAS tightening cannot be undone by an overlapping stale fill.
 
 **Files:** [`engine/spendcontrol/`](../../src/main/java/ai/labs/eddi/engine/spendcontrol),
 [`McpSpendControlTools`](../../src/main/java/ai/labs/eddi/engine/mcp/McpSpendControlTools.java),

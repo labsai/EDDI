@@ -136,6 +136,28 @@ public class SpendControlChangeService {
         this.meterRegistry = meterRegistry;
         this.authEnabled = authEnabled;
         this.clock = clock;
+        preRegisterCounters();
+    }
+
+    /** Every result string {@link #count} can emit, beside {@link Result}. */
+    private static final List<String> COUNTED_RESULTS = List.of("APPLIED", "PROPOSED", "APPROVED", "REJECTED", "WITHDRAWN", "STALE", "FAILED",
+            "EXPIRED");
+
+    /**
+     * Creates every {@code kind}/{@code result} series at zero. A counter born on
+     * its first increment exposes 1 as its first value, and Prometheus
+     * {@code rate()} does not turn that into a sample, so the first change after
+     * startup would be missing from the dashboard.
+     */
+    private void preRegisterCounters() {
+        if (meterRegistry == null) {
+            return;
+        }
+        for (Kind kind : Kind.values()) {
+            for (String result : COUNTED_RESULTS) {
+                meterRegistry.counter("eddi.spendcontrol.changes", "kind", kind.name(), "result", result);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ catalog
