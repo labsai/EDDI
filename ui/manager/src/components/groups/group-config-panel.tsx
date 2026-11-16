@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info, Hand } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { cn, hashColor, getInitials, formatUsd } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { normalizeLifecyclePolicy } from "@/lib/api/groups";
