@@ -58,9 +58,12 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   degraded-mode behaviour. `docs/clustering.md` lists it in the degraded-mode table.
   Such a leg also registers `LeaseHandle.onLost` and is cancelled immediately
   (`stopLegOnLeaseLoss`, `CANCEL_IMMEDIATE`) when its lease is declared lost, which the holder does
-  before the lease expires for other nodes. A paused cadence discussion stored before the flag
-  existed is marked by `TeamCadenceService.settleIfEnded` (state-and-pause CAS, best effort), so
-  its resume needs the lease too.
+  before the lease expires for other nodes. A cadence run stored before the flag existed is
+  recognised at leg start by its team's workspace (`GroupWorkspace.isCadenceRun`: the claim holder
+  or a parked run; `GroupConversationService.requiresGroupLease`), which cannot race a resume the
+  way marking the stored document did. Remaining by design: a cancel does not prove termination --
+  a worker the task-force engine abandons after its bounded drain, or a tool call already sent,
+  can outlive the lease by that margin; discussion writes carry no fencing token.
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).

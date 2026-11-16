@@ -384,6 +384,20 @@ public class GroupWorkspace {
      * Whether a cadence run — the one holding the claim or a parked one — holds
      * {@code taskId}.
      */
+    /**
+     * Whether {@code discussionId} is one of this team's cadence runs: the one
+     * holding the claim, or a parked one.
+     */
+    public boolean isCadenceRun(String discussionId) {
+        if (discussionId == null) {
+            return false;
+        }
+        if (discussionId.equals(runningDiscussionId)) {
+            return true;
+        }
+        return parkedRuns != null && parkedRuns.stream().anyMatch(p -> discussionId.equals(p.discussionId()));
+    }
+
     public boolean isHeldByRun(String taskId) {
         if (!NO_RUNNING_DISCUSSION.equals(runningDiscussionId) && pulledTaskIds.contains(taskId)) {
             return true;

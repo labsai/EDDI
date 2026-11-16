@@ -7,9 +7,11 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -40,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -266,6 +269,70 @@ class GroupConversationServiceClusterLeaseTest {
     @DisplayName("a lease lost after its leg ended stops nothing")
     void leaseLossAfterTheLegIsANoOp() {
         assertDoesNotThrow(() -> service.stopLegOnLeaseLoss("gc-ended"));
+    }
+
+    private GroupConversation unflagged() {
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setGroupId("group-1");
+        return gc;
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a run its team's workspace names is a cadence run, flag or not (a stale or pre-flag snapshot)")
+    void workspaceNamesTheClaimHolder() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setRunningDiscussionId(GC_ID);
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a parked cadence run counts too")
+    void workspaceNamesAParkedRun() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setParkedRuns(List.of(new GroupWorkspace.ParkedRun(GC_ID, Instant.now(), List.of())));
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a discussion no workspace names is not a cadence run")
+    void workspaceDoesNotNameIt() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setRunningDiscussionId("another-run");
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertFalse(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: an unreadable workspace counts as required")
+    void unreadableWorkspaceIsRequired() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        when(workspaces.find("group-1")).thenThrow(new IResourceStore.ResourceStoreException("down"));
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: outside a cluster the workspace is not read")
+    void standaloneReadsNoWorkspace() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        service.workspaceStore = workspaces;
+        when(leaseManager.isClustered()).thenReturn(false);
+
+        assertFalse(service.requiresGroupLease(unflagged()));
+        verify(workspaces, never()).find(anyString());
     }
 
     @Test

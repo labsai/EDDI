@@ -650,10 +650,16 @@ store cannot be read the leg counts as running, and a cadence run never runs
 without its lease: where NATS is unreachable at the start of a leg, the leg fails
 (its tasks return, a later fire retries) rather than run invisibly to this check,
 and a leg whose lease is lost while it runs is cancelled at once — the holder
-declares the lease lost before it expires for the other nodes. A member call
-already in flight is cancelled; a tool call it already sent cannot be taken back.
-A run paused before this rule existed is marked the first time a fire (or a
-workspace read) sees it paused, so its resume needs the lease too.
+declares the lease lost before it expires for the other nodes. A run stored
+before this rule existed is recognised by its team's workspace (it holds the
+claim or is parked) when its leg starts, so a resume of it needs the lease too.
+
+One limit remains, by design: a cancel is a signal, not proof that the work has
+stopped. A member call in flight is cancelled and the leg stops at its next
+check, but a worker the task-force engine abandons after its bounded drain, or a
+tool call already sent, can outlive the lease by that margin. Group discussion
+writes carry no fencing token (see [Clustering](clustering.md)), so nothing
+stronger than the lease exists to wait on.
 A discussion that completed
 normally may therefore be written back one fire later than before, while its
 leg finishes releasing the lease.

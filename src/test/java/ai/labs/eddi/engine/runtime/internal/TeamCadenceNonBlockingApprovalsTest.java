@@ -612,32 +612,6 @@ class TeamCadenceNonBlockingApprovalsTest {
         }
 
         @Test
-        @DisplayName("a paused run stored before requiresGroupLease existed is marked, so its resume needs the lease too")
-        void legacyPausedRunIsMarked() throws Exception {
-            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
-            var legacy = stored(GroupConversationState.AWAITING_APPROVAL, false);
-            when(conversationStore.read(PAUSED_ID)).thenReturn(legacy);
-
-            assertFalse(service.reconcile(workspace));
-
-            verify(conversationStore).updateIfStateAndPause(argThat(GroupConversation::isRequiresGroupLease),
-                    eq(GroupConversationState.AWAITING_APPROVAL), any());
-        }
-
-        @Test
-        @DisplayName("a paused run that already requires its lease is not rewritten")
-        void markedPausedRunIsLeftAlone() throws Exception {
-            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
-            var marked = stored(GroupConversationState.AWAITING_APPROVAL, false);
-            marked.setRequiresGroupLease(true);
-            when(conversationStore.read(PAUSED_ID)).thenReturn(marked);
-
-            service.reconcile(workspace);
-
-            verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
-        }
-
-        @Test
         @DisplayName("a completed discussion whose leg has not released its lease yet is settled at the next fire")
         void completedWaitsForTheLeg() throws Exception {
             claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);

@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
@@ -33,6 +34,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -953,7 +955,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
                 liveDiscussionRegistry.register(gc);
-                holdGroupLease(gc.getId(), gc.isRequiresGroupLease());
+                holdGroupLease(gc.getId(), requiresGroupLease(gc));
             }
 
             // Execute each phase
@@ -2866,6 +2868,13 @@ public class GroupConversationService implements IGroupConversationService, User
     @Inject
     NodeIdentity nodeIdentity;
 
+    /**
+     * Field-injected (like {@link #nodeIdentity}) so the many tests that construct
+     * this service directly are unaffected; {@code null} there.
+     */
+    @Inject
+    IGroupWorkspaceStore workspaceStore;
+
     private final Map<String, LeaseHandle> groupLeases = new ConcurrentHashMap<>();
 
     private boolean clustered() {
@@ -2949,6 +2958,34 @@ public class GroupConversationService implements IGroupConversationService, User
         LeaseHandle lease = groupLeases.remove(groupConversationId);
         if (lease != null) {
             leaseManager.release(lease);
+        }
+    }
+
+    /**
+     * Whether this leg may run only while it holds its group lease: the discussion
+     * carries {@link GroupConversation#isRequiresGroupLease()}, or its team's
+     * workspace names it as a cadence run (the claim holder or a parked run). The
+     * workspace is the authoritative answer for a cadence run stored before the
+     * flag existed; reading it at leg start cannot race a resume the way marking
+     * the stored document could. Read only in a cluster, where the answer matters.
+     * An unreadable workspace counts as "required": that refuses a lease-free start
+     * and stops the leg on lease loss, both safe for a run that turns out not to
+     * need it.
+     */
+    boolean requiresGroupLease(GroupConversation gc) {
+        if (gc.isRequiresGroupLease()) {
+            return true;
+        }
+        if (!clustered() || workspaceStore == null || gc.getGroupId() == null) {
+            return false;
+        }
+        try {
+            GroupWorkspace workspace = workspaceStore.find(gc.getGroupId());
+            return workspace != null && workspace.isCadenceRun(gc.getId());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the workspace of group %s (%s) — treating discussion %s as a cadence run",
+                    LogSanitizer.sanitize(gc.getGroupId()), e.getClass().getSimpleName(), LogSanitizer.sanitize(gc.getId()));
+            return true;
         }
     }
 
