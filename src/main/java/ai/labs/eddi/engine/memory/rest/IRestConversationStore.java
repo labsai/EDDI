@@ -77,6 +77,12 @@ public interface IRestConversationStore {
      * authorization disabled (a conversation then records the userId the client
      * passed, not the principal), there is no owner to match and the flag changes
      * nothing.
+     * <p>
+     * {@code filter} is a text search. For an administrator (or with authorization
+     * disabled) a search that matches no conversation at all is dropped and the
+     * listing returned without it. For every other caller a search that matches
+     * nothing they may be listed returns an empty page: whether other users'
+     * conversations match must not change what they are shown.
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)

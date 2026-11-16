@@ -43,6 +43,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -658,9 +659,92 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
-    @DisplayName("an agent maintainer's search matching only somebody else's legacy conversation of that agent answers like one matching nothing")
-    void maintainerSearchIsNoOracleOverAnotherUsersLegacyConversation() throws Exception {
-        maintainerLegacySearchAnswersLikeNoMatch("0000000000000000000000a1");
+    @DisplayName("a legacy conversation whose memory names the maintainer's agent is reviewable: listed, and found by search")
+    void reviewableLegacyConversationIsFound() throws Exception {
+        String agent = "0000000000000000000000a1";
+        String legacyId = "0a0a0a0a0a0a0a0a0a0a0a02";
+        List<ConversationDescriptor> store = List.of(descriptor(legacyId, null));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(legacyId)).thenReturn(memoryOf("victim-principal", agent));
+        textSearchingStore(store);
+        var maintainer = storeAs(OWNER, true, "eddi-viewer");
+
+        var listed = maintainer.readConversationDescriptors(0, 20, null, null, agent, null, null, null);
+        var found = maintainer.readConversationDescriptors(0, 20, legacyId, null, agent, null, null, null);
+
+        assertEquals(1, listed.size(), "review reaches a legacy row once its memory names the agent");
+        assertEquals(1, found.size());
+        assertEquals("victim-principal", found.getFirst().getUserId());
+    }
+
+    @Test
+    @DisplayName("100+ rejected matches ahead of a reviewable one do not change what a maintainer's search returns")
+    void manyRejectedMatchesDoNotChangeTheResult() throws Exception {
+        String agent = "0000000000000000000000a1";
+        URI agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=1");
+        var reviewable = descriptor("0c0c00000000000000000001", "other-user");
+        reviewable.setAgentResource(agentResource);
+        var mine = descriptor("0d0d00000000000000000001", OWNER);
+        mine.setAgentResource(agentResource);
+        List<ConversationDescriptor> withRejected = new ArrayList<>();
+        for (int i = 0; i < 120; i++) {
+            // Legacy rows of another user and another agent, matching the search.
+            String id = "0c0c" + String.format("%020x", 0x100 + i);
+            withRejected.add(descriptor(id, null));
+            when(conversationMemoryStore.loadConversationMemorySnapshot(id))
+                    .thenReturn(memoryOf("victim-principal", "0000000000000000000000b2"));
+        }
+        withRejected.add(reviewable);
+        withRejected.add(mine);
+        var maintainer = storeAs(OWNER, true, "eddi-viewer");
+
+        textSearchingStore(withRejected);
+        var withThem = maintainer.readConversationDescriptors(0, 20, "0c0c", null, agent, null, null, null);
+        textSearchingStore(List.of(reviewable, mine));
+        var withoutThem = maintainer.readConversationDescriptors(0, 20, "0c0c", null, agent, null, null, null);
+
+        assertEquals(resourcesOf(withoutThem), resourcesOf(withThem), "rows the caller cannot see must not change the answer");
+        assertEquals(List.of(reviewable.getResource().toString()), resourcesOf(withThem));
+    }
+
+    private static List<String> resourcesOf(List<ConversationDescriptor> rows) {
+        return rows.stream().map(d -> d.getResource().toString()).toList();
+    }
+
+    private static ConversationMemorySnapshot memoryOf(String userId, String agentId) {
+        var memory = new ConversationMemorySnapshot();
+        memory.setConversationState(ConversationState.READY);
+        memory.setConversationSteps(new ArrayList<>());
+        memory.setUserId(userId);
+        memory.setAgentId(agentId);
+        memory.setAgentVersion(1);
+        return memory;
+    }
+
+    /**
+     * A descriptor store over {@code rows} that applies the text search (on the
+     * resource), an exact owner restriction and paging, and hands out a fresh copy
+     * per read.
+     */
+    private void textSearchingStore(List<ConversationDescriptor> rows) throws Exception {
+        when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(invocation -> {
+                    String text = invocation.getArgument(1);
+                    int page = invocation.getArgument(2);
+                    int size = invocation.getArgument(3);
+                    List<IResourceFilter.QueryFilters> restrictions = invocation.getArgument(5);
+                    String ownerOnly = restrictions == null
+                            ? null
+                            : restrictions.stream().filter(group -> group.getQueryFilters().size() == 1)
+                                    .flatMap(group -> group.getQueryFilters().stream())
+                                    .filter(f -> "userId".equals(f.getField()) && f.isExact())
+                                    .map(f -> (String) f.getFilter()).findFirst().orElse(null);
+                    return rows.stream()
+                            .filter(d -> text == null || d.getResource().toString().contains(text))
+                            .filter(d -> ownerOnly == null || ownerOnly.equals(d.getUserId()))
+                            .skip((long) page * size).limit(size)
+                            .map(RestConversationStoreOwnershipTest::copyOf)
+                            .toList();
+                });
     }
 
     @Test
@@ -764,21 +848,15 @@ class RestConversationStoreOwnershipTest {
     }
 
     @Test
-    @DisplayName("the 'search matches nothing' fallback looks only at the caller's own conversations, never the whole store")
-    @SuppressWarnings("unchecked")
-    void searchFallbackIsDecidedWithinTheCallersScope() throws Exception {
+    @DisplayName("a scoped caller's search never falls back: matching nothing they may be listed returns an empty page, and nothing else is searched")
+    void scopedSearchNeverFallsBack() throws Exception {
         firstPage();
 
-        // An agent listing: the owner filter is not in the listing query, so the
-        // existence check must add it itself.
-        asOwner().readConversationDescriptors(0, 20, "someone-elses-id", null, "0000000000000000000000a1", null, null, null);
+        var result = asOwner().readConversationDescriptors(0, 20, "someone-elses-id", null, "0000000000000000000000a1", null, null, null);
 
-        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
-        verify(conversationDescriptorStore).readDescriptors(anyString(), eq("someone-elses-id"), eq(0), eq(1), anyBoolean(), captor.capture());
-        assertEquals(1, captor.getValue().size(), "the existence query must be confined to the caller's records");
-        var mine = captor.getValue().getFirst().getQueryFilters().get(0);
-        assertEquals("userId", mine.getField());
-        assertEquals(OWNER, mine.getFilter());
+        assertTrue(result.isEmpty());
+        verify(conversationDescriptorStore, never()).readDescriptors(anyString(), eq("someone-elses-id"), eq(0), eq(1), anyBoolean(), any());
+        verify(conversationDescriptorStore, never()).readDescriptors(anyString(), isNull(), anyInt(), anyInt(), anyBoolean(), any());
     }
 
     @Test
