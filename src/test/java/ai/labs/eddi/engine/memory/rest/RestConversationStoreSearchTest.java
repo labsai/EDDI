@@ -45,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -116,8 +117,11 @@ class RestConversationStoreSearchTest {
     @SuppressWarnings("unchecked")
     private List<QueryFilters> capturedRestrictions(Integer index, Integer limit) throws Exception {
         ArgumentCaptor<List<QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
-        verify(descriptorStore).readDescriptors(eq(RestConversationStore.DESCRIPTOR_TYPE), eq(null), eq(index), eq(limit), eq(false),
-                captor.capture());
+        // The search reads descriptor batches of `limit` from page 0 (orphans are
+        // counted
+        // out before the offset), so the first read is always page 0.
+        verify(descriptorStore, atLeastOnce()).readDescriptors(eq(RestConversationStore.DESCRIPTOR_TYPE), eq(null), eq(0), eq(limit),
+                eq(false), captor.capture());
         return captor.getValue();
     }
 
@@ -244,7 +248,7 @@ class RestConversationStoreSearchTest {
     }
 
     @Test
-    @DisplayName("paging is passed to the store; a negative index or a page past 10,000 results is 400")
+    @DisplayName("paging reads batches of limit; a negative index or a page past 10,000 results is 400")
     void paging() throws Exception {
         var store = storeAs(OWNER, true, "eddi-user");
         store.searchConversations("Rome", 3, 25);
@@ -276,5 +280,47 @@ class RestConversationStoreSearchTest {
         assertEquals(1, results.size());
         assertInstanceOf(ConversationDescriptor.class, results.getFirst());
         assertNull(broken.getConversationState());
+    }
+
+    @Test
+    @DisplayName("a named caller with authorization disabled searches every conversation, not only their own")
+    void namedCallerWithAuthorizationDisabledSearchesEverything() throws Exception {
+        storeAs(OWNER, false).searchConversations("Rome", 0, 20);
+
+        var filters = flatten(capturedRestrictions(0, 20));
+        assertEquals(1, filters.size(), "no owner restriction: " + filters);
+        assertEquals(ConversationDescriptor.FIELD_TITLE, filters.getFirst().getField());
+    }
+
+    @Test
+    @DisplayName("an orphan ahead of a valid match does not make page 0 empty")
+    void orphanAheadOfMatchStillFillsPage() throws Exception {
+        // An orphan: a descriptor whose conversation memory is gone.
+        var orphan = new ConversationDescriptor();
+        orphan.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/bbbbbbbbbbbbbbbbbbbbbbb2?version=0"));
+        orphan.setUserId(OWNER);
+        orphan.setTitle("Rome orphan");
+        storeRows.add(orphan);
+        row("aaaaaaaaaaaaaaaaaaaaaaa1", OWNER, "Trip to Rome");
+
+        var results = storeAs(OWNER, true, "eddi-user").searchConversations("rome", 0, 1);
+
+        assertEquals(1, results.size());
+        assertEquals("Trip to Rome", results.getFirst().getTitle());
+    }
+
+    @Test
+    @DisplayName("a match whose resource uri does not parse is skipped, not a failed page")
+    void unparsableResourceIsSkipped() throws Exception {
+        var corrupt = new ConversationDescriptor();
+        corrupt.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/aaaaaaaaaaaaaaaaaaaaaaa9?version=bad"));
+        corrupt.setUserId(OWNER);
+        corrupt.setTitle("Rome corrupt");
+        storeRows.add(corrupt);
+        row("aaaaaaaaaaaaaaaaaaaaaaa1", OWNER, "Trip to Rome");
+
+        var results = storeAs(OWNER, true, "eddi-user").searchConversations("rome", 0, 20);
+
+        assertEquals(1, results.size());
     }
 }

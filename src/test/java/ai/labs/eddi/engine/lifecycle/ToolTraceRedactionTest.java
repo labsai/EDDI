@@ -68,4 +68,13 @@ class ToolTraceRedactionTest {
     void dropsControlCharacters() {
         assertEquals("abc def", ToolTraceRedaction.summary("a\u0000b‮c\r\ndef"));
     }
+
+    @Test
+    @DisplayName("a credential a bidi character splits is redacted once normalization rejoins it")
+    void redactsAfterNormalizing() {
+        String summary = ToolTraceRedaction.summary("key: s\u202Ek-" + "a".repeat(40) + " end");
+
+        assertFalse(summary.contains("a".repeat(20)), summary);
+        assertTrue(summary.contains("sk-<REDACTED>"), summary);
+    }
 }

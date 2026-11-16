@@ -504,6 +504,14 @@ public class ConversationAccessGuard {
     }
 
     /**
+     * Whether authorization is enforced at all. When it is not, every caller is
+     * effectively an administrator and no owner scoping applies.
+     */
+    public boolean authorizationEnabled() {
+        return ownershipValidator.isAuthEnabled();
+    }
+
+    /**
      * The calling principal's name, to attribute an action on a conversation in the
      * audit trail (G4) — e.g. the {@code hitl.approval} cancellation written when a
      * delete or bulk end terminates a pending approval. Falls back to

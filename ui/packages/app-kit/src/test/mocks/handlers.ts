@@ -1639,6 +1639,8 @@ export const handlers = [
       const entry = { ...c, ...patch } as typeof c & { title?: string };
       return typeof entry.title === "string" && entry.title.toLowerCase().includes(needle) ? [entry] : [];
     });
+    // Newest first, as the backend orders it — before the page is cut.
+    result.sort((a, b) => (b.lastModifiedOn ?? 0) - (a.lastModifiedOn ?? 0));
     const rawLimit = Number(url.searchParams.get("limit") ?? "20");
     const limit = rawLimit < 1 ? 20 : rawLimit;
     const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));

@@ -1327,7 +1327,11 @@ class ToolLoopRunner {
         ToolCallResult result = runToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames, toolSources,
                 defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs,
                 activeSpecs, runSpend);
-        emitToolResult(memory, toolRequest.name(), trace, traceStart, result);
+        // A call a cascade timeout or a cancel aborted is not a finished call: no
+        // event.
+        if (!(memory != null && memory.isCancelled()) && !Thread.currentThread().isInterrupted()) {
+            emitToolResult(memory, toolRequest.name(), trace, traceStart, result);
+        }
         return result;
     }
 

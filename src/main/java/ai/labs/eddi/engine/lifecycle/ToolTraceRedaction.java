@@ -76,7 +76,10 @@ public final class ToolTraceRedaction {
             return "";
         }
         String redacted = (String) redactValue(text);
-        String normalized = ConversationTitles.normalize(redacted);
+        // Normalizing drops bidi/control characters and so can join the halves of a
+        // credential split by one: redact the result again, before the cut, so nothing
+        // the normalizer reassembles reaches the event.
+        String normalized = (String) redactValue(ConversationTitles.normalize(redacted));
         return ConversationTitles.truncate(normalized, MAX_SUMMARY_LENGTH);
     }
 }
