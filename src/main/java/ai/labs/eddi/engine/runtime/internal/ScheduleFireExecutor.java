@@ -80,7 +80,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ul>
  * <li>{@code TenantQuotaService} — API call and cost quotas</li>
  * <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
- * <li>{@code ConversationCoordinator} — ordered processing</li>
+ * <li>{@code IConversationCoordinator} — ordered processing</li>
  * </ul>
  *
  * @author ginccc
