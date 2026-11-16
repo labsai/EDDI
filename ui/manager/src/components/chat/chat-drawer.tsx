@@ -12,6 +12,7 @@ import {
   type ReadyAttachment,
 } from "@/hooks/use-attachment-staging";
 import { ChatMessage } from "./chat-message";
+import { GuardrailActivity } from "./guardrail-activity";
 import { ChatActivity } from "./chat-activity";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { StreamingToggle } from "./streaming-toggle";
@@ -306,6 +307,7 @@ export function ChatDrawer() {
                           <span className="italic">{t("chat.thinking")}</span>
                         </div>
                       ) : null}
+                      <GuardrailActivity messages={messages} isProcessing={isProcessing} />
                     </div>
                   )}
                 </div>

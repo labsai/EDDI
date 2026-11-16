@@ -16,7 +16,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TRANSLATIONS } from "@/i18n";
 
 const ROOT = process.cwd();
 const EDDI = /\bEDDI\b/;
@@ -82,7 +81,13 @@ function relPath(file: string): string {
 
 describe("no EDDI in user-visible strings", () => {
   it("no locale value names EDDI", () => {
-    const found = Object.entries(TRANSLATIONS).flatMap(([code, table]) =>
+    const localeDir = resolve(ROOT, "src/i18n/locales");
+    const tables = readdirSync(localeDir).map((file) => [
+      file.replace(/\.json$/, ""),
+      JSON.parse(readFileSync(join(localeDir, file), "utf8")) as Record<string, string>,
+    ] as const);
+    expect(tables.length).toBe(11);
+    const found = tables.flatMap(([code, table]) =>
       Object.entries(table)
         .filter(([, value]) => EDDI.test(value))
         .map(([key, value]) => `${code}: ${key} = ${value}`),
