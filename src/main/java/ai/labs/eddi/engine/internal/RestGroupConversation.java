@@ -449,14 +449,15 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
-    public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
+    public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit, Boolean mine) {
         try {
             // Owned conversations only, unless admin — and restricted IN THE QUERY, so
             // index/limit page through the caller's own conversations. Filtering the
             // fetched page afterwards gave a non-admin short or empty pages while their
             // conversations sat further back (the Workforce history's missing rows).
+            // mine=true applies the same restriction to an admin (the Workforce sidebar).
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
-                    && !identity.hasRole("eddi-admin")) {
+                    && (Boolean.TRUE.equals(mine) || !identity.hasRole("eddi-admin"))) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
                 if (callerId == null) {

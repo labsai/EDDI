@@ -1464,15 +1464,21 @@ export function getGroupConversation(
   );
 }
 
+/**
+ * A team's sessions, newest first. `mine` keeps the owner filter for an admin
+ * too (who otherwise sees every user's) — the Workforce sidebar is "mine".
+ */
 export function listGroupConversations(
   groupId: string,
   limit = 20,
-  index = 0
+  index = 0,
+  mine = false
 ): Promise<GroupConversation[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
+  if (mine) params.set("mine", "true");
   return api.get<GroupConversation[]>(
     `/groups/${seg(groupId)}/conversations?${params.toString()}`
   );

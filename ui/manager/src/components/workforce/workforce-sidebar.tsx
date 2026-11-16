@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -24,6 +25,10 @@ import { BrandIcon, BrandWordmark } from "@/components/layout/brand-logo";
 import { useBrand } from "@/hooks/use-brand";
 import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
+// Lazy: the Workforce layout (and so this sidebar) is in the entry chunk shared
+// with /manage, and the session list — its queries, mutations and dialog — is
+// Workforce-only code the Manager's first load should not carry.
+const SessionList = lazy(() => import("./session-list").then((m) => ({ default: m.SessionList })));
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -207,6 +212,14 @@ export function WorkforceSidebar({
 
       {/* ── Boards List ───────────────────────────────────────── */}
       <nav aria-label={t("Workforce.boardList", "Task Force list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
+        {/* The person's chats and team sessions, by date (T1.1). Collapsed,
+            there is no room for titles; Home lists the recent ones. */}
+        {!collapsed && (
+          <Suspense fallback={null}>
+            <SessionList />
+          </Suspense>
+        )}
+
         {!collapsed && (
           <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             {t("Workforce.boardsLabel", "Task Forces")}

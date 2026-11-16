@@ -1354,7 +1354,7 @@ summarizer's.
 | `GET` | `/groupstore/groups/styles` | List discussion styles |
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
-| `GET` | `/groups/{groupId}/conversations` | List conversations |
+| `GET` | `/groups/{groupId}/conversations` | List conversations (`index`, `limit`). A non-admin sees their own; `mine=true` restricts an admin to their own as well (since 6.7.0). Each member's private conversation records the discussion as `groupConversationId` on its conversation descriptor, and `GET /conversationstore/conversations?excludeGroupMembers=true` leaves those out |
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
