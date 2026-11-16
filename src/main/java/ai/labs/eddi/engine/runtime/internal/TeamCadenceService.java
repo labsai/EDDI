@@ -7,12 +7,16 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.HitlConfig;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.GroupConversation.HitlPauseType;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace.ParkedRun;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskApproval;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
@@ -54,7 +58,10 @@ import java.util.function.Predicate;
  * <li><b>Reconcile:</b> if the workspace records a running discussion, read it.
  * Terminal → write its outcomes back and release the claim. Still running (or
  * paused at an HITL gate) → skip this fire; a discussion may legitimately wait
- * on a human for days.</li>
+ * on a human for days. With {@code hitlConfig.maxPausedCadenceRuns > 0}, a
+ * paused one is instead <em>parked</em>: it keeps the tasks it pulled, releases
+ * the claim, and is written back on its own when it ends — so a team no longer
+ * waits on one undecided approval.</li>
  * <li><b>Pull:</b> top-N executable backlog tasks by priority. Empty → skip
  * (logged) — a cadence with no work must not burn a discussion.</li>
  * <li><b>Claim:</b> conditional store write on {@code runningDiscussionId} —
@@ -133,6 +140,7 @@ public class TeamCadenceService {
     private Counter cadenceRunsSkipped;
     private Counter cadenceWritebacks;
     private Counter cadenceClaimsReclaimed;
+    private Counter cadenceRunsParked;
 
     @Inject
     public TeamCadenceService(IGroupWorkspaceStore workspaceStore, IGroupConversationStore conversationStore,
@@ -155,6 +163,7 @@ public class TeamCadenceService {
         cadenceRunsSkipped = meterRegistry.counter("eddi_team_cadence_runs_skipped_total");
         cadenceWritebacks = meterRegistry.counter("eddi_team_cadence_writebacks_total");
         cadenceClaimsReclaimed = meterRegistry.counter("eddi_team_cadence_claims_reclaimed_total");
+        cadenceRunsParked = meterRegistry.counter("eddi_team_cadence_runs_parked_total");
     }
 
     /** True if the given schedule metadata marks a team-cadence schedule. */
@@ -234,11 +243,29 @@ public class TeamCadenceService {
             // produced "Previous cadence discussion is still running", with an empty id,
             // for precisely the case an operator most needs to tell apart.
             String previousDiscussionId = workspace.getRunningDiscussionId();
+            // A paused run parked by this fire (hitlConfig.maxPausedCadenceRuns), or null.
+            // The parking is applied to this in-memory copy only; it is persisted
+            // together with this fire's claim, in the same revision-checked write, or
+            // not at all.
+            String parkedDiscussionId = null;
+            int maxPaused = 0;
             if (!reconcile(workspace)) {
-                cadenceRunsSkipped.increment();
-                return CadenceResult.skipped(groupId, cadenceId,
-                        "Previous cadence discussion " + previousDiscussionId
-                                + " still holds the workspace (either still running, or settled concurrently by another reconciler)");
+                maxPaused = maxPausedCadenceRuns(groupId);
+                if (maxPaused > 0 && !previousDiscussionId.isEmpty()
+                        && previousDiscussionId.equals(workspace.getRunningDiscussionId())
+                        && workspace.getParkedRuns().size() < maxPaused && isPaused(previousDiscussionId)) {
+                    park(workspace);
+                    parkedDiscussionId = previousDiscussionId;
+                } else {
+                    cadenceRunsSkipped.increment();
+                    return CadenceResult.skipped(groupId, cadenceId,
+                            "Previous cadence discussion " + previousDiscussionId
+                                    + " still holds the workspace (either still running, or settled concurrently by another reconciler)"
+                                    + (maxPaused > 0 && workspace.getParkedRuns().size() >= maxPaused
+                                            ? "; " + workspace.getParkedRuns().size()
+                                                    + " paused run(s) are already parked (hitlConfig.maxPausedCadenceRuns)"
+                                            : ""));
+                }
             }
 
             Cadence cadence = workspace.getCadences().stream()
@@ -293,9 +320,9 @@ public class TeamCadenceService {
 
             // 4. Claim: a revision-checked write (H14c), retried against a fresh read
             // while the workspace is still idle and every pulled task still waits.
-            boolean claimed;
+            GroupWorkspace claimedWorkspace;
             try {
-                claimed = claim(workspace, gc.getId(), pulled);
+                claimedWorkspace = claim(workspace, gc.getId(), pulled, parkedDiscussionId, maxPaused);
             } catch (Exception e) {
                 // A store failure during the claim leaves a discussion nobody
                 // references — retire it before failing, or a later fire could never
@@ -303,7 +330,7 @@ public class TeamCadenceService {
                 prepared.abandon();
                 throw e;
             }
-            if (!claimed) {
+            if (claimedWorkspace == null) {
                 // Another pod claimed (or the pulled tasks moved) between our read and
                 // our write — retire the discussion this fire prepared and stand down.
                 LOGGER.infof("Cadence %s for group %s lost the run claim — retiring its unlaunched discussion %s",
@@ -316,6 +343,13 @@ public class TeamCadenceService {
             // 5. Run — only now, with the claim won.
             prepared.launch();
 
+            final String parkedId = parkedDiscussionId;
+            if (parkedId != null && claimedWorkspace.getParkedRuns().stream()
+                    .anyMatch(run -> parkedId.equals(run.discussionId()))) {
+                cadenceRunsParked.increment();
+                LOGGER.infof("Cadence %s for group %s parked paused discussion %s (it keeps its tasks) to start a new run",
+                        LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), parkedDiscussionId);
+            }
             cadenceRunsStarted.increment();
             LOGGER.infof("Cadence %s for group %s started discussion %s with %d backlog task(s)",
                     LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), gc.getId(), pulled.size());
@@ -339,21 +373,35 @@ public class TeamCadenceService {
      * re-checked: still idle, and every pulled task still executable, means the
      * claim is still ours to take and it is re-applied to the fresh copy. Anything
      * else is a genuine loss.
+     * <p>
+     * With {@code parkedDiscussionId} set, the caller found that discussion paused
+     * and parked it in its in-memory copy ({@link #park}); the park is persisted by
+     * this same write. A fresh copy that still names that discussion as its running
+     * one, with room left under {@code maxPaused}, is parked again before the
+     * retry; a fresh copy that went idle meanwhile is claimed without parking.
      *
-     * @return {@code true} once the claim is persisted
+     * @return the workspace as persisted once the claim landed, or {@code null}
      */
-    private boolean claim(GroupWorkspace workspace, String discussionId, List<TaskItem> pulled)
+    private GroupWorkspace claim(GroupWorkspace workspace, String discussionId, List<TaskItem> pulled,
+                                 String parkedDiscussionId, int maxPaused)
             throws IResourceStore.ResourceStoreException {
         GroupWorkspace current = workspace;
         for (int attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
             if (attempt > 0) {
                 current = workspaceStore.find(workspace.getGroupId());
-                if (current == null || !isIdle(current)) {
-                    return false;
+                if (current == null) {
+                    return null;
+                }
+                if (parkedDiscussionId != null && parkedDiscussionId.equals(current.getRunningDiscussionId())
+                        && current.getParkedRuns().size() < maxPaused) {
+                    park(current);
+                }
+                if (!isIdle(current)) {
+                    return null;
                 }
                 var executable = current.getBacklog().findExecutableTasks().stream().map(TaskItem::id).toList();
                 if (!pulled.stream().map(TaskItem::id).allMatch(executable::contains)) {
-                    return false;
+                    return null;
                 }
             }
             current.setRunningDiscussionId(discussionId);
@@ -367,10 +415,45 @@ public class TeamCadenceService {
                 current.getBacklog().updateTask(withStatus(fresh != null ? fresh : task, TaskStatus.IN_PROGRESS));
             }
             if (workspaceStore.casRunningDiscussion(current)) {
-                return true;
+                return current;
             }
         }
-        return false;
+        return null;
+    }
+
+    /**
+     * Moves the run holding the claim into {@code parkedRuns}, in memory only: its
+     * pulled tasks stay {@code IN_PROGRESS} (so no other run pulls them), its claim
+     * time is kept (so the claim TTL still measures it), and the workspace is idle
+     * again for the claim that will persist the park.
+     */
+    static void park(GroupWorkspace workspace) {
+        List<ParkedRun> parked = new ArrayList<>(workspace.getParkedRuns());
+        parked.add(new ParkedRun(workspace.getRunningDiscussionId(), workspace.getClaimedAt(),
+                workspace.getPulledTaskIds()));
+        workspace.setParkedRuns(parked);
+        workspace.setRunningDiscussionId(GroupWorkspace.NO_RUNNING_DISCUSSION);
+        workspace.setClaimedAt(null);
+        workspace.setPulledTaskIds(List.of());
+    }
+
+    /**
+     * Whether the discussion is waiting on a person — the only in-flight state a
+     * run may be parked in. A run that is still working is never parked: two runs
+     * of one team working at once is what {@code maxPausedCadenceRuns} bounds, not
+     * what it is for.
+     */
+    private boolean isPaused(String discussionId) {
+        try {
+            GroupConversation gc = conversationStore.read(discussionId);
+            return gc != null && isPausedState(gc.getState());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isPausedState(GroupConversationState state) {
+        return state == GroupConversationState.AWAITING_APPROVAL || state == GroupConversationState.AWAITING_HUMAN_INPUT;
     }
 
     private static boolean isIdle(GroupWorkspace workspace) {
@@ -378,35 +461,112 @@ public class TeamCadenceService {
     }
 
     /**
+     * One cadence run as the writeback sees it: the run holding the claim
+     * ({@code parked == false}) or a parked one. Settling the first clears the
+     * claim; settling the second removes it from {@code parkedRuns}.
+     */
+    record Run(String discussionId, Instant claimedAt, List<String> pulledTaskIds, boolean parked) {
+
+        static Run claimHolder(GroupWorkspace workspace) {
+            return new Run(workspace.getRunningDiscussionId(), workspace.getClaimedAt(), workspace.getPulledTaskIds(),
+                    false);
+        }
+
+        static Run of(ParkedRun parked) {
+            return new Run(parked.discussionId(), parked.claimedAt(), parked.pulledTaskIds(), true);
+        }
+
+        /**
+         * This run as {@code workspace} records it, or {@code null} if it no longer
+         * does.
+         */
+        Run in(GroupWorkspace workspace) {
+            if (!parked) {
+                return discussionId != null && !discussionId.isEmpty()
+                        && discussionId.equals(workspace.getRunningDiscussionId()) ? claimHolder(workspace) : null;
+            }
+            return workspace.getParkedRuns().stream()
+                    .filter(p -> discussionId.equals(p.discussionId()))
+                    .findFirst().map(Run::of).orElse(null);
+        }
+    }
+
+    /**
      * Settles a previous cadence run, if any. Returns {@code true} when the
      * workspace is idle (possibly after writing back a finished discussion),
      * {@code false} when a previous discussion is genuinely still in flight.
+     * <p>
+     * Parked runs ({@code hitlConfig.maxPausedCadenceRuns}) are settled first, each
+     * on its own: a parked run that ended is written back, one past the claim TTL
+     * is reclaimed, and one still paused is left alone — it does not make the
+     * workspace busy. Losing a parked run's settle race does: this caller's copy is
+     * then stale.
      * <p>
      * Public beyond the fire path: the REST layer runs this as read-repair so a
      * human looking at the workspace sees settled metrics, not "running" state for
      * a discussion that ended an hour ago.
      */
     public boolean reconcile(GroupWorkspace workspace) {
+        for (ParkedRun parked : List.copyOf(workspace.getParkedRuns())) {
+            if (settleIfEnded(workspace, Run.of(parked)) == Settled.LOST) {
+                return false;
+            }
+        }
         String runningId = workspace.getRunningDiscussionId();
         if (runningId == null || runningId.isEmpty()) {
             return true;
         }
+        return settleIfEnded(workspace, Run.claimHolder(workspace)) == Settled.WRITTEN;
+    }
+
+    /** What {@link #settleIfEnded} did with one run. */
+    private enum Settled {
+        /** The run ended (or was reclaimed) and its writeback landed. */
+        WRITTEN,
+        /** The run is legitimately still in flight; nothing was written. */
+        IN_FLIGHT,
+        /** The writeback lost its settle race; this caller's copy is stale. */
+        LOST
+    }
+
+    private Settled settleIfEnded(GroupWorkspace workspace, Run run) {
         GroupConversation gc;
         try {
-            gc = conversationStore.read(runningId);
+            gc = conversationStore.read(run.discussionId());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Deleted — release the claim and return the pulled tasks; holding the
+            // workspace hostage to a vanished discussion would stall every future fire.
+            LOGGER.warnf("Cadence discussion %s for group %s is gone — releasing the claim",
+                    run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()));
+            return written(writebackFailure(workspace, run, null, 0));
         } catch (Exception e) {
-            // Deleted or unreadable — release the claim and return the pulled
-            // tasks; holding the workspace hostage to a vanished discussion would
-            // stall every future fire.
-            LOGGER.warnf("Cadence discussion %s for group %s is gone (%s) — releasing the claim",
-                    runningId, LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
-            return writebackFailure(workspace, null);
+            // Unreadable is not gone: the discussion may still be running, and
+            // returning its tasks to PENDING would let another run execute them
+            // alongside it. The run keeps its claim -- past the TTL as well, because
+            // releasing needs a read that shows the run has ended. Past the TTL it is
+            // cancelled, so a live run stops; once it reads again it is CANCELLED and
+            // written back the ordinary way. A document that never reads again is
+            // released by deleting it (the not-found arm above).
+            if (pastTtl(run)) {
+                LOGGER.warnf("Cadence discussion %s for group %s is unreadable (%s) past the %s claim TTL — cancelling it "
+                        + "and keeping the claim until it reads as ended; delete the discussion to release it",
+                        run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName(),
+                        claimTtl);
+                cancelQuietly(run.discussionId());
+            } else {
+                LOGGER.warnf("Could not read cadence discussion %s for group %s (%s) — keeping the claim",
+                        run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
+            }
+            return Settled.IN_FLIGHT;
+        }
+        if (isEnded(gc.getState()) && legStillRunning(run.discussionId())) {
+            return Settled.IN_FLIGHT;
         }
         return switch (gc.getState()) {
             // A lost settle race means another reconciler (or a fresh claim) got
             // there first — this caller must treat the workspace as busy and let
             // the next fire read fresh state.
-            case COMPLETED -> writebackCompleted(workspace, gc);
+            case COMPLETED -> written(writebackCompleted(workspace, run, gc, 0));
             // REJECTED belongs here, with the other terminal outcomes, and not in
             // the default arm: a human declining a cadence run's recommendation
             // ends it just as finally as a failure. Landing in `reclaimIfStale`
@@ -415,11 +575,15 @@ public class TeamCadenceService {
             // IN_PROGRESS on the backlog until claim-ttl (default PT24H) elapses,
             // or forever on a non-positive TTL. This is the only remaining switch
             // over the enum in src/main; keep it exhaustive by hand.
-            case FAILED, REJECTED, CANCELLED -> writebackFailure(workspace, gc);
+            case FAILED, REJECTED, CANCELLED -> written(writebackFailure(workspace, run, gc, 0));
             // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
             // has been held past its TTL. See reclaimIfStale.
-            default -> reclaimIfStale(workspace, gc);
+            default -> reclaimIfStale(workspace, run, gc);
         };
+    }
+
+    private static Settled written(boolean won) {
+        return won ? Settled.WRITTEN : Settled.LOST;
     }
 
     /**
@@ -436,33 +600,97 @@ public class TeamCadenceService {
      * The discussion is cancelled before the claim is released, so a run cannot
      * keep spending against a budget nobody is tracking any more, and its tasks go
      * back to PENDING through the ordinary failure writeback rather than a bespoke
-     * path.
-     *
-     * @return {@code true} when the claim was released and the workspace is idle
-     *         again, {@code false} while the run is still legitimately in flight
+     * path. A parked run is measured from its original claim, the same way.
      */
-    private boolean reclaimIfStale(GroupWorkspace workspace, GroupConversation gc) {
-        if (claimTtl == null || claimTtl.isZero() || claimTtl.isNegative()) {
-            return false;
+    private Settled reclaimIfStale(GroupWorkspace workspace, Run run, GroupConversation gc) {
+        if (!pastTtl(run)) {
+            return Settled.IN_FLIGHT;
         }
-        Instant claimedAt = workspace.getClaimedAt();
-        if (claimedAt == null) {
-            // A workspace written before the stamp existed. Reclaiming on a missing
-            // timestamp would be a guess; it gets a stamp on its next claim.
-            return false;
-        }
-        if (Instant.now().isBefore(claimedAt.plus(claimTtl))) {
-            return false;
-        }
+        Instant claimedAt = run.claimedAt();
 
-        LOGGER.warnf("Cadence claim on group %s has been held since %s (past the %s TTL) by discussion %s in state %s — "
+        LOGGER.warnf("Cadence claim on group %s has been held since %s (past the %s TTL) by %sdiscussion %s in state %s — "
                 + "cancelling it and releasing the claim so the team's cadences can fire again",
-                LogSanitizer.sanitize(workspace.getGroupId()), claimedAt, claimTtl, gc.getId(), gc.getState());
+                LogSanitizer.sanitize(workspace.getGroupId()), claimedAt, claimTtl, run.parked() ? "parked " : "",
+                gc.getId(), gc.getState());
         cancelQuietly(gc.getId());
-        cadenceClaimsReclaimed.increment();
-        // The ordinary failure writeback: returns the pulled tasks to PENDING and
-        // clears the claim, exactly as a FAILED/CANCELLED discussion would.
-        return writebackFailure(workspace, gc);
+        // Write back from what the discussion is AFTER the cancel, never from the
+        // snapshot read before it. A cancel only ends a discussion no leg is running:
+        // the stored state is compare-and-set to CANCELLED. If an approval resumed the
+        // pause between that read and the cancel, the cancel merely signals the live
+        // leg, which goes on finishing tasks in its own copy -- a writeback from the
+        // stale snapshot would return those tasks to PENDING and the next fire would
+        // run them again. So the claim stays held until the discussion has really
+        // ended, and the run is then settled from its final task list.
+        GroupConversation after;
+        try {
+            after = conversationStore.read(gc.getId());
+        } catch (Exception e) {
+            // Retried at the next fire: a discussion that is really gone takes the
+            // vanished-discussion path in settleIfEnded then.
+            LOGGER.warnf("Could not re-read cadence discussion %s after cancelling it (%s) — keeping the claim",
+                    gc.getId(), e.getClass().getSimpleName());
+            return Settled.IN_FLIGHT;
+        }
+        if (!isEnded(after.getState())) {
+            LOGGER.infof("Cadence discussion %s is still running after the cancel (state %s) — keeping the claim "
+                    + "until it ends, so its writeback sees the tasks it finished", gc.getId(), after.getState());
+            return Settled.IN_FLIGHT;
+        }
+        if (legStillRunning(gc.getId())) {
+            // The cancel reached the database but not the leg -- its node did not
+            // answer. The stored CANCELLED fences the leg's next write, but the work
+            // it has in flight, and its side effects, go on until it stops.
+            return Settled.IN_FLIGHT;
+        }
+        // The ordinary writeback for the state the run ended in, by the same rules as
+        // any other ended run: a graceful cancel lets the current phase finish, so a
+        // run can still end COMPLETED; a person can still have rejected it, and a
+        // rejection at a PHASE pause keeps that rule rather than counting as a stop.
+        boolean won = after.getState() == GroupConversationState.COMPLETED
+                ? writebackCompleted(workspace, run, after, 0)
+                : writebackFailure(workspace, run, after, 0);
+        if (won) {
+            // Counted only when THIS caller released the claim; a lost settle race
+            // means another reconciler did, and it is not a reclaim of ours.
+            cadenceClaimsReclaimed.increment();
+        }
+        return written(won);
+    }
+
+    /**
+     * Whether {@code run}'s claim is older than {@link #claimTtl}. Never for a
+     * non-positive TTL (reclaiming disabled) or a missing stamp: a workspace
+     * written before the stamp existed gets one on its next claim, not a guessed
+     * expiry.
+     */
+    private boolean pastTtl(Run run) {
+        if (claimTtl == null || claimTtl.isZero() || claimTtl.isNegative() || run.claimedAt() == null) {
+            return false;
+        }
+        return !Instant.now().isBefore(run.claimedAt().plus(claimTtl));
+    }
+
+    /**
+     * Whether a leg of {@code discussionId} may still be running although the
+     * stored state says it ended. A stored terminal state does not prove it: a
+     * cancel that could not reach the node running the leg ends the document while
+     * the leg finishes what it has in flight. Handing the run's tasks to another
+     * run before that leg stops would run them twice, so the claim is kept until it
+     * has.
+     */
+    private boolean legStillRunning(String discussionId) {
+        if (!groupConversationService.isDiscussionLegRunning(discussionId)) {
+            return false;
+        }
+        LOGGER.infof("Cadence discussion %s reads as ended but a leg of it is still running — keeping the claim "
+                + "until that leg stops", discussionId);
+        return true;
+    }
+
+    /** States a discussion does not leave (stored): no further phase starts. */
+    private static boolean isEnded(GroupConversationState state) {
+        return state == GroupConversationState.COMPLETED || state == GroupConversationState.FAILED
+                || state == GroupConversationState.REJECTED || state == GroupConversationState.CANCELLED;
     }
 
     /**
@@ -479,64 +707,88 @@ public class TeamCadenceService {
      * human instead of a VERIFY phase re-ran every approved task on its next run.
      */
     boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc) {
-        return writebackCompleted(workspace, gc, 0);
+        return writebackCompleted(workspace, Run.claimHolder(workspace), gc, 0);
     }
 
-    private boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc, int attempt) {
-        String settledDiscussionId = workspace.getRunningDiscussionId();
+    private boolean writebackCompleted(GroupWorkspace workspace, Run run, GroupConversation gc, int attempt) {
         SharedTaskList discussionTasks = gc.getTaskList();
-        boolean approvalCountsAsDone = !workspace.getPulledTaskIds().isEmpty()
-                && approvalCompletesBacklogTask(workspace.getGroupId());
-        for (String pulledId : workspace.getPulledTaskIds()) {
+        HitlConfig hitl = run.pulledTaskIds().isEmpty() ? null : hitlConfig(workspace.getGroupId());
+        boolean approvalCountsAsDone = hitl != null && hitl.isApprovalCompletesBacklogTask();
+        for (String pulledId : run.pulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
             if (backlogTask == null) {
                 continue;
             }
-            TaskItem outcome = discussionTasks == null
-                    ? null
-                    : discussionTasks.getTasks().stream()
-                            .filter(t -> backlogTask.subject().equals(t.subject()))
-                            .findFirst().orElse(null);
-            if (outcome != null && outcome.verified()) {
-                workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
-                        backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
-                        outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
-                        outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
-                workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
-                if (outcome.assignedAgentId() != null) {
-                    memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
-                            memberStats(workspace, outcome.assignedAgentId()).getTasksVerified() + 1);
-                }
-            } else if (approvalCountsAsDone && approvedByPerson(discussionTasks, outcome)) {
-                // outcome.result() is the approver's edit when there was one
-                // (approveTaskWithEditedResult stores it in place of the agent's).
-                workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
-                        backlogTask.description(), TaskStatus.COMPLETED, outcome.assignedAgentId(),
-                        outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
-                        outcome.verificationNote(), false, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
-                workspace.getMetrics().setTasksApproved(workspace.getMetrics().getTasksApproved() + 1);
-                if (outcome.assignedAgentId() != null) {
-                    memberStats(workspace, outcome.assignedAgentId()).setTasksApproved(
-                            memberStats(workspace, outcome.assignedAgentId()).getTasksApproved() + 1);
-                }
-            } else {
-                String feedback = outcome != null && outcome.verificationNote() != null
-                        ? outcome.verificationNote()
-                        : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
-                workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
-                        appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
-                        TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
-                        backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
-                        backlogTask.bet()));
-                if (outcome != null && outcome.assignedAgentId() != null) {
-                    memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
-                            memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
-                }
+            TaskItem outcome = outcomeOf(discussionTasks, backlogTask);
+            if (writeBackIfDone(workspace, backlogTask, discussionTasks, outcome, approvalCountsAsDone)) {
+                continue;
+            }
+            String feedback = outcome != null && outcome.verificationNote() != null
+                    ? outcome.verificationNote()
+                    : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
+            workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
+                    appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
+                    TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
+                    backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
+                    backlogTask.bet()));
+            if (outcome != null && outcome.assignedAgentId() != null) {
+                memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
+                        memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
             }
         }
-        return settle(workspace, gc, settledDiscussionId, attempt, fresh -> writebackCompleted(fresh, gc, attempt + 1));
+        return settle(workspace, run, gc, attempt, fresh -> {
+            Run freshRun = run.in(fresh);
+            return freshRun != null && writebackCompleted(fresh, freshRun, gc, attempt + 1);
+        });
+    }
+
+    /** The discussion task a pulled backlog task became — matched by subject. */
+    private static TaskItem outcomeOf(SharedTaskList discussionTasks, TaskItem backlogTask) {
+        return discussionTasks == null
+                ? null
+                : discussionTasks.getTasks().stream()
+                        .filter(t -> backlogTask.subject().equals(t.subject()))
+                        .findFirst().orElse(null);
+    }
+
+    /**
+     * Writes {@code backlogTask} back as done when its discussion outcome is: a
+     * VERIFIED outcome stays VERIFIED; with {@code approvalCountsAsDone}, an
+     * outcome a person approved lands COMPLETED. Credits the metrics either way.
+     *
+     * @return {@code true} if the task was written back as done
+     */
+    private boolean writeBackIfDone(GroupWorkspace workspace, TaskItem backlogTask, SharedTaskList discussionTasks,
+                                    TaskItem outcome, boolean approvalCountsAsDone) {
+        if (outcome != null && outcome.verified()) {
+            workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
+                    backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
+                    outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
+                    outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
+                    Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+            workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
+            if (outcome.assignedAgentId() != null) {
+                memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
+                        memberStats(workspace, outcome.assignedAgentId()).getTasksVerified() + 1);
+            }
+            return true;
+        }
+        if (approvalCountsAsDone && approvedByPerson(discussionTasks, outcome)) {
+            // outcome.result() is the approver's edit when there was one
+            // (approveTaskWithEditedResult stores it in place of the agent's).
+            workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
+                    backlogTask.description(), TaskStatus.COMPLETED, outcome.assignedAgentId(),
+                    outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
+                    outcome.verificationNote(), false, backlogTask.priority(), backlogTask.createdAt(),
+                    Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+            workspace.getMetrics().setTasksApproved(workspace.getMetrics().getTasksApproved() + 1);
+            if (outcome.assignedAgentId() != null) {
+                memberStats(workspace, outcome.assignedAgentId()).setTasksApproved(
+                        memberStats(workspace, outcome.assignedAgentId()).getTasksApproved() + 1);
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -555,46 +807,92 @@ public class TeamCadenceService {
     }
 
     /**
-     * The group's {@code hitlConfig.approvalCompletesBacklogTask}, read from its
-     * current version. Unreadable or absent means {@code false} — the original rule
-     * — and is logged, since it means an approved task will run again.
+     * The group's {@code hitlConfig}, read from its current version, or
+     * {@code null} — no store, no group, no HITL config, or unreadable. Unreadable
+     * is logged: every switch on it then reads as its default for this writeback or
+     * fire.
      */
-    private boolean approvalCompletesBacklogTask(String groupId) {
+    private HitlConfig hitlConfig(String groupId) {
         if (groupStore == null || groupId == null) {
-            return false;
+            return null;
         }
         try {
             var resourceId = groupStore.getCurrentResourceId(groupId);
             if (resourceId == null) {
-                return false;
+                return null;
             }
             AgentGroupConfiguration config = groupStore.read(groupId, resourceId.getVersion());
-            return config != null && config.getHitlConfig() != null
-                    && config.getHitlConfig().isApprovalCompletesBacklogTask();
+            return config != null ? config.getHitlConfig() : null;
         } catch (Exception e) {
-            LOGGER.warnf("Cadence writeback for group %s could not read hitlConfig.approvalCompletesBacklogTask (%s) — "
-                    + "only VERIFIED tasks stay done this time", LogSanitizer.sanitize(groupId), e.getClass().getSimpleName());
-            return false;
+            LOGGER.warnf("Cadence run for group %s could not read the group's hitlConfig (%s) — its cadence switches "
+                    + "(approvalCompletesBacklogTask, maxPausedCadenceRuns, stoppedRunKeepsFinishedTasks) read as "
+                    + "their defaults this time", LogSanitizer.sanitize(groupId), e.getClass().getSimpleName());
+            return null;
         }
     }
 
     /**
-     * Writeback for a FAILED/CANCELLED (or vanished) discussion: every pulled task
-     * returns to PENDING untouched — the work simply did not happen.
+     * {@code hitlConfig.maxPausedCadenceRuns}, clamped; {@code 0} = parking off.
      */
-    boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc) {
-        return writebackFailure(workspace, gc, 0);
+    private int maxPausedCadenceRuns(String groupId) {
+        HitlConfig hitl = hitlConfig(groupId);
+        Integer max = hitl != null ? hitl.getMaxPausedCadenceRuns() : null;
+        return max == null ? 0 : Math.clamp(max, 0, HitlConfig.MAX_PAUSED_CADENCE_RUNS);
     }
 
-    private boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc, int attempt) {
-        String settledDiscussionId = workspace.getRunningDiscussionId();
-        for (String pulledId : workspace.getPulledTaskIds()) {
-            TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
-            if (backlogTask != null && backlogTask.status() != TaskStatus.VERIFIED) {
-                workspace.getBacklog().updateTask(withStatus(backlogTask, TaskStatus.PENDING));
-            }
+    /**
+     * Writeback for a FAILED/CANCELLED/REJECTED (or vanished) discussion: every
+     * pulled task returns to PENDING untouched — the work simply did not happen.
+     * <p>
+     * With {@code hitlConfig.stoppedRunKeepsFinishedTasks} on, the tasks the run
+     * did finish are written back as done first, by the completed-run rule (see
+     * {@link #keepsFinishedTasks}); only the rest return to PENDING.
+     */
+    boolean writebackFailure(GroupWorkspace workspace, GroupConversation gc) {
+        return writebackFailure(workspace, Run.claimHolder(workspace), gc, 0);
+    }
+
+    private boolean writebackFailure(GroupWorkspace workspace, Run run, GroupConversation gc, int attempt) {
+        boolean keepFinished = false;
+        boolean approvalCountsAsDone = false;
+        if (gc != null && !run.pulledTaskIds().isEmpty() && keepsFinishedTasks(gc)) {
+            HitlConfig hitl = hitlConfig(workspace.getGroupId());
+            keepFinished = hitl != null && hitl.isStoppedRunKeepsFinishedTasks();
+            approvalCountsAsDone = keepFinished && hitl.isApprovalCompletesBacklogTask();
         }
-        return settle(workspace, gc, settledDiscussionId, attempt, fresh -> writebackFailure(fresh, gc, attempt + 1));
+        SharedTaskList discussionTasks = gc != null ? gc.getTaskList() : null;
+        for (String pulledId : run.pulledTaskIds()) {
+            TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
+            if (backlogTask == null || backlogTask.status() == TaskStatus.VERIFIED) {
+                continue;
+            }
+            if (keepFinished && writeBackIfDone(workspace, backlogTask, discussionTasks,
+                    outcomeOf(discussionTasks, backlogTask), approvalCountsAsDone)) {
+                continue;
+            }
+            workspace.getBacklog().updateTask(withStatus(backlogTask, TaskStatus.PENDING));
+        }
+        return settle(workspace, run, gc, attempt, fresh -> {
+            Run freshRun = run.in(fresh);
+            return freshRun != null && writebackFailure(fresh, freshRun, gc, attempt + 1);
+        });
+    }
+
+    /**
+     * Which stopped runs {@code stoppedRunKeepsFinishedTasks} applies to: every
+     * stop nobody decided against the work — a failure, a cancel (an ABORT timeout,
+     * a person's cancel, a claim-TTL reclaim, which is written back from the
+     * CANCELLED state it ends in — and a rejection at a TASK pause, which is a
+     * decision about the undecided tasks only (an AUTO_REJECT timeout, or a
+     * person's phase-level "reject" while tasks waited). A rejection at a PHASE
+     * pause is not: the person declined the phase's whole output.
+     */
+    static boolean keepsFinishedTasks(GroupConversation gc) {
+        return switch (gc.getState()) {
+            case FAILED, CANCELLED -> true;
+            case REJECTED -> gc.getHitlPauseType() == HitlPauseType.TASK;
+            default -> false;
+        };
     }
 
     /**
@@ -606,7 +904,7 @@ public class TeamCadenceService {
      *         unwritten — an unconditional write here clobbered a live claim,
      *         orphaning its discussion's outcomes (final-review finding).
      */
-    private boolean settle(GroupWorkspace workspace, GroupConversation gc, String settledDiscussionId, int attempt,
+    private boolean settle(GroupWorkspace workspace, Run run, GroupConversation gc, int attempt,
                            Predicate<GroupWorkspace> redoOnFresh) {
         var metrics = workspace.getMetrics();
         metrics.setDiscussions(metrics.getDiscussions() + 1);
@@ -614,18 +912,25 @@ public class TeamCadenceService {
         if (gc != null) {
             metrics.setTotalCost(metrics.getTotalCost() + gc.getTotalCost());
         }
-        workspace.setRunningDiscussionId(GroupWorkspace.NO_RUNNING_DISCUSSION);
-        workspace.setClaimedAt(null);
-        workspace.setPulledTaskIds(List.of());
+        if (run.parked()) {
+            List<ParkedRun> remaining = new ArrayList<>(workspace.getParkedRuns());
+            remaining.removeIf(p -> run.discussionId().equals(p.discussionId()));
+            workspace.setParkedRuns(remaining);
+        } else {
+            workspace.setRunningDiscussionId(GroupWorkspace.NO_RUNNING_DISCUSSION);
+            workspace.setClaimedAt(null);
+            workspace.setPulledTaskIds(List.of());
+        }
+        String settledDiscussionId = run.discussionId();
         try {
             if (!workspaceStore.casRunningDiscussion(workspace)) {
                 // H14c: the write is revision-checked, so it also loses to an
                 // unrelated write (a backlog add, a cadence edit). If the fresh
-                // document still names this discussion, nobody settled it — redo
-                // the writeback on the fresh copy instead of dropping it.
+                // document still records this run, nobody settled it — redo the
+                // writeback on the fresh copy instead of dropping it.
                 if (attempt + 1 < MAX_WRITE_ATTEMPTS && settledDiscussionId != null && !settledDiscussionId.isEmpty()) {
                     GroupWorkspace fresh = workspaceStore.find(workspace.getGroupId());
-                    if (fresh != null && settledDiscussionId.equals(fresh.getRunningDiscussionId())) {
+                    if (fresh != null && run.in(fresh) != null) {
                         return redoOnFresh.test(fresh);
                     }
                 }

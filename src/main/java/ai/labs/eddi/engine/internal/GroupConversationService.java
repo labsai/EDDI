@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
@@ -33,6 +34,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -722,6 +724,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
         gc.setInheritedCostCeiling(maxCostPerRun);
+        gc.setRequiresGroupLease(true);
         discussionControls.put(gc.getId(), new DiscussionControlToken());
         final var discussionCaller = callerIdentityContext.captureOrCurrent();
         return new CadenceDiscussion() {
@@ -952,7 +955,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
                 liveDiscussionRegistry.register(gc);
-                holdGroupLease(gc.getId());
+                holdGroupLease(gc.getId(), requiresGroupLease(gc));
             }
 
             // Execute each phase
@@ -2865,6 +2868,13 @@ public class GroupConversationService implements IGroupConversationService, User
     @Inject
     NodeIdentity nodeIdentity;
 
+    /**
+     * Field-injected (like {@link #nodeIdentity}) so the many tests that construct
+     * this service directly are unaffected; {@code null} there.
+     */
+    @Inject
+    IGroupWorkspaceStore workspaceStore;
+
     private final Map<String, LeaseHandle> groupLeases = new ConcurrentHashMap<>();
 
     private boolean clustered() {
@@ -2880,6 +2890,18 @@ public class GroupConversationService implements IGroupConversationService, User
     long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
 
     void holdGroupLease(String groupConversationId) {
+        holdGroupLease(groupConversationId, false);
+    }
+
+    /**
+     * @param required
+     *            the discussion may not run without its lease
+     *            ({@link GroupConversation#isRequiresGroupLease()}): where the
+     *            lease could not be taken or read, the leg is refused instead of
+     *            running in degraded mode, so the lease stays a complete answer to
+     *            {@link #isDiscussionLegRunning}
+     */
+    void holdGroupLease(String groupConversationId, boolean required) {
         if (clustered()) {
             String key = IConversationLeaseManager.GROUP + groupConversationId;
             var lease = leaseManager.tryAcquireKey(key);
@@ -2898,6 +2920,13 @@ public class GroupConversationService implements IGroupConversationService, User
             }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
+                if (required) {
+                    // The lease is declared lost locally (ttl - 2 heartbeats after the last
+                    // confirmed renewal, NATS reachable or not) before the server expires it
+                    // and another node can see it gone. Stopping the leg then keeps
+                    // "no lease" meaning "no leg" for a discussion that requires its lease.
+                    lease.get().onLost(() -> stopLegOnLeaseLoss(groupConversationId));
+                }
                 return;
             }
             // A11: the lease is exclusive. A lease of a node that died or restarted is
@@ -2910,6 +2939,14 @@ public class GroupConversationService implements IGroupConversationService, User
                 throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
                         new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
             }
+            if (required) {
+                // A team cadence run: the next run takes over its backlog tasks once no
+                // leg of it holds the lease. A leg running without one would be invisible
+                // to that check after the lease service recovers. The leg fails instead;
+                // its tasks go back to the backlog and a later fire retries.
+                throw new IllegalStateException("Group discussion " + groupConversationId
+                        + " requires its group lease and could not take it (NATS unreachable or the lease could not be read)");
+            }
             // No holder could be read (NATS unreachable): the discussion runs, as every
             // turn does in degraded mode; a cancel then takes the database path.
             LOGGER.warnf("Group discussion %s runs without its group lease (NATS unreachable or the lease could not be read)",
@@ -2921,6 +2958,89 @@ public class GroupConversationService implements IGroupConversationService, User
         LeaseHandle lease = groupLeases.remove(groupConversationId);
         if (lease != null) {
             leaseManager.release(lease);
+        }
+    }
+
+    /**
+     * Whether this leg may run only while it holds its group lease: the discussion
+     * carries {@link GroupConversation#isRequiresGroupLease()}, or its team's
+     * workspace names it as a cadence run (the claim holder or a parked run). The
+     * workspace is the authoritative answer for a cadence run stored before the
+     * flag existed; reading it at leg start cannot race a resume the way marking
+     * the stored document could. Read only in a cluster, where the answer matters.
+     * An unreadable workspace counts as "required": that refuses a lease-free start
+     * and stops the leg on lease loss, both safe for a run that turns out not to
+     * need it.
+     */
+    boolean requiresGroupLease(GroupConversation gc) {
+        if (gc.isRequiresGroupLease()) {
+            return true;
+        }
+        if (!clustered() || workspaceStore == null || gc.getGroupId() == null) {
+            return false;
+        }
+        try {
+            GroupWorkspace workspace = workspaceStore.find(gc.getGroupId());
+            return workspace != null && workspace.isCadenceRun(gc.getId());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the workspace of group %s (%s) — treating discussion %s as a cadence run",
+                    LogSanitizer.sanitize(gc.getGroupId()), e.getClass().getSimpleName(), LogSanitizer.sanitize(gc.getId()));
+            return true;
+        }
+    }
+
+    /**
+     * Cancels, immediately, the leg of a discussion that requires its group lease
+     * once that lease is lost: the same thing a conversation turn does on lease
+     * loss ({@code ConversationStepRunner}). The leg stops at its next control
+     * check and its in-flight member call is cancelled.
+     */
+    void stopLegOnLeaseLoss(String groupConversationId) {
+        var token = discussionControls.get(groupConversationId);
+        if (token == null) {
+            return; // the leg has already ended
+        }
+        LOGGER.warnf("Group discussion %s lost its group lease while running — cancelling the leg",
+                LogSanitizer.sanitize(groupConversationId));
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE, "system:lease-lost");
+        token.cancelActiveFuture();
+    }
+
+    /**
+     * Whether a leg of this discussion may still be running, on this node or any
+     * other — independent of the stored state.
+     * <p>
+     * The stored state alone cannot say: a cancel that lands on a node not running
+     * the leg (forwarding failed, the holder did not answer) compare-and-sets the
+     * document to {@code CANCELLED} while the leg goes on until its next write is
+     * fenced off ({@link RunningDiscussionWrites}). Work that leg has in flight,
+     * and its side effects, are still happening. A caller that hands the
+     * discussion's work to someone else once it reads as ended (the team cadence
+     * settling its backlog claim) must wait for this to turn {@code false} as well.
+     * <p>
+     * A leg holds a local control token, and in a cluster its group lease, from
+     * start to its {@code finally} — after its last write. A lease of a node that
+     * died expires. When the lease store cannot be read the answer is {@code true}:
+     * "unknown" must not be read as "stopped".
+     * <p>
+     * An absent lease proves the leg stopped only for a discussion that
+     * {@linkplain GroupConversation#isRequiresGroupLease() requires its lease}: any
+     * other may run lease-free while NATS is unreachable. Team cadence runs require
+     * it, and they are this method's caller.
+     */
+    public boolean isDiscussionLegRunning(String groupConversationId) {
+        if (discussionControls.containsKey(groupConversationId)) {
+            return true;
+        }
+        if (!clustered()) {
+            return false;
+        }
+        try {
+            return leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + groupConversationId).isPresent();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not read the group lease of discussion %s (%s) — treating its leg as running",
+                    LogSanitizer.sanitize(groupConversationId), e.getClass().getSimpleName());
+            return true;
         }
     }
 

@@ -630,12 +630,99 @@ A claim older than `eddi.groups.cadence.claim-ttl` (default `PT24H`) is
 reclaimed — the stranded discussion is cancelled and put through the *ordinary*
 failure writeback, so pulled tasks return to `PENDING` and the claim clears.
 Cancel happens before release, so a reclaimed run cannot keep spending against a
-budget nobody is tracking. Set the TTL non-positive to disable reclaiming, for
+budget nobody is tracking. The writeback reads the discussion *after* the cancel:
+if an approval resumed it in the meantime, the cancel only signals the running
+leg, so the claim stays held until that leg ends and the run is written back from
+its final task list by the ordinary rule for the state it ended in. A run that
+ended `COMPLETED` keeps its `VERIFIED` tasks; one that ended `CANCELLED` (what a
+signalled leg usually reaches) returns every pulled task to `PENDING` unless
+`stoppedRunKeepsFinishedTasks` is on (below).
+
+A stored terminal state is not enough to release a run, here or anywhere a
+cadence run is written back: the run's tasks go back to the backlog only once no
+leg of its discussion is still running. In a cluster a cancel that cannot reach
+the node running the leg (the node does not answer) stores `CANCELLED` directly;
+that stops the leg's next write, but not the work it already has in flight or its
+tool calls. Until that leg ends — its node's group lease is released, or expires
+if the node died — the claim, or the parked run, keeps its tasks `IN_PROGRESS`,
+so no later run picks them up while it is still working on them. When the lease
+store cannot be read the leg counts as running, and a cadence run never runs
+without its lease: where NATS is unreachable at the start of a leg, the leg fails
+(its tasks return, a later fire retries) rather than run invisibly to this check,
+and a leg whose lease is lost while it runs is cancelled at once — the holder
+declares the lease lost before it expires for the other nodes. A run stored
+before this rule existed is recognised by its team's workspace (it holds the
+claim or is parked) when its leg starts, so a resume of it needs the lease too.
+
+One limit remains, by design: a cancel is a signal, not proof that the work has
+stopped. A member call in flight is cancelled and the leg stops at its next
+check, but a worker the task-force engine abandons after its bounded drain, or a
+tool call already sent, can outlive the lease by that margin. Group discussion
+writes carry no fencing token (see [Clustering](clustering.md)), so nothing
+stronger than the lease exists to wait on.
+A discussion that completed
+normally may therefore be written back one fire later than before, while its
+leg finishes releasing the lease.
+
+Set the TTL non-positive to disable reclaiming, for
 an operator who would rather wedge than risk abandoning a pause; the counter is
 `eddi_team_cadence_claims_reclaimed_total`. Creating a cadence on a group that
 combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
 that combination is what makes the backstop reachable — but is not rejected: it
 is legitimate for a team whose approver really is always available.
+
+**A paused run need not hold the team.** By the rule above, one run waiting on a
+person blocks every later fire of that team until somebody decides or the claim
+TTL reclaims it — and the reclaim then returns all its work to `PENDING`. Two
+group switches change that, both off by default:
+
+```json
+"hitlConfig": {
+  "granularity": "TASK",
+  "timeoutPolicy": "AUTO_REJECT",
+  "approvalTimeout": "PT8H",
+  "approvalCompletesBacklogTask": true,
+  "maxPausedCadenceRuns": 2,
+  "stoppedRunKeepsFinishedTasks": true
+}
+```
+
+- **`maxPausedCadenceRuns`** (`0`–`10`, absent = `0` = today's rule). A fire that
+  finds the running discussion paused (`AWAITING_APPROVAL` or
+  `AWAITING_HUMAN_INPUT`) *parks* it and starts a new run. A parked run keeps
+  the backlog tasks it pulled (they stay `IN_PROGRESS`, so the new run cannot
+  take them, nor can a task that depends on one), keeps its original claim time
+  (so the claim TTL still reclaims a pause nobody decides), and is written back
+  on its own when its discussion ends — an approval that lands on it the next
+  morning resumes it as usual. The new run pulls only tasks nobody holds; with
+  none free the fire is skipped as `No executable backlog tasks` and nothing is
+  parked. A run that is still working is never parked. Once that many runs are
+  parked, fires are skipped again, and the skip reason says so. Parked runs are
+  listed in the workspace's `parkedRuns` (`discussionId`, `claimedAt`,
+  `pulledTaskIds`); the park is persisted in the same revision-checked write as
+  the new run's claim, so two pods firing at once still start one run. Counter:
+  `eddi_team_cadence_runs_parked_total`. Every parked run can be resumed and
+  spend, so the cap is also a spend bound: up to `maxPausedCadenceRuns + 1` runs
+  of one team can be in flight, each under its cadence's `maxCostPerRun` and all
+  under the team's monthly budget.
+- **`stoppedRunKeepsFinishedTasks`** (boolean, default `false`). A run that ends
+  without completing — an `AUTO_REJECT` or `ABORT` timeout, a cancel, a claim-TTL
+  reclaim, a failure, or a person's reject at a `TASK` pause — keeps the tasks it
+  had finished: `VERIFIED` ones stay verified, and ones a person approved stay
+  `COMPLETED` when `approvalCompletesBacklogTask` is on too (same rule, same
+  metrics as a completed run). Only the rest, including the tasks still
+  waiting for a decision, return to `PENDING`, untouched and without retry
+  feedback. A reject at a `PHASE` pause keeps today's rule — that person declined
+  the phase's whole output — and so does a discussion that was deleted, which has
+  no task list to keep anything from. A discussion that fails to read for any
+  other reason is not treated as deleted: its run keeps its claim and its tasks
+  stay `IN_PROGRESS` while each fire retries the read; past the claim TTL it is
+  also cancelled, and it is written back once it reads as ended. Deleting such a
+  discussion releases its run. The run itself still ends where it stopped:
+  nothing continues unattended after a timeout.
+
+Both are read from the group's current version (an unreadable config reads as the
+defaults, logged), and both are validated on save.
 
 **Monthly budget.** A team can also carry a calendar-month dollar cap, `teamBudget`, that covers
 its cadence runs and its ad-hoc discussions alike: a fire of a team whose budget is spent is

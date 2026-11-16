@@ -97,6 +97,14 @@ public class GroupWorkspace {
      */
     private List<String> pulledTaskIds = new CopyOnWriteArrayList<>();
     /**
+     * Cadence runs that paused at a HITL gate and were parked so a later fire could
+     * start a new run ({@code hitlConfig.maxPausedCadenceRuns}). Each keeps the
+     * backlog tasks it pulled, and is written back on its own when its discussion
+     * ends. Empty unless that switch is on; absent in documents written before it
+     * existed, which read back as empty.
+     */
+    private List<ParkedRun> parkedRuns = new CopyOnWriteArrayList<>();
+    /**
      * Cross-team handoff state: origins of handed-off tasks, the intake inbox and
      * decline tombstones. Absent in documents written before handoff existed, which
      * read back as empty.
@@ -115,6 +123,26 @@ public class GroupWorkspace {
      * (see {@code GroupWorkspaceStore#conditionalWrite}).
      */
     private String revision = "0";
+
+    /**
+     * A paused cadence run that no longer holds the workspace claim but still holds
+     * the backlog tasks it pulled.
+     *
+     * @param discussionId
+     *            the run's group conversation
+     * @param claimedAt
+     *            when the run first claimed the workspace — kept from the original
+     *            claim, so the claim TTL measures the run, not the parking
+     * @param pulledTaskIds
+     *            the backlog tasks the run pulled; they stay {@code IN_PROGRESS}
+     *            until its writeback
+     */
+    public record ParkedRun(String discussionId, Instant claimedAt, List<String> pulledTaskIds) {
+
+        public ParkedRun {
+            pulledTaskIds = pulledTaskIds != null ? List.copyOf(pulledTaskIds) : List.of();
+        }
+    }
 
     /**
      * One scheduled pull from the backlog.
@@ -342,6 +370,39 @@ public class GroupWorkspace {
 
     public void setPulledTaskIds(List<String> pulledTaskIds) {
         this.pulledTaskIds = pulledTaskIds != null ? new CopyOnWriteArrayList<>(pulledTaskIds) : new CopyOnWriteArrayList<>();
+    }
+
+    public List<ParkedRun> getParkedRuns() {
+        return parkedRuns;
+    }
+
+    public void setParkedRuns(List<ParkedRun> parkedRuns) {
+        this.parkedRuns = parkedRuns != null ? new CopyOnWriteArrayList<>(parkedRuns) : new CopyOnWriteArrayList<>();
+    }
+
+    /**
+     * Whether a cadence run — the one holding the claim or a parked one — holds
+     * {@code taskId}.
+     */
+    /**
+     * Whether {@code discussionId} is one of this team's cadence runs: the one
+     * holding the claim, or a parked one.
+     */
+    public boolean isCadenceRun(String discussionId) {
+        if (discussionId == null) {
+            return false;
+        }
+        if (discussionId.equals(runningDiscussionId)) {
+            return true;
+        }
+        return parkedRuns != null && parkedRuns.stream().anyMatch(p -> discussionId.equals(p.discussionId()));
+    }
+
+    public boolean isHeldByRun(String taskId) {
+        if (!NO_RUNNING_DISCUSSION.equals(runningDiscussionId) && pulledTaskIds.contains(taskId)) {
+            return true;
+        }
+        return parkedRuns.stream().anyMatch(run -> run.pulledTaskIds().contains(taskId));
     }
 
     public WorkspaceHandoffs getHandoffs() {

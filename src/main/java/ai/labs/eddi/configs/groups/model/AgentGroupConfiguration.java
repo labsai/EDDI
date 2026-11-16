@@ -2121,6 +2121,69 @@ public class AgentGroupConfiguration {
         public void setApprovalCompletesBacklogTask(boolean approvalCompletesBacklogTask) {
             this.approvalCompletesBacklogTask = approvalCompletesBacklogTask;
         }
+
+        /** Upper bound for {@link #maxPausedCadenceRuns}. */
+        public static final int MAX_PAUSED_CADENCE_RUNS = 10;
+
+        /**
+         * Standing teams only: how many cadence runs may wait at a HITL pause
+         * ({@code AWAITING_APPROVAL} or {@code AWAITING_HUMAN_INPUT}) while a later
+         * cadence fire starts a new run.
+         * <p>
+         * Absent or {@code 0} (the default, and what every stored config reads as)
+         * keeps the original rule: a paused run holds the whole team, and every later
+         * fire is skipped until the pause is decided or the claim TTL
+         * ({@code eddi.groups.cadence.claim-ttl}) reclaims it. With {@code n > 0}, a
+         * fire that finds the running discussion paused <em>parks</em> it — the run
+         * keeps the backlog tasks it pulled (they stay {@code IN_PROGRESS}, so no other
+         * run takes them) and is written back on its own when it ends — and starts a
+         * new run from the tasks nobody holds. Once {@code n} runs are parked, fires
+         * are skipped as before. Each parked run keeps its own claim time, so the claim
+         * TTL still reclaims a pause nobody decides. Between {@code 0} and
+         * {@link #MAX_PAUSED_CADENCE_RUNS}.
+         *
+         * @since 6.8.0
+         */
+        private Integer maxPausedCadenceRuns;
+
+        public Integer getMaxPausedCadenceRuns() {
+            return maxPausedCadenceRuns;
+        }
+
+        public void setMaxPausedCadenceRuns(Integer maxPausedCadenceRuns) {
+            this.maxPausedCadenceRuns = maxPausedCadenceRuns;
+        }
+
+        /**
+         * Standing teams only: whether a cadence run that ends without completing keeps
+         * the backlog tasks it already finished.
+         * <p>
+         * {@code false} (the default) keeps the original rule: a run that ends
+         * {@code FAILED}, {@code CANCELLED} or {@code REJECTED} returns every task it
+         * pulled to {@code PENDING}, so the next run does — and pays for — all of it
+         * again, including tasks that were verified or approved before the run stopped.
+         * {@code true} writes those tasks back by the rule a completed run uses: a
+         * {@code VERIFIED} task stays verified, and a task a person approved stays done
+         * when {@link #approvalCompletesBacklogTask} is on too. Only the rest — the
+         * undecided tasks among them — return to {@code PENDING}.
+         * <p>
+         * Applies to runs that time out ({@code AUTO_REJECT} or {@code ABORT}), are
+         * cancelled, are reclaimed past the claim TTL, or fail, and to a run a person
+         * rejected at a {@code TASK}-granularity pause. A run rejected at a
+         * {@code PHASE} pause keeps the original rule: that person declined the phase's
+         * output, not one undecided task.
+         *
+         * @since 6.8.0
+         */
+        private boolean stoppedRunKeepsFinishedTasks;
+
+        public boolean isStoppedRunKeepsFinishedTasks() {
+            return stoppedRunKeepsFinishedTasks;
+        }
+
+        public void setStoppedRunKeepsFinishedTasks(boolean stoppedRunKeepsFinishedTasks) {
+            this.stoppedRunKeepsFinishedTasks = stoppedRunKeepsFinishedTasks;
+        }
     }
 
 }

@@ -9063,12 +9063,12 @@
         {
           "id": 76,
           "type": "timeseries",
-          "title": "Team cadence writebacks & reclaims",
+          "title": "Team cadence writebacks, reclaims & parked runs",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Reclaimed claims mean a cadence holder died mid-run and another node took over.",
+          "description": "Reclaimed claims mean a cadence holder died mid-run and another node took over. Parked runs are paused runs set aside so a later fire could start (hitlConfig.maxPausedCadenceRuns).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9097,6 +9097,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "claims reclaimed"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(eddi_team_cadence_runs_parked_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "paused runs parked"
             }
           ],
           "fieldConfig": {

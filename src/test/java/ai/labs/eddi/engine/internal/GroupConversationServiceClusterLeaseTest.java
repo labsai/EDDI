@@ -7,8 +7,11 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -16,6 +19,7 @@ import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.lease.LeaseInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
@@ -38,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +55,7 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -206,6 +212,193 @@ class GroupConversationServiceClusterLeaseTest {
         assertTrue(service.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
         verify(conversationStore, never()).read(anyString());
     }
+    @Test
+    @DisplayName("a discussion that requires its lease is refused, not run lease-free, when the lease cannot be read")
+    void requiredLeaseIsNotSkipped() {
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+        when(leaseManager.peekKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+
+        var refused = assertThrows(IllegalStateException.class, () -> service.holdGroupLease(GC_ID, true));
+
+        assertTrue(refused.getMessage().contains("requires its group lease"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("a discussion that requires its lease runs normally once it holds it")
+    void requiredLeaseTaken() {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+
+        assertDoesNotThrow(() -> service.holdGroupLease(GC_ID, true));
+        service.releaseGroupLease(GC_ID);
+        verify(leaseManager).release(lease);
+    }
+
+    @Test
+    @DisplayName("a leg that requires its lease is cancelled at once when the lease is lost")
+    @SuppressWarnings("unchecked")
+    void requiredLeaseLossCancelsTheLeg() throws Exception {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+        running(GC_ID);
+
+        service.holdGroupLease(GC_ID, true);
+        ArgumentCaptor<Runnable> onLost = ArgumentCaptor.forClass(Runnable.class);
+        verify(lease).onLost(onLost.capture());
+        onLost.getValue().run();
+
+        Field field = GroupConversationService.class.getDeclaredField("discussionControls");
+        field.setAccessible(true);
+        var token = ((Map<String, DiscussionControlToken>) field.get(service)).get(GC_ID);
+        assertTrue(token.isCancelled(), "a leg whose lease is gone must stop before another node sees no lease");
+        assertEquals(ControlSignal.CANCEL_IMMEDIATE, token.getSignal());
+    }
+
+    @Test
+    @DisplayName("a leg that does not require its lease keeps today's behaviour on lease loss")
+    void unrequiredLeaseRegistersNoLossStop() {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+
+        service.holdGroupLease(GC_ID, false);
+
+        verify(lease, never()).onLost(any());
+    }
+
+    @Test
+    @DisplayName("a lease lost after its leg ended stops nothing")
+    void leaseLossAfterTheLegIsANoOp() {
+        assertDoesNotThrow(() -> service.stopLegOnLeaseLoss("gc-ended"));
+    }
+
+    private GroupConversation unflagged() {
+        var gc = new GroupConversation();
+        gc.setId(GC_ID);
+        gc.setGroupId("group-1");
+        return gc;
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a run its team's workspace names is a cadence run, flag or not (a stale or pre-flag snapshot)")
+    void workspaceNamesTheClaimHolder() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setRunningDiscussionId(GC_ID);
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a parked cadence run counts too")
+    void workspaceNamesAParkedRun() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setParkedRuns(List.of(new GroupWorkspace.ParkedRun(GC_ID, Instant.now(), List.of())));
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: a discussion no workspace names is not a cadence run")
+    void workspaceDoesNotNameIt() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        var workspace = new GroupWorkspace();
+        workspace.setRunningDiscussionId("another-run");
+        when(workspaces.find("group-1")).thenReturn(workspace);
+        service.workspaceStore = workspaces;
+
+        assertFalse(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: an unreadable workspace counts as required")
+    void unreadableWorkspaceIsRequired() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        when(workspaces.find("group-1")).thenThrow(new IResourceStore.ResourceStoreException("down"));
+        service.workspaceStore = workspaces;
+
+        assertTrue(service.requiresGroupLease(unflagged()));
+    }
+
+    @Test
+    @DisplayName("requiresGroupLease: outside a cluster the workspace is not read")
+    void standaloneReadsNoWorkspace() throws Exception {
+        var workspaces = mock(IGroupWorkspaceStore.class);
+        service.workspaceStore = workspaces;
+        when(leaseManager.isClustered()).thenReturn(false);
+
+        assertFalse(service.requiresGroupLease(unflagged()));
+        verify(workspaces, never()).find(anyString());
+    }
+
+    @Test
+    @DisplayName("a team cadence discussion is created requiring its group lease")
+    void cadenceDiscussionRequiresItsLease() throws Exception {
+        IAgentGroupStore groupStore = mock(IAgentGroupStore.class);
+        var cadenceService = new GroupConversationService(groupStore, conversationStore, mock(IConversationService.class),
+                mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(),
+                mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), null,
+                new CallerIdentityContext(null, null), "default", 3);
+        IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
+        when(resourceId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId("group-1")).thenReturn(resourceId);
+        when(groupStore.read("group-1", 1)).thenReturn(new AgentGroupConfiguration());
+        when(conversationStore.create(any())).thenReturn(GC_ID);
+
+        var prepared = cadenceService.prepareCadenceDiscussion("group-1", "What next?", "pm", List.of(), null, null);
+
+        assertTrue(prepared.conversation().isRequiresGroupLease());
+        prepared.abandon();
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: a leg on this node is running, whatever the lease says")
+    void legRunningLocally() throws Exception {
+        running(GC_ID);
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: a group lease held by another node means its leg still runs there")
+    void legRunningOnAnotherNode() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID))
+                .thenReturn(Optional.of(new LeaseInfo("node-b", "boot-b", 7, 0)));
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID),
+                "a cancel that fell back to the database has not stopped that leg");
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: no token and no lease — no leg runs")
+    void noLegRunning() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+
+        assertFalse(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: an unreadable lease store is 'running', never 'stopped'")
+    void unreadableLeaseCountsAsRunning() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID))
+                .thenThrow(new ClusterUnavailableException("NATS down"));
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: outside a cluster only a local leg counts")
+    void standaloneNeedsALocalLeg() {
+        when(leaseManager.isClustered()).thenReturn(false);
+
+        assertFalse(service.isDiscussionLegRunning(GC_ID));
+        verify(leaseManager, never()).peekKeyStrict(anyString());
+    }
+
     @SuppressWarnings("unchecked")
     private void running(String id) throws Exception {
         Field field = GroupConversationService.class.getDeclaredField("discussionControls");

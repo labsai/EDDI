@@ -1766,6 +1766,18 @@ your tool schemas do not cover it, not as a routine first step:
   edited) result, counted in metrics.tasksApproved, not tasksVerified. A timeout
   auto-approval (decidedBy system:timeout) never counts, nor does a task
   completed in an ungated phase.
+- A standing team's cadence run paused at an approval (or a human turn) holds
+  the whole team by default: later fires skip until it is decided or the claim
+  TTL reclaims it. hitlConfig.maxPausedCadenceRuns (0-10, default 0) lets a fire
+  park that many paused runs — each keeps its pulled tasks and claim time, is
+  listed in the workspace's parkedRuns and is written back on its own — and
+  start a new run from the tasks nobody holds. Up to that many plus one runs of
+  the team can then spend. hitlConfig.stoppedRunKeepsFinishedTasks (default
+  false) makes a run that stops without completing (AUTO_REJECT or ABORT
+  timeout, cancel, TTL reclaim, failure, a reject at a TASK pause; not a reject
+  at a PHASE pause) keep its VERIFIED tasks and, with
+  approvalCompletesBacklogTask, its person-approved ones; only the undecided
+  rest return to PENDING. A team stalled on one approval wants both.
 - Tool-call guardrails (an LLM task's toolCallGuardrails, next to toolApprovals;
   absent = nothing runs): each entry is a guardrail (type, action, maxRetries,
   blockMessage, parameters) plus tools (required, approval patterns such as

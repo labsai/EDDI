@@ -664,6 +664,21 @@ public class GroupConversation {
     private Double inheritedCostCeiling;
 
     /**
+     * A leg of this discussion may run only while it holds its group lease
+     * ({@code g.<id>}) in a cluster — never in the degraded, lease-free mode a NATS
+     * outage otherwise allows. Set for team cadence runs: the cadence hands a run's
+     * backlog tasks to the next run only once no leg of it is running, and the
+     * lease is how another node tells. A leg that ran without it could still be
+     * working after the lease service recovered and reported nobody holding it.
+     * <p>
+     * PERSISTED, like {@link #inheritedCostCeiling}: it is a property of the run,
+     * and a resume after a HITL pause re-reads the document.
+     *
+     * @since 6.8.0
+     */
+    private boolean requiresGroupLease;
+
+    /**
      * What this root discussion has charged to its team's monthly budget and the
      * ceiling that follows (F6); {@code null} for nested children (their parent
      * pays) and for documents written before the feature. Persisted for the same
@@ -1648,6 +1663,14 @@ public class GroupConversation {
 
     public void setInheritedCostCeiling(Double inheritedCostCeiling) {
         this.inheritedCostCeiling = inheritedCostCeiling;
+    }
+
+    public boolean isRequiresGroupLease() {
+        return requiresGroupLease;
+    }
+
+    public void setRequiresGroupLease(boolean requiresGroupLease) {
+        this.requiresGroupLease = requiresGroupLease;
     }
 
     public TeamBudgetState getTeamBudgetState() {
