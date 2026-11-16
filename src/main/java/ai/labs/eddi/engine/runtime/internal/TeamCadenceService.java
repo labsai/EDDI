@@ -626,14 +626,19 @@ public class TeamCadenceService {
                     + "until it ends, so its writeback sees the tasks it finished", gc.getId(), after.getState());
             return Settled.IN_FLIGHT;
         }
-        cadenceClaimsReclaimed.increment();
         // The ordinary writeback for the state the run ended in, by the same rules as
         // any other ended run: a graceful cancel lets the current phase finish, so a
         // run can still end COMPLETED; a person can still have rejected it, and a
         // rejection at a PHASE pause keeps that rule rather than counting as a stop.
-        return after.getState() == GroupConversationState.COMPLETED
-                ? written(writebackCompleted(workspace, run, after, 0))
-                : written(writebackFailure(workspace, run, after, 0));
+        boolean won = after.getState() == GroupConversationState.COMPLETED
+                ? writebackCompleted(workspace, run, after, 0)
+                : writebackFailure(workspace, run, after, 0);
+        if (won) {
+            // Counted only when THIS caller released the claim; a lost settle race
+            // means another reconciler did, and it is not a reclaim of ours.
+            cadenceClaimsReclaimed.increment();
+        }
+        return written(won);
     }
 
     /**

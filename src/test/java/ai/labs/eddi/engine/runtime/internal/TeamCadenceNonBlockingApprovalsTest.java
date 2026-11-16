@@ -454,6 +454,19 @@ class TeamCadenceNonBlockingApprovalsTest {
 
             assertEquals(TaskStatus.PENDING, status(), "the person declined the phase's whole output");
         }
+
+        @Test
+        @DisplayName("a reclaim whose writeback loses the settle race is not counted — another reconciler released the claim")
+        void lostReclaimIsNotCounted() throws Exception {
+            when(conversationStore.read(PAUSED_ID)).thenReturn(paused(),
+                    snapshot(GroupConversationState.CANCELLED, HitlPauseType.TASK, false));
+            when(workspaceStore.casRunningDiscussion(any())).thenReturn(false);
+            when(workspaceStore.find(GROUP_ID)).thenReturn(workspace(task));
+
+            assertFalse(service.reconcile(workspace));
+
+            assertEquals(0, meters.counter("eddi_team_cadence_claims_reclaimed_total").count());
+        }
     }
 
     @Nested
