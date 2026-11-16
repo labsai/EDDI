@@ -400,10 +400,10 @@ describe("LogsPage", () => {
     renderLogs();
 
     expect(screen.getByText("API agent sync failed")).toBeInTheDocument();
-    expect(screen.queryByText(/java\.net\.ConnectException/)).not.toBeInTheDocument();
+    expect(screen.queryByText((content) => content.includes("java.net.ConnectException"))).not.toBeInTheDocument();
     await user.click(screen.getByTestId("stacktrace-toggle"));
-    expect(screen.getByText(/java\.net\.ConnectException: refused/)).toBeInTheDocument();
-    expect(screen.getByText(/Caused by: java\.io\.IOException: boom/)).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("java.net.ConnectException: refused"))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes("Caused by: java.io.IOException: boom"))).toBeInTheDocument();
     vi.mocked(useLogStream).mockReturnValue(base);
   });
 });
