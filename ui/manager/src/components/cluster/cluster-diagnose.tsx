@@ -3,16 +3,16 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, CircleAlert, Info, Stethoscope } from "lucide-react";
-import type { Finding } from "@/lib/api/cluster";
+import type { Finding } from "@eddi/app-kit/lib/api/cluster";
 import { diagnosisVerdictLabel, findingActionLabel, findingText, formatDuration } from "@/lib/cluster-labels";
 import { useDiagnosis, useReleaseLease } from "@/hooks/use-cluster";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 
 function FindingIcon({ severity }: { severity: Finding["severity"] }) {

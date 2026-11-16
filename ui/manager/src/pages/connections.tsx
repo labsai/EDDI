@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plug, Plus, Search, ShieldAlert } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@eddi/app-kit/components/shared/permanent-delete-option";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
@@ -29,9 +29,9 @@ import {
   useConnectionDescriptors,
   useDeleteConnection,
   useDuplicateConnection,
-} from "@/hooks/use-connections";
+} from "@eddi/app-kit/hooks/use-connections";
 import { useConnectionLinkResult } from "@/hooks/use-connection-link-result";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 
 /**
  * Connections — the admin surface.

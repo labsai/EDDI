@@ -11,10 +11,10 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn } from '@eddi/app-kit/lib/utils';
 import { Button } from '@eddi/ui';
-import { Badge } from '@/components/ui/badge';
-import { AlertDialog } from '@/components/ui/alert-dialog';
+import { Badge } from '@eddi/app-kit/components/ui/badge';
+import { AlertDialog } from '@eddi/app-kit/components/ui/alert-dialog';
 import {
   useDeleteSourceFile,
   useSourceFiles,
@@ -23,7 +23,7 @@ import {
   uploadSourceFile,
   type IngestedFile,
 } from '@/lib/api/ingestion-sources';
-import { getErrorMessage } from '@/lib/api-client';
+import { getErrorMessage } from '@eddi/app-kit/lib/api-client';
 
 /**
  * The files of an ingestion source of type `upload`.

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderPage } from "@/test/test-utils";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
 import { LandingPage } from "@/pages/landing-page";
 
 /**

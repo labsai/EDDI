@@ -16,11 +16,11 @@ import {
   Bot,
   NotebookPen,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { useDebounce } from "@/hooks/use-debounce";
-import { getErrorMessage } from "@/lib/api-client";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import {
   useUserMemories,
   useDeleteMemory,

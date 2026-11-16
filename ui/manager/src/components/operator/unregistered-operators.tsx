@@ -4,8 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Bot, Loader2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import {
   operatorKeys,
   useAdoptOperator,
@@ -13,12 +13,12 @@ import {
   useRemoveOperatorAgent,
   useUnregisteredOperators,
 } from "@/hooks/use-operator";
-import { isGrantFailure, useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { isGrantFailure, useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
 import { clearOperatorConfig, type OperatorConfig } from "@/lib/api/operator";
-import type { DeploymentStatus } from "@/lib/api/agents";
+import type { DeploymentStatus } from "@eddi/app-kit/lib/api/agents";
 import type { DiscoveredOperator } from "@/lib/api/operator-discovery";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 const STATUS_VARIANT: Record<DeploymentStatus["status"], "success" | "warning" | "destructive" | "secondary"> = {
   READY: "success",

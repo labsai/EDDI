@@ -1,10 +1,15 @@
 # Workforce: a guide for end users
 
 Workforce (`/workforce`) is where a signed-in person uses the agents and teams their organisation
-offers them. It is a separate screen from the Manager (`/manage`), which is for building and
+offers them. It is a separate app from the Manager (`/manage`), which is for building and
 administration. A person who holds only the `eddi-user` role lands in Workforce straight away; an
 editor or administrator chooses between the two at `/welcome`. A deployment can give Workforce its
 own name in its [branding](white-labeling.md).
+
+Workforce loads only what it needs, so it opens faster than the Manager. Both apps share one
+sign-in: moving from one to the other (the **Manager** and **Workforce** links, an administrator's
+**Platform Operator** link) reloads the page, and you stay signed in. Your theme, language and
+pinned items carry over.
 
 This page describes what you see in Workforce as a user. How an agent or team gets into Workforce
 in the first place is in [End-User Catalog](catalog.md).
@@ -102,3 +107,10 @@ the discussion styles work.
   host (`img-src`); a small `data:image` picture always shows.
 - Titles, renaming and pinning are stored on the conversation and are covered by GDPR export and
   erasure ([GDPR / CCPA Compliance](gdpr-compliance.md)).
+- Workforce uses the Manager's Keycloak client (both pages load `/manage/__auth_config__.js`), so
+  it needs no client or redirect URI of its own. EDDI serves its page for every `/workforce/...`
+  address, which is why a reload or a bookmarked chat opens where it should; behind a reverse proxy,
+  pass `/workforce/` through to EDDI like `/manage/`. Building EDDI with `-DskipUi=true` leaves it
+  out, with the other UIs.
+- The Platform Operator stays in the Manager. Workforce shows an administrator a link to it,
+  never the operator itself.

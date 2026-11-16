@@ -3,17 +3,17 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Building2, Copy, KeyRound, Lock, Plus, Save, Trash2, User, Users, Variable } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { EmptyState } from "@/components/shared/empty-state";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useSpaces } from "@/hooks/use-spaces";
-import { useHasRole } from "@/hooks/use-auth";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import {
   useDeleteSpaceSecret,
   useDeleteSpaceVariable,
@@ -25,13 +25,13 @@ import {
   useWorkspaceSettings,
 } from "@/hooks/use-workspace-admin";
 import type { SpaceInfo, WorkspaceSetting } from "@/lib/api/workspaces";
-import { AllowedHostsField } from "@/components/secrets/allowed-hosts-field";
+import { AllowedHostsField } from "@eddi/app-kit/components/secrets/allowed-hosts-field";
 import {
   allowedHostsMissing,
   newAllowedHostsDraft,
   resolveAllowedHostsDraft,
   type AllowedHostsDraft,
-} from "@/lib/api/secrets";
+} from "@eddi/app-kit/lib/api/secrets";
 
 /**
  * Workspaces: which spaces you are in, the secrets and variables each one

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ChatActivity } from "@/components/chat/chat-activity";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 
 // Regression: the classified task_failed SSE event was dropped, so a failing
 // stage stuck on "running" and the "error" status branch was dead code.

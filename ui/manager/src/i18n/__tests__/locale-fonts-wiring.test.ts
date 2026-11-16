@@ -21,8 +21,9 @@ describe("main.tsx", () => {
   });
 });
 
-describe("index.css", () => {
-  const css = readFileSync(resolve(__dirname, "../../index.css"), "utf8");
+// The stacks live in the base stylesheet both apps import (index.css imports it).
+describe("@eddi/app-kit/styles/app.css", () => {
+  const css = readFileSync(resolve(__dirname, "../../../../packages/app-kit/src/styles/app.css"), "utf8");
 
   it.each([
     [":root:lang(ja)", "JP"],

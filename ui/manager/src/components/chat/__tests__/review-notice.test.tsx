@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { ReviewNotice } from "@/components/chat/review-notice";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { ReviewNotice } from "@eddi/app-kit/components/chat/review-notice";
 
 const AGENT_ID = "aaaaaaaaaaaaaaaaaaaaaaaa";
 const PROFILE = `*/agents/${AGENT_ID}/profile`;

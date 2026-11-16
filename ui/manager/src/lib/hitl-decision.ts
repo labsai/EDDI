@@ -1,5 +1,5 @@
-import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@/lib/api/hitl";
-import { humanizeToolName } from "@/lib/tool-labels";
+import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@eddi/app-kit/lib/api/hitl";
+import { humanizeToolName } from "@eddi/app-kit/lib/tool-labels";
 
 /**
  * What a reviewer agreed to, captured the moment the decision was submitted, so

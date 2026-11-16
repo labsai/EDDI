@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users, Bot, Copy, Trash2, MoreVertical, ExternalLink } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { cn, formatRelativeTime } from "@/lib/utils";
-import { type DiscussionStyle } from "@/lib/api/groups";
-import { styleDisplay } from "@/lib/discussion-styles";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
+import { type DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
+import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
 
 interface GroupCardProps {
   group: {

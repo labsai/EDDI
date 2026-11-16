@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { useAgentVersions } from "@/hooks/use-agents";
+import { useAgentVersions } from "@eddi/app-kit/hooks/use-agents";
 import { entityFromPath } from "@/lib/route-registry";
 
 /**

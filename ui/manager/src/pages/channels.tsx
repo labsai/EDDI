@@ -2,9 +2,9 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Cable, Plus, Search, ExternalLink } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
@@ -22,7 +22,7 @@ import {
 } from "@/hooks/use-channels";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 
 export function ChannelsPage() {
   const { t } = useTranslation();

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { MockDataBanner } from "@/components/layout/mock-data-banner";
 
 describe("MockDataBanner", () => {

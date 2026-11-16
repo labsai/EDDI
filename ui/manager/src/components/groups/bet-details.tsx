@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, FlaskConical } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
 import { isBetDue } from "@/lib/bet";
-import type { Bet } from "@/lib/api/groups";
+import type { Bet } from "@eddi/app-kit/lib/api/groups";
 
 interface BetDetailsProps {
   taskId: string;

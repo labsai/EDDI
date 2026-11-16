@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildDigest } from "@/hooks/use-discussion-digest";
-import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
+import { buildDigest } from "@eddi/app-kit/hooks/use-discussion-digest";
+import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 import type {
   DiscussionPhase,
   GroupConversation,
   TranscriptEntry,
   TranscriptEntryType,
-} from "@/lib/api/groups";
+} from "@eddi/app-kit/lib/api/groups";
 
 /**
  * Tests for the adapter that normalises a live SSE stream and a persisted

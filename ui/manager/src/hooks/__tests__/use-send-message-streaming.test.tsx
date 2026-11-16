@@ -8,8 +8,8 @@ import { type ReactNode } from "react";
 // non-streaming path is covered by the ChatPanel integration tests.
 const h = vi.hoisted(() => ({ streamInput: null as null | { input?: string; context?: Record<string, unknown> } }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* (
@@ -24,7 +24,7 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
+import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({

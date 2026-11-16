@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ApprovalContextEditor } from "@/components/editors/approval-context-editor";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ApprovalContextEditor } from "@eddi/app-kit/components/editors/approval-context-editor";
 import { HitlConfigSection } from "@/components/editors/agent-config-sections";
-import type { ApprovalContextBlock } from "@/lib/api/hitl";
-import type { Agent } from "@/lib/api/agents";
+import type { ApprovalContextBlock } from "@eddi/app-kit/lib/api/hitl";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 import {
   approvalContextHasErrors,
   validateApprovalContextBlock,
-} from "@/lib/hitl-approval-context";
+} from "@eddi/app-kit/lib/hitl-approval-context";
 
 function Harness({
   initial = null,

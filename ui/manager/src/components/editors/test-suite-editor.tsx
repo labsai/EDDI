@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, FlaskConical, MessageSquare, Plus, Trash2, Wrench } from "lucide-react";
-import { EditorSection } from "./editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ExpectationEditor } from "@/components/agent-tests/expectation-editor";
 import { countExpectations } from "@/lib/agent-test-utils";
 import { INPUT_CLASS, JsonField, LabelledField, OptionalNumberField } from "@/components/agent-tests/fields";

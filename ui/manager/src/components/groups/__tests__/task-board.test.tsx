@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { TaskBoard } from "../task-board";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { TaskBoard } from "@eddi/app-kit/components/groups/task-board";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */

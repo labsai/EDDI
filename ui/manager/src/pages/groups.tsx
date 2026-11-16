@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown, LayoutTemplate, Users } from "lucide-react";
@@ -10,18 +10,18 @@ import {
   useDeleteGroup,
   useDeleteGroupWithMembers,
   useDuplicateGroup,
-} from "@/hooks/use-groups";
+} from "@eddi/app-kit/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
-import { styleDisplay } from "@/lib/discussion-styles";
+import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
-import { getGroup, type AgentGroupConfiguration } from "@/lib/api/groups";
-import { getErrorMessage } from "@/lib/api-client";
-import { describeGroupDeleteError } from "@/lib/group-delete-errors";
+import { getGroup, type AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { describeGroupDeleteError } from "@eddi/app-kit/lib/group-delete-errors";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@eddi/app-kit/components/shared/permanent-delete-option";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import {
@@ -29,7 +29,7 @@ import {
   type ViewMode,
 } from "@/components/shared/view-toggle";
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime } from "@eddi/app-kit/lib/utils";
 
 type SortField = "name" | "style" | "members" | "modified";
 type SortDir = "asc" | "desc";

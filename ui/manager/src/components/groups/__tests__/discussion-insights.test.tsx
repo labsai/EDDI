@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { DiscussionInsights } from "@/components/groups/discussion-insights";
-import type { GroupConversation, SharedArtifact } from "@/lib/api/groups";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { DiscussionInsights } from "@eddi/app-kit/components/groups/discussion-insights";
+import type { GroupConversation, SharedArtifact } from "@eddi/app-kit/lib/api/groups";
 
 function conversation(overrides: Partial<GroupConversation> = {}): GroupConversation {
   return {

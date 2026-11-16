@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { StructuredTurnCard } from "@/components/groups/structured-turn-card";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { StructuredTurnCard } from "@eddi/app-kit/components/groups/structured-turn-card";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import { AdvisorResponseCard } from "@/components/workforce/advisor-response-card";
-import { parseStructuredPayload } from "@/lib/group-payloads";
-import type { TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
+import { parseStructuredPayload } from "@eddi/app-kit/lib/group-payloads";
+import type { TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 
 function entry(type: TranscriptEntryType, content: string): TranscriptEntry {
   return {
@@ -119,35 +118,8 @@ describe("structured turns in the transcript renderers", () => {
     expectNoRawJson(container);
   });
 
-  it("the Workforce board card shows a retro harvest rather than its JSON", () => {
-    const { container } = renderWithProviders(
-      <AdvisorResponseCard
-        displayName="Ana"
-        agentId="a1"
-        content={RETRO_BODY}
-        entryType="RETRO"
-        boardId="b1"
-      />,
-    );
-    expect(container).toHaveTextContent("Timebox the debate");
-    expectNoRawJson(container);
-  });
-
-  it("the Workforce board card unwraps a response envelope like the other two", () => {
-    // It used to hand `content` straight to ReactMarkdown, so an envelope
-    // rendered as its own JSON.
-    const { container } = renderWithProviders(
-      <AdvisorResponseCard
-        displayName="Ana"
-        agentId="a1"
-        content={JSON.stringify({ output: [{ type: "text", text: "Plain answer." }] })}
-        entryType="OPINION"
-        boardId="b1"
-      />,
-    );
-    expect(container).toHaveTextContent("Plain answer.");
-    expectNoRawJson(container);
-  });
+  // The Workforce board card's cases moved with it (ui/workforce/src/components/
+  // workforce/__tests__/advisor-response-card-structured.test.tsx).
 
   it("an unreadable contract still degrades to prose rather than a blob", () => {
     // Tier 3 of the backend's own parse is "give up"; the UI's equivalent is

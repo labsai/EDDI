@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Building2, Globe, Users } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { useSpaces } from "@/hooks/use-spaces";
 import { describeSpace } from "@/lib/spaces";
 

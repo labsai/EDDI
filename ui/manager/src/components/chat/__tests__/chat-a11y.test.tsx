@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChatPanel } from "../chat-panel";
-import { SecretInputField } from "../secret-input-field";
-import { useChatStore } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { SecretInputField } from "@eddi/app-kit/components/chat/secret-input-field";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("SecretInputField — IME and eye toggle", () => {

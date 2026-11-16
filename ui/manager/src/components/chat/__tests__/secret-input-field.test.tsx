@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
-import { SecretInputField } from "../secret-input-field";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { SecretInputField } from "@eddi/app-kit/components/chat/secret-input-field";
 
 /**
  * The field an agent's `inputField` output asks for. Its visible label used to

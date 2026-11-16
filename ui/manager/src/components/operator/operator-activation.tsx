@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { ModelCombobox } from "@/components/shared/model-combobox";
-import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { SELF_HOSTED_EXAMPLES, SELF_HOSTED_PROVIDER_ID, getProviderRegions } from "@/lib/llm-provider-catalog";
-import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
+import { LLM_PROVIDERS, getProviderConfig } from "@eddi/app-kit/lib/api/agent-setup";
+import { SELF_HOSTED_EXAMPLES, SELF_HOSTED_PROVIDER_ID, getProviderRegions } from "@eddi/app-kit/lib/llm-provider-catalog";
+import { ProviderRegionSelect, ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 import {
   MODEL_SUGGESTIONS,
   acceptsOptionalApiKey,
@@ -16,10 +16,10 @@ import {
   isProvisionableBySetup,
   provisionableProviderOr,
   supportsBaseUrl,
-} from "@/lib/model-suggestions";
-import { useSecrets, useVaultHealth } from "@/hooks/use-secrets";
-import { grantsAllAgents } from "@/lib/api/secrets";
-import { useAuth } from "@/hooks/use-auth";
+} from "@eddi/app-kit/lib/model-suggestions";
+import { useSecrets, useVaultHealth } from "@eddi/app-kit/hooks/use-secrets";
+import { grantsAllAgents } from "@eddi/app-kit/lib/api/secrets";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 import { usePlatformSelfUrl } from "@/hooks/use-operator";
 import {
   safetyPreambleForScope,
@@ -33,7 +33,7 @@ import {
 import { extractVaultKeyName, toVaultRef } from "@/lib/operator/vault-ref";
 import { isOriginOnlyBaseUrl, normalizeBaseUrl, type OperatorConfig, type OperatorAuthMode } from "@/lib/api/operator";
 import type { ActivationStage } from "@/hooks/use-operator";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 interface OperatorActivationProps {
   initial: OperatorConfig;

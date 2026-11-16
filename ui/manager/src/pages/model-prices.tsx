@@ -5,16 +5,16 @@ import { AlertTriangle, Coins, Download, Pencil, Plus, RefreshCw, Save, Trash2, 
 import { ErrorState } from "@/components/shared/error-state";
 import { ModelPriceEntrySheet } from "@/components/model-prices/model-price-entry-sheet";
 import { useModelPrices, useReferencePrices, useSaveModelPrices, useUnpricedSightings } from "@/hooks/use-model-prices";
-import { useIsAdminOrUnknown } from "@/hooks/use-auth";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { Skeleton } from "@/components/ui/skeleton";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   UNPRICED_POLICIES,
   type ModelPriceCatalog,
   type ModelPriceEntry,
   type UnpricedPolicy,
-} from "@/lib/api/model-prices";
+} from "@eddi/app-kit/lib/api/model-prices";
 import { entryProblems, isStale, mergeReference, parseCatalogImport, type ReferenceMerge } from "@/lib/model-prices";
 
 const EMPTY_ENTRY: ModelPriceEntry = { provider: "", model: "" };

@@ -3,18 +3,18 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertTriangle, KeyRound, Search, Unlock } from "lucide-react";
-import type { ActionResult, LeaseView } from "@/lib/api/cluster";
+import type { ActionResult, LeaseView } from "@eddi/app-kit/lib/api/cluster";
 import { formatDuration, leaseFlagHelp, leaseFlagLabel } from "@/lib/cluster-labels";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useClusterLeases, useReleaseLease } from "@/hooks/use-cluster";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
 
 /**
  * Every lease in the cluster, suspicious first: a holder with no presence, a

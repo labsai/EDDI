@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
-import type { LongContextTier, ModelPriceEntry } from "@/lib/api/model-prices";
+import type { LongContextTier, ModelPriceEntry } from "@eddi/app-kit/lib/api/model-prices";
 import { entryProblems } from "@/lib/model-prices";
 
 interface Props {

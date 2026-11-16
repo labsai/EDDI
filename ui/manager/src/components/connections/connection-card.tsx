@@ -2,12 +2,12 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Copy, Globe, Plug, Trash2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import {
   AuthTypeBadge,
   BindingBadge,
 } from "@/components/connections/connection-badges";
-import type { EnrichedConnectionDescriptor } from "@/lib/api/connections";
+import type { EnrichedConnectionDescriptor } from "@eddi/app-kit/lib/api/connections";
 
 interface ConnectionCardProps {
   connection: EnrichedConnectionDescriptor;

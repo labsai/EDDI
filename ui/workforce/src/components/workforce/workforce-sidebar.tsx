@@ -1,0 +1,419 @@
+import { lazy, Suspense } from "react";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import {
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Sun,
+  Moon,
+  X,
+  Users,
+  BarChart3,
+  LayoutDashboard,
+} from "lucide-react";
+import { Button, useTheme } from "@eddi/ui";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
+import { useStreamingGroupIds } from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
+import { type DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
+import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { getInitials } from "@eddi/app-kit/lib/utils";
+import { ModeSwitcher } from "@eddi/app-kit/components/shared/mode-switcher";
+import { BrandIcon, BrandWordmark } from "@eddi/app-kit/components/layout/brand-logo";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
+import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
+// Lazy: the Workforce layout (and so this sidebar) is in the entry chunk shared
+// with /manage, and the session list — its queries, mutations and dialog — is
+// Workforce-only code the Manager's first load should not carry.
+const SessionList = lazy(() => import("@/components/workforce/session-list").then((m) => ({ default: m.SessionList })));
+
+// ─── Types ───────────────────────────────────────────────────────
+
+export interface WorkforceSidebarProps {
+  collapsed: boolean;
+  onToggle: () => void;
+  onClose?: () => void;
+}
+
+// ─── Component ───────────────────────────────────────────────────
+
+export function WorkforceSidebar({
+  collapsed,
+  onToggle,
+  onClose,
+}: WorkforceSidebarProps) {
+  const { boardId } = useParams<{ boardId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { t } = useTranslation();
+  const { productName } = useBrand();
+  const { theme, setTheme } = useTheme();
+
+  const { canAuthor } = useWorkforceAccess();
+  // An author reads the group store (everything they may edit, listed or not);
+  // an end user reads the catalog — `/groupstore` would answer them 403.
+  const { data: storeBoards } = useEnrichedGroupDescriptors(50, 0, "", canAuthor);
+  const { data: catalogGroups } = useCatalogGroups(!canAuthor);
+  const boards = canAuthor
+    ? storeBoards
+    : catalogGroups?.map((g) => ({
+        id: g.groupId,
+        version: g.version,
+        name: g.name ?? "",
+        style: g.style ?? undefined,
+        memberCount: g.members.length,
+      }));
+  // Task forces with a discussion running right now — so leaving the board
+  // doesn't hide the fact that it is still going.
+  const streamingBoardIds = useStreamingGroupIds();
+
+  const cycleTheme = () => {
+    const order: Array<"light" | "dark" | "system"> = [
+      "light",
+      "dark",
+      "system",
+    ];
+    const idx = order.indexOf(theme);
+    setTheme(order[(idx + 1) % order.length]!);
+  };
+
+  return (
+    <aside
+      aria-label={t("Workforce.sidebar.boards", "Board navigation")}
+      className={cn(
+        "flex h-full flex-col border-e transition-all duration-250 ease-in-out",
+        "border-border bg-card",
+        collapsed ? "w-16" : "w-70",
+      )}
+    >
+      {/* ── Header ────────────────────────────────────────────── */}
+      <div className={cn(
+        "shrink-0 border-b border-border",
+        collapsed ? "flex flex-col items-center py-3 gap-2" : "flex h-14 items-center gap-2 ps-3 pe-3",
+      )}>
+        {!collapsed && (
+          <Link to="/workforce" className="flex flex-1 items-center gap-2 truncate">
+            <BrandWordmark className="h-6 w-auto" testId="workforce-sidebar-logo" />
+          </Link>
+        )}
+        {collapsed && (
+          <Link to="/workforce" className="flex items-center justify-center" aria-label={productName}>
+            <BrandIcon className="h-10 w-10" alt="" testId="workforce-sidebar-icon" />
+          </Link>
+        )}
+
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 w-8", !collapsed && "ms-auto")}
+            onClick={onClose}
+            aria-label={t("Workforce.closeSidebar", "Close sidebar")}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 w-8", !collapsed && "ms-auto")}
+            onClick={onToggle}
+            aria-label={t("Workforce.toggleSidebar", "Toggle sidebar")}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+      </div>
+
+      {/* Mode switcher (Manager ↔ Workforce) — authors only: an end user's
+          place is Workforce (decision D6). */}
+      {canAuthor && (
+        <div className="shrink-0 border-b border-border p-1.5">
+          <ModeSwitcher collapsed={collapsed} />
+        </div>
+      )}
+
+      {/* ── New Workforce Button (authors only) ────────────────── */}
+      {canAuthor && (
+      <div className="shrink-0 ps-3 pe-3 py-3">
+        <Button
+          asChild
+          className={cn(
+            "w-full bg-primary text-primary-foreground hover:bg-primary/90",
+            collapsed && "ps-0 pe-0",
+          )}
+          size={collapsed ? "icon" : "md"}
+        >
+          <Link to="/workforce/new">
+            <Plus className="h-4 w-4" />
+            {!collapsed && (
+              <span>{t("Workforce.newBoard", "Assemble Task Force")}</span>
+            )}
+          </Link>
+        </Button>
+      </div>
+      )}
+
+      {/* ── Dashboard Link ────────────────────────────────────── */}
+      {/* Without this the only route back to the dashboard was the unlabelled
+          logo, which users did not find — reported as "no way back from
+          Insights". */}
+      <div className="shrink-0 ps-3 pe-3 pb-1">
+        <Link
+          to="/workforce"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+            location.pathname === "/workforce"
+              ? "bg-muted text-foreground font-medium"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={collapsed ? t("Workforce.nav.dashboard", "Dashboard") : undefined}
+          {...(location.pathname === "/workforce" ? { "aria-current": "page" as const } : {})}
+        >
+          <LayoutDashboard className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>{t("Workforce.nav.dashboard", "Dashboard")}</span>}
+        </Link>
+      </div>
+
+      {/* ── Insights Link (authors only — analytics reads the stores) ── */}
+      {canAuthor && (
+      <div className="shrink-0 ps-3 pe-3 pb-1">
+        <Link
+          to="/workforce/analytics"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+            location.pathname === "/workforce/analytics"
+              ? "bg-muted text-foreground font-medium"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={collapsed ? t("Workforce.insights", "Insights") : undefined}
+        >
+          <BarChart3 className="h-4 w-4 shrink-0" />
+          {!collapsed && (
+            <span>{t("Workforce.insights", "Insights")}</span>
+          )}
+        </Link>
+      </div>
+      )}
+
+      {/* ── Workforce ──────────────────────────────────────────── */}
+      <WorkforceSection collapsed={collapsed} boardId={boardId} canAuthor={canAuthor} />
+
+      {/* ── Boards List ───────────────────────────────────────── */}
+      <nav aria-label={t("Workforce.boardList", "Task Force list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
+        {/* The person's chats and team sessions, by date (T1.1). Collapsed,
+            there is no room for titles; Home lists the recent ones. */}
+        {!collapsed && (
+          <Suspense fallback={null}>
+            <SessionList />
+          </Suspense>
+        )}
+
+        {!collapsed && (
+          <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {t("Workforce.boardsLabel", "Task Forces")}
+          </p>
+        )}
+
+        <ul className="flex flex-col gap-0.5" aria-label={t("Workforce.boardList", "Task Force list")}>
+          {boards?.map((board) => {
+            const isActive = board.id === boardId;
+            const isLive = streamingBoardIds.includes(board.id);
+            const styleKey = (board.style ?? "ROUND_TABLE") as DiscussionStyle;
+            const style = styleDisplay(styleKey, t);
+
+            return (
+              <li key={board.id}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(`/workforce/${board.id}?version=${board.version ?? 1}`)
+                  }
+                  title={
+                    collapsed
+                      ? isLive
+                        ? `${board.name} — ${t("Workforce.board.live", "Live")}`
+                        : board.name
+                      : undefined
+                  }
+                  // Collapsed, the name is the only accessible text and the dot
+                  // is decorative — fold the live state into it, or screen
+                  // readers never learn the task force is running.
+                  aria-label={
+                    collapsed
+                      ? isLive
+                        ? `${board.name} — ${t("Workforce.board.live", "Live")}`
+                        : board.name
+                      : undefined
+                  }
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "relative flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-start text-sm transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    isActive
+                      ? "bg-primary/10 text-primary"
+                      : "text-foreground/80 hover:bg-muted",
+                    collapsed && "justify-center ps-0 pe-0",
+                  )}
+                >
+                  <span className="shrink-0 text-base" role="img" aria-hidden>
+                    {style.icon}
+                  </span>
+
+                  {/* Collapsed: the dot rides on the style icon */}
+                  {collapsed && isLive && (
+                    <span
+                      className="absolute top-1 end-2 h-2 w-2 rounded-full bg-primary animate-pulse"
+                      data-testid={`sidebar-live-${board.id}`}
+                      aria-hidden
+                    />
+                  )}
+
+                  {!collapsed && (
+                    <>
+                      <span className="min-w-0 flex-1 truncate">
+                        {board.name || t("Workforce.untitled", "Untitled")}
+                      </span>
+                      {isLive && (
+                        <span
+                          className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-primary"
+                          data-testid={`sidebar-live-${board.id}`}
+                        >
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                          {t("Workforce.board.live", "Live")}
+                        </span>
+                      )}
+                      <span className="flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground">
+                        <Users className="h-3 w-3" />
+                        {board.memberCount}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* ── Footer: Theme Toggle ─────────────────────────────────── */}
+      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2">
+        <Button
+          variant="ghost"
+          size={collapsed ? "icon" : "sm"}
+          className={cn("w-full", !collapsed && "justify-start gap-2")}
+          onClick={cycleTheme}
+          aria-label={t("Workforce.toggleTheme", "Toggle theme")}
+        >
+          {theme === "dark" ? (
+            <Moon className="h-4 w-4" />
+          ) : (
+            <Sun className="h-4 w-4" />
+          )}
+          {!collapsed && (
+            <span className="capitalize">
+              {theme === "system"
+                ? t("Workforce.themeSystem", "System")
+                : theme === "dark"
+                  ? t("Workforce.themeDark", "Dark")
+                  : t("Workforce.themeLight", "Light")}
+            </span>
+          )}
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+// ─── Workforce Sub-Component ─────────────────────────────────────
+
+function WorkforceSection({
+  collapsed,
+  boardId,
+  canAuthor,
+}: {
+  collapsed: boolean;
+  boardId?: string;
+  canAuthor: boolean;
+}) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { data: rawAgents } = useAgentDescriptors(50, 0, "", canAuthor);
+  const { data: catalogAgents } = useCatalogAgents(!canAuthor);
+
+  const agents: { key: string; agentId: string; name: string }[] = canAuthor
+    ? (rawAgents ? groupAgentsByName(rawAgents).slice(0, 10) : []).map((agent) => ({
+        key: agent.resource,
+        agentId: agent.resource.match(/\/agentstore\/agents\/([^?]+)/)?.[1] ?? agent.id,
+        name: agent.name,
+      }))
+    : (catalogAgents ?? []).slice(0, 10).map((agent) => ({
+        key: agent.agentId,
+        agentId: agent.agentId,
+        name: agent.name ?? "",
+      }));
+
+  if (agents.length === 0) return null;
+
+  return (
+    <div className="shrink-0 border-b border-border ps-2 pe-2 pb-2">
+      {!collapsed && (
+        <p className="ps-2 pe-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {t("Workforce.workforce", "Workforce")}
+        </p>
+      )}
+      <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+        {agents.map((agent) => {
+          const agentId = agent.agentId;
+
+          return (
+            <li key={agent.key}>
+              <button
+                type="button"
+                onClick={() =>
+                  boardId
+                    ? navigate(`/workforce/${boardId}/thread/${agentId}`)
+                    : navigate(`/workforce/chat?agentId=${agentId}&agentName=${encodeURIComponent(agent.name || agentId)}`)
+                }
+                title={collapsed ? (agent.name || agentId) : undefined}
+                aria-label={collapsed ? (agent.name || agentId) : undefined}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-1.5 text-start text-sm transition-colors",
+                  "text-foreground/80 hover:bg-muted",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  collapsed && "justify-center ps-0 pe-0",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium",
+                    "bg-muted text-muted-foreground",
+                  )}
+                  aria-hidden
+                >
+                  {getInitials(agent.name || agentId)}
+                </span>
+                {!collapsed && (
+                  <span className="min-w-0 flex-1 truncate">
+                    {agent.name || agentId}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

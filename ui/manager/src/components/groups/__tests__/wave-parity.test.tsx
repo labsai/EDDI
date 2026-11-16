@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import { DecisionRecordCard } from "@/components/groups/decision-record-card";
+import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { PhaseHeader } from "@/components/groups/phase-header";
-import { TaskBoard } from "@/components/groups/task-board";
-import { MAX_GROUP_QUESTION_CHARS } from "@/lib/api/groups";
-import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@/lib/api/groups";
+import { TaskBoard } from "@eddi/app-kit/components/groups/task-board";
+import { MAX_GROUP_QUESTION_CHARS } from "@eddi/app-kit/lib/api/groups";
+import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 
 const entry = (type: TranscriptEntryType, content = "…"): TranscriptEntry => ({
   speakerAgentId: "agent-001",

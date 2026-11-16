@@ -3,18 +3,18 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { BellRing, Bot, CheckCheck, Pencil, Plus, Trash2 } from "lucide-react";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { AlertEventsTable } from "@/components/alerts/alert-events-table";
 import { AlertRuleEditor } from "@/components/alerts/alert-rule-editor";
-import { useIsAdminOrUnknown } from "@/hooks/use-auth";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
 import { alertErrorCode, useAcknowledgeAlerts, useAlertEvents, useAlertRules, useDeleteAlertRule } from "@/hooks/use-alerts";
-import { blankRule, type AlertEventQuery, type AlertRule, type AlertSource } from "@/lib/api/alerts";
+import { blankRule, type AlertEventQuery, type AlertRule, type AlertSource } from "@eddi/app-kit/lib/api/alerts";
 
 const PAGE_SIZE = 25;
 const selectClass =

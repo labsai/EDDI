@@ -10,8 +10,8 @@ import {
   Hand,
   Loader2,
 } from "lucide-react";
-import { cn, formatUsd } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
 import { Button } from "@eddi/ui";
 import type { IngestionRun } from "@/lib/api/ingestion-sources";
 

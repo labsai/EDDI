@@ -5,8 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { SECRET_EXISTS, SECRET_NOT_FOUND } from "@/lib/api/secrets";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { SECRET_EXISTS, SECRET_NOT_FOUND } from "@eddi/app-kit/lib/api/secrets";
 
 import {
   useSecrets,
@@ -14,7 +14,7 @@ import {
   useDeleteSecret,
   useVaultHealth,
   useRotateSecret,
-} from "@/hooks/use-secrets";
+} from "@eddi/app-kit/hooks/use-secrets";
 
 function createWrapper() {
   const queryClient = new QueryClient({

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely, parseStructuredItems } from "@/components/groups/group-utils";
+import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely, parseStructuredItems } from "@eddi/app-kit/components/groups/group-utils";
 
 describe("emoji verification: a long detail is still a verdict", () => {
   it("parses a header whose detail after the colon is very long", () => {

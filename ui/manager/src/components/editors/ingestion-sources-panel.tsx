@@ -13,11 +13,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
   useIngestionRuns,

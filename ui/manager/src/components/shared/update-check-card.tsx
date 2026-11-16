@@ -16,17 +16,17 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
-import { useHasRole } from "@/hooks/use-auth";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import {
   EDDI_DOCKER_TAGS_URL,
   EDDI_RELEASES_URL,
   previewReleaseNotes,
   type UpdateCheckErrorReason,
 } from "@/lib/api/updates";
-import { cn } from "@/lib/utils";
-import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { ConversationMarkdown } from "@eddi/app-kit/components/chat/conversation-markdown";
 
 /**
  * The GitHub mark, drawn as lucide-react 0.x drew it (ISC licence).

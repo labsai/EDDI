@@ -1,4 +1,4 @@
-import { formatUsd } from "@/lib/utils";
+import { formatUsd } from "@eddi/app-kit/lib/utils";
 import { useState, useEffect, useCallback, useMemo, useId, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useOnboarding } from "@/hooks/use-onboarding";
@@ -29,8 +29,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useMutationState, useQueries } from "@tanstack/react-query";
-import { isApiError, getErrorMessage } from "@/lib/api-client";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { isApiError, getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { zonedLocalInputToIso, isoToZonedLocalInput } from "@/lib/date-format";
 import {
@@ -66,12 +66,12 @@ import {
   DISABLED_ACCESS_REVOKED,
   invalidScheduleReason,
   isFinishedOneShot,
-} from "@/lib/api/schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 import type {
   ScheduleConfiguration,
   ScheduleFireLog,
   FireLogStatus,
-} from "@/lib/api/schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 
 /** Which timing form the create/edit dialog is currently showing. */
 type FormMode = "cron" | "oneTime" | "heartbeat";
