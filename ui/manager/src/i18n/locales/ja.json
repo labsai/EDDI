@@ -3871,7 +3871,9 @@
     "invalidInteger": "0 以上の整数を入力するか、空欄で無制限にしてください。",
     "invalidAmount": "0 以上の金額を入力するか、空欄で無制限にしてください。",
     "heldByTurns": "実行中のターンが {{amount}} を確保中",
-    "costHardCeiling": "既定では、予算を超える呼び出しも最後まで実行されます。代わりに拒否するには、サーバーが各呼び出しの最大コストを先に確保します。eddi.tenant.quota.cost-reservation.enabled=true を設定してください（起動時プロパティ）。 確保の対象は LLM モデル呼び出しと価格設定されたツール呼び出しです。小さな付随呼び出し（要約、ジャッジ、Dream）は引き続き後から課金され、わずかに上乗せされることがあります。"
+    "costHardCeiling": "既定では、予算を超える呼び出しも最後まで実行されます。代わりに拒否するには、サーバーが各呼び出しの最大コストを先に確保します。eddi.tenant.quota.cost-reservation.enabled=true を設定してください（起動時プロパティ）。 確保の対象は LLM モデル呼び出しと価格設定されたツール呼び出しです。小さな付随呼び出し（要約、ジャッジ、Dream）は引き続き後から課金され、わずかに上乗せされることがあります。",
+    "editsDiscardedAfterRefresh": "クォータを再読み込みし、現在の上限を上書きしないよう未保存の編集を破棄しました。",
+    "refreshFailedSaveBlocked": "クォータを更新できなかったため、保存を一時停止しています。再試行して、まず現在の上限を読み込んでください。"
   },
   "snippetEditor": {
     "category": "カテゴリ",
@@ -5905,5 +5907,21 @@
     "runSkipped": "統合をスキップしました：{{reason}}",
     "timeZone": "タイムゾーン",
     "loadError": "このセクションを読み込めませんでした。"
+  },
+  "spendControl": {
+    "title": "保留中の変更",
+    "description": "MCP 経由で提案され、未適用です。いずれも支出管理を緩めます。承認するとあなたの名前で適用されます。",
+    "proposedBy": "{{who}} が {{when}} に提案",
+    "loosening": "支出管理を緩める",
+    "allChanges": "すべての変更",
+    "approve": "承認",
+    "reject": "却下",
+    "approveTitle": "この変更を承認しますか？",
+    "rejectTitle": "この変更を却下しますか？",
+    "approveDesc": "あなたを実行者として今すぐ適用され、支出管理を緩めます: {{loosening}}",
+    "rejectDesc": "何も適用されません。提案者は再提出できます。",
+    "approved": "変更を承認して適用しました",
+    "rejected": "変更を却下しました。何も適用されていません",
+    "approveBlockedDirty": "先にクォータの編集を保存するか、ページを再読み込みして破棄してください。承認後に保存すると、承認されたクォータが上書きされます。"
   }
 }

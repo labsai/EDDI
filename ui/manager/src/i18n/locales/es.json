@@ -3907,7 +3907,9 @@
     "invalidInteger": "Introduzca un número entero (0 o más) o déjelo vacío para ilimitado.",
     "invalidAmount": "Introduzca un importe (0 o más) o déjelo vacío para ilimitado.",
     "heldByTurns": "{{amount}} reservados por turnos en curso",
-    "costHardCeiling": "Por defecto, la llamada que cruza el presupuesto se completa igualmente. Para rechazarla, el servidor puede reservar antes el coste máximo de cada llamada: establezca eddi.tenant.quota.cost-reservation.enabled=true (propiedad de arranque). Las reservas cubren las llamadas a modelos LLM y las llamadas a herramientas con precio; las llamadas secundarias menores (resúmenes, jueces, Dream) se siguen cobrando después y pueden sumar un poco más."
+    "costHardCeiling": "Por defecto, la llamada que cruza el presupuesto se completa igualmente. Para rechazarla, el servidor puede reservar antes el coste máximo de cada llamada: establezca eddi.tenant.quota.cost-reservation.enabled=true (propiedad de arranque). Las reservas cubren las llamadas a modelos LLM y las llamadas a herramientas con precio; las llamadas secundarias menores (resúmenes, jueces, Dream) se siguen cobrando después y pueden sumar un poco más.",
+    "editsDiscardedAfterRefresh": "La cuota se volvió a cargar y se descartaron tus cambios sin guardar, para que no sobrescriban los límites actuales.",
+    "refreshFailedSaveBlocked": "No se pudo actualizar la cuota, así que el guardado está en pausa. Reintenta para cargar primero los límites actuales."
   },
   "snippetEditor": {
     "category": "Categoría",
@@ -5957,5 +5959,21 @@
     "runSkipped": "Consolidación omitida: {{reason}}",
     "timeZone": "Zona horaria",
     "loadError": "No se pudo cargar esta sección."
+  },
+  "spendControl": {
+    "title": "Cambios pendientes",
+    "description": "Propuestos por MCP y no aplicados: cada uno relajaría el control del gasto. Al aprobarlo se aplica en su nombre.",
+    "proposedBy": "Propuesto por {{who}} el {{when}}",
+    "loosening": "Relaja el control del gasto",
+    "allChanges": "Todos los cambios",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "approveTitle": "¿Aprobar este cambio?",
+    "rejectTitle": "¿Rechazar este cambio?",
+    "approveDesc": "Se aplica ahora con usted como autor y relaja el control del gasto: {{loosening}}",
+    "rejectDesc": "No se aplica nada. Quien lo propuso puede volver a presentarlo.",
+    "approved": "Cambio aprobado y aplicado",
+    "rejected": "Cambio rechazado; no se aplicó nada",
+    "approveBlockedDirty": "Guarda primero tus cambios de la cuota o recarga la página para descartarlos: guardarlos después de una aprobación sobrescribiría la cuota aprobada."
   }
 }

@@ -218,6 +218,11 @@ All five operations sit under `/administration/quotas` and require the `eddi-adm
 | `GET` | `/administration/quotas/{tenantId}/usage` | Read the tenant's current counters |
 | `POST` | `/administration/quotas/{tenantId}/usage/reset` | Zero the tenant's counters |
 
+Over MCP an administrator's client reads the quota and usage with `read_tenant_quota` and changes it with
+`update_tenant_quota`: lowering a limit or enabling the quota applies at once, raising a limit, making it unlimited
+or disabling it is filed for an administrator's approval in the Manager — see
+[Spend-Control Changes](spend-control-changes.md). Resetting the counters has no tool.
+
 ### Quota shape
 
 ```json

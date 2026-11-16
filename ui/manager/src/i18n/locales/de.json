@@ -3871,7 +3871,9 @@
     "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "heldByTurns": "{{amount}} von laufenden Turns reserviert",
-    "costHardCeiling": "Standardmäßig wird der Aufruf, der das Budget überschreitet, noch zu Ende ausgeführt. Um ihn stattdessen abzulehnen, kann der Server vorab die Höchstkosten jedes Aufrufs reservieren: eddi.tenant.quota.cost-reservation.enabled=true setzen (Startup-Property). Reserviert werden LLM-Modellaufrufe und bepreiste Tool-Aufrufe; kleinere Nebenaufrufe (Zusammenfassungen, Judges, Dream) werden weiterhin nachträglich abgerechnet und können etwas darüber hinaus kosten."
+    "costHardCeiling": "Standardmäßig wird der Aufruf, der das Budget überschreitet, noch zu Ende ausgeführt. Um ihn stattdessen abzulehnen, kann der Server vorab die Höchstkosten jedes Aufrufs reservieren: eddi.tenant.quota.cost-reservation.enabled=true setzen (Startup-Property). Reserviert werden LLM-Modellaufrufe und bepreiste Tool-Aufrufe; kleinere Nebenaufrufe (Zusammenfassungen, Judges, Dream) werden weiterhin nachträglich abgerechnet und können etwas darüber hinaus kosten.",
+    "editsDiscardedAfterRefresh": "Das Kontingent wurde neu geladen und Ihre nicht gespeicherten Änderungen wurden verworfen, damit sie die aktuellen Limits nicht überschreiben.",
+    "refreshFailedSaveBlocked": "Das Kontingent konnte nicht aktualisiert werden, daher ist das Speichern pausiert. Versuchen Sie es erneut, um zuerst die aktuellen Limits zu laden."
   },
   "snippetEditor": {
     "category": "Kategorie",
@@ -5905,5 +5907,21 @@
     "runSkipped": "Konsolidierung übersprungen: {{reason}}",
     "timeZone": "Zeitzone",
     "loadError": "Dieser Abschnitt konnte nicht geladen werden."
+  },
+  "spendControl": {
+    "title": "Ausstehende Änderungen",
+    "description": "Über MCP vorgeschlagen und nicht angewendet: Jede würde die Ausgabenkontrolle lockern. Mit der Genehmigung wird sie unter Ihrem Namen angewendet.",
+    "proposedBy": "Vorgeschlagen von {{who}} am {{when}}",
+    "loosening": "Lockert die Ausgabenkontrolle",
+    "allChanges": "Alle Änderungen",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "approveTitle": "Diese Änderung genehmigen?",
+    "rejectTitle": "Diese Änderung ablehnen?",
+    "approveDesc": "Sie wird jetzt mit Ihnen als Verantwortlichem angewendet und lockert die Ausgabenkontrolle: {{loosening}}",
+    "rejectDesc": "Es wird nichts angewendet. Der Vorschlagende kann sie erneut einreichen.",
+    "approved": "Änderung genehmigt und angewendet",
+    "rejected": "Änderung abgelehnt; nichts wurde angewendet",
+    "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
   }
 }

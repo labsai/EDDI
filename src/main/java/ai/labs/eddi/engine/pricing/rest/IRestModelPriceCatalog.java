@@ -25,8 +25,11 @@ import org.jboss.resteasy.reactive.NoCache;
  * The deployment price catalog (docs/model-pricing.md). Reading is open to
  * admins and editors — an editor setting up a task wants to see which price
  * applies — but only {@code eddi-admin} writes: the catalog is a budget lever
- * (lowering a price to $0 is raising a budget). There is deliberately no MCP
- * write tool and no Platform Operator write grant.
+ * (lowering a price to $0 is raising a budget). The MCP write tool
+ * ({@code update_model_prices}) applies only what makes spending stricter and
+ * files the rest for an administrator's approval
+ * ({@code docs/spend-control-changes.md}); the Platform Operator has no write
+ * grant.
  */
 @Path("/administration/model-prices")
 @Tag(name = "Operations / Model Prices", description = "The deployment's model price catalog and unpriced-call policy")

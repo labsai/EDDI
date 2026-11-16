@@ -6,6 +6,7 @@ import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { spendControlHandlers } from "./spend-control-handlers";
 import { teamBudgetHandlers } from "./team-budget-handlers";
 import { userEventHandlers } from "./user-event-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
@@ -970,6 +971,8 @@ export const handlers = [
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // Spend-control changes waiting for an admin: /administration/spend-control-changes.
+  ...spendControlHandlers,
   // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
   ...teamBudgetHandlers,
   // The per-user event stream: GET /me/events (ready, then whatever pushMockUserEvent sends).

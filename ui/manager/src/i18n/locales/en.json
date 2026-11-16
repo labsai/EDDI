@@ -3912,7 +3912,9 @@
     "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
     "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited.",
     "heldByTurns": "{{amount}} held by running turns",
-    "costHardCeiling": "By default the call that crosses the budget still finishes. To refuse it instead, the server can reserve each call's maximum cost first: set eddi.tenant.quota.cost-reservation.enabled=true (a startup property). Reservations cover LLM model calls and priced tool calls; smaller side calls (summaries, judges, Dream) are still charged afterwards and can add a little on top."
+    "costHardCeiling": "By default the call that crosses the budget still finishes. To refuse it instead, the server can reserve each call's maximum cost first: set eddi.tenant.quota.cost-reservation.enabled=true (a startup property). Reservations cover LLM model calls and priced tool calls; smaller side calls (summaries, judges, Dream) are still charged afterwards and can add a little on top.",
+    "editsDiscardedAfterRefresh": "The quota was reloaded and your unsaved edits were discarded, so they cannot overwrite the current limits.",
+    "refreshFailedSaveBlocked": "Could not refresh the quota, so saving is paused. Retry to load the current limits first."
   },
   "snippetEditor": {
     "category": "Category",
@@ -5905,5 +5907,21 @@
     "runSkipped": "Consolidation skipped: {{reason}}",
     "timeZone": "Time zone",
     "loadError": "Could not load this section."
+  },
+  "spendControl": {
+    "title": "Pending changes",
+    "description": "Proposed over MCP and not applied: each would loosen spending. Approving applies it under your name.",
+    "proposedBy": "Proposed by {{who}} on {{when}}",
+    "loosening": "Loosens spending",
+    "allChanges": "All changes",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveTitle": "Approve this change?",
+    "rejectTitle": "Reject this change?",
+    "approveDesc": "It is applied now with you as the actor and loosens spending: {{loosening}}",
+    "rejectDesc": "Nothing is applied. The proposer can file it again.",
+    "approved": "Change approved and applied",
+    "rejected": "Change rejected; nothing was applied",
+    "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
   }
 }

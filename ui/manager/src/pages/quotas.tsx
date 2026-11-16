@@ -21,14 +21,17 @@ import { useQuota, useQuotaUsage, useUpdateQuota, useResetUsage } from "@/hooks/
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
-import type { TenantQuota } from "@/lib/api/quotas";
+import type { TenantQuota } from "@eddi/app-kit/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
 import { TeamBudgetsTable } from "@/components/quotas/team-budgets-table";
+import { PendingSpendChanges } from "@/components/spend-control/pending-spend-changes";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
 
 const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
+  const isAdmin = useIsAdminOrUnknown();
   const { data: quota, isLoading: quotaLoading, isError: quotaError, error: quotaErr, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const {
     data: usage,
@@ -94,8 +97,44 @@ export function QuotasPage() {
   );
   const hasInvalidField = invalidFields.size > 0;
 
+  // The newest read failed: what the form shows may predate an approved change, and the
+  // quota PUT carries no version, so saving it could overwrite the approved limits.
+  const staleQuota = quotaError && !!quota;
+
+  // The form may still hold pre-approval limits after the refresh succeeds: a dirty
+  // form does not follow the server. So the block outlives the failed read until the
+  // form has been re-initialised from the fresh quota (local edits are discarded, which
+  // the toast says), and Save stays blocked meanwhile.
+  const [resyncPending, setResyncPending] = useState(false);
+  // Each field keeps its own text (and bad-input flag). Remounting them on a resync
+  // drops invalid text that the parent never saw as a number, even when the
+  // refreshed value equals the one shown before, which no value-driven effect catches.
+  const [fieldsResetKey, setFieldsResetKey] = useState(0);
+  useEffect(() => {
+    if (staleQuota) {
+      setResyncPending(true);
+      return;
+    }
+    if (!resyncPending || !quota) return;
+    const hadEdits = dirty;
+    setForm(quota);
+    setDirty(false);
+    setInvalidFields(new Set());
+    setFieldsResetKey((k) => k + 1);
+    setResyncPending(false);
+    if (hadEdits) {
+      toast.info(
+        t(
+          "quotas.editsDiscardedAfterRefresh",
+          "The quota was reloaded and your unsaved edits were discarded, so they cannot overwrite the current limits.",
+        ),
+      );
+    }
+  }, [staleQuota, resyncPending, quota, dirty, t]);
+  const saveBlocked = staleQuota || resyncPending;
+
   const handleSave = useCallback(() => {
-    if (!form || hasInvalidField) return;
+    if (!form || hasInvalidField || saveBlocked) return;
     const sentAt = editCount.current;
     updateMutation.mutate(
       { tenantId: DEFAULT_TENANT, quota: form },
@@ -114,7 +153,7 @@ export function QuotasPage() {
         onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
-  }, [form, hasInvalidField, updateMutation, t]);
+  }, [form, hasInvalidField, saveBlocked, updateMutation, t]);
 
   const handleReset = useCallback(() => {
     resetMutation.mutate(DEFAULT_TENANT, {
@@ -154,7 +193,7 @@ export function QuotasPage() {
           <button
             data-testid="quotas-save"
             onClick={handleSave}
-            disabled={!dirty || hasInvalidField || updateMutation.isPending}
+            disabled={!dirty || hasInvalidField || saveBlocked || updateMutation.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-sidebar-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-sidebar-accent/90 disabled:opacity-50"
           >
             <Save className="h-4 w-4" />
@@ -168,9 +207,31 @@ export function QuotasPage() {
       ) : (
         <>
           {/* Policy loaded, but the newest read failed — keep the form usable. */}
-          {quotaError && quota && (
-            <RefetchErrorNotice onRetry={() => refetchQuota()} />
+          {staleQuota && (
+            <RefetchErrorNotice
+              onRetry={() => refetchQuota()}
+              message={t(
+                "quotas.refreshFailedSaveBlocked",
+                "Could not refresh the quota, so saving is paused. Retry to load the current limits first.",
+              )}
+            />
           )}
+
+          {/* The form stops following the server while it is dirty, and Save sends the
+              whole form: approving now and saving afterwards would overwrite the
+              approved quota with the limits read before it. */}
+          <PendingSpendChanges
+            kind="TENANT_QUOTA"
+            isAdmin={isAdmin}
+            approveBlockedReason={
+              dirty
+                ? t(
+                    "spendControl.approveBlockedDirty",
+                    "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota.",
+                  )
+                : undefined
+            }
+          />
 
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (
@@ -229,7 +290,7 @@ export function QuotasPage() {
                   />
                 </div>
               ) : form ? (
-                <div className="space-y-4">
+                <div className="space-y-4" key={fieldsResetKey}>
                   <QuotaField
                     icon={<MessageSquare className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxConversationsPerDay", "Max Conversations / Day")}

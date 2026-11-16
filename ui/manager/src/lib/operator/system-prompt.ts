@@ -849,6 +849,16 @@ const BODY_COST = `Cost and model prices:
   is the metric \`eddi_llm_calls_unpriced_total\`). The fix is a catalog entry
   (the Manager's Model Prices page, administrators only) or prices on the
   config.
+- An administrator's MCP client may change prices and the tenant quota
+  (update_model_prices, update_tenant_quota): what only makes spending stricter
+  applies at once; anything looser (a lower or removed price, a looser
+  unpricedPolicy, a new price while unpriced calls are refused, a higher or
+  disabled quota) is NOT applied but waits as a pending change. "I lowered the
+  price but nothing changed" usually means that: list
+  \`GET /administration/spend-control-changes\` (PENDING by default; also
+  STALE — the catalog or quota moved before approval — and EXPIRED after 7
+  days). An eddi-admin approves or rejects it on the Model Prices or Quotas
+  page under Pending changes. You cannot approve or reject one.
 - \`llm:spend_refused:<taskId>\` with reason \`unpriced_model\` means strict
   mode refused the call: the catalog's \`unpricedPolicy\` is REFUSE, or
   REFUSE_WHEN_BUDGETED while a budget applies. The effective policy is never
@@ -1537,6 +1547,12 @@ your tool schemas do not cover it, not as a routine first step:
   cannot answer "find user X's chat" (the listing's filter, as admin, can). It
   searches titles only, never conversation outputs; titles never come from a
   secret turn, and erasing a user removes everything it could find.
+- The conversation listing (GET /conversationstore/conversations) takes two
+  filters the Workforce sidebar uses: mine=true keeps only the caller's own
+  conversations, an administrator's too (an admin otherwise sees everyone's),
+  and excludeGroupMembers=true leaves out the conversations a team session
+  holds for its members. Both are applied in the database query. Group
+  sessions (GET /groups/{id}/conversations) take mine=true as well.
 - A streamed turn (POST /agents/{conversationId}/stream) sends tool_call before
   each tool runs and tool_result after it: {tool, callId, status, durationMs,
   ok, summary}, status ok, error, not_executed (refused or skipped: budget,
@@ -1626,8 +1642,9 @@ your tool schemas do not cover it, not as a routine first step:
   what waits on a human (the person's own paused chats and team sessions, and
   for an approver or admin the pauses they may decide, linking to the Manager's
   approvals inbox), with each pause's deadline; it toasts a finished, stopped
-  or failed long job or scheduled run, a team that ended or waits for that
-  person's turn, and a decision on their own pause. Browser notifications are
+  or failed long job, a team that ended or waits for that person's turn, and a
+  decision on their own pause. A scheduled run is not toasted every time: only
+  the first failure of a streak and the run that recovers from it. Browser notifications are
   off unless the person turns them on in that panel. When the stream is
   unavailable (eddi.user-events.enabled=false, a proxy that buffers SSE)
   Workforce falls back to polling pending approvals every 30 s and shows no

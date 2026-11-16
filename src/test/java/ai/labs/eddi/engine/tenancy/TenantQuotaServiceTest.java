@@ -21,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -804,6 +805,49 @@ class TenantQuotaServiceTest {
     }
 
     // --- Helpers ---
+
+    @Test
+    @DisplayName("a cache fill that read the old quota cannot publish it after a CAS update")
+    void staleFillCannotOutliveConcurrentUpdate() throws Exception {
+        TenantQuota loose = new TenantQuota(TENANT_ID, 100, -1, -1, -1, true);
+        TenantQuota tight = new TenantQuota(TENANT_ID, 1, -1, -1, -1, true);
+        CountDownLatch readDone = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        var pausing = new InMemoryTenantQuotaStore(loose) {
+            private volatile boolean first = true;
+
+            @Override
+            public TenantQuota getQuota(String tenantId) {
+                TenantQuota read = super.getQuota(tenantId);
+                if (first) {
+                    first = false;
+                    readDone.countDown();
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return read;
+            }
+        };
+        var service = new TenantQuotaService(pausing, new SimpleMeterRegistry(), TENANT_ID);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            var fill = pool.submit(() -> service.acquireConversationSlot(TENANT_ID));
+            assertTrue(readDone.await(5, TimeUnit.SECONDS));
+            // The fill holds the loose quota; the tightening lands and invalidates.
+            assertTrue(service.compareAndSetQuota(loose, tight));
+            release.countDown();
+            assertTrue(fill.get(5, TimeUnit.SECONDS).allowed());
+
+            // One slot was used under the loose limit; the tight limit of 1 must now deny.
+            assertFalse(service.acquireConversationSlot(TENANT_ID).allowed());
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
 
     private void enableQuotaWithConversationLimit(int limit) {
         quotaStore.setQuota(new TenantQuota(TENANT_ID, limit, -1, -1, -1, true));

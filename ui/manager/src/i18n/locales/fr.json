@@ -3907,7 +3907,9 @@
     "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
     "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité.",
     "heldByTurns": "{{amount}} réservés par les tours en cours",
-    "costHardCeiling": "Par défaut, l'appel qui dépasse le budget se termine quand même. Pour le refuser, le serveur peut d'abord réserver le coût maximal de chaque appel : définissez eddi.tenant.quota.cost-reservation.enabled=true (propriété de démarrage). Les réservations couvrent les appels aux modèles LLM et les appels d'outils tarifés ; les petits appels annexes (résumés, juges, Dream) sont toujours facturés après coup et peuvent ajouter un peu au-delà."
+    "costHardCeiling": "Par défaut, l'appel qui dépasse le budget se termine quand même. Pour le refuser, le serveur peut d'abord réserver le coût maximal de chaque appel : définissez eddi.tenant.quota.cost-reservation.enabled=true (propriété de démarrage). Les réservations couvrent les appels aux modèles LLM et les appels d'outils tarifés ; les petits appels annexes (résumés, juges, Dream) sont toujours facturés après coup et peuvent ajouter un peu au-delà.",
+    "editsDiscardedAfterRefresh": "Le quota a été rechargé et vos modifications non enregistrées ont été annulées, afin qu'elles n'écrasent pas les limites actuelles.",
+    "refreshFailedSaveBlocked": "Impossible d'actualiser le quota, l'enregistrement est donc suspendu. Réessayez pour charger d'abord les limites actuelles."
   },
   "snippetEditor": {
     "category": "Catégorie",
@@ -5957,5 +5959,21 @@
     "runSkipped": "Consolidation ignorée : {{reason}}",
     "timeZone": "Fuseau horaire",
     "loadError": "Impossible de charger cette section."
+  },
+  "spendControl": {
+    "title": "Modifications en attente",
+    "description": "Proposées via MCP et non appliquées : chacune assouplirait le contrôle des dépenses. L'approbation l'applique en votre nom.",
+    "proposedBy": "Proposée par {{who}} le {{when}}",
+    "loosening": "Assouplit le contrôle des dépenses",
+    "allChanges": "Toutes les modifications",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "approveTitle": "Approuver cette modification ?",
+    "rejectTitle": "Rejeter cette modification ?",
+    "approveDesc": "Elle est appliquée maintenant, avec vous comme auteur, et assouplit le contrôle des dépenses : {{loosening}}",
+    "rejectDesc": "Rien n'est appliqué. L'auteur de la proposition peut la soumettre à nouveau.",
+    "approved": "Modification approuvée et appliquée",
+    "rejected": "Modification rejetée ; rien n'a été appliqué",
+    "approveBlockedDirty": "Enregistrez d'abord vos modifications du quota, ou rechargez la page pour les abandonner : les enregistrer après une approbation écraserait le quota approuvé."
   }
 }
