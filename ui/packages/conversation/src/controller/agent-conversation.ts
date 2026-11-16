@@ -274,6 +274,18 @@ function newTurn(stateBeforeSend: ConversationState | null, userMessageId: strin
 }
 
 /**
+ * A stream that closed, without an error, after part of the reply but before
+ * its `done`. The turn is handled as a dropped stream; a host's `presentFailure`
+ * can tell this case by the failure's `error`.
+ */
+export class StreamEndedError extends Error {
+  constructor() {
+    super("The stream closed before the turn finished");
+    this.name = "StreamEndedError";
+  }
+}
+
+/**
  * What identifies the latest stored step in a read: the step's timestamp and
  * its entries' keys and timestamps. A current-step read carries exactly that
  * step, so two reads with the same mark saw the same stored step. Null when the
@@ -1168,7 +1180,7 @@ export class AgentConversation {
     // and reported if it never settles — rather than the part on screen
     // passing for the whole answer.
     if (!streamDone && !stopped() && turn.tokenCount > 0 && !turn.failure && this.options.reconnectDelaysMs?.length) {
-      throw new TypeError("The stream closed before the turn finished");
+      throw new StreamEndedError();
     }
     if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
 

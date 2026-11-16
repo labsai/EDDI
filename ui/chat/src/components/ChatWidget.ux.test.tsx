@@ -118,6 +118,12 @@ describe("failed sends give the draft back", () => {
   });
 
   it("keeps partial text, says it is reconnecting, and shows the reply the turn settled with", async () => {
+    /** A current-step read as the backend answers it: the latest STORED step. */
+    const stored = (stamp: string, text: string) => ({
+      conversationState: "READY",
+      conversationSteps: [{ timestamp: stamp, conversationStep: [{ key: "output:text:0", value: text, timestamp: stamp }] }],
+      conversationOutputs: [{ output: [{ type: "text", text }] }],
+    });
     const backend = install({
       send: () => {
         const enc = new TextEncoder();
@@ -126,7 +132,12 @@ describe("failed sends give the draft back", () => {
             start(c) {
               c.enqueue(enc.encode("event: token\ndata: half an answ\n\n"));
               // Erroring at once would discard the queued token; drop the link after it.
-              setTimeout(() => c.error(new TypeError("network error")), 20);
+              setTimeout(() => {
+                // The turn runs on: the server stores it while the client is
+                // offline. Until then a read shows the step before it.
+                backend.snapshot = stored("t2", "half an answer, settled on the server");
+                c.error(new TypeError("network error"));
+              }, 20);
             },
           }),
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
@@ -137,11 +148,7 @@ describe("failed sends give the draft back", () => {
     await screen.findByText("Hello there");
     const readsBefore = backend.calls.filter((c) => c.method === "GET").length;
 
-    // The turn runs on: the server settles it while the client is offline.
-    backend.snapshot = {
-      conversationState: "READY",
-      conversationOutputs: [{ output: [{ type: "text", text: "half an answer, settled on the server" }] }],
-    };
+    backend.snapshot = stored("t1", "Hello there");
     await typeAndSend("tell me more");
 
     expect(await screen.findByTestId("reconnecting-indicator")).toHaveTextContent(/Reconnecting/);

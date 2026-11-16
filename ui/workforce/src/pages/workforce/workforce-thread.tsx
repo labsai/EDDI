@@ -48,6 +48,7 @@ import {
   AgentConversation,
   RECONNECT_DELAYS_MS,
   STOP_VERIFY_DELAYS_MS,
+  StreamEndedError,
   useAgentConversation,
   type ConversationMessage,
 } from "@eddi/conversation";
@@ -767,7 +768,12 @@ function createThreadConversation(
       // A known stream code has a sentence in the reader's language; the
       // backend's own text is the fallback rather than something discarded.
       const message =
-        failure.error !== undefined
+        failure.error instanceof StreamEndedError
+          ? hooks.t(
+              "Workforce.thread.streamEnded",
+              "The connection ended before the reply finished. What arrived is above — send again to retry.",
+            )
+          : failure.error !== undefined
           ? getErrorMessage(failure.error)
           : (translateStreamError(failure.code ?? undefined, hooks.t) ?? failure.message);
       hooks.failed(message, false, failure.partial ? null : ctx.userMessageId);
