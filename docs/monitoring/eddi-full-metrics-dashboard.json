@@ -3400,7 +3400,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Aggregate `eddi_tool_cache_hits_total` / `_misses_total`.",
+          "description": "Aggregate `eddi_tool_cache_hits_total` / `_misses_total`, and `eddi_tool_cache_skipped_oversized_total`: results not cached because they exceed `eddi.tools.cache.max-entry-chars`.",
           "gridPos": {
             "h": 6,
             "w": 10,
@@ -3429,6 +3429,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "misses"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(eddi_tool_cache_skipped_oversized_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "skipped (oversized)"
             }
           ],
           "fieldConfig": {

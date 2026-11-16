@@ -74,6 +74,18 @@ not asked for again — and stops after `eddi.backup.sync.max-requests` requests
 `10000`) with `502`, so a source naming thousands of distinct documents cannot keep a
 request worker fetching them one by one.
 
+**And their total.** Every document a sync reads is kept until it ends, so the
+per-response cap times the request budget was the only bound on the heap one sync took.
+`eddi.backup.sync.max-total-response-bytes` (default `268435456`, 256 MiB) caps what one
+sync preview or sync reads from the source, all responses together; past it the sync
+fails with `502` naming the property.
+
+**And how many run at once.** A node runs at most `eddi.backup.max-concurrent-operations`
+(default `4`) imports, import previews, syncs and sync previews (listing a source's agents
+included) at the same time. One more is refused at once with `429 Too Many Requests`, a
+`Retry-After` header and a message naming the property; retry when one has finished. The
+limit is per node.
+
 ## Workflow
 
 ### 1. List Remote Agents

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.IWeighedValue;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -15,6 +16,7 @@ import jakarta.enterprise.context.NormalScope;
 import jakarta.enterprise.inject.Vetoed;
 import jakarta.inject.Inject;
 import jakarta.inject.Scope;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.lang.annotation.Annotation;
@@ -233,7 +235,7 @@ public class ToolCacheService {
     /**
      * Cached result wrapper with metadata
      */
-    private static class CachedResult {
+    private static class CachedResult implements IWeighedValue {
         final String result;
         final long cachedAt;
 
@@ -241,6 +243,29 @@ public class ToolCacheService {
             this.result = result;
             this.cachedAt = System.currentTimeMillis();
         }
+
+        @Override
+        public int weight() {
+            return result == null ? 0 : result.length();
+        }
+    }
+
+    /**
+     * Results longer than this, in characters, are not cached at all:
+     * {@value #MAX_ENTRY_CHARS_PROPERTY}. The cache is bounded by the characters it
+     * holds ({@code eddi.tools.cache.max-total-chars}, see {@code CacheFactory}),
+     * and one result as large as a web-scraper page would otherwise push out
+     * hundreds of small ones. Not caching a result only costs the next identical
+     * call its run.
+     */
+    static final String MAX_ENTRY_CHARS_PROPERTY = "eddi.tools.cache.max-entry-chars";
+    static final int DEFAULT_MAX_ENTRY_CHARS = 256 * 1024;
+
+    @ConfigProperty(name = MAX_ENTRY_CHARS_PROPERTY, defaultValue = "262144")
+    int maxEntryChars = DEFAULT_MAX_ENTRY_CHARS;
+
+    private int effectiveMaxEntryChars() {
+        return maxEntryChars > 0 ? maxEntryChars : DEFAULT_MAX_ENTRY_CHARS;
     }
 
     /**
@@ -444,6 +469,14 @@ public class ToolCacheService {
     public void put(String scopeTag, String toolName, String arguments, String result, long ttl, TimeUnit unit) {
         if (scopeTag == null) {
             logBypass(toolName);
+            return;
+        }
+        if (result != null && result.length() > effectiveMaxEntryChars()) {
+            meterRegistry.counter("eddi.tool.cache.skipped.oversized", "tool", toolName).increment();
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Not caching the result of %s: %d characters, over %s (%d)", sanitize(toolName), result.length(),
+                        MAX_ENTRY_CHARS_PROPERTY, effectiveMaxEntryChars());
+            }
             return;
         }
 

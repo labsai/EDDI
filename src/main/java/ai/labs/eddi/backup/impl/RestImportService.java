@@ -129,6 +129,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  */
 @ApplicationScoped
+@BackupConcurrencyLimited
 public class RestImportService extends AbstractBackupService implements IRestImportService {
     private final RagSourceIngestionService ragSourceIngestionService;
 

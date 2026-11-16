@@ -304,7 +304,7 @@ class CacheFactoryTest {
         @Test
         @DisplayName("caches that are not rate-sized keep their configured capacity")
         void nonRateSizedCachesKeepConfiguredSize() {
-            assertEquals(10_000L, evictionMaximumOf(factory.getCache("tool-results", Duration.ofMinutes(5))));
+            assertEquals(10_000L, evictionMaximumOf(factory.getCache("userConversations", Duration.ofMinutes(5))));
             assertEquals(1_000L, evictionMaximumOf(factory.getCache("slack-event-dedup", Duration.ofHours(24))),
                     "an unlisted cache must stay on the 1_000 default however long its TTL is");
         }
@@ -508,5 +508,55 @@ class CacheFactoryTest {
 
         assertNull(cache.get("greeting"));
         assertEquals("b", cache.get("support"));
+    }
+
+    @Nested
+    @DisplayName("tool results — bounded by the characters they hold")
+    class WeighedToolResults {
+
+        private record Result(String text) implements IWeighedValue {
+            @Override
+            public int weight() {
+                return text.length();
+            }
+        }
+
+        @Test
+        @DisplayName("the tool-result cache is built with the character bound, not an entry count")
+        void builtWithTheCharacterBound() {
+            assertEquals(CacheFactory.DEFAULT_TOOL_RESULTS_MAX_CHARS, evictionMaximumOf(factory.getCache("tool-results")));
+            assertTrue(((CacheImpl<?, ?>) factory.getCache("tool-results")).backingCache().policy().eviction().orElseThrow()
+                    .isWeighted());
+        }
+
+        @Test
+        @DisplayName("a few large results cannot pin more than the bound: older ones are evicted")
+        void largeResultsAreEvictedPastTheBound() {
+            factory.toolResultsMaxChars = 10_000;
+            ICache<String, Result> cache = factory.getCache("tool-results");
+
+            for (int i = 0; i < 20; i++) {
+                cache.put("key-" + i, new Result("x".repeat(2_000)));
+            }
+
+            int kept = cache.sizeExact();
+            assertTrue(kept <= 5, "20 results of 2,000 characters under a 10,000-character bound, kept " + kept);
+        }
+
+        @Test
+        @DisplayName("small results are charged a floor, so the entry count stays bounded as before")
+        void smallResultsKeepTheEntryBound() {
+            int floor = (int) (CacheFactory.DEFAULT_TOOL_RESULTS_MAX_CHARS / 10_000);
+            assertEquals(floor, CacheFactory.weightOf("k", new Result("4"), floor));
+            assertEquals(floor + 1, CacheFactory.weightOf("k", new Result("x".repeat(floor)), floor));
+            assertEquals(floor, CacheFactory.weightOf("k", "not weighed", floor));
+        }
+
+        @Test
+        @DisplayName("a weighed cache name does not change the count bound of the others")
+        void otherCachesStayCountBounded() {
+            assertEquals(0, factory.maximumWeightFor("userConversations"));
+            assertEquals(CacheFactory.DEFAULT_TOOL_RESULTS_MAX_CHARS, factory.maximumWeightFor("tool-results"));
+        }
     }
 }
