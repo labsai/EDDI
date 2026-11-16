@@ -1,18 +1,21 @@
 import { Toaster } from "sonner";
-import { useTranslation } from "react-i18next";
-import { isRtlLanguage } from "@/i18n/config";
-import { useTheme } from "./theme-provider";
+import { useTheme } from "../theme/theme-context";
+
+export interface ThemedToasterProps {
+  /** Whether the page reads right to left. The app knows its language; this package does not. */
+  rtl?: boolean;
+}
 
 /**
  * Toasts follow the resolved theme — sonner defaults to light and ignores `.dark`.
  * They also sit in the reading direction's trailing corner: sonner takes a
  * physical `position`, so `bottom-right` stayed on the right in Arabic, where
  * it covers the start of the layout instead of its end.
+ *
+ * Moved from the Manager in phase 3a. `toast()` itself is sonner's.
  */
-export function ThemedToaster() {
+export function ThemedToaster({ rtl = false }: ThemedToasterProps) {
   const { resolvedTheme } = useTheme();
-  const { i18n } = useTranslation();
-  const rtl = isRtlLanguage(i18n.resolvedLanguage ?? i18n.language ?? "en");
   return (
     <Toaster
       position={rtl ? "bottom-left" : "bottom-right"}

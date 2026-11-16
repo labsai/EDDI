@@ -1,7 +1,8 @@
 /* ──────────────────────────────────────────────
    Package boundaries (frontend unification plan §3.1)
    Apps may import packages; packages never import apps; @eddi/core imports
-   neither React nor @eddi/ui; and no import cycle, inside a package or across
+   neither React nor @eddi/ui; @eddi/ui makes no API call (no @eddi/core, no
+   fetch, no window.__EDDI_*__); and no import cycle, inside a package or across
    packages. ESLint (`sharedPackage` in ui/eslint.config.base.js) catches the
    first three at edit time; only this test sees a cycle.
 
@@ -93,6 +94,9 @@ function findCycles(graph: Map<string, string[]>): string[][] {
   return cycles;
 }
 
+/** A network call from source: fetch(), sendBeacon(), an XHR, EventSource or WebSocket. */
+const API_CALL = /\b(?:fetch|sendBeacon)\s*\(|\bnew\s+(?:XMLHttpRequest|EventSource|WebSocket)\b/;
+
 const { modules, entries } = loadPackages();
 const known = new Set(modules.map((m) => m.file));
 
@@ -119,6 +123,30 @@ describe("package boundaries", () => {
           .filter((spec) => /^(react|react-dom)(\/|$)/.test(spec) || /^@eddi\/(ui|conversation)(\/|$)/.test(spec))
           .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
       );
+    expect(offenders).toEqual([]);
+  });
+
+  it("finds @eddi/ui", () => {
+    expect([...entries.keys()]).toContain("@eddi/ui");
+  });
+
+  it("keeps @eddi/ui free of API calls and server globals", () => {
+    // @eddi/ui sits below @eddi/core's callers and @eddi/conversation: what
+    // the server says reaches it as props or options from the app.
+    const ui = modules.filter((m) => m.pkg === "@eddi/ui");
+    const offenders = ui.flatMap((m) => {
+      const found = m.imports
+        .filter((spec) => /^@eddi\/(core|conversation)(\/|$)/.test(spec))
+        .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`);
+      const source = readFileSync(m.file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      const call = API_CALL.exec(source);
+      if (call) found.push(`${relative(PACKAGES_ROOT, m.file)}: ${call[0]}`);
+      if (/__EDDI_\w*__/.test(source)) found.push(`${relative(PACKAGES_ROOT, m.file)}: window.__EDDI_*__`);
+      return found;
+    });
+    expect(ui.length).toBeGreaterThan(0);
     expect(offenders).toEqual([]);
   });
 
@@ -155,6 +183,9 @@ describe("package boundaries", () => {
 
     expect(findCycles(new Map([[a, [b]], [b, [a]], [c, [a]]]))).toEqual([[a, b, a]]);
     expect(findCycles(new Map([[a, [b]], [b, [c]], [c, []]]))).toEqual([]);
+    expect(API_CALL.test("const r = await fetch(url);")).toBe(true);
+    expect(API_CALL.test("new EventSource(u)")).toBe(true);
+    expect(API_CALL.test("prefetch the font")).toBe(false);
     expect(specifiers('import type { X } from "./b";\nexport * from "./c";\nconst m = import("./d");')).toEqual([
       "./b",
       "./c",

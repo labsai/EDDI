@@ -6,7 +6,7 @@ import { TopBar } from "@/components/layout/top-bar";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 
 /** Render TopBar with custom auth and route */
 function renderTopBarWithAuth(
