@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Loader2, MessageSquare, Search, X } from "lucide-react";
@@ -29,6 +29,14 @@ export function ConversationSearch({ children }: { children: ReactNode }) {
   const hintId = useId();
   const searching = search.query !== "";
   const current = Math.min(active, Math.max(sessions.length - 1, 0));
+  // Only an empty page ends the list: a page whose matches were all left out
+  // here (a team session's member conversations) says nothing about the next
+  // one. Read on by itself rather than call such a page "no match".
+  const pending = search.status === "done" && sessions.length === 0 && search.hasMore;
+  const { loadMore, loadingMore, moreFailed } = search;
+  useEffect(() => {
+    if (pending && !loadingMore && !moreFailed) loadMore();
+  }, [pending, loadingMore, moreFailed, loadMore]);
 
   const formatDate = (ms: number) =>
     new Intl.DateTimeFormat(i18n.language, { month: "short", day: "numeric" }).format(new Date(ms));
@@ -60,7 +68,9 @@ export function ConversationSearch({ children }: { children: ReactNode }) {
   const announcement =
     search.status === "done"
       ? sessions.length === 0
-        ? t("Workforce.search.empty", "No conversation titles match.")
+        ? search.hasMore
+          ? ""
+          : t("Workforce.search.empty", "No conversation titles match.")
         : t("Workforce.search.found", "Conversations found: {{n}}", { n: sessions.length })
       : search.status === "error"
         ? t("Workforce.search.failed", "The search failed.")
@@ -122,7 +132,7 @@ export function ConversationSearch({ children }: { children: ReactNode }) {
         children
       ) : (
         <section aria-label={t("Workforce.search.results", "Search results")} data-testid="conversation-search-results">
-          {search.status === "loading" ? (
+          {search.status === "loading" || (pending && !moreFailed) ? (
             <p className="flex items-center gap-1.5 ps-2 pe-2 py-2 text-xs text-muted-foreground" data-testid="conversation-search-loading">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
               {t("Workforce.search.loading", "Searching…")}

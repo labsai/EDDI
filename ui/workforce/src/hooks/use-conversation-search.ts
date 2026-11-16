@@ -17,7 +17,8 @@ import { chatSession, memberConversationIds, type WorkforceSession } from "@/lib
  *
  * Debounced, and every new text aborts the request still out for the old one,
  * so a slow answer to "rom" can never land over the answer to "rome". Paged
- * with "more": a full page may have a next one; a short page ends the list.
+ * with "more": any page that holds a match may have a next one, and only an
+ * empty page ends the list (see `hasMore`).
  */
 
 /** How long typing must pause before a request goes out. */

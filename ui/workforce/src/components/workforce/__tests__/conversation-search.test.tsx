@@ -106,7 +106,35 @@ describe("ConversationSearch", () => {
     expect(await screen.findByTestId("conversation-search-empty")).toBeInTheDocument();
   });
 
-  it("loads more while pages come back full", async () => {
+  it("reads on past a page whose matches were all left out, instead of saying none match", async () => {
+    const pages: number[] = [];
+    server.use(
+      http.get("*/conversationstore/conversations/search", ({ request }) => {
+        const index = Number(new URL(request.url).searchParams.get("index"));
+        pages.push(index);
+        const conv = (id: string, agentId: string | undefined) => ({
+          resource: `eddi://ai.labs.conversation/conversationstore/conversations/${id}`,
+          createdOn: 1,
+          lastModifiedOn: 1,
+          agentId,
+          conversationState: "READY",
+          title: `Trip ${id}`,
+        });
+        // Page 0: a match the sidebar leaves out (no agent); page 1: one it shows; then the end.
+        const page = index === 0 ? [conv("hidden", undefined)] : index === 1 ? [conv("shown", "agent1")] : [];
+        return HttpResponse.json(page);
+      }),
+    );
+    renderList();
+    await screen.findByTestId("session-group-pinned");
+    fireEvent.change(input(), { target: { value: "trip" } });
+    expect(await screen.findByTestId("conversation-search-result-shown")).toBeInTheDocument();
+    expect(pages.slice(0, 2)).toEqual([0, 1]);
+    expect(screen.queryByTestId("conversation-search-empty")).toBeNull();
+    expect(screen.getByTestId("conversation-search-status")).not.toHaveTextContent("No conversation titles match.");
+  });
+
+  it("loads more until a page comes back empty", async () => {
     const pages: number[] = [];
     const conv = (n: number) => ({
       resource: `eddi://ai.labs.conversation/conversationstore/conversations/s${n}`,
@@ -122,8 +150,9 @@ describe("ConversationSearch", () => {
         const index = Number(url.searchParams.get("index"));
         const limit = Number(url.searchParams.get("limit"));
         pages.push(index);
-        // Two full pages, then a short one.
-        const count = index < 2 ? limit : 3;
+        // Two full pages, a short one (not the end: the server drops rows after
+        // paging), then an empty one.
+        const count = index < 2 ? limit : index === 2 ? 3 : 0;
         return HttpResponse.json(Array.from({ length: count }, (_, i) => conv(index * limit + i)));
       }),
     );
@@ -135,8 +164,9 @@ describe("ConversationSearch", () => {
     await screen.findByTestId("conversation-search-result-s20");
     fireEvent.click(screen.getByTestId("conversation-search-more"));
     await screen.findByTestId("conversation-search-result-s42");
-    expect(screen.queryByTestId("conversation-search-more")).toBeNull();
-    expect(pages).toEqual([0, 1, 2]);
+    fireEvent.click(screen.getByTestId("conversation-search-more"));
+    await waitFor(() => expect(screen.queryByTestId("conversation-search-more")).toBeNull());
+    expect(pages).toEqual([0, 1, 2, 3]);
     expect(screen.getAllByRole("option")).toHaveLength(43);
   });
 });

@@ -133,8 +133,8 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
 - **Search my conversations (T1.3).** `hooks/use-conversation-search.ts` is the one request
   discipline: normalized text (`normalizeSearchQuery`, at most
   `MAX_CONVERSATION_SEARCH_LENGTH`), a 300 ms debounce, an `AbortController` per request (a
-  new text aborts the old one, and a late answer is dropped), More while pages come back
-  full. `components/workforce/conversation-search.tsx` puts it in the sidebar (inside the
+  new text aborts the old one, and a late answer is dropped), More until a page comes back empty (a short page
+  is not the end). `components/workforce/conversation-search.tsx` puts it in the sidebar (inside the
   lazy `SessionList`): a combobox whose results replace the date list while it holds text,
   a "titles only" line tied to it with `aria-describedby`, and a polite status that says the
   count once a search settles. The quick switcher adds the title matches it has not shown.

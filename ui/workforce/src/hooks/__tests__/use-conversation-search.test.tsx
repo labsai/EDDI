@@ -139,7 +139,7 @@ describe("useConversationSearch", () => {
     expect(search).toHaveBeenCalledTimes(1);
   });
 
-  it("pages: a full page offers more, the next page is appended without duplicates, a short page ends it", async () => {
+  it("pages: a full page offers more, the next page is appended without duplicates, only an empty page ends it", async () => {
     const { result } = setup("trip", 2);
     await settleDebounce();
     await answer(calls[0]!, [descriptor("c1", "Trip 1"), descriptor("c2", "Trip 2")]);
