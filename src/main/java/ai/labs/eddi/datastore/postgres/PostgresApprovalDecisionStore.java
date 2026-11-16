@@ -208,16 +208,16 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public List<Pending> pendingCheck(int limit) {
         ensureSchema();
-        String sql = "SELECT " + COLUMNS + ", settle_version FROM approval_decisions WHERE pending_check LIMIT ?";
+        String sql = "SELECT " + COLUMNS + ", COALESCE(settle_version, 0) AS settle_version FROM approval_decisions WHERE pending_check LIMIT ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, Math.max(0, limit));
             List<Pending> rows = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     ApprovalDecision stored = OversightJson.read(rs.getString("data"), ApprovalDecision.class);
+                    // COALESCE in the query: a wasNull() here would test the last column read.
                     long version = rs.getLong("settle_version");
-                    rows.add(new Pending(stored.withPersonalFields(rs.getString("user_id"), rs.getString("decided_by")),
-                            rs.wasNull() ? INITIAL_VERSION : version));
+                    rows.add(new Pending(stored.withPersonalFields(rs.getString("user_id"), rs.getString("decided_by")), version));
                 }
             }
             return rows;

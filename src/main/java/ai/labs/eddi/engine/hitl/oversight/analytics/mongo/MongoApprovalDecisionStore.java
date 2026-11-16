@@ -151,7 +151,13 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending) {
         Bson mark = pending ? set(PENDING_CHECK, true) : unset(PENDING_CHECK);
-        return collection.updateOne(and(eq(ID, id), eq(SETTLE_VERSION, expectedVersion)),
+        // A document stored before the version existed has no field; pendingCheck reads
+        // it
+        // as the initial version, so the initial version must match it too.
+        Bson version = expectedVersion == INITIAL_VERSION
+                ? or(eq(SETTLE_VERSION, INITIAL_VERSION), exists(SETTLE_VERSION, false))
+                : eq(SETTLE_VERSION, expectedVersion);
+        return collection.updateOne(and(eq(ID, id), version),
                 combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), mark, inc(SETTLE_VERSION, 1L))).getMatchedCount() > 0;
     }
 

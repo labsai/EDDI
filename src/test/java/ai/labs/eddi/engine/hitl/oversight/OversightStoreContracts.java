@@ -172,6 +172,29 @@ public final class OversightStoreContracts {
         }
 
         /**
+         * A pending row with no decider (a null last column) and a version past the
+         * initial one reads back with that version, so it can be settled.
+         */
+        @Test
+        default void pendingRowWithNullDeciderKeepsItsVersion_andSettles() {
+            ApprovalDecision masked = decision("APPROVED", NOW).withPersonalFields(null, null);
+            decisions().insertPendingIfAbsent(masked);
+            assertTrue(decisions().updateIdentities(masked.id(), 0, "user-1", null, true));
+            assertTrue(decisions().updateIdentities(masked.id(), 1, null, null, true));
+
+            IApprovalDecisionStore.Pending pending = decisions().pendingCheck(10).getFirst();
+            assertNull(pending.row().decidedBy());
+            assertEquals(2, pending.version(), "the version, not whether decided_by was null");
+
+            // A settler interrupted after reading version 1 resumes: its write loses.
+            assertFalse(decisions().updateIdentities(masked.id(), 1, "user-1", null, false));
+            assertEquals(2, decisions().pendingCheck(10).getFirst().version());
+            assertTrue(decisions().updateIdentities(masked.id(), pending.version(), null, null, false));
+            assertTrue(decisions().pendingCheck(10).isEmpty());
+            assertEquals(1, decisions().count(new DecisionFilter(null, null, null, null, null, null, null, null, null)));
+        }
+
+        /**
          * Two settlers and an erasure that returns the row to the very values a stale
          * settler expects (owner and decider are the same erased person): the version,
          * not the values, decides, so neither stale write lands.
