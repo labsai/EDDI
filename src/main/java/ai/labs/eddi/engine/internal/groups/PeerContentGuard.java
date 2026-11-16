@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -177,13 +178,27 @@ final class PeerContentGuard {
     /**
      * {@code name} on one line: line breaks and other control characters become
      * spaces, fences are broken, and it is cut at {@link #MAX_SPEAKER_CHARS}.
+     * <p>
+     * A name ending in {@link AgentGroupStore#NOT_AN_AGENT_SUFFIX} — how
+     * {@code GroupSigningGuard} marks an entry no agent wrote for a member that
+     * requires peer verification — keeps that suffix: the cut and the strip apply
+     * to the part before it. Otherwise a long or blank-padded name would lose the
+     * mark and read like a verified agent's.
      */
     static String speaker(String name) {
         if (name == null) {
             return null;
         }
-        StringBuilder sb = new StringBuilder(Math.min(name.length(), MAX_SPEAKER_CHARS));
-        for (int i = 0; i < name.length() && sb.length() < MAX_SPEAKER_CHARS; i++) {
+        String suffix = AgentGroupStore.NOT_AN_AGENT_SUFFIX;
+        if (name.endsWith(suffix)) {
+            return (oneLine(name.substring(0, name.length() - suffix.length()), MAX_SPEAKER_CHARS - suffix.length()) + suffix).strip();
+        }
+        return oneLine(name, MAX_SPEAKER_CHARS);
+    }
+
+    private static String oneLine(String name, int maxChars) {
+        StringBuilder sb = new StringBuilder(Math.min(name.length(), maxChars));
+        for (int i = 0; i < name.length() && sb.length() < maxChars; i++) {
             char c = name.charAt(i);
             sb.append(Character.isISOControl(c) || c == ' ' || c == ' ' ? ' ' : c);
         }

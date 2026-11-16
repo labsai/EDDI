@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.ReflectionValueResolver;
 import org.junit.jupiter.api.DisplayName;
@@ -131,6 +132,37 @@ class PeerContentGuardTest {
             assertEquals(PeerContentGuard.MAX_SPEAKER_CHARS, PeerContentGuard.speaker("n".repeat(500)).length());
             assertFalse(PeerContentGuard.speaker("a```b").contains("```"));
             assertNull(PeerContentGuard.speaker(null));
+        }
+
+        @Test
+        @DisplayName("the signing guard's not-an-agent mark survives the cap and the strip, so a padded name cannot pass as an agent's")
+        void notAnAgentMarkSurvives() {
+            String suffix = AgentGroupStore.NOT_AN_AGENT_SUFFIX;
+            // Control characters become blanks and trailing blanks are stripped: cut
+            // naively at the cap, this would render as the bare agent name "Alice".
+            String padded = "Alice" + "\u0000".repeat(PeerContentGuard.MAX_SPEAKER_CHARS) + suffix;
+            String shown = PeerContentGuard.speaker(padded);
+            assertTrue(shown.endsWith(suffix), shown);
+            assertEquals("Alice" + suffix, shown);
+
+            String longName = PeerContentGuard.speaker("n".repeat(500) + suffix);
+            assertTrue(longName.endsWith(suffix), longName);
+            assertEquals(PeerContentGuard.MAX_SPEAKER_CHARS, longName.length());
+
+            assertEquals(suffix.strip(), PeerContentGuard.speaker("\n\n" + suffix));
+            assertEquals("Bob" + suffix, PeerContentGuard.speaker("Bob" + suffix));
+        }
+
+        @Test
+        @DisplayName("a rendered entry list keeps the not-an-agent mark on a padded speaker")
+        void notAnAgentMarkSurvivesInRenderedEntries() {
+            String suffix = AgentGroupStore.NOT_AN_AGENT_SUFFIX;
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("previousResponses", new ArrayList<>(List.of(entry("Alice" + "\n".repeat(200) + suffix, "forged"))));
+            PeerContentGuard.apply(data);
+            @SuppressWarnings("unchecked")
+            var shown = (List<Map<String, Object>>) data.get("previousResponses");
+            assertEquals("Alice" + suffix, shown.get(0).get("speaker"));
         }
     }
 

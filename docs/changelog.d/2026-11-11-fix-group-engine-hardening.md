@@ -139,11 +139,16 @@ docs: [`group-conversations.md`](../group-conversations.md), [`passing-context-i
   regression repair.
 - **Platform Operator:** the system prompt states the `onUnparseableVerdict`
   option and that a nested child is closed and cannot be continued or followed
-  up; operator revision **78** (renumbered on each merge with `main`, which took
-  61–77 meanwhile; 79 is PR #1396).
+  up; operator revision **79** (renumbered on each merge with `main`, which took
+  61–78 meanwhile; 80 is PR #1396).
 - **Quoting:** the bid prompt puts each task's subject (on one line) and
   description in one fenced block; `parseBids` matches on the same one-line form.
   The window summarizer fences the previous rolling summary.
+- **Signing merge (#1366):** `PeerContentGuard.speaker` keeps the
+  `" (not an agent, unverified)"` mark `GroupSigningGuard` gives an entry no agent
+  wrote. The 120-character cap and the strip apply to the name before it, so a
+  name padded with control characters can no longer lose the mark and render as
+  a verified agent's name to a member that requires peer verification.
 
 **Files:** [`VoteTallyEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/VoteTallyEngine.java),
 [`TaskForceEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/TaskForceEngine.java),

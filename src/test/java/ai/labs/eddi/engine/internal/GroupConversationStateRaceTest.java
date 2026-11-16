@@ -95,7 +95,7 @@ class GroupConversationStateRaceTest {
         var templatingEngine = mock(ITemplatingEngine.class);
         var jsonSerialization = mock(IJsonSerialization.class);
         service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory,
-                templatingEngine, jsonSerialization, new SimpleMeterRegistry(), null, mock(IAgentStore.class), null, null,
+                templatingEngine, jsonSerialization, new SimpleMeterRegistry(), null, mock(IAgentStore.class), null,
                 null, new CallerIdentityContext(null, null), "default", 3);
 
         lenient().when(jsonSerialization.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
