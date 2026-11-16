@@ -8,11 +8,16 @@ import com.github.tjake.jlama.safetensors.DType;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.jlama.JlamaChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
@@ -60,10 +65,19 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
                 KEY_QUANTIZE_AT_RUNTIME, KEY_WORKING_DIRECTORY, KEY_WORKING_QUANTIZED_TYPE);
     }
 
+    /**
+     * The operator's base directory ({@value JlamaModelDirectory#PROPERTY}); when
+     * set, every per-agent path is confined to it. Field-injected so a directly
+     * constructed builder keeps the unconfined behaviour.
+     */
+    @Inject
+    @ConfigProperty(name = JlamaModelDirectory.PROPERTY)
+    Optional<String> modelDir = Optional.empty();
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         JlamaRuntimeSupport.warnOnceIfDegraded();
-        return applyTo(JlamaChatModel.builder(), parameters).build();
+        return applyTo(JlamaChatModel.builder(), parameters, JlamaModelDirectory.base(modelDir.orElse(null)).orElse(null)).build();
     }
 
     /**
@@ -88,6 +102,34 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
      */
     static JlamaChatModel.JlamaChatModelBuilder applyTo(JlamaChatModel.JlamaChatModelBuilder builder,
                                                         Map<String, String> parameters) {
+        return applyTo(builder, parameters, null);
+    }
+
+    /**
+     * As {@link #applyTo(JlamaChatModel.JlamaChatModelBuilder, Map)}, with the
+     * paths confined to {@code baseDir} when it is not null: a
+     * {@code modelCachePath} outside it (or none) becomes the base itself, a
+     * {@code workingDirectory} outside it is dropped. Independent of who wrote the
+     * config — the save-time rule only decides who may write one.
+     */
+    static JlamaChatModel.JlamaChatModelBuilder applyTo(JlamaChatModel.JlamaChatModelBuilder builder,
+                                                        Map<String, String> parameters, Path baseDir) {
+        if (baseDir != null) {
+            applyTo(builder, withoutPaths(parameters), null);
+            Optional<Path> cache = JlamaModelDirectory.confine(parameters.get(KEY_MODEL_CACHE_PATH), baseDir);
+            if (cache.isEmpty() && !isNullOrEmpty(parameters.get(KEY_MODEL_CACHE_PATH))) {
+                LOGGER.warnv("Jlama ''{0}'' lies outside {1}; using the base directory instead.", KEY_MODEL_CACHE_PATH,
+                        JlamaModelDirectory.PROPERTY);
+            }
+            builder.modelCachePath(cache.orElse(baseDir));
+            Optional<Path> working = JlamaModelDirectory.confine(parameters.get(KEY_WORKING_DIRECTORY), baseDir);
+            if (working.isPresent()) {
+                builder.workingDirectory(working.get());
+            } else if (!isNullOrEmpty(parameters.get(KEY_WORKING_DIRECTORY))) {
+                LOGGER.warnv("Jlama ''{0}'' lies outside {1}; ignored.", KEY_WORKING_DIRECTORY, JlamaModelDirectory.PROPERTY);
+            }
+            return builder;
+        }
 
         if (!isNullOrEmpty(parameters.get(KEY_MODEL_NAME))) {
             builder.modelName(parameters.get(KEY_MODEL_NAME));
@@ -136,6 +178,13 @@ public class JlamaLanguageModelBuilder implements ILanguageModelBuilder {
         applyWorkingQuantizedType(builder, parameters);
 
         return builder;
+    }
+
+    private static Map<String, String> withoutPaths(Map<String, String> parameters) {
+        Map<String, String> rest = new HashMap<>(parameters);
+        rest.remove(KEY_MODEL_CACHE_PATH);
+        rest.remove(KEY_WORKING_DIRECTORY);
+        return rest;
     }
 
     /**

@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -193,6 +194,9 @@ public class RestAgentStore implements IRestAgentStore {
         agentConfiguration.setIdentity(stored != null ? stored.getIdentity() : null);
         validateSecurityFlags(id, agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
+        // Resolved once: the version the carry-over check reads is the version updated.
+        version = restVersionInfo.validateParameters(id, version);
+        requireMayAuthorProvider(agentConfiguration, readQuietly(id, version));
         Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -323,11 +327,36 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * The agent's Dream settings name an LLM provider: a restricted one needs an
+     * administrator unless the replaced version already had it — see
+     * {@link LlmProviderAuthorPolicy}.
+     */
+    private void requireMayAuthorProvider(AgentConfiguration candidate, AgentConfiguration stored) {
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(candidate, stored, "agent");
+        }
+    }
+
+    private AgentConfiguration readQuietly(String id, Integer version) {
+        try {
+            return agentStore.read(id, version);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(null, agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
+        requireMayAuthorProvider(agentConfiguration, null);
         // A new agent's identity is not the caller's to declare either: no vault key
         // can exist for an id that does not exist yet, so any key in the body is one
         // whose private half someone else holds. See updateAgent.
@@ -360,6 +389,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             RatingConfigValidator.validate(agentConfig);
+            requireMayAuthorProvider(agentConfig, null);
             // The copy is an agent a person made, not one create_sub_agent
             // provisioned: it must not inherit the original's provenance.
             agentConfig.setDynamicOrigin(null);

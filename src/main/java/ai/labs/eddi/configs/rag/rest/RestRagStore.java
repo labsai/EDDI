@@ -22,6 +22,7 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -115,6 +116,7 @@ public class RestRagStore implements IRestRagStore {
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.
         RagConfiguration previous = readQuietly(id, version);
+        requireMayAuthorProvider(ragConfiguration, previous);
         storageGuard.prepareUpdate(id, previous, ragConfiguration);
         Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
@@ -217,6 +219,7 @@ public class RestRagStore implements IRestRagStore {
     @Override
     public Response createRag(RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
+        requireMayAuthorProvider(ragConfiguration, null);
         storageGuard.prepareNew(ragConfiguration, true);
         Response response = restVersionInfo.create(ragConfiguration);
         syncIngestionSchedules(response, null, ragConfiguration, Set.of());
@@ -243,6 +246,22 @@ public class RestRagStore implements IRestRagStore {
             return false;
         }
     }
+
+    /**
+     * Refuses an embedding provider that authenticates with the server's own cloud
+     * identity from a caller who is not an administrator, unless {@code previous}
+     * already had exactly that setting — see {@link LlmProviderAuthorPolicy}.
+     */
+    private void requireMayAuthorProvider(RagConfiguration candidate, RagConfiguration previous) {
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(candidate, previous, "rag");
+        }
+    }
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    LlmProviderAuthorPolicy llmProviderAuthorPolicy;
 
     private RagConfiguration readQuietly(String id, Integer version) {
         try {
@@ -532,6 +551,8 @@ public class RestRagStore implements IRestRagStore {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
         RedactionMarkerGuard.requireNone(config);
+        // A copy is a new knowledge base authored by whoever duplicates it.
+        requireMayAuthorProvider(config, null);
         // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
         // document must not be refused just because the rules tightened after it was
         // stored.

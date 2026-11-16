@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -115,6 +116,18 @@ public class UpgradeExecutor {
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Who may write restricted LLM providers, Jlama paths and content logging. Null
+     * when built outside the container, where the check is skipped; applied to the
+     * direct create in createExtension like the caller-token policy above.
+     */
+    private LlmProviderAuthorPolicy llmProviderAuthorPolicy;
+
+    @Inject
+    void useLlmProviderAuthorPolicy(LlmProviderAuthorPolicy policy) {
+        this.llmProviderAuthorPolicy = policy;
     }
 
     /**
@@ -949,14 +962,12 @@ public class UpgradeExecutor {
             // deserialization then turned
             // into a live one.
             Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
-            if (callerTokenAuthorPolicy != null) {
-                // Inside the per-resource try on purpose: an upgrade is not transactional
-                // and reports each resource's outcome, so a refusal is recorded as that
-                // resource failing (nothing is written), exactly as the same refusal from
-                // the REST store does on the update path. Throwing here would abort the
-                // run with earlier resources already written and no rollback.
-                callerTokenAuthorPolicy.requireMayAuthor(content, source.type());
-            }
+            // Inside the per-resource try on purpose: an upgrade is not transactional
+            // and reports each resource's outcome, so a refusal is recorded as that
+            // resource failing (nothing is written), exactly as the same refusal from
+            // the REST store does on the update path. Throwing here would abort the run
+            // with earlier resources already written and no rollback.
+            requireMayCreate(content, source.type());
             if (content instanceof ParserConfiguration parser) {
                 // RestParserStore's create check, recorded like the one above: a
                 // dictionary the source did not serve keeps the source's reference,
@@ -1286,6 +1297,21 @@ public class UpgradeExecutor {
      * operator left out has nothing to point that step at, so it is refused before
      * anything is written rather than created half-wired.
      */
+    /**
+     * The authoring policies a created extension must pass, on its decoded content:
+     * no {@code ${caller:token}} an editor may not write, and no LLM provider
+     * setting only an administrator may author. A created resource has no stored
+     * version to carry a setting over from.
+     */
+    private void requireMayCreate(Object content, String type) {
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(content, type);
+        }
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(content, null, type);
+        }
+    }
+
     private URI createNewWorkflow(WorkflowSourceData sourceWf, Set<String> selectedSourceIds, Outcome outcome) {
         for (ExtensionSourceData extension : sourceWf.extensions().values()) {
             if (!isSelected(selectedSourceIds, extension.sourceId())) {
@@ -1320,6 +1346,14 @@ public class UpgradeExecutor {
                 ref.repointTo(created);
             }
             WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, preview, repointed);
+            // Every extension's authoring policies too, before the first is created: a
+            // refusal of the third (a restricted LLM config, say) once the first two were
+            // written left those two behind, unreferenced, on every retry. The checks
+            // run again in createExtension on what is actually stored.
+            for (ExtensionSourceData extension : sourceWf.extensions().values()) {
+                ExtensionStoreOps<Object> ops = resolveExtensionOps(extension.type());
+                requireMayCreate(jsonSerialization.deserialize(extension.contentJson(), ops.configClass()), extension.type());
+            }
         } catch (Exception e) {
             outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(), e);
             return null;

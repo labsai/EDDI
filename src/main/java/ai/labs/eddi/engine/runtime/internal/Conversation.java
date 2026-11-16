@@ -1079,7 +1079,7 @@ public class Conversation implements IConversation {
 
     /** Spend and usage records the secret-context scrub leaves alone. */
     private static final Set<String> ACCOUNTING_KEYS = Set.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_METERED_COST,
-            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
+            MemoryKeys.AUDIT_PENDING_COST, MemoryKeys.AUDIT_DISCARDED_COST, MemoryKeys.AUDIT_DELEGATED_COST, MemoryKeys.AUDIT_TOKEN_USAGE);
 
     private boolean isSecretContextKey(String dataKey) {
         return dataKey.startsWith(KEY_CONTEXT + ":") && secretContextKeys.contains(dataKey.substring(KEY_CONTEXT.length() + 1));
@@ -1306,7 +1306,10 @@ public class Conversation implements IConversation {
                     || MemoryKeys.PROPERTIES_EXTRACTED.key().equals(key)) {
                 writable.setResult(List.of());
                 writable.setPossibleResults(null);
-            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":")) {
+            } else if (searched && !key.startsWith(KEY_PROPERTIES + ":") && !ACCOUNTING_KEYS.contains(key)) {
+                // Accounting records are numbers the engine wrote, not client text: a
+                // secret that happens to read "0.125" must not turn a recorded cost into
+                // a placeholder every spend reader then skips.
                 Object cleaned = scrubSecretInputFrom(datum.getResult(), needles, tokens);
                 if (cleaned != null) {
                     writable.setResult(cleaned);

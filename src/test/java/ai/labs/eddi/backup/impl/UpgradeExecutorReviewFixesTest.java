@@ -28,6 +28,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.RestUtilities;
@@ -57,6 +58,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -230,7 +233,9 @@ class UpgradeExecutorReviewFixesTest {
 
         assertTrue(result.failures().isEmpty(), "got: " + result.failures());
         // The decoded object, not the raw text a JSON escape could hide a reference in.
-        verify(policy).requireMayAuthor(isA(RagConfiguration.class), eq("rag"));
+        // Twice: the new workflow's preflight, before anything is created, and the
+        // create itself.
+        verify(policy, times(2)).requireMayAuthor(isA(RagConfiguration.class), eq("rag"));
         verify(policy, never()).requireMayAuthor(isA(String.class), anyString());
         var stored = ArgumentCaptor.forClass(RagConfiguration.class);
         verify(ragStore).create(stored.capture());
@@ -285,6 +290,46 @@ class UpgradeExecutorReviewFixesTest {
 
         verify(ragStore, never()).create(any()); // refused before anything is written
         verify(wfStore, never()).create(any());
+        assertTrue(result.failures().stream().anyMatch(f -> "workflow".equals(f.resourceType())), "got: " + result.failures());
+    }
+
+    @Test
+    @DisplayName("a new workflow whose later extension an authoring policy refuses creates none of its extensions")
+    void refusedLaterExtensionLeavesNoOrphans() throws Exception {
+        var policy = mock(LlmProviderAuthorPolicy.class);
+        executor.useLlmProviderAuthorPolicy(policy);
+        when(jsonSerialization.deserialize(eq("{\"rag\":1}"), eq(RagConfiguration.class))).thenReturn(new RagConfiguration());
+        var restricted = new LlmConfiguration(List.of());
+        when(jsonSerialization.deserialize(eq("{\"bedrock\":1}"), eq(LlmConfiguration.class))).thenReturn(restricted);
+        doThrow(new ForbiddenException("restricted provider")).when(policy).requireMayAuthor(same(restricted), isNull(), anyString());
+        var ragStore = mock(IRagStore.class);
+        lenient().when(ragStore.create(any())).thenReturn(resourceIdAt("ff112233445566aabbccddee", 1));
+        var wfStore = mock(IWorkflowStore.class);
+
+        // An ordinary extension first, the restricted LLM config after it.
+        WorkflowConfiguration config = ragWorkflow();
+        config.getWorkflowSteps().addAll(llmWorkflow(LLM_ID).getWorkflowSteps());
+        var refs = WorkflowExtensions.scan(config);
+        Map<String, ExtensionSourceData> extensions = new LinkedHashMap<>();
+        extensions.put(refs.get(0).key(), new ExtensionSourceData("src-rag", "KB", "rag", "eddi://ai.labs.rag", "{\"rag\":1}"));
+        extensions.put(refs.get(1).key(), new ExtensionSourceData("src-llm", "LLM", "langchain", "eddi://ai.labs.llm", "{\"bedrock\":1}"));
+        givenAgentWith(new ArrayList<>());
+        when(jsonSerialization.serialize(config)).thenReturn("wf-json");
+        when(jsonSerialization.deserialize("wf-json", WorkflowConfiguration.class))
+                .thenAnswer(inv -> new ObjectMapper().convertValue(config, WorkflowConfiguration.class));
+        var source = source(List.of(new WorkflowSourceData("src-wf", "WF", 0, config, extensions)));
+        givenPreview(List.of(
+                new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 1, "targetAgent", null, null, -1),
+                new ResourceDiff("src-wf", "workflow", "WF", DiffAction.CREATE, null, null, null, null, null, 0),
+                new ResourceDiff("src-rag", "rag", "KB", DiffAction.CREATE, null, null, null, null, null, 0),
+                new ResourceDiff("src-llm", "langchain", "LLM", DiffAction.CREATE, null, null, null, null, null, 0)));
+
+        UpgradeResult result = withStoresInCdi(Map.of(IRagStore.class, ragStore, IWorkflowStore.class, wfStore),
+                () -> executor.executeUpgrade(source, AGENT_ID, null, null));
+
+        verify(ragStore, never()).create(any());
+        verify(wfStore, never()).create(any());
+        verify(descriptorStore, never()).createDescriptor(anyString(), anyInt(), any());
         assertTrue(result.failures().stream().anyMatch(f -> "workflow".equals(f.resourceType())), "got: " + result.failures());
     }
 

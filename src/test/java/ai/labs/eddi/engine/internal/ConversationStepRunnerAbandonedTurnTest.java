@@ -35,7 +35,9 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.modules.llm.impl.StandaloneDynamicAgents;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -334,6 +336,73 @@ class ConversationStepRunnerAbandonedTurnTest {
     }
 
     /** Submits a say and returns the coordinator's task for it (the n-th one). */
+    /**
+     * End signal, then the watchdog gives up, then the turn ends late: the
+     * sub-agents that turn created exist only in its live memory, so the teardown
+     * still runs from it — and nothing is stored, no state written.
+     */
+    @SuppressWarnings("unchecked")
+    private StandaloneDynamicAgents endSignalledThenAbandoned() throws Exception {
+        StandaloneDynamicAgents standalone = mock(StandaloneDynamicAgents.class);
+        Instance<StandaloneDynamicAgents> instance = mock(Instance.class);
+        doReturn(true).when(instance).isResolvable();
+        doReturn(standalone).when(instance).get();
+        conversationService.standaloneDynamicAgents = instance;
+        AtomicBoolean signalled = new AtomicBoolean();
+        doAnswer(invocation -> {
+            callbacks.add(invocation.getArgument(1));
+            // The end reaches the running turn before the watchdog gives up on it.
+            signalled.set(conversationService.signalLocalInFlight(CONVERSATION_ID, true));
+            return new CompletableFuture<>();
+        }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
+
+        assertDoesNotThrow(submitTurn(1)::call, "the watchdog gives up");
+        assertTrue(signalled.get(), "the end signal reached the running turn");
+        clearInvocations(conversationMemoryStore);
+        return standalone;
+    }
+
+    @Test
+    @DisplayName("an end-signalled turn the watchdog abandoned tears down its sub-agents when it completes late; nothing is stored")
+    void lateCompletionOfEndSignalledTurnTearsDown() throws Exception {
+        StandaloneDynamicAgents standalone = endSignalledThenAbandoned();
+
+        callbacks.get(0).onComplete(null);
+
+        verify(standalone).cleanup(eq(CONVERSATION_ID), any(IConversationMemory.class));
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), any());
+        verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("an end-signalled turn the watchdog abandoned tears down its sub-agents when it fails late; nothing is stored")
+    void lateFailureOfEndSignalledTurnTearsDown() throws Exception {
+        StandaloneDynamicAgents standalone = endSignalledThenAbandoned();
+
+        callbacks.get(0).onFailure(new ExecutionAbandonedException("abandoned by the watchdog"));
+
+        verify(standalone).cleanup(eq(CONVERSATION_ID), any(IConversationMemory.class));
+        verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), any());
+        verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a plainly cancelled turn the watchdog abandoned keeps its sub-agents")
+    @SuppressWarnings("unchecked")
+    void lateOutcomeOfPlainCancelKeepsSubAgents() throws Exception {
+        StandaloneDynamicAgents standalone = mock(StandaloneDynamicAgents.class);
+        Instance<StandaloneDynamicAgents> instance = mock(Instance.class);
+        doReturn(true).when(instance).isResolvable();
+        doReturn(standalone).when(instance).get();
+        conversationService.standaloneDynamicAgents = instance;
+        assertDoesNotThrow(submitTurn(1)::call);
+
+        callbacks.get(0).onComplete(null);
+
+        verify(standalone, never()).cleanup(anyString(), any(IConversationMemory.class));
+    }
+
     private ConversationStepRunner.TurnTask submitTurn(int n) throws Exception {
         conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(), new InputData("message " + n, Map.of()), false,
                 mock(ConversationResponseHandler.class));

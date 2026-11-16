@@ -466,7 +466,6 @@ class ToolLoopRunner {
             // (LlmSpendGate.effectiveCeiling).
             OptionalDouble costCeiling = LlmSpendGate.effectiveCeiling(memory);
             boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
-            double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
             // The live path's first request was gated by the task-level preflight, so
             // the check starts once the model has answered. A resume (startIteration
             // > 0) has already run the approved calls, whose cost no preflight saw:
@@ -475,7 +474,10 @@ class ToolLoopRunner {
 
             for (int i = startIteration; i < maxIterations; i++) {
                 if (ceilingApplies && (modelAnswered || resumed)) {
-                    double spent = costBeforeLoop + runSpend.getAsDouble();
+                    // Re-read every round, not once before the loop: a delegation tool
+                    // charges its callee's spend back onto this step mid-loop
+                    // (audit:delegated_cost), and that spend counts too.
+                    double spent = LlmSpendGate.conversationCost(memory) + runSpend.getAsDouble();
                     if (spent >= costCeiling.getAsDouble()) {
                         String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
                                 spent);

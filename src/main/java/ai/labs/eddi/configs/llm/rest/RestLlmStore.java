@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.LlmProviderAuthorPolicy;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -60,6 +61,10 @@ public class RestLlmStore implements IRestLlmStore {
     // there, which skips the check.
     @Inject
     CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    // Field-injected for the same reason; null there, which skips the check.
+    @Inject
+    LlmProviderAuthorPolicy llmProviderAuthorPolicy;
 
     private static final String KIND = "langchain";
 
@@ -126,16 +131,21 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
+        // Resolved once: the version the carry-over check reads is the version updated.
+        final Integer target = restVersionInfo.validateParameters(id, version);
         requireMayAuthorCallerToken(llmConfiguration);
+        requireMayAuthorProvider(llmConfiguration, id, target);
         warnOnPlaintextSecrets(llmConfiguration);
-        return restVersionInfo.update(id, version, llmConfiguration);
+        return restVersionInfo.update(id, target, llmConfiguration);
     }
 
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
-        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
+        final Integer target = restVersionInfo.validateParameters(id, version);
+        return restVersionInfo.patch(id, target, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             // The same pre-write checks updateLlm runs.
             requireMayAuthorCallerToken(patched);
+            requireMayAuthorProvider(patched, id, target);
             warnOnPlaintextSecrets(patched);
             return null;
         });
@@ -144,6 +154,7 @@ public class RestLlmStore implements IRestLlmStore {
     @Override
     public Response createLlm(LlmConfiguration llmConfiguration) {
         requireMayAuthorCallerToken(llmConfiguration);
+        requireMayAuthorProvider(llmConfiguration, null, null);
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.create(llmConfiguration);
     }
@@ -189,6 +200,7 @@ public class RestLlmStore implements IRestLlmStore {
         LlmConfiguration llmConfiguration = restVersionInfo.read(id, version);
         // A copy is a new resource authored by whoever duplicates it.
         requireMayAuthorCallerToken(llmConfiguration);
+        requireMayAuthorProvider(llmConfiguration, null, null);
         return restVersionInfo.create(llmConfiguration);
     }
 
@@ -203,6 +215,33 @@ public class RestLlmStore implements IRestLlmStore {
         RedactionMarkerGuard.requireNone(configuration);
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
+        }
+    }
+
+    /**
+     * Refuses restricted providers, Jlama paths and content logging from a caller
+     * who is not an administrator, unless the version being replaced already had
+     * exactly that setting — see {@link LlmProviderAuthorPolicy}. {@code id} and
+     * {@code version} name that version; null for a new resource.
+     */
+    private void requireMayAuthorProvider(LlmConfiguration candidate, String id, Integer version) {
+        if (llmProviderAuthorPolicy != null) {
+            llmProviderAuthorPolicy.requireMayAuthor(candidate, storedOrNull(id, version), KIND);
+        }
+    }
+
+    /**
+     * The stored version, unredacted; null when there is none or it cannot be read
+     * (no carry-over then).
+     */
+    private LlmConfiguration storedOrNull(String id, Integer version) {
+        if (id == null || version == null) {
+            return null;
+        }
+        try {
+            return httpCallsStore.read(id, version);
+        } catch (Exception e) {
+            return null;
         }
     }
 
