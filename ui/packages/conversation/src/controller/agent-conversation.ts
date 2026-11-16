@@ -725,31 +725,7 @@ export class AgentConversation {
           };
           return true;
         }
-        if (unconsumed) {
-          // Refused before it ran — the streaming twin of a 409. Withdraw the
-          // optimistic bubble and hand the draft (a secret included, masked)
-          // back. The refresh after the stream picks up the paused state.
-          this.withdraw(turn.userMessageId);
-          dispatch({
-            type: "ADD_MESSAGE",
-            message: makeNotice(
-              code === "awaiting_approval"
-                ? this.t("conversation.send.awaiting")
-                : this.t("conversation.send.notSent", { message }),
-            ),
-          });
-          dispatch({ type: "FINISH_STREAMING" });
-          dispatch({ type: "SET_PROCESSING", value: false });
-          return true;
-        }
-        if (turn.tokenCount === 0) {
-          dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-          dispatch({ type: "ADD_MESSAGE", message: makeNotice(`⚠️ ${message}`) });
-        } else {
-          dispatch({ type: "APPEND_TO_LAST_AGENT", token: `\n\n⚠️ ${message}` });
-        }
-        dispatch({ type: "FINISH_STREAMING" });
-        dispatch({ type: "SET_PROCESSING", value: false });
+        this.presentDefaultStreamError(turn, unconsumed, code, message);
         return true;
       }
 
@@ -1064,7 +1040,11 @@ export class AgentConversation {
     let result: TurnResult = { outcome: "sent" };
     if (turn.failure) {
       const failure = turn.failure;
-      await this.presentHostFailure(failure, failureContext);
+      const handled = await this.presentHostFailure(failure, failureContext);
+      if (!handled && this.isCurrent(sendGen)) {
+        // The host declined: the controller's own notices, and the turn ends.
+        this.presentDefaultStreamError(turn, failure.kind === "refused", failure.code ?? null, failure.message);
+      }
       if (failure.kind === "refused") result = { outcome: "refused", failure };
       if (!this.isCurrent(sendGen)) return result;
     }
@@ -1110,6 +1090,32 @@ export class AgentConversation {
       }
     }
     return result;
+  }
+
+  /** The controller's own notices for a stream `error` frame, and the end of the turn. */
+  private presentDefaultStreamError(turn: TurnContext, unconsumed: boolean, code: string | null, message: string): void {
+    const dispatch = this.dispatch;
+    if (unconsumed) {
+      // Refused before it ran — the streaming twin of a 409. Withdraw the
+      // optimistic bubble and hand the draft (a secret included, masked)
+      // back. The refresh after the stream picks up the paused state.
+      this.withdraw(turn.userMessageId);
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(
+          code === "awaiting_approval"
+            ? this.t("conversation.send.awaiting")
+            : this.t("conversation.send.notSent", { message }),
+        ),
+      });
+    } else if (turn.tokenCount === 0) {
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(`⚠️ ${message}`) });
+    } else {
+      dispatch({ type: "APPEND_TO_LAST_AGENT", token: `\n\n⚠️ ${message}` });
+    }
+    dispatch({ type: "FINISH_STREAMING" });
+    dispatch({ type: "SET_PROCESSING", value: false });
   }
 
   /** Hand a failure to the host, then end the turn whatever it did. */
@@ -1160,14 +1166,16 @@ export class AgentConversation {
     // reset the UI, and the abort must not be reported as a failure.
     if (transport.mode !== "local" && stopped()) return { outcome: "sent" };
 
+    // Keep the send locked while the host presents the failure (it may await a
+    // read); clear the processing state only once it has finished.
+    const handled = await this.presentHostFailure(failure, failureContext);
+    if (!this.isCurrent(sendGen)) return result;
     dispatch({ type: "SET_PROCESSING", value: false });
     dispatch({ type: "SET_THINKING", value: false });
     // This path never reaches FINISH_STREAMING, so clear these here too.
     dispatch({ type: "SET_ESCALATING", value: false });
     dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-
-    if (await this.presentHostFailure(failure, failureContext)) return result;
-    if (!this.isCurrent(sendGen)) return result;
+    if (handled) return result;
 
     if (status === 409) {
       // Refused and NEVER consumed — most often because the conversation is
