@@ -335,6 +335,8 @@ export function AgentDetailPage() {
   const [continuationInvalid, setContinuationInvalid] = useState(false);
   /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
   const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
+  /** Bumped by a discard so sections holding state outside the draft start over. */
+  const [discardCount, setDiscardCount] = useState(0);
   /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
   const [ratingInvalid, setRatingInvalid] = useState(false);
 
@@ -425,6 +427,8 @@ export function AgentDetailPage() {
 
   function confirmDiscard() {
     setDraft(null);
+    // Section-local state (a retained unsavable draft) is not in `draft`: remount.
+    setDiscardCount((n) => n + 1);
     setShowDiscardDialog(false);
     setShowReviewDialog(false);
   }
@@ -1228,7 +1232,7 @@ export function AgentDetailPage() {
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection
-        key={`hitl-${id}-${resolvedVersion}`}
+        key={`hitl-${id}-${resolvedVersion}-${discardCount}`}
         agent={doc}
         onChange={editAgent}
         disabled={sectionsDisabled}

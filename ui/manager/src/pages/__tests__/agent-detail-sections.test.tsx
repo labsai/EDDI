@@ -285,4 +285,30 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     await waitFor(() => expect(saved).toHaveLength(1));
     expect(saved[0]).toMatchObject({ hitlConfig: { notify: { email: { recipients: ["lead@example.com"] } } } });
   });
+
+  it("Discard drops an unsavable Slack name kept while the HITL section was collapsed", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } },
+        }),
+      ),
+    );
+    renderPage("agent-hitl");
+
+    const field = await screen.findByTestId("hitl-notify-slack-integration");
+    await user.clear(field);
+    await user.type(field, "ops-slack2"); // a valid edit makes the draft dirty
+    await user.clear(field);
+    await user.type(field, "ops|slack"); // the unsavable one stays in the section
+    await user.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
+    expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+    await waitFor(() => expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops-slack"));
+  });
 });
