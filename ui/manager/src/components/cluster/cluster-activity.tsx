@@ -4,7 +4,7 @@ import { Activity, AlertTriangle, CircleAlert, Info, Pause, Play } from "lucide-
 import type { ActivityEvent } from "@/lib/api/cluster";
 import { ACTIVITY_GROUPS, activityGroup, activityGroupLabel, activityTitle, type ActivityGroup } from "@/lib/cluster-labels";
 import type { ClusterActivityState } from "@/hooks/use-cluster";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { EmptyState } from "@/components/shared/empty-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";

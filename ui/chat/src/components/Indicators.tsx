@@ -6,7 +6,7 @@
 
 import { Brain, Wrench } from "lucide-react";
 import { t } from "@/i18n";
-import { humanizeToolName, type ToolActivity } from "@/tool-labels";
+import { humanizeToolName, type ToolActivity } from "@eddi/core";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {

@@ -1,4 +1,4 @@
-import { useTheme } from "@/components/layout/theme-provider";
+import { useTheme } from "@eddi/ui";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
 import "@/lib/monaco-setup";

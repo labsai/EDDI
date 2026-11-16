@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -46,8 +47,12 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.configs.descriptors.ResourceUtilities.*;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -61,6 +66,7 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 @ApplicationScoped
 public class RestAgentStore implements IRestAgentStore {
     private static final String WORKFLOW_URI = IRestWorkflowStore.resourceURI;
+    private static final String SIGNING_KEYS_PATH = "/agentstore/agents/{id}/signing-keys";
     private final IAgentStore agentStore;
     private final IRestWorkflowStore restWorkflowStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -164,18 +170,29 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
-        validateSecurityFlags(agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         // The agent's own EDIT check first: the workflow lookup below answers "exists
         // / does not exist", which a caller with no rights to this agent must not be
-        // able to use as an oracle for arbitrary workflow ids.
+        // able to use as an oracle for arbitrary workflow ids — and the signing-key
+        // check asks the vault about this agent's key.
         restVersionInfo.requireEditAccess(id);
+        // Engine-owned fields: keep what is stored, never what the body says, for
+        // every caller — a person's PUT, an import merge, a sync, the cascade and
+        // autonomy all arrive here.
+        // - dynamicOrigin is the provenance teardown_agent and group cleanup rely on
+        // before they delete an agent: an editor must not be able to erase the
+        // marker (the sub-agent would then outlive its discussion) or plant one.
+        // - identity holds the public keys peers verify this agent's signatures
+        // with. Whoever could write it could plant a key whose private half they
+        // hold, delete the revocation an admin made, or shrink the list a permanent
+        // delete sizes its vault sweep from. It changes only through the admin-only
+        // signing-key endpoints; an import or sync keeps this instance's identity
+        // too, since its private keys are in this instance's vault.
+        AgentConfiguration stored = storedCurrentVersion(id);
+        agentConfiguration.setDynamicOrigin(stored != null ? stored.getDynamicOrigin() : null);
+        agentConfiguration.setIdentity(stored != null ? stored.getIdentity() : null);
+        validateSecurityFlags(id, agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
-        // dynamicOrigin is engine-written provenance that teardown_agent and group
-        // cleanup rely on before they delete an agent. Keep what is stored, never
-        // what the body says: an editor must not be able to erase the marker (the
-        // sub-agent would then outlive its discussion) or plant one.
-        agentConfiguration.setDynamicOrigin(storedDynamicOrigin(id));
         Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -273,6 +290,9 @@ public class RestAgentStore implements IRestAgentStore {
                     throw new NotFoundException(e.getMessage());
                 case CONFLICT :
                     throw new ClientErrorException(e.getMessage(), Response.Status.CONFLICT);
+                case UNAVAILABLE :
+                    throw new WebApplicationException(e.getMessage(), e, Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                            .type(MediaType.APPLICATION_JSON_TYPE).entity(ErrorResponses.body("service_unavailable", e.getMessage())).build());
                 case FAILED :
                     throw new InternalServerErrorException(e.getMessage(), e);
                 default :
@@ -282,20 +302,20 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * The {@code dynamicOrigin} on the agent's current stored version, or
-     * {@code null} when it has none or does not exist (the update then fails on its
-     * own). A store failure propagates rather than being read as "no marker":
-     * silently dropping the marker would turn a transient error into a sub-agent
-     * that group cleanup can no longer delete.
+     * The agent's current stored version, the source of its engine-owned fields
+     * ({@code dynamicOrigin}, {@code identity}), or {@code null} when it does not
+     * exist (the update then fails on its own). A store failure propagates rather
+     * than being read as "nothing stored": silently dropping the fields would turn
+     * a transient error into a sub-agent that group cleanup can no longer delete,
+     * or an agent whose keys are gone.
      */
-    private AgentConfiguration.DynamicOrigin storedDynamicOrigin(String id) {
+    private AgentConfiguration storedCurrentVersion(String id) {
         try {
             IResourceId current = agentStore.getCurrentResourceId(id);
             if (current == null) {
                 return null;
             }
-            AgentConfiguration stored = agentStore.read(id, current.getVersion());
-            return stored != null ? stored.getDynamicOrigin() : null;
+            return agentStore.read(id, current.getVersion());
         } catch (IResourceStore.ResourceNotFoundException e) {
             return null;
         } catch (IResourceStore.ResourceStoreException e) {
@@ -305,9 +325,13 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
-        validateSecurityFlags(agentConfiguration);
+        validateSecurityFlags(null, agentConfiguration);
         RatingConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
+        // A new agent's identity is not the caller's to declare either: no vault key
+        // can exist for an id that does not exist yet, so any key in the body is one
+        // whose private half someone else holds. See updateAgent.
+        agentConfiguration.setIdentity(null);
 
         // createDocument() because the id and version are what this method needs.
         // NOT because Response.getLocation() is broken for eddi:// URIs — it is not;
@@ -335,11 +359,18 @@ public class RestAgentStore implements IRestAgentStore {
         version = restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
-            validateSecurityFlags(agentConfig);
             RatingConfigValidator.validate(agentConfig);
             // The copy is an agent a person made, not one create_sub_agent
             // provisioned: it must not inherit the original's provenance.
             agentConfig.setDynamicOrigin(null);
+            // Nor the original's identity. Its private keys are in the vault under the
+            // ORIGINAL's id, so the copy could never sign with them, and verifiers would
+            // take the copy's public keys for the original's. The copy signs once an
+            // admin generates a key of its own and turns signing back on.
+            agentConfig.setIdentity(null);
+            if (agentConfig.getSecurity() != null) {
+                agentConfig.getSecurity().setSignInterAgentMessages(false);
+            }
             if (deepCopy) {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
@@ -497,11 +528,11 @@ public class RestAgentStore implements IRestAgentStore {
         // Deleting an Agent used to leave its Ed25519 private key in the vault
         // forever — nothing else ever removes it, and the entry outlives the config
         // that documented what it was for. But destroying it is irreversible in a way
-        // the config itself is not: there is no key-generation endpoint (see
-        // validateSecurityFlags), so a private key that is gone cannot be recreated,
-        // and an Agent restored from a ZIP backup would come back with a public key
-        // whose private half no longer exists — signInterAgentMessages permanently
-        // broken. A soft delete is the deliberately recoverable path and must stay
+        // the config itself is not: a private key that is gone cannot be recreated
+        // (createSigningKey makes a NEW one), and an Agent restored from a ZIP backup
+        // would come back with a public key whose private half no longer exists —
+        // unable to sign until an admin generates it a new key. A soft delete is the
+        // deliberately recoverable path and must stay
         // recoverable, by the same rule the cascade above follows: destroying shared
         // or unrecreatable material is an explicit request, never a side effect.
         // The residual leak (soft-delete then never purge) is the recoverable failure
@@ -836,46 +867,386 @@ public class RestAgentStore implements IRestAgentStore {
         return agentStore.getCurrentResourceId(id);
     }
 
-    /**
-     * Validate that cryptographic security flags are backed by a signing keypair.
-     * <p>
-     * Both {@code signInterAgentMessages} and {@code requirePeerVerification}
-     * require an Ed25519 keypair on the agent's identity block. This validation
-     * prevents enabling signing without the necessary infrastructure.
-     *
-     * @throws BadRequestException
-     *             if crypto is enabled without a keypair
-     */
-    private void validateSecurityFlags(AgentConfiguration config) {
-        if (config.getSecurity() == null) {
-            return;
-        }
-        var security = config.getSecurity();
+    @Override
+    public Response createSigningKey(String id, Integer version) {
+        restVersionInfo.requireEditAccess(id);
+        version = restVersionInfo.validateParameters(id, version);
+        // Refused BEFORE the vault is touched. The next key version is computed from
+        // the configuration read here, so a stale one would number the new key from
+        // an outdated list.
+        AgentConfiguration config = currentVersionForKeyChange(id, version);
 
-        boolean anyCryptoEnabled = security.isSignInterAgentMessages()
-                || security.isRequirePeerVerification();
-        if (!anyCryptoEnabled) {
+        var identity = config.getIdentity() != null ? config.getIdentity() : new AgentConfiguration.AgentIdentity();
+        int nextVersion = identity.signingKeyVersion() + 1;
+        if (nextVersion > AgentPublicKey.MAX_VERSION) {
+            throw new ClientErrorException("Agent " + id + " has used every signing key version up to " + AgentPublicKey.MAX_VERSION
+                    + "; no further key can be generated for it.", Response.Status.CONFLICT);
+        }
+        AgentSigningService.GeneratedKey generated;
+        try {
+            generated = agentSigningService.generateKey(defaultTenantId, id, nextVersion);
+        } catch (AgentSigningService.AgentSigningException e) {
+            log.warnf("Could not generate a signing key for Agent %s: %s", sanitize(id), sanitize(e.getMessage()));
+            throw vaultUnavailable("Could not generate a signing key: " + e.getMessage());
+        }
+
+        // Older keys stay, unexpired: entries they signed are verified by the exact
+        // version they declare, and only the newest key signs from now on.
+        AgentPublicKey key = AgentPublicKey.createCurrent(generated.version(), generated.publicKeyB64());
+        List<AgentPublicKey> keys = new ArrayList<>(identity.getKeys() != null ? identity.getKeys() : List.of());
+        keys.add(key);
+        identity.setKeys(keys);
+        config.setIdentity(identity);
+        Integer newVersion;
+        try {
+            newVersion = agentStore.update(id, version, config, true);
+        } catch (IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
+            // Refused before anything was written: nothing declares the stored key, so
+            // take it back out of the vault.
+            agentSigningService.discardKey(defaultTenantId, id, generated.version());
+            throw sneakyThrow(e);
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // The outcome is unknown: a socket error or a lost commit acknowledgement can
+            // arrive AFTER the write was applied. Discarding the key then would leave an
+            // agent that declares a key its vault no longer holds — it could not sign,
+            // and every later save would be refused — so look before discarding.
+            newVersion = versionIfSaved(id, "Saving signing key v" + key.version(), saved -> declaresKey(saved, key), e);
+            if (newVersion == null) {
+                agentSigningService.discardKey(defaultTenantId, id, generated.version());
+                throw sneakyThrow(e);
+            }
+        }
+        advanceDescriptor(id, version, newVersion);
+        log.infof("Generated signing key v%d for Agent %s (now at version %d)", generated.version(), sanitize(id), newVersion);
+        return keyChangeResponse(id, newVersion, key);
+    }
+
+    @Override
+    public Response revokeSigningKey(String id, Integer keyVersion, Integer version) {
+        restVersionInfo.requireEditAccess(id);
+        version = restVersionInfo.validateParameters(id, version);
+        if (keyVersion == null) {
+            throw new BadRequestException("keyVersion is required");
+        }
+        AgentConfiguration config = currentVersionForKeyChange(id, version);
+        var identity = config.getIdentity();
+        String notDeclared = "Agent " + id + " declares no signing key v" + keyVersion
+                + (keyVersion == 0 ? " and no legacy signing key (identity.publicKey)" : "");
+        if (identity == null) {
+            // No identity block declares no key at all: answered before anything below
+            // reads or writes the identity.
+            throw new NotFoundException(notDeclared);
+        }
+
+        // The legacy unversioned key (keyVersion 0) has no revoked flag to set, so
+        // revoking it removes it: an entry signed as v0 then names no key and is not
+        // trusted. An identity.keys entry that is itself declared as v0 — malformed,
+        // but what a peer checks a v0 signature against — is revoked with it.
+        boolean legacy = keyVersion == 0 && identity.getPublicKey() != null && !identity.getPublicKey().isBlank();
+        List<AgentPublicKey> keys = identity.getKeys() != null ? identity.getKeys() : List.of();
+        List<AgentPublicKey> entries = keys.stream().filter(k -> k.version() == keyVersion).toList();
+        if (!legacy && entries.isEmpty()) {
+            throw new NotFoundException(notDeclared);
+        }
+        AgentPublicKey revoked = legacy ? new AgentPublicKey(0, identity.getPublicKey(), 0, 0, true) : entries.get(0).revoke();
+        if (!legacy && entries.stream().allMatch(AgentPublicKey::revoked)) {
+            // Already revoked: nothing to write, and the answer names the version that
+            // says so. The private key is still deleted: that delete is best effort
+            // below, so revoking again is how a key the vault kept is retried.
+            agentSigningService.discardKey(defaultTenantId, id, keyVersion);
+            return keyChangeResponse(id, version, revoked);
+        }
+        String legacyKey = legacy ? identity.getPublicKey() : null;
+        if (legacy) {
+            identity.setPublicKey(null);
+        }
+        // Every entry of that version: a list that names a version twice must not
+        // keep a trusted copy of it.
+        identity.setKeys(keys.stream().map(k -> k.version() == keyVersion ? k.revoke() : k).toList());
+
+        Integer newVersion;
+        try {
+            newVersion = agentStore.update(id, version, config, true);
+        } catch (IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
+            throw sneakyThrow(e);
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // The outcome is unknown, as when generating a key. Rethrowing a write that
+            // landed would leave the descriptor behind, and a retry could not repair it
+            // (the old version is refused as stale, the new one is already revoked). If
+            // it did not land, the key is still declared, so its private half stays.
+            newVersion = versionIfSaved(id, "Revoking signing key v" + keyVersion,
+                    saved -> !trustsKey(saved, keyVersion, legacyKey), e);
+            if (newVersion == null) {
+                throw sneakyThrow(e);
+            }
+        }
+        advanceDescriptor(id, version, newVersion);
+        // The private half can sign nothing anyone will accept any more; it goes
+        // after the configuration that says so is written, so a failed write leaves
+        // a key that is still declared and still usable. Best effort: a key left
+        // behind is swept by the agent's permanent delete.
+        agentSigningService.discardKey(defaultTenantId, id, keyVersion);
+        log.infof("Revoked signing key v%d of Agent %s (now at version %d)", keyVersion, sanitize(id), newVersion);
+        return keyChangeResponse(id, newVersion, revoked);
+    }
+
+    /**
+     * The agent's configuration at {@code version}, refused with 409 unless that is
+     * its current version: a key change computed from a stale configuration would
+     * write over whatever changed since.
+     */
+    private AgentConfiguration currentVersionForKeyChange(String id, Integer version) {
+        try {
+            IResourceId current = agentStore.getCurrentResourceId(id);
+            if (current == null) {
+                throw new NotFoundException("Agent " + id + " has no current version");
+            }
+            if (!current.getVersion().equals(version)) {
+                throw RestUtilities.createConflictException(resourceURI, current);
+            }
+            catchUpDescriptor(id, version);
+            return agentStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Repairs what an earlier key change left behind when its agent write landed
+     * but {@link #advanceDescriptor} did not: the agent at {@code agentVersion},
+     * its descriptor still one version back. The 500 that change answered names the
+     * new version, so retrying there (or at the version a 409 hands back) is the
+     * way out — it moves the descriptor first, before this change writes the agent
+     * again on top of a descriptor that would then be two versions behind. Only
+     * that one-behind shape is repaired; a descriptor that is missing or further
+     * off is left as it is, for the change to fail on as before.
+     */
+    private void catchUpDescriptor(String id, int agentVersion) {
+        IResourceId descriptorId;
+        try {
+            descriptorId = documentDescriptorStore.getCurrentResourceId(id);
+        } catch (IResourceStore.ResourceNotFoundException e) {
             return;
         }
-        // Crypto is enabled — validate that a public key exists on the agent identity.
-        // There is deliberately no endpoint named here: none exists.
-        // Nothing in EDDI generates an agent signing key (docs/architecture.md,
-        // "Cryptographic Agent Identity"), so the only way to satisfy this check
-        // today is to write the key material into the config yourself. Pointing
-        // at POST /agentstore/{agentId}/signing/keys — which returns 404 — sent
-        // operators looking for a route that was never built.
-        var identity = config.getIdentity();
-        boolean hasLegacyKey = identity != null && identity.getPublicKey() != null
-                && !identity.getPublicKey().isBlank();
-        boolean hasRotatedKeys = identity != null && identity.getKeys() != null
-                && !identity.getKeys().isEmpty();
-        if (!hasLegacyKey && !hasRotatedKeys) {
-            throw new BadRequestException(
-                    "Cryptographic identity features require a signing key. "
-                            + "Set identity.publicKey (or identity.keys) on this agent before enabling "
-                            + "signInterAgentMessages or requirePeerVerification. "
-                            + "Note that the matching private key must also be in the secrets vault under "
-                            + "'agent-signing-key:{agentId}', or signing will fail at runtime.");
+        if (descriptorId == null || descriptorId.getVersion() == null || descriptorId.getVersion() != agentVersion - 1) {
+            return;
         }
+        log.warnf("Agent %s is at version %d but its descriptor names version %d (an earlier key change did not finish): moving it",
+                sanitize(id), agentVersion, agentVersion - 1);
+        advanceDescriptor(id, agentVersion - 1, agentVersion);
+    }
+
+    /**
+     * After a key change whose write failed with an outcome that is unknown: the
+     * agent's current version if it shows the change ({@code saved}), so the caller
+     * can carry on as if the write had answered; {@code null} if it did not land,
+     * for the caller to decide what happens to the private key. If the agent cannot
+     * be read to find out, the vault is left as it is — a key left behind is swept
+     * by the agent's permanent delete, where a declared key that is gone breaks
+     * signing — and {@code failure} is rethrown.
+     */
+    private Integer versionIfSaved(String id, String change, Predicate<AgentConfiguration> saved, Exception failure) {
+        AgentConfiguration current;
+        IResourceId currentId;
+        try {
+            currentId = agentStore.getCurrentResourceId(id);
+            current = currentId == null ? null : agentStore.read(id, currentId.getVersion());
+        } catch (Exception readFailure) {
+            log.errorf("%s of Agent %s failed (%s) and the agent cannot be read to tell whether it was saved (%s). The vault is left as it is.",
+                    change, sanitize(id), sanitize(failure.getMessage()), sanitize(readFailure.getMessage()));
+            throw sneakyThrow(failure);
+        }
+        if (current == null || !saved.test(current)) {
+            return null;
+        }
+        log.warnf("%s of Agent %s reported a failure (%s), but version %d shows it: the save landed.", change, sanitize(id),
+                sanitize(failure.getMessage()), currentId.getVersion());
+        return currentId.getVersion();
+    }
+
+    private static boolean declaresKey(AgentConfiguration config, AgentPublicKey key) {
+        var identity = config.getIdentity();
+        return identity != null && identity.getKeys() != null && identity.getKeys().stream()
+                .anyMatch(k -> k.version() == key.version() && Objects.equals(k.publicKeyB64(), key.publicKeyB64()));
+    }
+
+    /**
+     * Whether {@code config} still trusts key {@code keyVersion}: an entry of that
+     * version that is not revoked, or — for {@code legacyKey}, the legacy key being
+     * revoked — that key still declared as {@code identity.publicKey}.
+     */
+    private static boolean trustsKey(AgentConfiguration config, int keyVersion, String legacyKey) {
+        var identity = config.getIdentity();
+        if (identity == null) {
+            return false;
+        }
+        return (legacyKey != null && legacyKey.equals(identity.getPublicKey()))
+                || (identity.getKeys() != null && identity.getKeys().stream().anyMatch(k -> k.version() == keyVersion && !k.revoked()));
+    }
+
+    /**
+     * Moves the agent's descriptor from {@code fromVersion} to {@code toVersion},
+     * as {@code DocumentDescriptorFilter} does for a {@code PUT}. A key change
+     * writes the agent in process and answers a {@code POST}, which that filter
+     * treats as a creation or not at all, so without this the descriptor stays
+     * behind: every later save of the agent is answered 404, and a conversation on
+     * the new version cannot start.
+     */
+    private void advanceDescriptor(String id, int fromVersion, int toVersion) {
+        try {
+            DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(id, fromVersion);
+            descriptor.setLastModifiedOn(new Date());
+            descriptor.setResource(RestUtilities.createURI(resourceURI, id, versionQueryParam, toVersion));
+            DescriptorAccess.rebuildIndex(descriptor);
+            documentDescriptorStore.updateDescriptor(id, fromVersion, descriptor);
+        } catch (Exception e) {
+            log.errorf(e, "Agent %s was saved as version %d, but its descriptor could not be moved from version %d", sanitize(id), toVersion,
+                    fromVersion);
+            throw new InternalServerErrorException("Agent " + id + " was saved as version " + toVersion
+                    + ", but its descriptor still names version " + fromVersion + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 200, not 201: nothing new is created at {@code Location}, and a POST answered
+     * 201 is what {@code DocumentDescriptorFilter} takes for a creation — it would
+     * try to create a second descriptor for this agent and turn the answer into a
+     * 500.
+     */
+    private static Response keyChangeResponse(String id, int agentVersion, AgentPublicKey key) {
+        URI location = RestUtilities.createURI(resourceURI, id, versionQueryParam, agentVersion);
+        return Response.ok(key).location(location).build();
+    }
+
+    @Override
+    public String signingKeyProblem(String id) {
+        AgentConfiguration stored = storedCurrentVersion(id);
+        if (stored == null) {
+            throw new NotFoundException("Agent " + id + " not found");
+        }
+        return signingKeyProblem(id, stored.getIdentity());
+    }
+
+    /**
+     * Refuses {@code signInterAgentMessages} unless the agent can actually sign —
+     * see {@link #signingKeyProblem(String, AgentConfiguration.AgentIdentity)}.
+     * <p>
+     * Without this the save succeeded and every turn after it logged a WARN and
+     * wrote an UNSIGNED transcript entry, while the configuration said messages
+     * were signed. {@code requirePeerVerification} needs nothing of the agent's
+     * own: verifying uses the speakers' public keys.
+     *
+     * @param agentId
+     *            the agent being saved, or {@code null} for one being created —
+     *            which has no key yet, since keys are stored under the agent's id
+     * @throws BadRequestException
+     *             if signing is on and the agent cannot sign
+     * @throws WebApplicationException
+     *             503, if the vault could not answer
+     */
+    private void validateSecurityFlags(String agentId, AgentConfiguration config) {
+        if (config.getSecurity() == null || !config.getSecurity().isSignInterAgentMessages()) {
+            return;
+        }
+        if (agentId == null) {
+            throw new BadRequestException("A new agent has no signing key yet. Create it with signInterAgentMessages off, "
+                    + "generate its key with POST " + SIGNING_KEYS_PATH + " (eddi-admin), then turn signInterAgentMessages on.");
+        }
+        String problem = signingKeyProblem(agentId, config.getIdentity());
+        if (problem != null) {
+            throw new BadRequestException(problem);
+        }
+    }
+
+    /**
+     * Why an agent with this identity cannot sign right now, or {@code null} when
+     * it can. It can when:
+     * <ul>
+     * <li>every key it declares that is not revoked is well-formed: a version from
+     * 1 to {@link AgentPublicKey#MAX_VERSION}, declared once, holding a Base64
+     * X.509 Ed25519 public key. A peer trusts every declared key, not only the one
+     * that signs;</li>
+     * <li>the key version it would sign with ({@code identity.signingKeyVersion()},
+     * the same rule the signer uses) has a public key, is not revoked and is inside
+     * its validity window — the signer refuses a key outside it and does not fall
+     * back to an older one;</li>
+     * <li>the vault holds the private key that signs as that public key.</li>
+     * </ul>
+     * Each answer names the way out.
+     *
+     * @throws WebApplicationException
+     *             503, if the vault could not answer
+     */
+    private String signingKeyProblem(String agentId, AgentConfiguration.AgentIdentity identity) {
+        String malformed = malformedKey(identity);
+        if (malformed != null) {
+            return malformed + " Revoke it with POST " + SIGNING_KEYS_PATH + "/{keyVersion}/revoke (eddi-admin), or turn signInterAgentMessages off.";
+        }
+        int keyVersion = identity != null ? identity.signingKeyVersion() : 0;
+        String publicKey = identity != null ? identity.getKeyForVersion(keyVersion) : null;
+        if (publicKey == null || publicKey.isBlank()) {
+            return "signInterAgentMessages needs a signing key, and this agent declares none. Generate one with POST "
+                    + SIGNING_KEYS_PATH + " (eddi-admin), then save with signInterAgentMessages on.";
+        }
+        String key = keyVersion > 0 ? "Signing key v" + keyVersion : "The legacy signing key (identity.publicKey)";
+        String fix = " Generate a new key with POST " + SIGNING_KEYS_PATH + " (eddi-admin), or turn signInterAgentMessages off.";
+        AgentPublicKey signingKey = identity.signingKey();
+        if (signingKey != null && signingKey.revoked()) {
+            return key + " is revoked." + fix;
+        }
+        if (signingKey != null && !signingKey.isValidAt(System.currentTimeMillis())) {
+            return key + " is outside its validity window (validFromMs " + signingKey.validFromMs() + ", validUntilMs "
+                    + signingKey.validUntilMs() + ")." + fix;
+        }
+        AgentSigningService.SigningKeyStatus status;
+        try {
+            status = agentSigningService.checkSigningKey(defaultTenantId, agentId, keyVersion, publicKey);
+        } catch (AgentSigningService.AgentSigningException e) {
+            throw vaultUnavailable("Could not check this agent's signing key: " + e.getMessage());
+        }
+        return switch (status) {
+            case USABLE -> null;
+            case INVALID_PUBLIC_KEY -> key + " is not a Base64 X.509 Ed25519 public key." + fix;
+            case NOT_IN_VAULT -> key + " has no private key in the secrets vault." + fix;
+            case UNREADABLE -> key + " is in the secrets vault but is not an Ed25519 private key." + fix;
+            case MISMATCH -> key + " does not match the private key in the secrets vault." + fix;
+        };
+    }
+
+    /**
+     * The first declared key that is not revoked and is not well-formed, described,
+     * or {@code null} when there is none. Only the signing-key endpoints write
+     * keys, and they write well-formed ones; this finds what an agent stored before
+     * identity became engine-owned may still carry.
+     */
+    private static String malformedKey(AgentConfiguration.AgentIdentity identity) {
+        if (identity == null || identity.getKeys() == null) {
+            return null;
+        }
+        Set<Integer> seen = new HashSet<>();
+        for (AgentPublicKey key : identity.getKeys()) {
+            if (key.revoked()) {
+                continue;
+            }
+            if (key.version() < 1 || key.version() > AgentPublicKey.MAX_VERSION) {
+                return "Signing key v" + key.version() + " has a version outside 1 to " + AgentPublicKey.MAX_VERSION + ".";
+            }
+            if (!seen.add(key.version())) {
+                return "Signing key v" + key.version() + " is declared more than once.";
+            }
+            if (!AgentSigningService.isEd25519PublicKey(key.publicKeyB64())) {
+                return "Signing key v" + key.version() + " is not a Base64 X.509 Ed25519 public key.";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A 503 whose JSON body carries {@code message}: the exception mapper that
+     * copies a message into the body handles 4xx only.
+     */
+    private static WebApplicationException vaultUnavailable(String message) {
+        return new WebApplicationException(message, Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .type(MediaType.APPLICATION_JSON_TYPE).entity(ErrorResponses.body("vault_unavailable", message)).build());
     }
 }

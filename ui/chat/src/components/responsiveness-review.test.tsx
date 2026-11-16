@@ -9,12 +9,12 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { indicatorStatusText } from "./Indicators";
 import { ChatProvider, useChatDispatch } from "@/store/chat-store";
-import { stepsToMessages } from "@/api/snapshot";
+import { stepsToMessages } from "@eddi/core";
 import { setLocale } from "@/i18n";
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  setLocale("en");
+  await setLocale("en");
 });
 
 describe("QuickReplies", () => {
@@ -71,8 +71,8 @@ describe("MessageBubble", () => {
 });
 
 describe("indicator status text", () => {
-  it("is translated", () => {
-    setLocale("de");
+  it("is translated", async () => {
+    await setLocale("de");
     expect(indicatorStatusText(false, null)).toBe("Denke nach…");
     expect(indicatorStatusText(false, { text: "calculator", phrase: false })).toBe("Verwende Calculator…");
   });
