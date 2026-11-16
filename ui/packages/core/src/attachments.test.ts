@@ -8,10 +8,10 @@ import {
   uploadAttachment,
   deleteAttachment,
   MAX_ATTACHMENTS_PER_TURN,
-} from "./attachments-api";
+} from "./attachments";
 import { setBaseUrl } from "./http";
-import { captureFetch, mockFetchResponse } from "@/test-utils/sse";
-import type { AttachmentResult } from "./attachments-api";
+import { captureFetch, mockFetchResponse } from "./test-utils/sse";
+import type { AttachmentResult } from "./attachments";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -59,7 +59,7 @@ describe("buildAttachmentContext", () => {
   });
 
   it("omits mimeType — the server resolves it from validated store metadata", () => {
-    const value = buildAttachmentContext([att(0)]).attachment_0.value as Record<
+    const value = buildAttachmentContext([att(0)]).attachment_0!.value as Record<
       string,
       unknown
     >;
@@ -92,8 +92,8 @@ describe("uploadAttachment", () => {
 
     await uploadAttachment("conv-1", new File(["abc"], "a.pdf"));
 
-    expect(calls[0].url).toBe("/conversations/conv-1/attachments");
-    expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0]!.url).toBe("/conversations/conv-1/attachments");
+    expect(calls[0]!.init?.method).toBe("POST");
   });
 
   it("surfaces the server's rejection code on an oversized file", async () => {
@@ -126,8 +126,8 @@ describe("deleteAttachment", () => {
 
     await deleteAttachment("conv-1", "r1");
 
-    expect(calls[0].url).toBe("/conversations/conv-1/attachments/r1");
-    expect(calls[0].init?.method).toBe("DELETE");
+    expect(calls[0]!.url).toBe("/conversations/conv-1/attachments/r1");
+    expect(calls[0]!.init?.method).toBe("DELETE");
   });
 
   it("encodes both segments, so a ref with a slash cannot rewrite the path", async () => {
@@ -136,7 +136,7 @@ describe("deleteAttachment", () => {
 
     await deleteAttachment("conv/1", "a/../b");
 
-    expect(calls[0].url).toBe("/conversations/conv%2F1/attachments/a%2F..%2Fb");
+    expect(calls[0]!.url).toBe("/conversations/conv%2F1/attachments/a%2F..%2Fb");
   });
 
   it("throws ApiError when the server refuses the delete", async () => {

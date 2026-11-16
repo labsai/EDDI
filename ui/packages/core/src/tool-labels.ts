@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────
-   EDDI Chat — readable tool names
+   @eddi/core — readable tool names
    The engine names a tool by the identifier the model invoked: a built-in
    slug (`webSearch`), an httpcall name, an OpenAPI operationId
    (`getAgentDescriptors`) or an MCP tool (`add_issue_comment`). The widget
