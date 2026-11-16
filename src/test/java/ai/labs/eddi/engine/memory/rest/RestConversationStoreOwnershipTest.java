@@ -597,12 +597,22 @@ class RestConversationStoreOwnershipTest {
     @Test
     @DisplayName("a search matching only somebody else's legacy (ownerless) conversation answers like one matching nothing")
     void agentSearchIsNoExistenceOracleOverLegacyConversations() throws Exception {
+        legacySearchAnswersLikeNoMatch("");
+    }
+
+    @Test
+    @DisplayName("a whitespace-only recorded owner is legacy too: the search answers like one matching nothing")
+    void whitespaceOwnerIsLegacyForTheSearch() throws Exception {
+        legacySearchAnswersLikeNoMatch("   ");
+    }
+
+    private void legacySearchAnswersLikeNoMatch(String recordedOwner) throws Exception {
         String agent = "0000000000000000000000a1";
         URI agentResource = URI.create("eddi://ai.labs.agent/agentstore/agents/" + agent + "?version=1");
         var mine = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
         mine.setAgentResource(agentResource);
         String legacyId = "0a0a0a0a0a0a0a0a0a0a0a02";
-        var legacy = descriptor(legacyId, "");
+        var legacy = descriptor(legacyId, recordedOwner);
         legacy.setAgentResource(agentResource);
         // Its owner is known only to its memory: another user.
         var foreignMemory = new ConversationMemorySnapshot();

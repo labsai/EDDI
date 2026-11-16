@@ -486,7 +486,7 @@ public class RestConversationStore implements IRestConversationStore {
             if (onlyOwner != null && !onlyOwner.equals(recordedOwner)) {
                 return null;
             }
-            if (!seesAllConversations && !isNullOrEmpty(recordedOwner)
+            if (!seesAllConversations && !recordsNoOwner(recordedOwner)
                     && !conversationAccessGuard.canAccessConversation(recordedOwner)
                     && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
                 return null;
@@ -537,7 +537,7 @@ public class RestConversationStore implements IRestConversationStore {
                                        boolean seesAllConversations, String agentId, Integer agentVersion,
                                        ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
         try {
-            boolean ownerRecorded = !isNullOrEmpty(conversationDescriptor.getUserId());
+            boolean ownerRecorded = !recordsNoOwner(conversationDescriptor.getUserId());
             if (!ownerRecorded) {
                 // fallback for older conversations pre v5.1.6
                 conversationDescriptor.setUserId(summary.userId());
@@ -712,7 +712,7 @@ public class RestConversationStore implements IRestConversationStore {
             }
         }
         for (var summary : readListingSummaries(ids, new HashSet<>()).values()) {
-            if (summary != null && !isNullOrEmpty(summary.userId()) && conversationAccessGuard.canAccessConversation(summary.userId())) {
+            if (summary != null && !recordsNoOwner(summary.userId()) && conversationAccessGuard.canAccessConversation(summary.userId())) {
                 return true;
             }
         }
@@ -721,7 +721,19 @@ public class RestConversationStore implements IRestConversationStore {
 
     /** Whether every row records no owner (pre-v5.1.6 conversations). */
     private static boolean onlyLegacyRows(List<ConversationDescriptor> rows) {
-        return rows.stream().allMatch(row -> isNullOrEmpty(row.getUserId()));
+        return rows.stream().allMatch(row -> recordsNoOwner(row.getUserId()));
+    }
+
+    /**
+     * Whether a descriptor's {@code userId} records no owner: null, empty or only
+     * whitespace. The one definition of a legacy row, shared by the owner query
+     * (which matches a userId without a non-whitespace character,
+     * {@link #NOT_BLANK}), the per-row checks and the search's fallback decision.
+     * Two definitions let a whitespace-only owner be legacy to the query and owned
+     * to the checks, which rejected the row without the fallback running.
+     */
+    static boolean recordsNoOwner(String userId) {
+        return userId == null || userId.isBlank();
     }
 
     /**
