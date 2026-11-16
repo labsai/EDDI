@@ -81,6 +81,20 @@ and the bearer rule (open PR #1338) were not touched.
 - The patch destination check compares each ancestor's direct fields instead of converting the
   whole document per restored credential.
 
+**Third review round.**
+- An upgrade wrote the preview's agent settings (the source rewritten onto the target, the
+  target's credentials restored into it) against the version resolved at write time, so an agent
+  changed in between, for example by a key rotation, was silently overwritten with the older
+  values. `UpgradeExecutor.updateAgentConfig` now refuses the write and reports it when the agent
+  is no longer at the version the preview compared against.
+- The export's vault-reference exemption judged only the words beside a reference, so a
+  symbol-only or non-ASCII literal (`!!!${vault:k}`) was exported while the read masked it. It now
+  accepts only the scaffolding characters the read accepts.
+- With `connectionString` recognised as a credential name, a connection-string URL whose password
+  slot is a vault reference (`jdbc:postgresql://app:${vault:db-password}@db/eddi`) was masked whole
+  on export, losing the reference and the host. Such a URL now goes through the part-by-part URL
+  pass, which still redacts a literal password and every credential-named query value.
+
 ### Design decisions
 
 - Refuse rather than drop the credential: a patch that changes the destination next to a hidden

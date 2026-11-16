@@ -319,6 +319,32 @@ class UpgradeExecutorSyncTest {
     }
 
     /**
+     * The adopted settings were rewritten onto the target as the preview read it
+     * (v5), the target's own credentials restored into them. When the agent has
+     * moved on by the time it is written — a rotated key, say — writing them
+     * against the newer version would silently restore the old one.
+     */
+    @Test
+    @DisplayName("adopted settings are not written over an agent that changed after the preview")
+    void adoptedSettingsAreRefusedWhenTheAgentMovedOn() throws Exception {
+        var adopted = new AgentConfiguration();
+        adopted.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        adopted.setDescription("promoted from staging");
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
+        givenPreview(agentRow(DiffAction.UPDATE, mapper.writeValueAsString(adopted)),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0));
+        // The preview compared against v5; by the write the agent is at v6.
+        when(agentStore.getCurrentResourceId(AGENT)).thenReturn(resourceId(AGENT, 6));
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+
+        assertFalse(result.agentUpdated());
+        verify(agentStore, never()).updateAgent(anyString(), anyInt(), any(), anyBoolean());
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType()) && f.reason().contains("v5 → v6")),
+                result.failures().toString());
+    }
+
+    /**
      * The identity stays the target's, so the source's "sign" could only be
      * honoured with the target's own key. Carried onto a target that cannot sign,
      * the agent save was refused with 400 — and with it every workflow change the

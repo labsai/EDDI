@@ -159,6 +159,35 @@ class SecretScrubberRedactorParityTest {
     }
 
     @Test
+    @DisplayName("symbols or non-ASCII letters beside a vault reference are a literal on read and on export alike")
+    void symbolsBesideAVaultReferenceAreMasked() throws Exception {
+        for (String mixed : List.of("!!!${vault:k}", "${vault:k}#%&", "ééé ${vault:k}")) {
+            List<String> both = exportedAndRead("apiKey", mixed);
+            assertEquals(SecretScrubber.REDACTED, both.get(0), mixed);
+            assertEquals(ConfigSecretRedactor.REDACTED, both.get(1), mixed);
+        }
+        // Scheme scaffolding beside the reference is still a pointer on both paths.
+        for (String pointer : List.of("Bearer ${vault:k}", "${vault:u}:${vault:p}")) {
+            assertEquals(List.of(pointer, pointer), exportedAndRead("apiKey", pointer), pointer);
+        }
+    }
+
+    @Test
+    @DisplayName("a connection-string URL keeps its vault reference on export; a literal beside it is still redacted")
+    void connectionStringWithAVaultReference() throws Exception {
+        String kept = exportedAndRead("connectionString", "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi").get(0);
+        assertEquals("jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi", kept);
+
+        String mixed = exportedAndRead("connectionString", "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi?password=plainliteral")
+                .get(0);
+        assertFalse(mixed.contains("plainliteral"), mixed);
+        assertTrue(mixed.contains("${vault:db-password}"), mixed);
+
+        // No reference at all: masked whole, as on the read path.
+        assertEquals(SecretScrubber.REDACTED, exportedAndRead("connectionString", "jdbc:postgresql://app:plainliteral@db.internal/eddi").get(0));
+    }
+
+    @Test
     @DisplayName("a query-map credential parameter holding a template stays legible on both paths")
     void queryParameterReference() throws Exception {
         ObjectNode document = mapper.createObjectNode();

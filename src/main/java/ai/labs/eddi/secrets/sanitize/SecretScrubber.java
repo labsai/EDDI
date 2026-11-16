@@ -789,6 +789,19 @@ public class SecretScrubber {
                 // exported verbatim. There, only a scheme word and separators may sit
                 // beside the reference; anything else redacts the value.
                 if (isSecretFieldName(fieldName, parentFieldName) && !isReferenceScaffolding(remainder)) {
+                    // A connection string under a credential name — connectionString,
+                    // recognised by name since the read rules were adopted — is a URL
+                    // whose password slot may be the reference:
+                    // "jdbc:postgresql://app:${vault:db-password}@db/eddi". Its scheme
+                    // carries a ':' the URL gate above does not admit, so it arrives here,
+                    // and masking it whole lost the reference and the host. It is judged
+                    // part by part instead, by the read redactor's URL rule: a literal
+                    // userinfo password and every credential-named query value are
+                    // replaced, references stay.
+                    if (textValue.contains("://")) {
+                        String parts = ConfigSecretRedactor.redactUrl(textValue).replace(ConfigSecretRedactor.IN_STRING_REDACTED, REDACTED);
+                        return parts.equals(textValue) ? textValue : parts;
+                    }
                     return REDACTED;
                 }
                 return null;
@@ -806,7 +819,16 @@ public class SecretScrubber {
         // above, by the stricter scaffolding rule. A pointer is returned as it is, so
         // the free-text shape scan that follows a null cannot take "Bearer ${vars.t}"
         // for a bearer token.
-        if (isSecretFieldName(fieldName, parentFieldName)) {
+        // One exception, the URL that carries a vault reference: a connection string
+        // under a credential name ("connectionString", now recognised by name like the
+        // read does) holding "jdbc:postgresql://app:${vault:db-password}@db/eddi" is a
+        // URL whose password slot is a pointer. Masking it whole lost the reference
+        // and the host; it goes to the part-by-part URL pass below instead, which
+        // redacts a literal password and every credential-named query value and keeps
+        // a reference legible. A URL under a credential name with no vault reference
+        // is masked whole, as before.
+        boolean urlWithVaultReference = looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:"));
+        if (isSecretFieldName(fieldName, parentFieldName) && !urlWithVaultReference) {
             return ConfigSecretRedactor.isLiteral(textValue) ? REDACTED : textValue;
         }
 
@@ -1081,6 +1103,20 @@ public class SecretScrubber {
     private static boolean isReferenceScaffolding(String remainder) {
         for (String word : remainder.split("[^a-zA-Z0-9\\-]+")) {
             if (!word.isEmpty() && !AUTH_SCHEME_WORDS.contains(word.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        // The words alone are not the whole remainder: a password made only of
+        // symbols ("!!!${vault:k}") or of non-ASCII letters splits into no word and
+        // passed as scaffolding, so the export kept a literal the read masks. Only
+        // the characters ConfigSecretRedactor.isLiteral accepts beside a reference
+        // are scaffolding: whitespace, ASCII letters, digits and '-', and the
+        // separators a scheme uses (':' ',' ';' '=').
+        for (int i = 0; i < remainder.length(); i++) {
+            char c = remainder.charAt(i);
+            boolean scaffolding = Character.isWhitespace(c) || (c < 128 && (Character.isLetterOrDigit(c) || c == '-')) || c == ':'
+                    || c == ',' || c == ';' || c == '=';
+            if (!scaffolding) {
                 return false;
             }
         }

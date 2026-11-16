@@ -377,7 +377,7 @@ public class UpgradeExecutor {
             int failuresBeforeAgent = outcome.failures.size();
             URI writtenAgentUri = agentMayChange
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, removedWorkflowIds,
-                            agentSettings, workflowOrder, compatible, outcome)
+                            agentSettings, agentSettings != null ? agentDiff.targetVersion() : null, workflowOrder, compatible, outcome)
                     : null;
             boolean agentUpdated = writtenAgentUri != null;
             URI agentUri = agentUpdated ? writtenAgentUri : currentAgentUri(targetAgentId);
@@ -1665,6 +1665,10 @@ public class UpgradeExecutor {
      * @param adoptedSettings
      *            the source agent as the preview rewrote it onto this target, or
      *            null to keep the target's own settings
+     * @param adoptedFromVersion
+     *            the target version the preview compared against and rewrote
+     *            {@code adoptedSettings} onto; when the agent is at another version
+     *            by the time it is written, nothing is written and the run fails
      * @return the agent's new URI, or null when the result is what the agent
      *         already is — nothing is written and no version is burned
      */
@@ -1673,6 +1677,7 @@ public class UpgradeExecutor {
                                   List<URI> newWorkflowUris,
                                   Set<String> removedWorkflowIds,
                                   String adoptedSettings,
+                                  Integer adoptedFromVersion,
                                   List<String> workflowOrder,
                                   boolean compatible,
                                   Outcome outcome) {
@@ -1687,6 +1692,18 @@ public class UpgradeExecutor {
                         + " could not be established from its descriptor, so it was not written");
             }
             int currentVersion = resolved;
+            if (adoptedSettings != null && adoptedFromVersion != null && adoptedFromVersion != currentVersion) {
+                // The adopted settings are the preview's: the source rewritten onto the
+                // target as it stood at version adoptedFromVersion, the target's own
+                // credentials restored into it. Written against a newer version they
+                // would silently undo whatever changed here since — a rotated key comes
+                // back as the old one, with no conflict anywhere, because the version
+                // passed to the store is the one resolved just now.
+                outcome.failed(agentId, "agent", null, "the agent changed on this instance (v" + adoptedFromVersion + " → v"
+                        + currentVersion + ") after the upgrade compared against it, so its settings were not overwritten"
+                        + " and the workflows and extensions written by this run are not deployed; preview and upgrade again");
+                return null;
+            }
             // Unredacted: this document is written back, and an editor's redacted copy
             // carries the marker in place of the agent's stored credentials.
             AgentConfiguration current = RestAgentStore.readUnredacted(agentStore, agentId, currentVersion);
