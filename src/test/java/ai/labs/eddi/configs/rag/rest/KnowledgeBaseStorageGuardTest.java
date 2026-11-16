@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
@@ -174,6 +175,41 @@ class KnowledgeBaseStorageGuardTest {
 
             assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
         }
+
+        /**
+         * The neighbour that cannot be read may be the very one that owns the location,
+         * so skipping it let an editor point a knowledge base at another's table on a
+         * transient read error — the same hole the page budget already closes.
+         */
+        @Test
+        @DisplayName("a knowledge base that cannot be read refuses the location rather than being skipped")
+        void unreadableNeighbourFailsClosed() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+
+            var e = assertThrows(IllegalStateException.class,
+                    () -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+            assertTrue(e.getMessage().contains(OTHER), e.getMessage());
+            verify(accessGuard, never()).hasAccess(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a knowledge base whose document fails to load refuses the location too")
+        void neighbourFailingWithARuntimeErrorFailsClosed() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IllegalArgumentException("cannot deserialize"));
+
+            assertThrows(IllegalStateException.class, () -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+        }
+
+        @Test
+        @DisplayName("a knowledge base deleted since it was listed owns no location and is skipped")
+        void deletedNeighbourIsSkipped() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
+
+            assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+        }
     }
 
     @Nested
@@ -247,6 +283,39 @@ class KnowledgeBaseStorageGuardTest {
             var dropped = kb("victim", null, null);
             guard.prepareUpdate(SELF, renamed, dropped);
             assertEquals("id", dropped.getStoreNamespace());
+        }
+
+        @Test
+        @DisplayName("a name-layout knowledge base that changes backend or server moves to a store of its own")
+        void changingBackendOrServerMigrates() {
+            // the same name maps to the new backend's (or server's) default store, which
+            // can be another 6.5.0 knowledge base's of that name
+            var previous = kb("alpha", null, Map.of("host", "pg-a"));
+            previous.setStoreType("pgvector");
+            var otherBackend = kb("alpha", null, Map.of("host", "pg-a"));
+            otherBackend.setStoreType("qdrant");
+            guard.prepareUpdate(SELF, previous, otherBackend);
+            assertEquals("id", otherBackend.getStoreNamespace());
+
+            var otherServer = kb("alpha", null, Map.of("host", "pg-b"));
+            otherServer.setStoreType("pgvector");
+            guard.prepareUpdate(SELF, previous, otherServer);
+            assertEquals("id", otherServer.getStoreNamespace());
+
+            // a parameter that does not choose the store leaves the layout alone
+            var tuned = kb("alpha", null, Map.of("host", "pg-a", "dimension", "768"));
+            tuned.setStoreType("pgvector");
+            guard.prepareUpdate(SELF, previous, tuned);
+            assertNull(tuned.getStoreNamespace());
+        }
+
+        @Test
+        @DisplayName("spelling out a server parameter's default is not a move: the factory already connected there")
+        void writingOutTheDefaultServerDoesNotMigrate() {
+            var previous = kb("alpha", null, null);
+            var explicitDefaults = kb("alpha", null, Map.of("host", "localhost", "port", "5432", "database", "eddi"));
+            guard.prepareUpdate(SELF, previous, explicitDefaults);
+            assertNull(explicitDefaults.getStoreNamespace(), "an omitted host is localhost; its documents must stay reachable");
         }
 
         @Test

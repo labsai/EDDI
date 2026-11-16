@@ -110,6 +110,14 @@ export function getResourceType(slug: string): ResourceTypeConfig | undefined {
   return RESOURCE_TYPES.find((rt) => rt.slug === slug);
 }
 
+/**
+ * Look up a resource type config by its store segment (`apicallstore`,
+ * `llmstore`, …) — the first path segment of an `eddi://` config URI.
+ */
+export function getResourceTypeByStore(store: string): ResourceTypeConfig | undefined {
+  return RESOURCE_TYPES.find((rt) => rt.store === store);
+}
+
 /** Build the base path for a resource type */
 function basePath(rt: ResourceTypeConfig): string {
   return `/${rt.store}/${rt.plural}`;

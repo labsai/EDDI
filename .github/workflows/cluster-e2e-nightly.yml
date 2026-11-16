@@ -1,0 +1,165 @@
+name: Cluster E2E (nightly)
+
+# The evidence for cluster mode (planning/cluster-production-readiness-review.md, Phase 3), kept
+# out of ci.yml on purpose: it needs a packaged app, builds a cluster per database and takes
+# 15-40 minutes, and several of its scenarios are known to fail until the Phase 1 fixes land
+# (their display names carry the review's finding IDs). It is not a required check.
+#
+#   e2e   the multi-process suite (src/test/java/ai/labs/eddi/integration/cluster): three EDDI
+#         processes from this commit's packaged app, an R3 NATS cluster, real MongoDB or
+#         PostgreSQL, Toxiproxy between every EDDI process and every NATS server, SIGSTOP, kill -9,
+#         stream-leader failover, and a per-conversation history checker. Opt-in through
+#         -Deddi.cluster.e2e=true, so the normal `./mvnw verify -DskipITs=false` skips it.
+#   demo  scripts/cluster-demo (13 scenarios through the published runtime image with this
+#         commit's build mounted), with its JSON results and node logs uploaded.
+#
+# docs/clustering.md#how-cluster-mode-is-tested describes both.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Nightly, 02:20 UTC (loadtest-db-ops runs at 03:40)
+    - cron: "20 2 * * *"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/main/java/ai/labs/eddi/engine/cluster/**"
+      - "src/test/java/ai/labs/eddi/integration/cluster/**"
+      - "scripts/cluster-demo/**"
+      - ".github/workflows/cluster-e2e-nightly.yml"
+
+concurrency:
+  group: cluster-e2e-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "25"
+
+jobs:
+  e2e:
+    name: Cluster E2E suite (${{ matrix.db }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - db: mongo
+            test-class: MongoClusterE2EIT
+          - db: postgres
+            test-class: PostgresClusterE2EIT
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build
+        run: ./mvnw package -DskipTests -DskipUi=true -Dquarkus.analytics.disabled=true -B -q
+
+      # Surefire, not failsafe: failsafe's fork timeout (15 min) and rerun-once policy suit the
+      # normal ITs, not a suite that kills nodes on purpose and must report its first verdict.
+      - name: Run the suite
+        env:
+          TEST_CLASS: ${{ matrix.test-class }}
+        run: |
+          set +e
+          ./mvnw test -B -Dtest="$TEST_CLASS" -Deddi.cluster.e2e=true -Dsurefire.failIfNoSpecifiedTests=false \
+            > cluster-e2e-maven.log 2>&1
+          status=$?
+          tail -n 120 cluster-e2e-maven.log
+          exit $status
+
+      - name: Job summary
+        if: always()
+        env:
+          DB: ${{ matrix.db }}
+        run: |
+          {
+            echo "### Cluster E2E ($DB)"
+            echo
+            echo "| Scenario | Clean history | Summary |"
+            echo "|---|---|---|"
+            for f in target/cluster-e2e/"$DB"/*.json; do
+              [ -f "$f" ] || continue
+              python3 - "$f" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1], encoding="utf-8"))
+          first = r["summary"].splitlines()[0].replace("|", "/")
+          print(f"| {r['scenario']} | {'yes' if r['clean'] else '**no**'} | {first} |")
+          PY
+            done
+            echo
+            echo "Test verdicts (a scenario can have a clean history and still fail its liveness check):"
+            echo
+            echo '```'
+            grep -hE "Tests run:|FAIL|ERROR\]" cluster-e2e-maven.log | head -n 40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cluster-e2e-${{ matrix.db }}
+          path: |
+            target/cluster-e2e/
+            target/surefire-reports/*ClusterE2EIT*
+            cluster-e2e-maven.log
+          if-no-files-found: warn
+          retention-days: 30
+
+  demo:
+    name: Cluster demo (${{ matrix.db }})
+    # The demo is 13 scenarios against the published runtime image; on a pull request the suite
+    # above is the faster signal, so the demo runs nightly and by hand only.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [mongo, postgres]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build
+        run: ./mvnw package -DskipTests -DskipUi=true -Dquarkus.analytics.disabled=true -B -q
+
+      - name: Run the cluster demo
+        env:
+          DB: ${{ matrix.db }}
+          EDDI_APP: ${{ github.workspace }}/target/quarkus-app
+        run: python3 scripts/cluster-demo/demo.py --db "$DB" --exit-code --summary-md "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cluster-demo-${{ matrix.db }}
+          path: |
+            scripts/cluster-demo/results-*.json
+            scripts/cluster-demo/logs-*/
+            scripts/cluster-demo/mock-requests.jsonl
+          if-no-files-found: warn
+          retention-days: 30

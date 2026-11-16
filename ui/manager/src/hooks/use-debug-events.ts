@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AuditEntry } from "@/lib/api/audit";
+import type { ToolActivity } from "@/lib/tool-labels";
 
 // ==================== Types ====================
 
@@ -125,7 +126,7 @@ interface DebugState {
    * and storing both in one list would double-count. This list exists solely
    * so the status line can say "Using {tool}…" while the turn is running.
    */
-  liveToolCalls: string[];
+  liveToolCalls: ToolActivity[];
   /**
    * True once TOKENS have arrived since the last `tool_call`, i.e. the model is
    * writing again and the tool phase is over.
@@ -151,7 +152,7 @@ interface DebugState {
 
   // Actions
   addEvent: (event: PipelineEvent) => void;
-  addToolCall: (tool: string) => void;
+  addToolCall: (tool: ToolActivity) => void;
   markToolsSettled: () => void;
   finalizeTurn: () => void;
   setDebugOpen: (open: boolean) => void;

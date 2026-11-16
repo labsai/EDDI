@@ -354,6 +354,24 @@ describe("RulesEditor", () => {
     expect(cond.type).toBe("contentTypeMatcher");
     expect(cond.configs).toEqual({ mimeType: "", minCount: "1" });
   });
+
+  it("presets deploymentContext without tagMatches, which the backend refuses", async () => {
+    // Agents carry no tags, so DeploymentContextCondition refuses a non-blank
+    // tagMatches on save; the preset must not offer a field to fill in.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RulesEditor data={populatedConfig} onChange={onChange} />
+    );
+    await user.selectOptions(
+      screen.getByTestId("condition-type-select"),
+      "deploymentContext"
+    );
+    await confirmTypeChange(user);
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
+    expect(cond.type).toBe("deploymentContext");
+    expect(cond.configs).toEqual({ when: "production" });
+  });
 });
 
 /** True if the option with this value is disabled (the surfaced legacy marker). */

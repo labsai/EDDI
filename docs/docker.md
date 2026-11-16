@@ -68,7 +68,7 @@ To expose an **unauthenticated** instance on purpose — an isolated network
 only you can reach — set `EDDI_I_UNDERSTAND_PUBLIC=true` as well; the GCP
 provisioner's `--i-understand-public` does exactly that. Every API endpoint,
 the secrets vault and the MCP server are then open to whoever can reach the
-port, and EDDI's own `AuthStartupGuard` says so in its log every hour.
+port, and EDDI's own `AuthStartupGuard` says so in its log at startup.
 
 ### With Keycloak Authentication
 
@@ -82,7 +82,7 @@ This starts:
 
 - **Keycloak 26** on `127.0.0.1:8180` (admin console: `http://localhost:8180/admin`, login `admin` / `KC_BOOTSTRAP_ADMIN_PASSWORD` — `admin` unless you set it; the installers generate one into `.env`)
 - **`keycloak-guard`**, a one-shot check Keycloak waits for: it exits 1, so Keycloak never starts, when `KEYCLOAK_BIND` is not a loopback address while `KC_BOOTSTRAP_ADMIN_PASSWORD` is unset or `admin`. The loopback quick start needs no `.env`; to publish Keycloak on another interface, set `KC_BOOTSTRAP_ADMIN_PASSWORD` first (the installers and the GCP provisioner already do). Keycloak reads that password only when it first creates the master realm, so on an existing `keycloak-data` volume put the console's current admin password there
-- **`keycloak-admin-rotate`**, a one-shot step EDDI waits for: once Keycloak is healthy it tries the `admin` login, and if an existing volume still accepts it, sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` (the password goes to `kcadm` on stdin). The guard alone cannot see a stored password, so this is what makes a new `.env` value take effect on an old volume. If `KC_BOOTSTRAP_ADMIN_USERNAME` names another user, the original `admin` account is checked and rotated the same way. Once a login with the configured credentials succeeds it leaves a marker in the volume, and `keycloak-guard` serves an existing volume off loopback only after that marker exists: start an old volume once on loopback
+- **`keycloak-admin-rotate`**, a one-shot step EDDI waits for: once Keycloak is healthy it tries the `admin` login, and if an existing volume still accepts it, sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` (the password goes to `kcadm` on stdin). The guard alone cannot see a stored password, so this is what makes a new `.env` value take effect on an old volume. If `KC_BOOTSTRAP_ADMIN_USERNAME` names another user, the original `admin` account is checked and rotated the same way. Once a login with the configured credentials succeeds it leaves a marker in the volume, and `keycloak-guard` serves an existing volume off loopback only after that marker exists: start an old volume once on loopback. With a non-default `KC_BOOTSTRAP_ADMIN_PASSWORD` (a password of `admin` skips the check and the step succeeds), if that login fails (the admin password was changed in the console so `.env` no longer matches, or `KC_BOOTSTRAP_ADMIN_USERNAME` was renamed on an existing volume), the step exits 1 and EDDI does not start, on loopback too: put the console's password back in `.env`, restore the user name, or reset the `keycloak-data` volume.
 - **EDDI** on port `7070` with OIDC auth enabled
 - **MongoDB** for data storage
 
@@ -154,7 +154,7 @@ docker run --name eddi \
 | `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` | `false`                      | Opt out of the production auth requirement. Required to boot with OIDC disabled |
 | `EDDI_MCP_ALLOW_UNAUTHENTICATED` | `false`                           | Knowingly expose `/mcp` without authentication. Required to boot with OIDC disabled |
 | `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED` | `false`                   | Knowingly expose `/secretstore` without authentication. Required to boot with OIDC disabled |
-| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
+| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, `*.localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 
@@ -164,7 +164,7 @@ docker run --name eddi \
 | -------------------------- | --------------------------------------------- | ----------- |
 | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
 | `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
-| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters or a known default) |
+| `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters, fewer than 6 distinct characters, or a known default/placeholder) unless `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` |
 | `POSTGRES_PASSWORD`        | *(required)*                                  | `docker-compose.postgres-only.yml` only: the database password for both PostgreSQL and EDDI. No default — the file used to ship `eddi`/`eddi`. The postgres image reads it at first init only, so keep it stable; `install.sh --db=postgres` generates one into `.env` |
 | `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` | `eddi` / `changeme` | MongoDB's root user, created on first init. Only `mongod` and the one-shot `mongodb-app-user` service see it; EDDI does not connect with it |
 | `MONGO_APP_USERNAME`       | `eddi_app`                                    | EDDI's own MongoDB user: `readWrite` + `dbAdmin` on `eddi`, nothing else. `mongodb-app-user` creates it, or resets its password, on every `up` — including on a volume from before it existed, so no manual migration is needed |
@@ -175,13 +175,24 @@ docker run --name eddi \
 
 Set configuration through environment variables like these rather than by overriding `JAVA_OPTS_APPEND`: the image sets `JAVA_OPTS_APPEND` itself, and a runtime value replaces it instead of adding to it.
 
+### Update check
+
+EDDI looks for a newer release once a day and puts a notification in the administrators' inbox (the bell in the Manager's top bar) when there is one. It is **on by default**: one anonymous request a day to `api.github.com/repos/labsai/EDDI/releases/latest`, the first a minute after boot, carrying nothing about your deployment.
+
+| Variable                    | Default | Description |
+| --------------------------- | ------- | ----------- |
+| `EDDI_UPDATE_CHECK_ENABLED` | `true`  | `false` switches the check off entirely — the first check after the first start included, because it is read before the database is touched. It wins over the Manager's switch, which then shows as locked. Compose passes it through from `.env`; the Helm chart sets it from `eddi.updateCheck.enabled` |
+
+Administrators can also turn it off on the Manager's **Updates** page; that is stored in the database, so it survives restarts and applies to every node. A white-labelled deployment that has not set `eddi.branding.show-update-check` neither checks nor notifies. `eddi.update-check.interval` (default `24h`) changes the cadence.
+
 ### AI Tools
 
 ```bash
--e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=your_key \
--e EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=your_cx
+-e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+-e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=your_key
 ```
+
+(`google` still works with `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY` and `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX` until Google shuts the Custom Search JSON API down on 2027-01-01; see [langchain.md → Web Search Tool](langchain.md#web-search-tool).)
 
 ```bash
 -e EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=your_key
@@ -196,7 +207,7 @@ docker run --name eddi \
   -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
-  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=google \
-  -e EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=YOUR_KEY \
+  -e EDDI_TOOLS_WEBSEARCH_PROVIDER=brave \
+  -e EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=YOUR_KEY \
   -d labsai/eddi:latest
 ```

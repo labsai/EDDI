@@ -9,13 +9,18 @@ import java.util.Map;
 /**
  * Callback interface for streaming conversation events via SSE.
  * <p>
- * Two layers of events are supported:
+ * The events supported:
  * <ul>
  * <li><strong>Workflow step events</strong> —
  * {@link #onTaskStart}/{@link #onTaskComplete} emitted by
  * {@code LifecycleManager} around each task execution</li>
  * <li><strong>LLM token events</strong> — {@link #onToken} emitted by
  * {@code LlmTask} during streaming chat completion</li>
+ * <li><strong>Optional events</strong> (no-op by default) — tool calls and
+ * results, cascade steps and escalations, LLM retries, guardrail triggers and
+ * task failures</li>
+ * <li><strong>Terminal events</strong> — {@link #onComplete} or
+ * {@link #onError}</li>
  * </ul>
  * <p>
  * When no streaming is requested (standard {@code say} endpoint), no sink is
@@ -143,6 +148,34 @@ public interface ConversationEventSink {
      * unaffected.
      */
     default void onToolCall(String toolName) {
+    }
+
+    /**
+     * As {@link #onToolCall(String)}, with the model's call id and the designer's
+     * optional {@link ToolDisplay} (the {@code toolDisplay} task setting). The id
+     * lets a client pair this call with its {@link #onToolResult}. Defaults to the
+     * name-only form, so a sink that only knows that one keeps working.
+     *
+     * @param display
+     *            null unless the task configures a display for this tool
+     */
+    default void onToolCall(String toolName, String callId, ToolDisplay display) {
+        onToolCall(toolName);
+    }
+
+    /**
+     * One tool call has finished — sent exactly once for every call, and always
+     * after that call's {@link #onToolCall} on the same stream (a gated call that a
+     * resume settles without running is announced immediately before its result).
+     * Status only, never the result: results may hold user data and are delivered,
+     * redacted, in the task summary's toolTrace.
+     *
+     * @param status
+     *            {@code ok}, {@code error}, {@code not_executed} (refused or
+     *            skipped before the tool ran) or {@code rejected} (a human declined
+     *            it)
+     */
+    default void onToolResult(String toolName, String callId, String status, long durationMs) {
     }
 
     /**

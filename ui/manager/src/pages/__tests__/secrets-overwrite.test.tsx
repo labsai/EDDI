@@ -103,8 +103,8 @@ describe("Add Secret never overwrites", () => {
   });
 });
 
-describe("Rotate keeps the grant", () => {
-  it("sends the secret's current narrowed grant and description with the new value", async () => {
+describe("Rotate keeps the grant (by not sending one)", () => {
+  it("sends only the new value, so the stored grant and description are kept server-side", async () => {
     const stores = recordStores();
     renderSecrets();
     const user = userEvent.setup();
@@ -115,11 +115,8 @@ describe("Rotate keeps the grant", () => {
     await user.click(screen.getByTestId("confirm-rotate-button"));
 
     await waitFor(() => expect(stores).toHaveLength(1));
-    expect(stores[0]!.body).toEqual({
-      value: "rotated-value",
-      allowedAgents: ["agent5", "agent7"],
-      description: "Google Gemini 2.5 Flash API key",
-    });
+    // A restated grant would override a concurrent revocation (last-writer-wins).
+    expect(stores[0]!.body).toEqual({ value: "rotated-value" });
     await waitFor(() =>
       expect(screen.queryByTestId("rotate-value-input")).not.toBeInTheDocument(),
     );

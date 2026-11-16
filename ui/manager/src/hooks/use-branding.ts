@@ -42,6 +42,10 @@ function useBrandingWrite<TArgs>(write: (args: TArgs) => Promise<BrandingView>, 
     // notice, per-slot image errors), so the global error toast would repeat it.
     meta: { silent: true },
     onSuccess: (view) => {
+      // Two writes can both commit and answer out of order: a late response
+      // older than what the cache already holds must not bring stale branding back.
+      const cached = qc.getQueryData<BrandingView>(brandingKeys.all);
+      if (cached && view.effective.revision < cached.effective.revision) return;
       qc.setQueryData(brandingKeys.all, view);
       // Not awaited: the write is done, and the mutation should not stay
       // pending on a script load.

@@ -13,7 +13,9 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
@@ -65,6 +67,16 @@ public interface IRestConversationStore {
      * stops on the owner-scan budget. {@code index * limit} above 10,000 is refused
      * with a 400 — each page counts off the matches before it, so the ceiling
      * bounds what one request can read; narrow the listing with a filter instead.
+     * <p>
+     * {@code mine=true} lists only the caller's own conversations, for every caller
+     * — an administrator, who otherwise sees everybody's, and an agent's reviewer
+     * included. A client that picks a conversation to continue (the chat panel's
+     * resume) must ask this, or it continues another user's. The owner is an exact
+     * match on the descriptor's {@code userId}, so a pre-v5.1.6 conversation that
+     * records no owner there is left out. Without a named caller, or with
+     * authorization disabled (a conversation then records the userId the client
+     * passed, not the principal), there is no owner to match and the flag changes
+     * nothing.
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -76,7 +88,24 @@ public interface IRestConversationStore {
                                                              @QueryParam("agentId") String agentId,
                                                              @QueryParam("agentVersion") Integer agentVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
-                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
+                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState,
+                                                             @Parameter(name = "mine", required = false, example = "true",
+                                                                        description = "Only the caller's own conversations, an administrator's included")
+                                                             @QueryParam("mine")
+                                                             @DefaultValue("false") Boolean mine);
+
+    /**
+     * The listing as the caller is entitled to see it ({@code mine=false}): every
+     * conversation for an administrator, their own (and those of agents they
+     * review) for anyone else.
+     */
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     String conversationId, String agentId, Integer agentVersion,
+                                                                     ConversationState conversationState,
+                                                                     ConversationDescriptor.ViewState viewState) {
+        return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
+                false);
+    }
 
     @GET
     @Path("/simple/{conversationId}")
@@ -93,6 +122,39 @@ public interface IRestConversationStore {
     @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     ConversationMemorySnapshot readRawConversationLog(@PathParam("conversationId") String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The owner's edit of a conversation's list entry: its title, its pin, or both.
+     * A field left out (or null) is left as it is.
+     *
+     * @param title
+     *            the new title — whitespace collapsed, control characters dropped,
+     *            not blank, at most 200 characters. A renamed conversation keeps
+     *            the name: no generated title ever replaces it
+     * @param pinned
+     *            whether the conversation is pinned to the top of the owner's list
+     */
+    record ConversationPatch(String title, Boolean pinned) {
+    }
+
+    /**
+     * Renames or (un)pins a conversation. Owner only — the same strict owner check
+     * as deleting it, so an administrator may act too and nobody else can,
+     * reviewers included.
+     */
+    @PATCH
+    @Path("/{conversationId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Rename or pin a conversation",
+               description = "Sets the title (then marked as set by the user, so a generated title never replaces it) "
+                       + "and/or the pin of one of the caller's conversations. Owner or eddi-admin only.")
+    @APIResponse(responseCode = "200", description = "The updated conversation descriptor.")
+    @APIResponse(responseCode = "400", description = "Neither field given, or the title is blank or too long.")
+    @APIResponse(responseCode = "403", description = "The caller does not own the conversation.")
+    @APIResponse(responseCode = "404", description = "No such conversation, or it was deleted.")
+    ConversationDescriptor patchConversation(@PathParam("conversationId") String conversationId, ConversationPatch patch)
             throws ResourceStoreException, ResourceNotFoundException;
 
     @DELETE

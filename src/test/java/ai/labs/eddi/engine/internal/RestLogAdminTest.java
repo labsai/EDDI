@@ -94,6 +94,17 @@ class RestLogAdminTest {
         }
 
         @Test
+        @DisplayName("a non-positive limit reads the default page, never the store's unlimited query")
+        void nonPositiveLimitReadsTheDefaultPage() {
+            restLogAdmin.getHistoryLogs(Deployment.Environment.production, null, null, null, null, null, 0, 0);
+            restLogAdmin.getHistoryLogs(Deployment.Environment.production, null, null, null, null, null, 0, -5);
+            restLogAdmin.getHistoryLogs(Deployment.Environment.production, null, null, null, null, null, 0, null);
+
+            verify(databaseLogs, times(3)).getLogs(Deployment.Environment.production, null, null, null, null, null, 0,
+                    RestLogAdmin.DEFAULT_HISTORY_LIMIT);
+        }
+
+        @Test
         @DisplayName("L10: a limit above the page ceiling, or a negative skip, is refused before the store is read")
         void boundsAreEnforced() {
             assertThrows(BadRequestException.class, () -> restLogAdmin.getHistoryLogs(

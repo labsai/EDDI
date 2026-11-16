@@ -255,28 +255,13 @@ describe("rotateSecret", () => {
     return { hits, rotatePosts };
   }
 
-  it("sends the current narrowed grant and description with the new value (S1)", async () => {
-    // A PUT without allowedAgents is stored as ["*"] with a blank description by
-    // a backend before the vault-key-safety fix — which is what the old /rotate
-    // 404 fallback sent on every rotation.
+  it("sends only the new value, so the stored grant and description are kept, never restated", async () => {
     const { hits, rotatePosts } = captureStore();
-    await rotateSecret("default", "gemini-key", "new-value", {
-      allowedAgents: ["agent5", "agent7"],
-      description: "Gemini key",
-    });
+    await rotateSecret("default", "gemini-key", "new-value");
     expect(rotatePosts).toEqual([]);
     expect(hits).toHaveLength(1);
-    expect(hits[0]!.body).toEqual({
-      value: "new-value",
-      allowedAgents: ["agent5", "agent7"],
-      description: "Gemini key",
-    });
-  });
-
-  it("sends the explicit wildcard for a secret open to every agent", async () => {
-    const { hits } = captureStore();
-    await rotateSecret("default", "k", "v", { allowedAgents: [], description: null });
-    expect(hits[0]!.body).toEqual({ value: "v", allowedAgents: ["*"] });
+    // A grant sent here would be last-writer-wins over a concurrent revocation.
+    expect(hits[0]!.body).toEqual({ value: "new-value" });
   });
 
   it("surfaces a store failure instead of reporting a rotation", async () => {
@@ -286,7 +271,7 @@ describe("rotateSecret", () => {
       ),
     );
     await expect(
-      rotateSecret("default", "k", "v", { allowedAgents: ["*"], description: null }),
+      rotateSecret("default", "k", "v"),
     ).rejects.toThrow("Rotation refused");
   });
 });

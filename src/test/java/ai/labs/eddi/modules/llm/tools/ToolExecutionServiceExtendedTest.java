@@ -107,6 +107,22 @@ class ToolExecutionServiceExtendedTest {
 
             assertEquals("no rate limit", result);
             verify(rateLimiter, never()).tryAcquire(nullable(String.class), anyString(), anyInt());
+            verify(rateLimiter).refusedByGlobalLimit("myTool");
+        }
+
+        /**
+         * enableRateLimiting is the agent designer's switch for the task's own limit;
+         * the operator's deployment-wide ceiling must still hold with it off.
+         */
+        @Test
+        @DisplayName("the deployment-wide limit still applies with the task's rate limiting off")
+        void globalLimitAppliesWithTaskLimitingOff() {
+            when(rateLimiter.refusedByGlobalLimit("myTool")).thenReturn(true);
+
+            String result = service.executeToolWrapped("myTool", "arg1", SCOPE, "conv-1",
+                    () -> "should not run", false, false, false, 0);
+
+            assertTrue(result.contains("Rate limit exceeded"), result);
         }
 
         /**

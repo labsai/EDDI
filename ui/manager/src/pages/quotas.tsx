@@ -23,6 +23,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
+import { TeamBudgetsTable } from "@/components/quotas/team-budgets-table";
 
 const DEFAULT_TENANT = "default";
 
@@ -46,6 +47,9 @@ export function QuotasPage() {
   // Fields whose text is not a number yet (a lone "-", "1e"). Saving is blocked
   // while any is set: Number("-") is NaN, which the PUT would send as null.
   const [invalidFields, setInvalidFields] = useState<ReadonlySet<keyof TenantQuota>>(new Set());
+  // Counts edits, so a save can tell whether the form moved on while it was in
+  // flight: the fields stay editable, and an edit made then is not saved yet.
+  const editCount = useRef(0);
 
   // Closing the tab or navigating away with edits would silently discard them —
   // the page already shows an "Unsaved changes" pill, so it must also guard.
@@ -63,6 +67,7 @@ export function QuotasPage() {
 
   const handleChange = useCallback(
     (field: keyof TenantQuota, value: number | boolean) => {
+      editCount.current++;
       setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
       setDirty(true);
     },
@@ -80,7 +85,10 @@ export function QuotasPage() {
         return next;
       });
       if (value !== null) handleChange(field, value);
-      else setDirty(true);
+      else {
+        editCount.current++;
+        setDirty(true);
+      }
     },
     [handleChange],
   );
@@ -88,13 +96,19 @@ export function QuotasPage() {
 
   const handleSave = useCallback(() => {
     if (!form || hasInvalidField) return;
+    const sentAt = editCount.current;
     updateMutation.mutate(
       { tenantId: DEFAULT_TENANT, quota: form },
       {
         onSuccess: (data) => {
-          setForm(data);
-          setDirty(false);
-          setInvalidFields(new Set());
+          // Take the server's copy only if nothing was edited since sending.
+          // Otherwise the form holds an edit the server has not seen: replacing
+          // it would lose that edit, and clearing `dirty` would drop the guard.
+          if (editCount.current === sentAt) {
+            setForm(data);
+            setDirty(false);
+            setInvalidFields(new Set());
+          }
           toast.success(t("quotas.saveSuccess", "Quota saved"));
         },
         onError: (err) => toast.error(getErrorMessage(err)),
@@ -257,10 +271,13 @@ export function QuotasPage() {
                     step={0.01}
                     integer={false}
                     dimmed={!form.enabled}
-                    note={t(
+                    note={`${t(
                       "quotas.costPricedOnly",
                       "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration adds $0 to the total, but is refused like any other once the budget is spent.",
-                    )}
+                    )} ${t(
+                      "quotas.costHardCeiling",
+                      "By default the call that crosses the budget still finishes. To refuse it instead, the server can reserve each call's maximum cost first: set eddi.tenant.quota.cost-reservation.enabled=true (a startup property).",
+                    )}`}
                   />
                 </div>
               ) : null}
@@ -326,6 +343,10 @@ export function QuotasPage() {
                     value={usage.monthlyCostUsd}
                     limit={form?.maxMonthlyCostUsd ?? -1}
                     format={formatUsd}
+                    held={usage.reservedUsd}
+                    heldLabel={t("quotas.heldByTurns", "{{amount}} held by running turns", {
+                      amount: formatUsd(usage.reservedUsd ?? 0),
+                    })}
                     testId="usage-cost"
                   />
                   <div className="flex flex-col justify-center rounded-lg border border-border/50 bg-muted/30 p-3">
@@ -342,7 +363,12 @@ export function QuotasPage() {
               {/* The saved policy, not the form: this says what the backend is doing now,
                   and an unsaved edit is not applied until it is saved. */}
               {usage && quota && (
-                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={quota.maxMonthlyCostUsd} enforced={quota.enabled} />
+                <CostBudgetStatus
+                  spent={usage.monthlyCostUsd}
+                  held={usage.reservedUsd ?? 0}
+                  limit={quota.maxMonthlyCostUsd}
+                  enforced={quota.enabled}
+                />
               )}
             </div>
           </div>
@@ -364,6 +390,8 @@ export function QuotasPage() {
         onConfirm={handleReset}
         isPending={resetMutation.isPending}
       />
+
+      <TeamBudgetsTable />
     </div>
   );
 }
@@ -509,7 +537,18 @@ function formatUsd(n: number): string {
  * budget (nothing metered), enforcement off with a budget, no budget, budget
  * reached, or spend versus remaining.
  */
-function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
+function CostBudgetStatus({
+  spent,
+  held = 0,
+  limit,
+  enforced,
+}: {
+  spent: number;
+  /** Budget held by running turns (hard-ceiling mode): not spent, but not free for a new call either. */
+  held?: number;
+  limit: number;
+  enforced: boolean;
+}) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
   const reached = !unlimited && spent >= limit;
@@ -531,6 +570,12 @@ function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: nu
       "quotas.budgetReached",
       "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
       { spent: money(spent), limit: money(limit) },
+    );
+  } else if (held > 0) {
+    state = t(
+      "quotas.budgetRemainingHeld",
+      "{{spent}} of {{limit}} used this month and {{held}} held by running turns. {{remaining}} left for new calls.",
+      { spent: money(spent), limit: money(limit), held: money(held), remaining: money(Math.max(0, limit - spent - held)) },
     );
   } else {
     state = t("quotas.budgetRemaining", "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.", {
@@ -560,6 +605,8 @@ function UsageCard({
   limit,
   prefix = "",
   format,
+  held,
+  heldLabel,
   testId,
 }: {
   label: string;
@@ -568,10 +615,14 @@ function UsageCard({
   prefix?: string;
   /** Renders value and limit; replaces `prefix` and the two-decimal rounding. */
   format?: (n: number) => string;
+  /** Budget set aside for turns still running (hard-ceiling mode); shown only when above zero. */
+  held?: number;
+  heldLabel?: string;
   testId: string;
 }) {
   const isUnlimited = limit < 0;
   const ratio = !isUnlimited && limit > 0 ? value / limit : 0;
+  const heldRatio = !isUnlimited && limit > 0 && held && held > 0 ? held / limit : 0;
   const barColor =
     ratio >= 0.9 ? "bg-red-500" : ratio >= 0.7 ? "bg-warn-500" : "bg-emerald-500";
 
@@ -587,12 +638,24 @@ function UsageCard({
         </span>
       </div>
       {!isUnlimited && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full rounded-full transition-all ${barColor}`}
+            className={`h-full transition-all ${barColor}`}
             style={{ width: `${Math.min(ratio * 100, 100)}%` }}
           />
+          {heldRatio > 0 && (
+            <div
+              className="h-full bg-primary/40"
+              style={{ width: `${Math.min(heldRatio * 100, 100 - Math.min(ratio * 100, 100))}%` }}
+              data-testid={`${testId}-held-bar`}
+            />
+          )}
         </div>
+      )}
+      {held !== undefined && held > 0 && (
+        <p className="mt-1 text-[10px] text-muted-foreground" data-testid={`${testId}-held`}>
+          {heldLabel}
+        </p>
       )}
     </div>
   );

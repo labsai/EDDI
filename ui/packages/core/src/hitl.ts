@@ -13,6 +13,7 @@
 
 import { defaultHttp, encodeSegment, type HttpClient } from "./http";
 import type { ConversationState } from "./types";
+import { humanizeToolName } from "./tool-labels";
 
 export interface PendingToolCall {
   callId: string;
@@ -108,8 +109,12 @@ export function parseIsoDuration(value: string): number | null {
  * `pausedAt` is `Instant.toString()` on the summary endpoint (ISO-8601), but
  * the `detail=full` snapshot serializes instants as epoch millis, so both
  * forms are accepted.
+ *
+ * A `WAIT_INDEFINITELY` pause is never scheduled, so a stored
+ * `approvalTimeout` says nothing about when it ends and is ignored.
  */
 export function approvalDeadline(status: ApprovalStatus): number | null {
+  if (status.timeoutPolicy === "WAIT_INDEFINITELY") return null;
   const timeout = parseIsoDuration(status.approvalTimeout);
   if (timeout === null || !status.pausedAt) return null;
 
@@ -124,7 +129,10 @@ export function approvalDeadline(status: ApprovalStatus): number | null {
 export function gatedToolNames(status: ApprovalStatus): string[] {
   const details = status.pauseDetails;
   if (!details || details.type !== "TOOL_CALL") return [];
-  return (details.calls ?? []).map((c) => c.toolName).filter(Boolean);
+  // In words, once each: an end user reads this, and a batch may call one tool twice.
+  return Array.from(
+    new Set((details.calls ?? []).map((c) => humanizeToolName(c.toolName)).filter(Boolean)),
+  );
 }
 
 /** The pause's reason as the backend recorded it: a RULE pause's own, else the summary's. */

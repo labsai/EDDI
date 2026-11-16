@@ -139,7 +139,12 @@ export function updateWorkspaceSettings(update: {
 /** Something about sharing that happened to the signed-in user. */
 export interface WorkspaceNotification {
   id: string;
-  type: "SHARED_WITH_YOU" | "ACCESS_REQUESTED";
+  /**
+   * `UPDATE_AVAILABLE` is the deployment's own notice, not a share: `resourceName`
+   * is the new version, `resourceUri` the release page, `actor` is `system` and
+   * `level` is empty.
+   */
+  type: "SHARED_WITH_YOU" | "ACCESS_REQUESTED" | "UPDATE_AVAILABLE";
   resourceId: string;
   resourceUri?: string | null;
   resourceName?: string | null;

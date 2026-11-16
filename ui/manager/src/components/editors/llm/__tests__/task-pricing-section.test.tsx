@@ -63,4 +63,26 @@ describe("TaskPricingSection", () => {
     expect(screen.getByTestId("task-input-price")).toHaveAttribute("readonly");
     expect(screen.getByTestId("task-output-price")).toHaveAttribute("readonly");
   });
+
+  it("names the catalog price that applies when the task sets none", async () => {
+    renderWithProviders(<Harness initial={{ type: "openai", parameters: { modelName: "gpt-4o" } } as LlmTask} />);
+    const hint = await screen.findByTestId("task-pricing-catalog-hint");
+    expect(hint.textContent).toContain("openai/gpt-4o");
+  });
+
+  it("says when the catalog has no price for the model either", async () => {
+    renderWithProviders(<Harness initial={{ type: "openai", parameters: { modelName: "my-finetune" } } as LlmTask} />);
+    expect(await screen.findByTestId("task-pricing-catalog-hint")).toBeInTheDocument();
+  });
+
+  it("writes cache prices into the pricing object and drops it again when emptied", () => {
+    const onChangeSpy = vi.fn();
+    renderWithProviders(<Harness initial={{ type: "anthropic", parameters: {} } as LlmTask} onChangeSpy={onChangeSpy} />);
+
+    fireEvent.change(screen.getByTestId("task-pricing-cacheReadPricePer1M"), { target: { value: "0.3" } });
+    expect(onChangeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pricing: expect.objectContaining({ cacheReadPricePer1M: 0.3 }) }));
+
+    fireEvent.change(screen.getByTestId("task-pricing-cacheReadPricePer1M"), { target: { value: "" } });
+    expect(onChangeSpy).toHaveBeenLastCalledWith(expect.objectContaining({ pricing: undefined }));
+  });
 });

@@ -37,8 +37,22 @@ public class PendingApprovalSummary {
      * {@code null} for every other pause kind.
      */
     private String pendingMemberId;
+    /**
+     * What a "HUMAN_TURN" pause asks for: {@code TURN} (a member speaking or a
+     * facilitator escalation), {@code TIE_BREAK} or {@code TASK}. {@code null} for
+     * every other pause kind.
+     */
+    private String pendingKind;
 
     public PendingApprovalSummary() {
+    }
+
+    public String getPendingKind() {
+        return pendingKind;
+    }
+
+    public void setPendingKind(String pendingKind) {
+        this.pendingKind = pendingKind;
     }
 
     public PendingApprovalSummary(String conversationId, String agentId, String userId, Instant pausedAt,

@@ -79,7 +79,7 @@
   "conversation.attach.maxFiles": "आप प्रति संदेश अधिकतम {{max}} फ़ाइलें संलग्न कर सकते हैं।",
   "conversation.attach.notAttached": "संलग्न नहीं हुईं: {{files}}",
   "conversation.attach.done": "{{file}} संलग्न हो गई।",
-  "conversation.attach.doneLarge": "{{file}} संलग्न हो गई, लेकिन यह सीधे भेजने के लिए बहुत बड़ी है — हो सकता है सहायक इसे पढ़ न पाए।",
+  "conversation.attach.doneLarge": "{{file}} संलग्न हो गई। यह संदेश में सीधे शामिल करने के लिए बहुत बड़ी है, इसलिए सहायक को यह संदर्भ के रूप में मिलती है।",
   "conversation.attach.removed": "{{file}} हटा दी गई।",
   "conversation.attach.remove": "{{file}} हटाएं",
   "conversation.attach.removeNth": "{{file}} हटाएं ({{total}} में से {{n}})",

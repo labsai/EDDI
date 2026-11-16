@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import { toast } from "sonner";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { cn } from "../lib/cn";
 import { ThemeProvider } from "../theme/theme-provider";
 import { Button, buttonVariants } from "./button";
@@ -63,6 +63,14 @@ describe("ThemedToaster", () => {
     await screen.findByText("Saved");
     return document.querySelector("[data-sonner-toaster]")!;
   }
+
+  // Sonner keeps its toasts in a module-level store that outlives the
+  // unmounted Toaster, so without this the next test finds two "Saved".
+  afterEach(() => {
+    act(() => {
+      toast.dismiss();
+    });
+  });
 
   it("sits bottom-right, left to right, in the resolved theme", async () => {
     const toaster = await toasterFor(false);

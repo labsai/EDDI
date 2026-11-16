@@ -298,13 +298,19 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public List<String> findDigestPendingRuleIds(int limit) {
+    public List<String> findDigestPendingRuleIds(String afterRuleId, int limit) {
         ensureSchema();
+        // COLLATE "C": a stable byte order that does not depend on the database's
+        // locale; the
+        // cursor only ever travels back to this same store, so it need not equal
+        // Mongo's order
         try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn
-                        .prepareStatement(
-                                "SELECT DISTINCT rule_id FROM alert_events WHERE state = 'DIGEST_PENDING' AND rule_id IS NOT NULL LIMIT ?")) {
-            ps.setInt(1, limit);
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT DISTINCT rule_id COLLATE \"C\" AS rid FROM alert_events WHERE state = 'DIGEST_PENDING' AND rule_id IS NOT NULL "
+                                + "AND (?::text IS NULL OR rule_id COLLATE \"C\" > ?::text) ORDER BY rid LIMIT ?")) {
+            ps.setString(1, afterRuleId);
+            ps.setString(2, afterRuleId);
+            ps.setInt(3, limit);
             List<String> ruleIds = new ArrayList<>();
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {

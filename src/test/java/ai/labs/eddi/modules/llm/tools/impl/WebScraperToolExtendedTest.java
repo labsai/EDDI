@@ -394,6 +394,57 @@ class WebScraperToolExtendedTest {
         }
 
         @Test
+        @DisplayName("positional pseudos are refused on a page too wide for their sibling walk")
+        void positionalPseudoRefusedOnAWidePage() throws Exception {
+            // jsoup's :eq / :nth-* / :*-of-type walk every sibling of every candidate:
+            // quadratic in one parent's width, CPU work the parse timeout cannot stop.
+            mockResponse(200, "<html><body>" + "<i>x</i>".repeat(10_000) + "</body></html>");
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "i:nth-of-type(2n)"));
+
+            assertTrue(result.contains("too wide for positional selectors"), result);
+        }
+
+        @Test
+        @DisplayName("the same wide page still answers a selector without a positional pseudo")
+        void wideNonPositionalSelectorStillRuns() throws Exception {
+            mockResponse(200, "<html><body>" + "<i>x</i>".repeat(10_000) + "</body></html>");
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "body > i"));
+
+            assertTrue(result.contains("10000 element(s)"), result.substring(0, Math.min(200, result.length())));
+        }
+
+        @Test
+        @DisplayName("positional text inside a literal argument or attribute value does not make a selector positional")
+        void positionalTextInALiteralIsNotPositional() throws Exception {
+            mockResponse(200, "<html><body>" + "<i>x</i>".repeat(10_000) + "<span>see :eq(1)</span></body></html>");
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "span:contains(:eq(1))"));
+
+            assertTrue(result.contains("see :eq(1)"), result);
+            assertFalse(WebScraperTool.usesPositionalPseudo("a[title=':nth-child(2)']"));
+            assertFalse(WebScraperTool.usesPositionalPseudo("p:containsOwn(:first-of-type)"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("li:nth-child(2n+1)"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("div:has(p:eq(1))"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("p:contains(x:eq(1)"), "an unterminated argument fails closed");
+        }
+
+        @Test
+        @DisplayName("positional pseudos still run on an ordinary table")
+        void positionalPseudoRunsOnANormalPage() throws Exception {
+            StringBuilder html = new StringBuilder("<html><body><table>");
+            for (int i = 0; i < 500; i++) {
+                html.append("<tr><td>a").append(i).append("</td><td>b").append(i).append("</td></tr>");
+            }
+            mockResponse(200, html.append("</table></body></html>").toString());
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "tr:eq(3) td:eq(1)"));
+
+            assertTrue(result.contains("b3"), result);
+        }
+
+        @Test
         @DisplayName("should handle HTTP error in selector extraction")
         void handlesHttpError() throws Exception {
             mockResponse(404, "Not Found");

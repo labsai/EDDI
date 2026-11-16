@@ -180,9 +180,8 @@ export function useVaultHealth(options: { enabled?: boolean } = {}) {
 /**
  * Replace a secret's value, keeping its grant and description.
  *
- * The grant is re-read here, immediately before the write, rather than taken
- * from the row the operator clicked: that row can be minutes old, and sending a
- * stale list would undo a grant edit made in between. A key that has vanished
+ * Neither is sent (the backend keeps what it has), so a grant edit made while
+ * the dialog was open cannot be undone by the rotation. A key that has vanished
  * is refused with `SECRET_NOT_FOUND` instead of being re-created.
  */
 export function useRotateSecret() {
@@ -201,7 +200,7 @@ export function useRotateSecret() {
           404,
         );
       }
-      return rotateSecret(args.tenantId, args.keyName, args.newValue, current);
+      return rotateSecret(args.tenantId, args.keyName, args.newValue);
     },
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({

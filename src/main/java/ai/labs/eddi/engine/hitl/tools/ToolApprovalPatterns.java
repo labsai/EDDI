@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * known source prefix (e.g. {@code mcp:read_*}) or match the bare tool name.
  */
 public final class ToolApprovalPatterns {
-    public static final List<String> KNOWN_SOURCES = List.of("builtin", "http", "mcp", "a2a", "dynamic", "memory", "recall");
+    public static final List<String> KNOWN_SOURCES = List.of("builtin", "http", "mcp", "a2a", "dynamic", "memory", "recall", "team");
     /**
      * Also permits {@code / { }} so a pattern can name an endpoint path template
      * such as {@code http.post:/agentstore/agents/{id}}. Braces are safe in the

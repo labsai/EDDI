@@ -170,4 +170,29 @@ class SecretScrubberStructuredValuesTest {
         assertEquals(json, scrubber.scrubJson(json));
         assertFalse(scrubber.containsCredential(json));
     }
+
+    @Test
+    @DisplayName("a header map serialized into a string is judged entry by entry, as the editor read judges it")
+    void embeddedHeaderMap() throws Exception {
+        // Zero-entropy values, so only the header-name rule can catch them.
+        var out = scrub("""
+                {"parameters":{"customHeaders":"{\\"X-Gateway-Key\\":\\"aaaaaaaaaaaaaaaaaaaa\\",\\"X-Trace\\":\\"on\\",\
+                \\"Authorization\\":\\"${vault:gw}\\"}"}}""");
+        JsonNode headers = mapper.readTree(out.at("/parameters/customHeaders").asText());
+
+        assertEquals(SecretScrubber.REDACTED, headers.get("X-Gateway-Key").asText(), headers.toString());
+        assertEquals("on", headers.get("X-Trace").asText());
+        assertEquals("${vault:gw}", headers.get("Authorization").asText(), "a vault reference stays legible");
+    }
+
+    @Test
+    @DisplayName("a query map serialized into a string loses its credential parameters")
+    void embeddedQueryMap() throws Exception {
+        var out = scrub("""
+                {"parameters":{"customQueryParams":"{\\"sig\\":\\"aaaaaaaaaaaaaaaaaaaa\\",\\"region\\":\\"eu\\"}"}}""");
+        JsonNode params = mapper.readTree(out.at("/parameters/customQueryParams").asText());
+
+        assertEquals(SecretScrubber.REDACTED, params.get("sig").asText(), params.toString());
+        assertEquals("eu", params.get("region").asText());
+    }
 }

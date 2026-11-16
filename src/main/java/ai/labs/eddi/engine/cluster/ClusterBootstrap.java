@@ -14,6 +14,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -57,6 +59,23 @@ public class ClusterBootstrap {
         this.startables = startables;
     }
 
+    /**
+     * The cluster settings that work but are probably not meant, including one that
+     * spans two configuration areas: a lease acquire timeout at or above the agent
+     * timeout lets a waiting turn outlive the request it answers.
+     */
+    List<String> configurationWarnings() {
+        List<String> warnings = new ArrayList<>(config.validationWarnings());
+        rawConfig.getOptionalValue("systemRuntime.agentTimeoutInSeconds", Integer.class).ifPresent(agentTimeout -> {
+            if (agentTimeout > 0 && config.leaseAcquireTimeout().compareTo(Duration.ofSeconds(agentTimeout)) >= 0) {
+                warnings.add("eddi.cluster.lease.acquire-timeout (" + config.leaseAcquireTimeout() + ") is not below "
+                        + "systemRuntime.agentTimeoutInSeconds (" + agentTimeout + " s): a turn still waiting for its lease "
+                        + "outlives the request it would answer");
+            }
+        });
+        return warnings;
+    }
+
     void onStart(@Observes
     @Priority(50) StartupEvent event) {
         config.validate();
@@ -68,6 +87,9 @@ public class ClusterBootstrap {
         }
         if (!config.isNats()) {
             return;
+        }
+        for (String warning : configurationWarnings()) {
+            LOGGER.warn(warning);
         }
         NatsConnectionManager manager = connections.get();
         manager.start();

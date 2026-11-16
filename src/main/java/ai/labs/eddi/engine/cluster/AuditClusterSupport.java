@@ -11,6 +11,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -38,6 +39,7 @@ import java.util.function.LongSupplier;
 @ApplicationScoped
 public class AuditClusterSupport implements IAuditClusterSupport {
 
+    private static final Logger LOGGER = Logger.getLogger(AuditClusterSupport.class);
     private static final SharedBucket AUDIT_SEQ = new SharedBucket("AUDIT_SEQ", Duration.ofDays(7), 256);
     private static final int MAX_ATTEMPTS = 10;
 
@@ -54,6 +56,17 @@ public class AuditClusterSupport implements IAuditClusterSupport {
      * this pause each audit entry of a turn waited that long in turn.
      */
     private volatile long unavailableUntilNanos = System.nanoTime();
+
+    /**
+     * Seals the user-id hash of {@code gdpr.user-erased} when a signing key is set
+     * (B5). Field-injected; null in tests.
+     */
+    @Inject
+    Instance<ClusterMessageSigner> signer;
+
+    private ClusterMessageSigner signer() {
+        return signer != null && signer.isResolvable() ? signer.get() : null;
+    }
 
     @Inject
     public AuditClusterSupport(ClusterConfig config, Instance<NatsSharedStateFactory> sharedState,
@@ -104,6 +117,13 @@ public class AuditClusterSupport implements IAuditClusterSupport {
                 if (current.isEmpty()) {
                     long first = seed.getAsLong();
                     if (kv.create(key, bytes(first + 1)).isPresent()) {
+                        // Counted (B5): a counter that is re-seeded after it was lost — the bucket
+                        // recreated, or a conversation idle past its TTL — restarts from the store's
+                        // highest position, and a position handed out but not yet stored (queued,
+                        // or waiting in the dead-letter stream) would be handed out again. A
+                        // margin would avoid that, but it is a gap in the chain, which
+                        // verification grades BROKEN; this makes such a duplicate attributable.
+                        count("seeded");
                         return allocated(first);
                     }
                     continue; // another node seeded it first
@@ -151,17 +171,44 @@ public class AuditClusterSupport implements IAuditClusterSupport {
         }
     }
 
+    /**
+     * The user-id hash of a {@code gdpr.user-erased} event, sealed or plain; null
+     * when it cannot be opened.
+     */
+    String userIdHashOf(ClusterEvent event) {
+        String sealed = event.getString("userIdSealed");
+        if (sealed == null) {
+            return event.getString("userIdHash");
+        }
+        ClusterMessageSigner s = signer();
+        Optional<String> opened = s == null ? Optional.empty() : s.unseal(sealed);
+        if (opened.isEmpty()) {
+            LOGGER.warnf("A gdpr.user-erased event from node %s could not be opened: eddi.cluster.signing.key differs on this node",
+                    event.originNode());
+            return null;
+        }
+        return opened.get();
+    }
+
     @Override
     public void announceUserErased(String userId) {
         if (isClustered() && userId != null) {
-            events.get().publish(ClusterEvent.GDPR_USER_ERASED, Map.of("userIdHash", KvKeys.sha256(userId)));
+            String hash = KvKeys.sha256(userId);
+            ClusterMessageSigner s = signer();
+            String sealed = s == null ? null : s.seal(hash);
+            events.get().publish(ClusterEvent.GDPR_USER_ERASED, sealed != null ? Map.of("userIdSealed", sealed) : Map.of("userIdHash", hash));
         }
     }
 
     @Override
     public void onUserErased(Consumer<String> userIdHashHandler) {
         if (isClustered()) {
-            events.get().subscribe(ClusterEvent.GDPR_USER_ERASED, event -> userIdHashHandler.accept(event.getString("userIdHash")));
+            events.get().subscribe(ClusterEvent.GDPR_USER_ERASED, event -> {
+                String hash = userIdHashOf(event);
+                if (hash != null) {
+                    userIdHashHandler.accept(hash);
+                }
+            });
         }
     }
 }

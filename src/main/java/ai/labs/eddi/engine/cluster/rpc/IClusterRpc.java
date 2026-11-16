@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.cluster.rpc;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -41,6 +42,17 @@ public interface IClusterRpc {
      * @return node id → reply, for the nodes that answered in time
      */
     Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request);
+
+    /**
+     * Like {@link #callAll(String, Map)}, but waits up to {@code wait} and stops
+     * early once {@code expectedReplies} nodes answered (0: wait the whole time).
+     * For a caller that compares the replies with a count it read itself — GDPR
+     * erasure reads {@link #expectedPeers()} fresh — and must not have the scatter
+     * stop at, or wait for, a different, cached count.
+     */
+    default Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request, Duration wait, int expectedReplies) {
+        return callAll(op, request);
+    }
 
     /** Serves {@code op} on this node. */
     void handle(String op, Function<Map<String, Object>, Map<String, Object>> handler);

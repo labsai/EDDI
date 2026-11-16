@@ -19,6 +19,7 @@ import type {
   InputField,
   OutputImage,
   QuickReply,
+  ToolActivity,
 } from "@eddi/core";
 
 /** An attachment a sent message shows (name, type, size, a local preview). */
@@ -92,12 +93,12 @@ export interface AgentConversationState {
    */
   isEscalating: boolean;
   /**
-   * Name of the tool the agent is running right now, from the live `tool_call`
-   * event, or null. There is no "tool finished" event, so resumed output is the
-   * completion signal: the next token clears it, as does anything that ends the
-   * turn. Transient by design — it drives the status line only.
+   * The tool the agent is running right now, from the live `tool_call` event,
+   * or null. Its `tool_result` (EDDI 6.7) clears it, and so does resumed output
+   * on an older server, as does anything that ends the turn. Transient by
+   * design — it drives the status line only.
    */
-  activeTool: string | null;
+  activeTool: ToolActivity | null;
   /**
    * isProcessing is also raised by undo, redo, retry and cancel, which use it
    * as the re-entrancy guard. Those are not the agent composing a reply, so
@@ -180,7 +181,7 @@ export type ConversationAction =
   | { type: "SET_HISTORY_BUSY" }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
-  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
+  | { type: "SET_ACTIVE_TOOL"; tool: ToolActivity | null }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ConversationMessage[] }
@@ -382,7 +383,10 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
 
     // Cleared on every token, so the same unchanged-value bail-out applies.
     case "SET_ACTIVE_TOOL":
-      return state.activeTool === action.tool ? state : { ...state, activeTool: action.tool };
+      return state.activeTool?.text === action.tool?.text &&
+        state.activeTool?.phrase === action.tool?.phrase
+        ? state
+        : { ...state, activeTool: action.tool };
 
     case "CLEAR_MESSAGES":
       return {

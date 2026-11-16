@@ -139,8 +139,14 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                     if (isResourceIdValid(resourceId)) {
                         ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(),
                                 resourceId.getVersion());
-                        resourceDescriptor.setDeleted(true);
-                        descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
+                        // Only the descriptor of the resource this DELETE addressed. Path depth
+                        // alone also matches DELETE /spacestore/variables/{key}, and a key spelled
+                        // like another owner's configuration id marked THAT descriptor deleted.
+                        URI described = resourceDescriptor.getResource();
+                        if (described == null || described.getPath() == null || deletedResource.getPath().endsWith(described.getPath())) {
+                            resourceDescriptor.setDeleted(true);
+                            descriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), resourceDescriptor);
+                        }
                     }
                 }
             }

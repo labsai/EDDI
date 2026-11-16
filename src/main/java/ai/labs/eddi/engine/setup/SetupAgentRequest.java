@@ -15,7 +15,6 @@ import java.util.List;
  * {@code setup_agent} tool parameters and the REST
  * {@code POST /administration/agents/setup} endpoint body.
  *
- * @author ginccc
  */
 public record SetupAgentRequest(@JsonProperty(required = true)
 @JsonAlias("name") String agentName, @JsonProperty(required = true) String systemPrompt, String provider,

@@ -13,7 +13,10 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
@@ -217,5 +220,103 @@ class DynamicAgentToolsProviderTest {
     @Test
     void contribute_emptyWhitelist_contributesNothing() {
         assertTrue(provider().contribute(assemblyCtx(true, List.of())).specs().isEmpty());
+    }
+
+    // =================================================================
+    // maxDelegationsPerTask spans every tool assembly of the turn
+    // =================================================================
+
+    /**
+     * A conversation service whose delegations all succeed: every start returns a
+     * conversation and every say completes at once.
+     */
+    private static IConversationService delegatingConversationService() throws Exception {
+        var conversationService = mock(IConversationService.class);
+        when(conversationService.startConversation(any(), anyString(), any(), any())).thenReturn(new ConversationResult("conv-sub", null));
+        doAnswer(invocation -> {
+            IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        return conversationService;
+    }
+
+    private static DynamicAgentToolsProvider providerWith(IConversationService conversationService) {
+        return new DynamicAgentToolsProvider(mock(AgentSetupService.class), mock(CapabilityRegistryService.class), conversationService,
+                mock(IAgentFactory.class), mock(IAgentStore.class), mock(IDeploymentStore.class), new LiveDiscussionRegistry(),
+                mock(IAgentGroupStore.class));
+    }
+
+    private static ConverseWithAgentTool converseTool(DynamicAgentToolsProvider provider, IConversationMemory memory) {
+        return converseTool(provider, memory, null);
+    }
+
+    private static ConverseWithAgentTool converseTool(DynamicAgentToolsProvider provider, IConversationMemory memory, String taskId) {
+        var tools = new ArrayList<>();
+        provider.addDynamicAgentTools(tools, List.of("converse_with_agent"), memory, null, taskId);
+        return (ConverseWithAgentTool) tools.get(0);
+    }
+
+    /**
+     * Each step of an agent-mode cascade, and the resume of a HITL-paused turn,
+     * assembles the tools again. With the count on the tool instance, each of them
+     * restarted at zero, so a three-step cascade could delegate three times the
+     * configured maximum.
+     */
+    @Test
+    void maxDelegationsPerTask_survivesToolReassemblyWithinTheTurn() throws Exception {
+        var conversationService = delegatingConversationService();
+        var provider = providerWith(conversationService);
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
+        int max = DynamicAgentToolsProvider.createDefaultDynamicConfig().getMaxDelegationsPerTask();
+
+        var firstCascadeStep = converseTool(provider, memory);
+        for (int i = 0; i < max; i++) {
+            assertFalse(firstCascadeStep.converseWithAgent("agent-b", "ask " + i, null).startsWith("⚠️"));
+        }
+        String refused = converseTool(provider, memory).converseWithAgent("agent-b", "one more", null);
+
+        assertTrue(refused.contains("Maximum delegations for this task (%d) reached".formatted(max)), refused);
+        verify(conversationService, times(max)).startConversation(any(), anyString(), any(), any());
+    }
+
+    @Test
+    void maxDelegationsPerTask_nextTurnStartsAgainFromZero() throws Exception {
+        var conversationService = delegatingConversationService();
+        var provider = providerWith(conversationService);
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
+        int max = DynamicAgentToolsProvider.createDefaultDynamicConfig().getMaxDelegationsPerTask();
+        var tool = converseTool(provider, memory);
+        for (int i = 0; i < max; i++) {
+            tool.converseWithAgent("agent-b", "ask " + i, null);
+        }
+
+        memory.startNextStep();
+
+        assertFalse(converseTool(provider, memory).converseWithAgent("agent-b", "next turn", null).startsWith("⚠️"));
+        verify(conversationService, times(max + 1)).startConversation(any(), anyString(), any(), any());
+    }
+
+    /**
+     * The cap is per LLM task, as documented: a second task of the same turn has
+     * its own budget, and a task id that is a prefix of another's does not read the
+     * other's count.
+     */
+    @Test
+    void maxDelegationsPerTask_isCountedPerTask() throws Exception {
+        var conversationService = delegatingConversationService();
+        var provider = providerWith(conversationService);
+        var memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
+        int max = DynamicAgentToolsProvider.createDefaultDynamicConfig().getMaxDelegationsPerTask();
+        var planner = converseTool(provider, memory, "planner-2");
+        for (int i = 0; i < max; i++) {
+            planner.converseWithAgent("agent-b", "ask " + i, null);
+        }
+
+        assertTrue(converseTool(provider, memory, "planner-2").converseWithAgent("agent-b", "again", null)
+                .contains("Maximum delegations for this task"));
+        assertFalse(converseTool(provider, memory, "planner").converseWithAgent("agent-b", "other task", null).startsWith("⚠️"),
+                "another task of the same turn has its own budget");
+        verify(conversationService, times(max + 1)).startConversation(any(), anyString(), any(), any());
     }
 }

@@ -1,0 +1,31 @@
+{
+  "workflowSteps" : [ {
+    "type" : "eddi://ai.labs.parser",
+    "extensions" : { },
+    "config" : { }
+  }, {
+    "type" : "eddi://ai.labs.behavior",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rules/rulestore/rulesets/bbb000000000000000000002?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.httpcalls",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.apicalls/apicallstore/apicalls/bbb000000000000000000003?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.httpcalls",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.apicalls/apicallstore/apicalls/bbb000000000000000000004?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.llm",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.llm/llmstore/llms/bbb000000000000000000005?version=1"
+    }
+  } ]
+}

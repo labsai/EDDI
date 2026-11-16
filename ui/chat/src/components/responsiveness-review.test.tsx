@@ -74,7 +74,7 @@ describe("indicator status text", () => {
   it("is translated", async () => {
     await setLocale("de");
     expect(indicatorStatusText(false, null, t)).toBe("Denke nach…");
-    expect(indicatorStatusText(false, "calculator", t)).toBe("Verwende calculator…");
+    expect(indicatorStatusText(false, { text: "calculator", phrase: false }, t)).toBe("Verwende Calculator…");
   });
 });
 

@@ -27,7 +27,7 @@ Add A2A fields to your agent configuration:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `a2aEnabled` | boolean | `false` | Opt-in flag for A2A discovery |
-| `description` | string | `"EDDI conversational AI agent"` | Human-readable description for the Agent Card |
+| `description` | string | `"<product name> conversational AI agent"` (the product name is the white-label name, "EDDI" by default) | Human-readable description for the Agent Card |
 | `a2aSkills` | string[] | `["chat"]` | Skills advertised in the Agent Card |
 
 ### Endpoints
@@ -211,15 +211,18 @@ node; a cancel that reaches a node which did not submit the turn cannot see it.
 ### Where tasks are remembered
 
 Tasks and context bindings are kept behind `IA2ATaskStore`. The default
-implementation keeps them in two bounded, node-local caches
-(`a2aTaskMapping`, `a2aTaskMapping:context`). A task EDDI issued is also found
+implementation keeps them in two bounded caches (`a2aTaskMapping`,
+`a2aTaskMapping:context`): node-local on a single node, and backed by JetStream
+KV buckets (`A2A_TASKS`, `A2A_CONTEXTS`) when `eddi.messaging.type=nats`, so a
+task issued on one node is found on every other. Entries expire after
+`eddi.a2a.task-ttl` (default 24h). A task EDDI issued is also found
 **without** that store — after a restart, or on another node — because its id
 names its conversation and its turn is tagged with it: `GetTask` then re-derives
 the task from the conversation store, and a `contextId` EDDI issued resolves the
 same way. Both are scoped to the calling peer: a conversation is only used when
 the peer owns it. What does not survive a restart on a single node is a
 peer-chosen id: a legacy `tasks/send` id, or a `contextId` the peer made up. A
-clustered deployment supplies a shared `IA2ATaskStore`.
+clustered deployment needs no custom store: the NATS-backed default is shared.
 
 ### Streaming
 
@@ -321,7 +324,10 @@ form is `"method": "tasks/send"` with `"params": {"id": "task-1", "message": {�
 | `eddi.a2a.public-token-endpoint` | *(derived)* | The token endpoint advertised in Agent Cards — see [The advertised token endpoint](#the-advertised-token-endpoint) |
 | `eddi.a2a.capabilities.public` | `false` | Whether `/.well-known/capabilities` and `/.well-known/capabilities/skills` are served at all — see [Who can call them](#who-can-call-them) |
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once — see [The in-flight bound](#the-in-flight-bound) |
+| `eddi.a2a.task-ttl` | `24h` | How long a task/context mapping is kept (shared bucket in NATS mode) |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking send waits for its turn before answering `working` |
+| `eddi.a2a.tool-description.max-chars` | `1024` | Client side: a peer's skill descriptions are directive-redacted and cut to this length before they reach the model, as for [MCP tools](mcp-client.md#what-is-governed) |
+| `eddi.a2a.tool-schema.max-bytes` / `eddi.a2a.tool-schema.max-bytes-per-agent` | `32768` / `524288` | Client side: the serialised parameter-schema bound per tool and per peer; each redaction, truncation or drop is counted in `eddi_a2a_tool_schema_governed_total` |
 
 While `eddi.a2a.enabled=false`, the card and capability endpoints answer `404`,
 `GET /a2a/agents` answers `200` with an empty list, and the JSON-RPC endpoint
@@ -354,8 +360,8 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `url` | string | *required* | Base URL of the remote A2A agent |
-| `name` | string | from Agent Card | Display name (used in tool naming) |
-| `apiKey` | string | — | **Must be a vault reference** (`${vault:...}`) to prevent secret leakage |
+| `name` | string | from Agent Card | Display name (used in tool naming). A blank `name` counts as unset |
+| `apiKey` | string | — | A `${vault:...}` or `${connection:...}` reference, to prevent secret leakage. A raw key still works but logs a warning |
 | `timeoutMs` | long | `30000` | Timeout for A2A operations |
 | `skillsFilter` | string[] | all skills | Only expose specific skills (by id or name) |
 
@@ -368,13 +374,18 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
 3. **Endpoint:** the configured `url`. A card is authored by the peer and is not allowed to redirect the call (or change what a HITL approval fingerprint pins); only when `url` names the card document itself is the card's interface URL used — and then only if it is on the same origin (scheme, host, port) as the card, because the configured credential is sent to that endpoint. A card naming another origin is refused. The URL is validated like any other target.
 4. **Mapping:** Each skill becomes a `ToolSpecification` with a `message` parameter
 5. **Execution:** When the LLM calls the tool, one send is made in the peer's dialect. The result is read in any of the three shapes. A task that did not complete reaches the model as such — `A2A agent task failed: …`, `… needs more input: …`, `… is still working …` — never as an answer.
-6. **Caching:** Agent Cards are cached for 5 minutes to avoid redundant fetches
+6. **Caching:** Agent Cards are cached for 5 minutes to avoid redundant fetches, per `url` and `apiKey`: a card fetched with one credential — which may list skills the peer shows only to that caller — is never served to a config with another credential or none. Configs naming the same `apiKey` reference share a card.
 
 ### Tool Naming
 
-Tools are named `{agentName}_{skillId}`, sanitized to `[a-z0-9_]`. Example: `support_agent_order_tracking`.
+Tools are named `{agentName}_{skillId}`, sanitized to `[a-z0-9_]`. Example: `support_agent_order_tracking`. A card without skills gives one tool named `{agentName}`.
+
+- **At most 64 characters**, the limit OpenAI, Anthropic and Gemini put on a tool name. A longer name is cut and ends in a short hash of the whole name, so two long skill ids that share a prefix stay two tools.
+- **Never empty.** A name that sanitizing leaves empty — one written in a script other than Latin, such as `検索エージェント` — becomes `a2a_<hash>` (a skill id: `skill_<hash>`), so two such agents get different tool names. Set an ASCII `name` on the agent config to choose a readable one.
 
 ---
+
+> **Network safety:** a peer `url` is an outbound URL chosen by the agent's author. SSRF validation (`eddi.security.ssrf-protection.enabled`) is **off by default**; the cloud metadata endpoints are refused either way. See [security.md](security.md).
 
 ## Architecture
 

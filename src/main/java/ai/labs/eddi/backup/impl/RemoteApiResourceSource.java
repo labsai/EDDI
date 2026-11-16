@@ -176,8 +176,13 @@ public class RemoteApiResourceSource implements IResourceSource {
      * incomplete source data, where a missing workflow reads as one the source
      * removed. A response this instance refused for its size is not "unreadable",
      * it is a source this instance will not sync from: the whole sync fails (502).
+     * The same holds for a sync that ran out of requests
+     * ({@link RequestBudgetExceededException}).
      */
     static void rethrowIfTooLarge(Exception e) {
+        if (e instanceof RequestBudgetExceededException exhausted) {
+            throw exhausted;
+        }
         if (isTooLarge(e)) {
             throw e instanceof RemoteReadException remote ? remote : new RemoteReadException(e.getMessage(), e);
         }
@@ -285,12 +290,61 @@ public class RemoteApiResourceSource implements IResourceSource {
         if (cached != null) {
             return cached;
         }
-        String json = httpGet(path);
-        String scrubbed = json == null ? null : secretScrubber.apply(json);
+        RuntimeException failed = failuresByPath.get(path);
+        if (failed != null) {
+            throw failed;
+        }
+        String json;
+        try {
+            json = httpGet(path);
+        } catch (RemoteReadException e) {
+            // Remembered like a success: the callers skip a document they cannot read
+            // and carry on, so a source repeating one failing reference — across
+            // workflows, steps or snippet descriptors — would otherwise be asked for
+            // it again every time.
+            failuresByPath.put(path, e);
+            throw e;
+        }
+        String scrubbed;
+        try {
+            scrubbed = json == null ? null : secretScrubber.apply(json);
+        } catch (RuntimeException e) {
+            // A document the scrubber refuses (one it cannot parse) is a failed read
+            // too, and remembered as one for the same reason.
+            failuresByPath.put(path, e);
+            throw e;
+        }
         if (scrubbed != null) {
             documentsByPath.put(path, scrubbed);
         }
         return scrubbed;
+    }
+
+    /** The reads that failed, by path, so a repeated reference is not retried. */
+    private final Map<String, RuntimeException> failuresByPath = new HashMap<>();
+
+    /**
+     * The most requests one sync sends to its source:
+     * {@value #MAX_REQUESTS_PROPERTY}, default {@value #DEFAULT_MAX_REQUESTS}. Each
+     * read is cached, but the number of distinct documents is the source's to
+     * decide — a snippet listing of nameless descriptors, or workflows naming
+     * thousands of distinct resources, each of which the sync would fetch in turn
+     * while holding a request worker. A real agent needs a few hundred.
+     */
+    static final String MAX_REQUESTS_PROPERTY = "eddi.backup.sync.max-requests";
+    static final int DEFAULT_MAX_REQUESTS = 10_000;
+
+    private final int maxRequests = maxRequests();
+    private int requestsSent;
+
+    static int maxRequests() {
+        try {
+            int configured = ConfigProvider.getConfig().getOptionalValue(MAX_REQUESTS_PROPERTY, Integer.class)
+                    .orElse(DEFAULT_MAX_REQUESTS);
+            return configured > 0 ? configured : DEFAULT_MAX_REQUESTS;
+        } catch (RuntimeException e) {
+            return DEFAULT_MAX_REQUESTS;
+        }
     }
 
     /**
@@ -317,7 +371,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             // Resolve version if not specified
             int version = agentVersion != null ? agentVersion : resolveLatestAgentVersion();
 
-            String agentJson = readDocument("/agentstore/agents/" + agentId + "?version=" + version);
+            // One path segment, encoded as exportAgentArchive encodes it: concatenated
+            // raw, an id with "../" in it resolved to another path on the source.
+            String agentJson = readDocument("/agentstore/agents/" + encodePathSegment(agentId) + "?version=" + version);
             AgentConfiguration config = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
             String agentName = readRemoteDescriptorName("/agentstore/agents/descriptors", agentId);
@@ -339,6 +395,8 @@ public class RemoteApiResourceSource implements IResourceSource {
 
         List<URI> workflowUris = agent.config().getWorkflows();
         IResourceSource.requireWorkflowCountWithinLimit(workflowUris);
+        // One parsed copy per workflow the agent names, however often it names it.
+        Map<String, WorkflowSourceData> readByIdentity = new HashMap<>();
         for (int i = 0; i < workflowUris.size(); i++) {
             if (Thread.currentThread().isInterrupted()) {
                 // Per-workflow failures are tolerated, a cancellation is not: carrying on
@@ -347,7 +405,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 throw new RemoteReadException("Interrupted while reading workflows from remote " + baseUrl);
             }
             try {
-                WorkflowSourceData wfData = readSingleWorkflow(workflowUris.get(i), i);
+                WorkflowSourceData wfData = IResourceSource.atPosition(readByIdentity, workflowUris.get(i), i, this::readSingleWorkflow);
                 if (wfData != null) {
                     workflowDataList.add(wfData);
                 }
@@ -769,9 +827,13 @@ public class RemoteApiResourceSource implements IResourceSource {
         // references is read once, under the workflow's key.
         Set<String> read = new HashSet<>();
         extensions.values().forEach(extension -> read.add(extension.sourceId()));
+        // A parser document several steps name is parsed and scanned once — the
+        // cached read hands every one of them the same string.
+        Set<String> scanned = Collections.newSetFromMap(new IdentityHashMap<>());
         for (WorkflowExtensions.ExtensionRef ref : refs) {
             ExtensionSourceData document = extensions.get(ref.key());
-            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())) {
+            if (document == null || !AbstractBackupService.PARSER_EXT.equals(document.type())
+                    || !scanned.add(document.contentJson())) {
                 continue;
             }
             try {
@@ -835,7 +897,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
         }
 
-        throw new RuntimeException("Agent " + agentId + " is not listed on " + baseUrl
+        throw new RemoteReadException("Agent " + agentId + " is not listed on " + baseUrl
                 + " — cannot determine its latest version. Pass an explicit sourceAgentVersion.");
     }
 
@@ -895,6 +957,10 @@ public class RemoteApiResourceSource implements IResourceSource {
             normalized += "/";
         }
         URI requestUri = URI.create(normalized).resolve(path.substring(1));
+        if (++requestsSent > maxRequests) {
+            throw new RequestBudgetExceededException("The sync stopped after " + maxRequests + " requests to " + baseUrl
+                    + " (" + MAX_REQUESTS_PROPERTY + "): the source names more documents than this instance reads for one sync");
+        }
         try {
             OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken, peerSsrf).header("Accept", "application/json").build();
             OutboundResponse<String> response = sendJson(http, request);
@@ -957,6 +1023,17 @@ public class RemoteApiResourceSource implements IResourceSource {
 
         public RemoteReadException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * The sync used up {@value #MAX_REQUESTS_PROPERTY}. Never skipped like one
+     * unreadable document: the whole sync fails, as for an over-sized response.
+     */
+    static final class RequestBudgetExceededException extends RemoteReadException {
+
+        RequestBudgetExceededException(String message) {
+            super(message);
         }
     }
 }

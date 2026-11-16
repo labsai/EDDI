@@ -79,7 +79,7 @@
   "conversation.attach.maxFiles": "Você pode anexar no máximo {{max}} arquivos por mensagem.",
   "conversation.attach.notAttached": "Não anexados: {{files}}",
   "conversation.attach.done": "{{file}} anexado.",
-  "conversation.attach.doneLarge": "{{file}} anexado, mas é grande demais para ser enviado diretamente — o assistente talvez não consiga lê-lo.",
+  "conversation.attach.doneLarge": "{{file}} anexado. É grande demais para ser incluído na própria mensagem, por isso o assistente o recebe como referência.",
   "conversation.attach.removed": "{{file}} removido.",
   "conversation.attach.remove": "Remover {{file}}",
   "conversation.attach.removeNth": "Remover {{file}} ({{n}} de {{total}})",

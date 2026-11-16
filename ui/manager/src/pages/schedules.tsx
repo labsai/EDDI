@@ -106,7 +106,8 @@ function isSystemManagedSchedule(s: ScheduleConfiguration): boolean {
     md.ragIngestion === true ||
     nonEmpty(md.dreamType) ||
     nonEmpty(md.teamCadenceType) ||
-    nonEmpty(md.alertType)
+    nonEmpty(md.alertType) ||
+    md.followupType === "agent_followup"
   );
 }
 
@@ -310,6 +311,17 @@ function TypeBadge({ schedule }: { schedule: ScheduleConfiguration }) {
       <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
         <Timer className="h-3 w-3" />
         {t("schedules.typeHeartbeat", "Heartbeat")}
+      </span>
+    );
+  }
+  if (schedule.metadata?.followupType === "agent_followup") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary"
+        data-testid="schedule-type-followup"
+      >
+        <Clock className="h-3 w-3" />
+        {t("schedules.typeFollowUp", "Agent check-back")}
       </span>
     );
   }

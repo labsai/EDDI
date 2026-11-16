@@ -1,13 +1,16 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Plus, Trash2, X } from "lucide-react";
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { NumberInput } from "../number-input";
 import { modelParamSpec } from "./model-params";
+import { PiiKindsPicker } from "./pii-kinds-picker";
 import {
   DEFAULT_REPROMPT_RETRIES,
+  DISCLOSURE_ACTION,
   EXPRESSION_FIX_MAX_CHARS,
   EXPRESSION_MAX_CHARS,
   JUDGE_DEFAULT_TIMEOUT_MS,
@@ -15,11 +18,9 @@ import {
   JUDGE_MAX_ISSUES,
   MAX_REPROMPT_RETRIES,
   ON_EXHAUSTED,
-  PII_KINDS,
   actionsForPhase,
   classifierNeedsSafeLabel,
   effectiveAction,
-  enabledPiiKinds,
   expressionProblems,
   isKnownGuardrailType,
   judgeIssuesProblem,
@@ -33,7 +34,6 @@ import {
   withMaxRetries,
   withOnExhausted,
   withParameter,
-  withPiiKinds,
   withText,
   withType,
   type ExpressionProblem,
@@ -93,6 +93,8 @@ interface GuardrailSheetProps {
   onChange: (g: GuardrailConfig) => void;
   onClose: () => void;
   readOnly?: boolean;
+  /** Rendered first in the sheet: what a tool-call guardrail applies to. */
+  extra?: React.ReactNode;
 }
 
 /**
@@ -102,7 +104,7 @@ interface GuardrailSheetProps {
  * Every setter removes what the author blanks: an older server's strict parser
  * refuses a field it does not know, so only what was set is ever written.
  */
-export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: GuardrailSheetProps) {
+export function GuardrailSheet({ phase, value, onChange, onClose, readOnly, extra }: GuardrailSheetProps) {
   const { t } = useTranslation();
   const uid = useId();
   const id = (name: string) => `${uid}-${name}`;
@@ -157,7 +159,9 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
   const actionOptions = actionsForPhase(phase);
   if (!actionOptions.includes(action)) actionOptions.push(action);
 
+  const toolCall = phase === "tool_call";
   const actionDesc = (a: GuardrailActionName): string => {
+    if (toolCall && a !== "warn") return toolCallActionDesc(a, t);
     switch (a) {
       case "block":
         return phase === "input"
@@ -186,8 +190,9 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
   };
 
   const typeText = known ? TYPE_TEXT[value.type as GuardrailTypeName] : undefined;
-  const title =
-    phase === "input"
+  const title = toolCall
+    ? t("toolCallGuardrails.sheetTitle", "Tool-call guardrail")
+    : phase === "input"
       ? t("llmEditor.grSheetTitleInput", "Input guardrail")
       : t("llmEditor.grSheetTitleOutput", "Output guardrail");
 
@@ -223,6 +228,8 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          {extra}
+
           {/* Type */}
           <Field
             label={t("llmEditor.grType", "Type")}
@@ -281,6 +288,14 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
                 </option>
               ))}
             </select>
+            {value.type === "disclosure" && action !== DISCLOSURE_ACTION && (
+              <Warning testId="guardrail-disclosure-action">
+                {t(
+                  "toolCallGuardrails.disclosureNeedsRedact",
+                  "The disclosure label only works with redact; the server refuses any other action.",
+                )}
+              </Warning>
+            )}
             {action === "redact" && !typeHasRewrite(value.type) && (
               <Warning testId="guardrail-no-rewrite">
                 {t(
@@ -291,7 +306,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
             )}
           </Field>
 
-          {action === "reprompt" && phase === "output" && (
+          {action === "reprompt" && phase !== "input" && (
             <Field
               label={t("llmEditor.grMaxRetries", "Max retries")}
               htmlFor={id("retries")}
@@ -353,10 +368,17 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
           <Field
             label={t("llmEditor.grBlockMessage", "Block message")}
             htmlFor={id("block")}
-            hint={t(
-              "llmEditor.grBlockMessageHint",
-              "The answer the user gets when this guardrail blocks. Used exactly as written; never run through the template engine.",
-            )}
+            hint={
+              toolCall
+                ? t(
+                    "toolCallGuardrails.blockMessageHint",
+                    "What the model is told when this guardrail refuses a call. Used exactly as written; never run through the template engine.",
+                  )
+                : t(
+                    "llmEditor.grBlockMessageHint",
+                    "The answer the user gets when this guardrail blocks. Used exactly as written; never run through the template engine.",
+                  )
+            }
           >
             <input
               id={id("block")}
@@ -365,9 +387,15 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
               onChange={(e) => onChange(withText(value, "blockMessage", e.target.value))}
               readOnly={readOnly}
               placeholder={
-                phase === "input"
-                  ? t("llmEditor.grBlockMessageInputDefault", "Request blocked by guardrail '{{type}}'.", { type: value.type })
-                  : t("llmEditor.grBlockMessageOutputDefault", "Response withheld by guardrail '{{type}}'.", { type: value.type })
+                toolCall
+                  ? t(
+                      "toolCallGuardrails.blockMessageDefault",
+                      "This tool call was refused by guardrail '{{type}}'. Do not repeat it unchanged.",
+                      { type: value.type },
+                    )
+                  : phase === "input"
+                    ? t("llmEditor.grBlockMessageInputDefault", "Request blocked by guardrail '{{type}}'.", { type: value.type })
+                    : t("llmEditor.grBlockMessageOutputDefault", "Response withheld by guardrail '{{type}}'.", { type: value.type })
               }
               className={FIELD}
               data-testid="guardrail-block-message"
@@ -413,38 +441,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
 
           {value.type === "pii-redaction" && (
             <>
-              <fieldset>
-                <legend className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {t("llmEditor.grPiiKinds", "Kinds to find")}
-                </legend>
-                <div className="space-y-1">
-                  {PII_KINDS.map((kind) => {
-                    const enabled = enabledPiiKinds(value);
-                    const checked = enabled.includes(kind);
-                    return (
-                      <label key={kind} className="flex items-center gap-2 text-xs text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          // The last kind stays on: an empty list is the default, which is every kind.
-                          disabled={readOnly || (checked && enabled.length === 1)}
-                          onChange={(e) =>
-                            onChange(
-                              withPiiKinds(value, e.target.checked ? [...enabled, kind] : enabled.filter((k) => k !== kind)),
-                            )
-                          }
-                          className="h-3.5 w-3.5 rounded border-input accent-primary"
-                          data-testid={`guardrail-pii-${kind}`}
-                        />
-                        {kind === "email" && t("llmEditor.grPiiEmail", "E-mail addresses")}
-                        {kind === "ssn" && t("llmEditor.grPiiSsn", "US social security numbers")}
-                        {kind === "creditcard" && t("llmEditor.grPiiCard", "Payment card numbers (Luhn-checked)")}
-                        {kind === "phone" && t("llmEditor.grPiiPhone", "Phone numbers")}
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
+              <PiiKindsPicker value={value} onChange={onChange} readOnly={!!readOnly} />
               <Field
                 label={t("llmEditor.grReplacement", "Replacement")}
                 htmlFor={id("replacement")}
@@ -530,6 +527,10 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
             </Field>
           )}
 
+          {value.type === "disclosure" && (
+            <DisclosureFields value={value} readOnly={readOnly} idOf={id} setParam={setParam} />
+          )}
+
           {value.type === "json-object" && (
             <p className="text-[10px] leading-relaxed text-muted-foreground" data-testid="guardrail-json-note">
               {t(
@@ -559,7 +560,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
           )}
 
           {/* Common */}
-          {action === "reprompt" && phase === "output" && (
+          {action === "reprompt" && phase !== "input" && (
             <Field
               label={t("llmEditor.grRepromptMessage", "Reprompt message")}
               htmlFor={id("repromptmsg")}
@@ -617,6 +618,98 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
   );
 
   return createPortal(body, document.body);
+}
+
+/** What a tool-call guardrail's action does to the call. */
+function toolCallActionDesc(a: Exclude<GuardrailActionName, "warn">, t: TFunction): string {
+  switch (a) {
+    case "block":
+      return t(
+        "toolCallGuardrails.actionBlockDesc",
+        "The call does not run; the model gets a NOT_EXECUTED result with the block message.",
+      );
+    case "redact":
+      return t(
+        "toolCallGuardrails.actionRedactDesc",
+        "The field is rewritten before the call reaches an approver or runs. After approval nothing is rewritten: a finding refuses the call.",
+      );
+    case "reprompt":
+      return t(
+        "toolCallGuardrails.actionRepromptDesc",
+        "The call does not run; the model is told what to correct, up to Max retries per turn. Then the call is blocked.",
+      );
+  }
+}
+
+/** `disclosure`: the label, where it goes, and what separates it from the text. */
+function DisclosureFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  const missing = !p.text?.trim();
+  return (
+    <>
+      <Field
+        label={t("toolCallGuardrails.disclosureText", "Label")}
+        htmlFor={idOf("disclosure-text")}
+        hint={t("toolCallGuardrails.disclosureTextHint", "Required, at most 500 characters. Used exactly as written.")}
+      >
+        <input
+          id={idOf("disclosure-text")}
+          type="text"
+          maxLength={500}
+          value={p.text ?? ""}
+          onChange={(e) => setParam("text", e.target.value)}
+          readOnly={readOnly}
+          aria-invalid={missing}
+          className={FIELD}
+          data-testid="guardrail-disclosure-text"
+        />
+      </Field>
+      {missing && (
+        <Warning testId="guardrail-disclosure-text-required">
+          {t("toolCallGuardrails.disclosureTextRequired", "A label is required; the server refuses the deploy without one.")}
+        </Warning>
+      )}
+      <Field label={t("toolCallGuardrails.disclosurePosition", "Position")} htmlFor={idOf("disclosure-position")}>
+        <select
+          id={idOf("disclosure-position")}
+          value={p.position === "prepend" ? "prepend" : "append"}
+          onChange={(e) => setParam("position", e.target.value === "append" ? "" : e.target.value)}
+          disabled={readOnly}
+          className={FIELD}
+          data-testid="guardrail-disclosure-position"
+        >
+          <option value="append">{t("toolCallGuardrails.disclosureAppend", "At the end")}</option>
+          <option value="prepend">{t("toolCallGuardrails.disclosurePrepend", "At the start")}</option>
+        </select>
+      </Field>
+      <Field
+        label={t("toolCallGuardrails.disclosureSeparator", "Separator")}
+        htmlFor={idOf("disclosure-separator")}
+        hint={t("toolCallGuardrails.disclosureSeparatorHint", "Between the text and the label. Default: a blank line.")}
+      >
+        <input
+          id={idOf("disclosure-separator")}
+          type="text"
+          value={p.separator ?? ""}
+          onChange={(e) => setParam("separator", e.target.value)}
+          readOnly={readOnly}
+          className={FIELD}
+          data-testid="guardrail-disclosure-separator"
+        />
+      </Field>
+    </>
+  );
 }
 
 function ExpressionFields({

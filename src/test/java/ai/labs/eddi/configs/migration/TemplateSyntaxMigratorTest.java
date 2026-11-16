@@ -182,6 +182,20 @@ class TemplateSyntaxMigratorTest {
         });
     }
 
+    /**
+     * Many calls opened and no ')' after them: each candidate used to scan the
+     * whole remaining suffix, so the work grew with the square of the input.
+     */
+    @Test
+    void migrateStrings_manyUnterminatedCalls_finishesPromptly() {
+        String flat = "#strings.a(x,".repeat(150_000);
+        String nested = "[[${#strings.a(#strings.b(x,".repeat(100_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            assertEquals(flat, migrator.migrate(flat));
+            assertEquals(nested, migrator.migrate(nested));
+        });
+    }
+
     // --- Multiple patterns in one string ---
 
     @Test

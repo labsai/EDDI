@@ -164,6 +164,53 @@ class SecretRedactionFilterTest {
     }
 
     /**
+     * The scheme name is case-insensitive (RFC 9110 §11.1), and after an explicit
+     * {@code authorization:} key the token following it is the credential whatever
+     * its length — exactly as for {@code Basic}. All four cases leaked before: the
+     * shape rule matched only {@code Bearer} with a capital B, the scheme rule did
+     * not list bearer at all, and the name-bound rules stop the value at the space
+     * after the six-character scheme word, which is under their floor.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "authorization: bearer fixturefixturefixture0000",
+            "Authorization: BEARER fixturefixturefixture0000",
+            "Authorization: Bearer fixture000",
+            "curl -H x BEARER fixturefixturefixture0000"})
+    void redact_bearerTokenInAnyCase(String input) {
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("fixture"), result);
+        assertTrue(result.contains(REDACTED_MARKER), result);
+        assertEquals(result, SecretRedactionFilter.redact(result), "a second pass must not change the result");
+    }
+
+    @Test
+    void redact_bearerInsideAWord_isNotAScheme() {
+        // The case-insensitive rule starts at a word boundary, like the sk- rules:
+        // "forbearer" is a word, not an Authorization scheme.
+        String input = "a forbearer fixturefixturefixture0000";
+        assertEquals(input, SecretRedactionFilter.redact(input));
+    }
+
+    /**
+     * The word boundary must not cost a match the rule always made: in serialized
+     * text — a tool call's JSON arguments, a logged request body — a line break
+     * before the scheme is the two characters {@code \n}, so the character in front
+     * of {@code Bearer} is the letter {@code n}.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "{\"text\":\"use this:\\nBearer fixturefixturefixture0000\"}",
+            "{\"text\":\"use this:\\tbearer fixturefixturefixture0000\"}"})
+    void redact_bearerAfterAnEscapedLineBreak(String input) {
+        String result = SecretRedactionFilter.redact(input);
+
+        assertFalse(result.contains("fixture"), result);
+        assertEquals(result, SecretRedactionFilter.redact(result), "a second pass must not change the result");
+    }
+
+    /**
      * A vault reference is a POINTER to a secret, not a secret — and the correct,
      * encouraged alternative to writing one down. It is left legible on purpose:
      * masking it hid which credential a request uses (exactly what an approver must
@@ -667,6 +714,79 @@ class SecretRedactionFilterTest {
         void setCookieKeepsItsAttributes() {
             assertEquals("Set-Cookie: JSESSIONID=<REDACTED>; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly",
                     redactTwice("Set-Cookie: JSESSIONID=8F2A9C11DEADBEEF; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly"));
+        }
+
+        @Test
+        void aQuotedCookieValueIsRedactedWithItsQuotesKept() {
+            assertEquals("Cookie: sid=\"<REDACTED>\"; theme=<REDACTED>", redactTwice("Cookie: sid=\"abc123session\"; theme=dark"));
+        }
+
+        @Test
+        void aJsonCarriersClosingQuoteIsNotReadAsAnOpeningOne() {
+            // Nothing to mask: the text must come back exactly as it went in
+            String text = "{\"h\":\"Cookie: sid=\",\"b\":\"c\"}";
+            assertEquals(text, redactTwice(text));
+        }
+
+        @Test
+        void aJsonKeysClosingQuoteIsNotReadAsAnOpeningOne() {
+            assertValidJson(redactTwice("{\"Cookie: a=\":\"v\"}"));
+        }
+
+        @Test
+        void anApostropheInsideAQuotedCookieValueIsRedactedWithTheRest() {
+            assertEquals("Cookie: sid=\"<REDACTED>\"; theme=<REDACTED>", redactTwice("Cookie: sid=\"abc'def123456\"; theme=dark"));
+        }
+
+        @Test
+        void aQuotedCookieValueInsideAJsonCarrierIsRedacted() {
+            String redacted = redactTwice("{\"h\":\"Cookie: sid=\\\"abc123session\\\"\"}");
+            assertEquals("{\"h\":\"Cookie: sid=\\\"<REDACTED>\\\"\"}", redacted);
+            assertValidJson(redacted);
+        }
+
+        @Test
+        void aSetCookieWhoseFirstPairIsNamedLikeAnAttributeIsStillACookie() {
+            assertEquals("Set-Cookie: Path=<REDACTED>; Secure", redactTwice("Set-Cookie: Path=abc123session; Secure"));
+            assertEquals("Set-Cookie: Domain=<REDACTED>; Path=/", redactTwice("Set-Cookie: Domain=abc123session; Path=/"));
+        }
+
+        @Test
+        void aSetCookieWhoseFirstPairIsExpiresIsStillACookie() {
+            assertEquals("Set-Cookie: Expires=<REDACTED>; HttpOnly", redactTwice("Set-Cookie: Expires=abc123session; HttpOnly"));
+        }
+
+        @Test
+        void aQuotedCookieValueThatStartsWithAColonIsRedacted() {
+            assertEquals("Set-Cookie: Path=\"<REDACTED>\"", redactTwice("Set-Cookie: Path=\":abc123session\""));
+            assertEquals("Cookie: sid=\"<REDACTED>\"", redactTwice("Cookie: sid=\":abc123session\""));
+        }
+
+        @Test
+        void aJsonKeyFollowedByAnObjectValueStaysValidJson() {
+            assertValidJson(redactTwice("{\"Cookie: a=\":{\"x\":\"v\"}}"));
+        }
+
+        @Test
+        void aQuotedSetCookieAttributeIsKept() {
+            assertEquals("Set-Cookie: a=<REDACTED>; Domain=\"example.com\"", redactTwice("Set-Cookie: a=b; Domain=\"example.com\""));
+        }
+
+        @Test
+        void aBareFlagDoesNotEndTheWalkWhateverTheHeaderKind() {
+            // "x_set-cookie" is matched as a Cookie header: the lookbehind refuses "set-"
+            // after "_"
+            assertEquals("x_set-cookie: sid=<REDACTED>; Secure, auth=<REDACTED>", redactTwice("x_set-cookie: sid=a; Secure, auth=xyz"));
+        }
+
+        @Test
+        void expiresInARequestHeaderIsACookieAndItsDateSpanIsMasked() {
+            assertEquals("Cookie: expires=<REDACTED>; sid=<REDACTED>", redactTwice("Cookie: expires=Wed, 21 Oct 2015; sid=abc123session"));
+        }
+
+        @Test
+        void cookieAttributeNamesAreCookiesInARequestHeader() {
+            assertEquals("Cookie: Path=<REDACTED>", redactTwice("Cookie: Path=abc123session"));
         }
 
         @Test

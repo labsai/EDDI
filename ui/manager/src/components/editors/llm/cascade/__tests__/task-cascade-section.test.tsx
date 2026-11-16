@@ -61,6 +61,35 @@ describe("TaskCascadeSection", () => {
     expect(screen.queryByTestId("cascade-heuristic")).not.toBeInTheDocument();
   });
 
+  it("edits the acceptance criterion next to the judge and drops it when cleared", async () => {
+    const spy = vi.fn();
+    renderWithProviders(
+      <Harness
+        initial={taskWith({
+          evaluationStrategy: "judge_model",
+          judgeModel: { type: "openai", parameters: { model: "gpt-4o-mini", apiKey: "${vault:k}" } },
+          steps: [{ confidenceThreshold: null }],
+        })}
+        onChangeSpy={spy}
+      />,
+    );
+    const input = screen.getByTestId("cascade-acceptance-criterion");
+    await userEvent.type(input, "Gives steps");
+    expect(spy.mock.lastCall?.[0].modelCascade?.acceptanceCriterion).toBe("Gives steps");
+
+    await userEvent.clear(input);
+    expect(spy.mock.lastCall?.[0].modelCascade?.acceptanceCriterion).toBeUndefined();
+  });
+
+  it("hides the acceptance criterion for strategies that never read it", () => {
+    renderWithProviders(
+      <Harness
+        initial={taskWith({ evaluationStrategy: "heuristic", acceptanceCriterion: "x", steps: [{ confidenceThreshold: null }] })}
+      />,
+    );
+    expect(screen.queryByTestId("cascade-acceptance-criterion")).not.toBeInTheDocument();
+  });
+
   it("shows the heuristic editor only for the heuristic strategy", () => {
     renderWithProviders(
       <Harness

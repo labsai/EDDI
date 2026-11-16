@@ -253,6 +253,18 @@ class ToolLoopRunnerToolPolicyTest {
             assertEquals(1, executed.get(), "refused although the governed text no longer looks like a 403");
         }
 
+        @Test
+        @DisplayName("the allowed-call observer fires only for calls that ran, never for repeat-guard refusals")
+        void observerSkipsRefusedCalls() throws Exception {
+            var observed = new AtomicInteger();
+            runner.setAllowedCallObserver((memory, request, sources, endpoints, approvals, trace) -> observed.incrementAndGet());
+
+            runStubborn();
+
+            assertEquals(1, executed.get());
+            assertEquals(1, observed.get(), "3 refused rounds must not be reported as allowed calls");
+        }
+
         /**
          * Maps that tolerate a null key, like the real ones; Map.of throws on a null
          * lookup.

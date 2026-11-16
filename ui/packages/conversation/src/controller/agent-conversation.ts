@@ -26,7 +26,7 @@ import {
   outputsCarryStepIndexes,
   parseDoneSnapshot,
   parseErrorEvent,
-  parseToolCallName,
+  parseToolCallActivity,
   stepsToMessages,
   UNCONSUMED_STREAM_ERROR_CODES,
   END_REASON_AGENT_VERSION_RETIRED,
@@ -459,7 +459,8 @@ export class AgentConversation {
         dispatch({ type: "SET_THINKING", value: false });
         // Text is flowing, so whichever model won the cascade is answering.
         dispatch({ type: "SET_ESCALATING", value: false });
-        // No event says a tool finished; resumed output is that signal.
+        // Resumed output also means the tool finished (a server before 6.7
+        // sends no tool_result).
         dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
         dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
         return false;
@@ -485,10 +486,19 @@ export class AgentConversation {
       // tool, and the silence while that tool runs is the wait worth
       // explaining. The next token clears it.
       case "tool_call": {
-        const tool = parseToolCallName(event.data);
+        const tool = parseToolCallActivity(event.data);
         if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
         return false;
       }
+
+      // EDDI 6.7: `{tool, callId, status, durationMs}` once per call, right
+      // after it ran (never its arguments or result). Calls run one after
+      // another, so the call on screen is finished: back to "Thinking…"
+      // rather than naming a tool that is no longer running.
+      case "tool_result":
+        dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
+        if (turn.tokenCount === 0) dispatch({ type: "SET_THINKING", value: true });
+        return false;
 
       // Step starts are pure observability — task_start already raised the
       // thinking indicator, guarded on tokenCount so it cannot come back after

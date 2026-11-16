@@ -10,8 +10,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.List;
+import java.util.regex.Pattern;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -85,6 +90,30 @@ class CredentialReferenceResolverTest {
         when(secretResolver.resolveValue("${vault:jira}")).thenReturn("live-token");
 
         assertEquals("live-token", resolver.resolveRequired("${vars:secret-ref}", "jira", "credential"));
+    }
+
+    @Test
+    @DisplayName("the unresolved-reference check answers exactly what the regex it replaced answered")
+    void unresolvedCheckMatchesTheRegex() {
+        Pattern regex = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]*}");
+        for (String value : List.of("${vault:k}", "${vault:}", "${eddivault:k}", "${vars:x}", "Bearer ${vars:x", "}${vault:x", "${vault:x}}",
+                "a ${vault:b ${vars:c} d", "${vaul:x}", "plain-token", "${vars:x}${vault:", "x}${vault:", "${${vault:a}")) {
+            assertEquals(regex.matcher(value).find(), CredentialReferenceResolver.hasUnresolvedReference(value), value);
+        }
+    }
+
+    @Test
+    @DisplayName("a decrypted value full of unterminated openers is checked in linear time")
+    void unresolvedCheckIsLinear() {
+        // A closing brace only in front of every opener: the regex rescanned the
+        // rest of the value at each of the 300 000 openers before failing.
+        String value = "}" + "${vault:".repeat(300_000);
+        when(secretResolver.resolveValue("${vault:big}")).thenReturn(value);
+
+        String resolved = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> resolver.resolveRequired("${vault:big}", "jira", "credential"));
+
+        assertEquals(value, resolved);
     }
 
     @Test

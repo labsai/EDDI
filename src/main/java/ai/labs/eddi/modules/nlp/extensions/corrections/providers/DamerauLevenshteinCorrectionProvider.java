@@ -14,6 +14,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
 import java.util.Map;
 
+import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.BOOLEAN;
 import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType.INT;
 import static ai.labs.eddi.modules.nlp.extensions.corrections.DamerauLevenshteinCorrection.DEFAULT_MAX_CANDIDATES;
 
@@ -82,6 +83,7 @@ public class DamerauLevenshteinCorrectionProvider implements ICorrectionProvider
 
         ret.put(KEY_DISTANCE, new ConfigValue("Distance", INT, true, DEFAULT_DISTANCE));
         ret.put(KEY_MAX_CANDIDATES, new ConfigValue("Max Correction Candidates", INT, true, DEFAULT_MAX_CANDIDATES));
+        ret.put(KEY_LOOKUP_IF_KNOWN, new ConfigValue("Correct Known Words Too", BOOLEAN, true, false));
 
         return ret;
     }

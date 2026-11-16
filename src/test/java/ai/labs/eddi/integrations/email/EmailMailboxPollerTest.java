@@ -15,6 +15,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
+import ai.labs.eddi.integrations.email.transport.UidFolderSession;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -221,7 +222,7 @@ class EmailMailboxPollerTest {
                 throw failure;
             }
             opened++;
-            return new MailboxSession() {
+            return new UidFolderSession() {
                 @Override
                 public long uidValidity() {
                     return uidValidity;

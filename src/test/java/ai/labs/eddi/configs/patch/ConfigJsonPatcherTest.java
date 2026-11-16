@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.patch;
 
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.llm.rest.RestLlmStore;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -272,6 +273,24 @@ class ConfigJsonPatcherTest {
         var patched = patcher.apply(plaintext, "[{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", LlmConfiguration.class, true);
         assertEquals(1, patched.tasks().size());
         assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("relocation is judged by the store's own read rules: toolCacheScopes is not redacted by an LLM read")
+    void relocationIntoAPathTheReadSkipsIsRefused() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        String patch = """
+                [{"op":"add","path":"/tasks/0/toolCacheScopes","value":{}},
+                 {"op":"copy","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/toolCacheScopes/apiKey"}]
+                """;
+
+        // The generic rules hide a value named apiKey anywhere, but RestLlmStore's read
+        // leaves toolCacheScopes as it is, so the copy would come back in plain text.
+        var e = assertThrows(BadRequestException.class,
+                () -> patcher.apply(plaintext, patch, LlmConfiguration.class, true, RestLlmStore.NOT_CONFIGURATION));
+        String body = String.valueOf(e.getResponse().getEntity());
+        assertTrue(body.contains("/tasks/0/toolCacheScopes/apiKey"), body);
+        assertFalse(body.contains(PLAINTEXT_CREDENTIAL), body);
     }
 
     @Test

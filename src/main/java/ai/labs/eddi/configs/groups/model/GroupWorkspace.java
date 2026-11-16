@@ -96,6 +96,12 @@ public class GroupWorkspace {
      * completes.
      */
     private List<String> pulledTaskIds = new CopyOnWriteArrayList<>();
+    /**
+     * Cross-team handoff state: origins of handed-off tasks, the intake inbox and
+     * decline tombstones. Absent in documents written before handoff existed, which
+     * read back as empty.
+     */
+    private WorkspaceHandoffs handoffs = new WorkspaceHandoffs();
     private Instant created;
     private Instant lastModified;
     /**
@@ -153,6 +159,13 @@ public class GroupWorkspace {
 
         private int discussions;
         private int tasksVerified;
+        /**
+         * Backlog tasks kept done because a person approved them, not because a
+         * verifier passed them ({@code hitlConfig.approvalCompletesBacklogTask}).
+         * Counted apart from {@link #tasksVerified} so that number keeps meaning what
+         * it says. Absent in older documents, which read back as 0.
+         */
+        private int tasksApproved;
         private double totalCost;
         private Instant lastRunAt;
         private Map<String, MemberStats> perMemberStats = new ConcurrentHashMap<>();
@@ -171,6 +184,14 @@ public class GroupWorkspace {
 
         public void setTasksVerified(int tasksVerified) {
             this.tasksVerified = tasksVerified;
+        }
+
+        public int getTasksApproved() {
+            return tasksApproved;
+        }
+
+        public void setTasksApproved(int tasksApproved) {
+            this.tasksApproved = tasksApproved;
         }
 
         public double getTotalCost() {
@@ -206,6 +227,8 @@ public class GroupWorkspace {
     public static class MemberStats {
 
         private int tasksVerified;
+        /** See {@link WorkspaceMetrics#getTasksApproved()}. */
+        private int tasksApproved;
         private int tasksFailed;
 
         public int getTasksVerified() {
@@ -214,6 +237,14 @@ public class GroupWorkspace {
 
         public void setTasksVerified(int tasksVerified) {
             this.tasksVerified = tasksVerified;
+        }
+
+        public int getTasksApproved() {
+            return tasksApproved;
+        }
+
+        public void setTasksApproved(int tasksApproved) {
+            this.tasksApproved = tasksApproved;
         }
 
         public int getTasksFailed() {
@@ -311,6 +342,14 @@ public class GroupWorkspace {
 
     public void setPulledTaskIds(List<String> pulledTaskIds) {
         this.pulledTaskIds = pulledTaskIds != null ? new CopyOnWriteArrayList<>(pulledTaskIds) : new CopyOnWriteArrayList<>();
+    }
+
+    public WorkspaceHandoffs getHandoffs() {
+        return handoffs;
+    }
+
+    public void setHandoffs(WorkspaceHandoffs handoffs) {
+        this.handoffs = handoffs != null ? handoffs : new WorkspaceHandoffs();
     }
 
     public Instant getCreated() {

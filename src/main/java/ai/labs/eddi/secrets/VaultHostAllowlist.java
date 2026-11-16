@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -215,8 +216,9 @@ public class VaultHostAllowlist {
                 // API-call path: a secret deleted in between (or served from the
                 // resolver's cache) would leave with no host check at all. Before
                 // resolution, the request fails on the missing secret anyway.
-                throw new HostNotAllowedException(usedFor + " uses " + reference + ", which does not exist (it may just have been "
-                        + "deleted), so its allowedHosts cannot be checked and the request is refused.");
+                throw new HostRefusedException(
+                        usedFor + " uses " + SecretReference.describe(reference) + ", which does not exist (it may just have been "
+                                + "deleted), so its allowedHosts cannot be checked and the request is refused.");
             } catch (ISecretProvider.SecretProviderException e) {
                 LOGGER.errorf("Could not read the allowed hosts of %s for %s: %s", sanitize(reference), sanitize(usedFor), e.getMessage());
                 throw new HostNotAllowedException("The allowed hosts of " + reference + " could not be read, so " + usedFor
@@ -227,14 +229,14 @@ public class VaultHostAllowlist {
             }
             HostPort target = HostPort.of(destination);
             if (target == null || !isAllowed(target, allowedHosts)) {
-                throw new HostNotAllowedException(usedFor + " sends " + reference + " to " + (target == null ? "an unparseable destination" : target)
+                throw new HostRefusedException(usedFor + " sends " + reference + " to " + (target == null ? "an unparseable destination" : target)
                         + ", which is not on that secret's allowedHosts " + allowedHosts
                         + ". Add the host with PUT /secretstore/secrets/" + ref.tenantId() + "/" + ref.keyName()
                         + "/grant {\"allowedHosts\": [...]} (an eddi-admin call that needs no secret value), or point the configuration at an "
                         + "allowed host.");
             }
             if (target.plaintext() && !allowPlaintextRemoteHosts && !isLoopback(target.host())) {
-                throw new HostNotAllowedException(usedFor + " sends " + reference + " to " + target + " over unencrypted "
+                throw new HostRefusedException(usedFor + " sends " + reference + " to " + target + " over unencrypted "
                         + target.scheme() + ". The host is on that secret's allowedHosts, but allowedHosts names a host, not a "
                         + "transport, and the secret would cross the network in the clear. Use https (or wss), or set "
                         + ALLOW_PLAINTEXT_PROPERTY + "=true to accept an unencrypted secret to a remote host deliberately.");
@@ -343,6 +345,19 @@ public class VaultHostAllowlist {
      */
     public static class HostNotAllowedException extends IllegalStateException {
         public HostNotAllowedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The configuration itself is refused: the secret it sends does not exist, or
+     * its {@code allowedHosts} (or the transport) forbids the destination. Unlike
+     * its parent, which is also thrown when the allowed hosts could not be READ,
+     * this is never the server's fault, so a conversation start that fails on it
+     * answers 422 instead of 500.
+     */
+    public static class HostRefusedException extends HostNotAllowedException implements AgentConfigurationRefusal {
+        public HostRefusedException(String message) {
             super(message);
         }
     }

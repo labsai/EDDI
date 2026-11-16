@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@eddi/ui";
+import { ApprovalContextEditor } from "@/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
 import { useUpdateGroup } from "@/hooks/use-groups";
 import { getErrorMessage } from "@/lib/api-client";
 import type { AgentGroupConfiguration } from "@/lib/api/groups";
@@ -64,6 +66,7 @@ export function GroupHitlEditor({
   // pause trigger), so block save until at least one phase is selected.
   const noPhaseSelected =
     enabled && basePhases.length > 0 && approvalPhases.size === 0;
+  const contextInvalid = enabled && approvalContextHasErrors(hitl.approvalContext, "group");
 
   const togglePhase = (name: string) =>
     setApprovalPhases((prev) => {
@@ -76,12 +79,14 @@ export function GroupHitlEditor({
   const patchHitl = (u: Partial<GroupHitlConfig>) => setHitl((h) => ({ ...h, ...u }));
 
   const save = () => {
-    if (timeoutInvalid || noPhaseSelected) return;
+    if (timeoutInvalid || noPhaseSelected || contextInvalid) return;
     let phases: AgentGroupConfiguration["phases"];
     let hitlConfig: GroupHitlConfig | undefined;
     if (enabled) {
       phases = applyApprovalPhases(basePhases, [...approvalPhases]);
       hitlConfig = {
+        // keep every field this editor has no control for (e.g. `review`)
+        ...config.hitlConfig,
         // Only a finite timeout policy needs a duration — drop any leftover draft
         // when the policy was switched back to WAIT_INDEFINITELY (the field hides
         // but its draft state persists), so we don't persist an unused timeout.
@@ -90,6 +95,11 @@ export function GroupHitlEditor({
         // TASK granularity only applies to TASK_FORCE (the only EXECUTE style).
         granularity: isTaskForce ? hitl.granularity : "PHASE",
         onTaskRejection: hitl.onTaskRejection,
+        // Only meaningful at TASK granularity, where approval is per task; undefined
+        // (dropped from the JSON) reads as the backend default, false.
+        approvalCompletesBacklogTask:
+          isTaskForce && hitl.granularity === "TASK" && hitl.approvalCompletesBacklogTask ? true : undefined,
+        approvalContext: hitl.approvalContext ?? null,
       };
     } else {
       // Disable: clear every approval gate and drop the hitl block.
@@ -204,6 +214,13 @@ export function GroupHitlEditor({
             </div>
           )}
 
+          <ApprovalContextEditor
+            value={hitl.approvalContext}
+            scope="group"
+            onChange={(approvalContext) => patchHitl({ approvalContext })}
+            idPrefix="group-approval-context"
+          />
+
           {/* Granularity + on-rejection (TASK_FORCE only) */}
           {isTaskForce && (
             <>
@@ -233,6 +250,26 @@ export function GroupHitlEditor({
                   </select>
                 </div>
               )}
+              {hitl.granularity === "TASK" && (
+                <div>
+                  <label className="flex items-center gap-2 text-xs text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={!!hitl.approvalCompletesBacklogTask}
+                      onChange={(e) => patchHitl({ approvalCompletesBacklogTask: e.target.checked })}
+                      className="h-3 w-3 rounded border-input accent-primary"
+                      data-testid="group-hitl-approval-completes-backlog"
+                    />
+                    {t("groups.hitlApprovalCompletesBacklogTask", "Approval counts as done for the backlog")}
+                  </label>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {t(
+                      "groups.hitlApprovalCompletesBacklogTaskHelp",
+                      "Standing teams: a task a person approves stays done when the cadence run is written back, instead of returning to the backlog and running again. Timeout auto-approvals do not count.",
+                    )}
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -243,7 +280,7 @@ export function GroupHitlEditor({
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={save}
-          disabled={update.isPending || timeoutInvalid || noPhaseSelected}
+          disabled={update.isPending || timeoutInvalid || noPhaseSelected || contextInvalid}
           data-testid="group-hitl-save"
         >
           {update.isPending ? <RefreshCw className="h-3 w-3 animate-spin me-1" /> : <Save className="h-3 w-3 me-1" />}

@@ -208,4 +208,65 @@ class RedactionReviewFindingsTest {
             assertEquals("password: " + SecretRedactionFilter.REDACTED, SecretRedactionFilter.redact("password: ${vault:key}SECRETTAIL"));
         }
     }
+
+    /** The 2026-11 agent-findings pass over the secrets and connections area. */
+    @Nested
+    @DisplayName("agent findings, 2026-11")
+    class AgentFindings {
+
+        @Test
+        @DisplayName("a numeric credential in an embedded header map is redacted, not skipped as a non-string")
+        void numericEmbeddedCredential() {
+            String judged = ConfigSecretRedactor.judge("customHeaders", "parameters", "{\"X-Api-Key\":12345678,\"X-Trace\":1}");
+
+            assertNotNull(judged, "the request builder sends the number as the header value");
+            assertFalse(judged.contains("12345678"), judged);
+            assertTrue(judged.contains("\"X-Trace\":1"), judged);
+        }
+
+        @Test
+        @DisplayName("a short literal under a credential name in a JSON body is masked, whatever its length")
+        void shortCredentialInJsonBody() {
+            String judged = ConfigSecretRedactor.judge("body", "request",
+                    "{\"user\":\"alice\",\"password\":\"hunter2\",\"auth\":{\"token\":\"abc\"},\"ref\":\"${vault:k}\",\"tpl\":\"{properties.x}\"}");
+
+            assertNotNull(judged);
+            assertFalse(judged.contains("hunter2"), judged);
+            assertFalse(judged.contains("\"abc\""), judged);
+            assertTrue(judged.contains("\"user\":\"alice\""), judged);
+            assertTrue(judged.contains("${vault:k}") && judged.contains("{properties.x}"), judged);
+        }
+
+        @Test
+        @DisplayName("a number or boolean under a credential name in a JSON body is masked; an ordinary number stays")
+        void nonStringCredentialInJsonBody() {
+            String judged = ConfigSecretRedactor.judge("body", "request",
+                    "{\"password\":1234,\"auth\":{\"token\":true},\"pins\":{\"secret\":[5678]},\"count\":42}");
+
+            assertNotNull(judged, "the shape scan reads only quoted values, so the number was returned as written");
+            assertFalse(judged.contains("1234"), judged);
+            assertFalse(judged.contains("true"), judged);
+            assertFalse(judged.contains("5678"), judged);
+            assertTrue(judged.contains("\"count\":42"), judged);
+        }
+
+        @Test
+        @DisplayName("a body that is more than one JSON document is never cut down to the first")
+        void bodyWithTrailingContentIsNotTruncated() {
+            String judged = ConfigSecretRedactor.judge("body", "request", "{\"password\":\"hunter2\"} {\"b\":1}");
+
+            assertTrue(judged == null || judged.contains("{\"b\":1}"), judged);
+        }
+
+        @Test
+        @DisplayName("a long non-JSON message keeps an apostrophe password whole across an embedded double quote")
+        void longNonJsonApostropheValue() {
+            String message = "x".repeat((1 << 20) + 16) + " password='pa\"ssword-tail-secret' done";
+
+            String redacted = SecretRedactionFilter.redact(message);
+
+            assertFalse(redacted.contains("ssword-tail-secret"), "the size bound may only apply to text that could be JSON");
+            assertTrue(redacted.endsWith(" done"), redacted.substring(redacted.length() - 40));
+        }
+    }
 }

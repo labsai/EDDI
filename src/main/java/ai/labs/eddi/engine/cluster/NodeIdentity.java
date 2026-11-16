@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.cluster;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.net.InetAddress;
 import java.util.Optional;
@@ -27,6 +28,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class NodeIdentity {
 
+    private static final Logger LOGGER = Logger.getLogger(NodeIdentity.class);
+
     private final String nodeId;
     private final String bootId;
 
@@ -46,6 +49,13 @@ public class NodeIdentity {
             return configured.get().trim();
         }
         if (scheduleInstanceId.isPresent() && !scheduleInstanceId.get().isBlank()) {
+            // C6: not silently. A schedule instance id is often one constant for every
+            // replica (it names the scheduler, not the pod), and two nodes with one id
+            // break lease mutual exclusion. ClusterPresence detects a live twin; this
+            // says why it may happen.
+            LOGGER.warnf("eddi.cluster.node-id is not set — using eddi.schedule.instance-id '%s' as the cluster node id. "
+                    + "It must be unique per replica; set eddi.cluster.node-id to the pod name instead.",
+                    scheduleInstanceId.get().trim());
             return scheduleInstanceId.get().trim();
         }
         try {

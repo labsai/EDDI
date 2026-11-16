@@ -22,6 +22,7 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -61,6 +62,7 @@ class GridFsAttachmentQuotaTest {
         locks = mock(MongoCollection.class);
         sut = new ObjenesisStd().newInstance(GridFsAttachmentStore.class);
         set("gridFSBucket", gridFSBucket);
+        set("primaryReadBucket", gridFSBucket);
         set("filesCollection", mock(MongoCollection.class));
         set("locksCollection", locks);
         set("maxSizeBytes", 1_000_000L);
@@ -115,6 +117,20 @@ class GridFsAttachmentQuotaTest {
         order.verify(gridFSBucket).find(any(Bson.class));
         order.verify(gridFSBucket).uploadFromStream(anyString(), any(InputStream.class), any(GridFSUploadOptions.class));
         order.verify(locks).deleteOne(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("usage is counted on the primary: a lagging secondary undercounted the uploads already admitted")
+    void usageIsReadFromThePrimary() throws Exception {
+        GridFSBucket nearest = mock(GridFSBucket.class);
+        set("gridFSBucket", nearest);
+        set("maxPerConversation", 1L);
+        givenExistingFiles(1, 10); // on the primary-read bucket
+
+        assertThrows(AttachmentQuotaExceededException.class,
+                () -> sut.store("hello".getBytes(), "text/plain", "a.txt", "conv-1", null, null));
+        verify(nearest, never()).find(any(Bson.class));
+        verify(nearest, never()).uploadFromStream(anyString(), any(InputStream.class), any(GridFSUploadOptions.class));
     }
 
     @Test

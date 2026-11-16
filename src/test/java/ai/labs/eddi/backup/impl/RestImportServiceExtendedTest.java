@@ -220,7 +220,7 @@ class RestImportServiceExtendedTest {
             // Use a domain that resolves to a public IP (passes SSRF validation).
             // Stub structuralMatcher.buildPreview to throw so the per-mapping
             // catch block creates an error preview entry.
-            var mappings = List.of(new SyncMapping("bad-agent", 1, "target-1"));
+            var mappings = List.of(new SyncMapping("aabbccddeeff112233440001", 1, "target-1"));
 
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true)))
                     .thenThrow(new RuntimeException("Connection refused"));
@@ -986,8 +986,8 @@ class RestImportServiceExtendedTest {
         @DisplayName("should produce error entries for multiple failed mappings in batch")
         void multipleMappingFailures() {
             var mappings = List.of(
-                    new SyncMapping("agent-1", 1, "target-1"),
-                    new SyncMapping("agent-2", 2, "target-2"));
+                    new SyncMapping("aabbccddeeff112233440011", 1, "target-1"),
+                    new SyncMapping("aabbccddeeff112233440022", 2, "target-2"));
 
             when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(true)))
                     .thenThrow(new RuntimeException("Failed 1"));
@@ -1000,8 +1000,8 @@ class RestImportServiceExtendedTest {
             assertEquals(2, results.size());
             assertNotNull(results.get(0).error());
             assertNotNull(results.get(1).error());
-            assertEquals("agent-1", results.get(0).sourceAgentId());
-            assertEquals("agent-2", results.get(1).sourceAgentId());
+            assertEquals("aabbccddeeff112233440011", results.get(0).sourceAgentId());
+            assertEquals("aabbccddeeff112233440022", results.get(1).sourceAgentId());
         }
 
         @Test

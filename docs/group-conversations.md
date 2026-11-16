@@ -61,6 +61,8 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
+**Save-time limits** (a config over any of them is rejected with `400`): at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5.
+
 **One agent, one seat.** A member is addressed everywhere by its `agentId` —
 its member conversation, display name, vote weight, `participants` lists and
 the facilitator all key on it — so listing the same agent twice does not give
@@ -221,7 +223,8 @@ marker and the next boundary catches up.
 - `llmProvider`/`llmModel` name the summarizer; without them, overflow falls
   back to the truncation marker (a save-time warning says so).
 - The optional prices attribute the summarizer's own spend to the discussion's
-  cost ledger, where `maxCostPerDiscussion` sees it.
+  cost ledger, where `maxCostPerDiscussion` sees it — and it is charged to the
+  tenant's monthly budget like any other spend ([Model Pricing](model-pricing.md#for-other-features-spend-attribution)).
 - The convergence judge's input is not windowed — it is already bounded to the
   last two rounds.
 
@@ -343,9 +346,9 @@ peer-hidden until their phase completes (commit-reveal).
 - **Ties and quorum failures** go to `tiePolicy`: `MODERATOR_DECIDES` runs one
   moderator turn choosing among the unresolved options (method
   `vote+moderator-tiebreak`); `NO_DECISION` (default) records an honest
-  `type: NONE` and the discussion continues. `HUMAN_DECIDES` is still rejected at save
-  time: humans can now be group *members* (I6), but a tie-break that waits on a
-  person needs its own resume machinery, which has not shipped.
+  `type: NONE` and the discussion continues. `HUMAN_DECIDES` pauses the
+  discussion until a named person picks one of the tied options (method
+  `vote+human-tiebreak`) — see [Group Human Decisions](group-human-decisions.md#tie-breaks).
 - The result fires the `decision_reached` SSE event (which this feature also
   wires for debate verdicts) and renders a tally block in Slack.
 
@@ -390,10 +393,14 @@ roster like any agent, but their turn **pauses the discussion**
 - **PARALLEL phases**: agents fan out first; humans are then prompted one at a
   time against the *pre-fan-out* snapshot, so an independent round stays
   independent — a human answering after the agents cannot read their answers.
-- **v1 bounds (save-time rejected)**: no HUMAN members in task-force groups
-  (PLAN/EXECUTE/VERIFY) or `targetEachPeer` phases, and a group containing
-  humans cannot be nested as a GROUP member. A human **moderator** is allowed —
-  every synthesis then waits on that person (the save warns about it).
+- **Task forces**: a HUMAN member may execute task-force tasks it is explicitly
+  assigned — one pause per task, after the agents' waves — but may not plan or
+  verify; see [Group Human Decisions](group-human-decisions.md#humans-as-task-force-executors).
+- **Bounds (save-time rejected)**: no HUMAN members in `targetEachPeer` phases, a
+  group containing humans cannot be nested as a GROUP member, and a HUMAN
+  planner/verifier is refused in a group with PLAN or VERIFY phases. A human
+  **moderator** is otherwise allowed — every synthesis then waits on that person
+  (the save warns about it).
 
 ## Facilitator with bounded moves (I12)
 
@@ -528,6 +535,8 @@ knowledge that compounds run-over-run.
   `memoryGuardrails.maxValueLength`; ceiling 4000) bounds one stored lesson
   value, lesson plus its "applies:" context. Longer lessons are truncated, the
   context first; the idempotency key still hashes the untruncated lesson.
+- A team's lessons can also be read by teams it agrees to share with, and merged or retired by a
+  scheduled, cost-capped job that keeps what it removes: see [Team Learning Loop → Lessons](team-learning-loop.md#lessons).
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
@@ -583,6 +592,35 @@ reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
+**Human approval as done.** A team gated by a person instead of a VERIFY phase —
+`hitlConfig.granularity: TASK` with a `requiresApproval` EXECUTE phase — ends
+each run with its approved tasks `COMPLETED`, not `VERIFIED`, so by the rule
+above they return to `PENDING` and the next fire runs them again (for a team that
+publishes, it posts the same thing twice). Set
+`hitlConfig.approvalCompletesBacklogTask: true` to keep them done:
+
+```json
+"hitlConfig": {
+  "granularity": "TASK",
+  "timeoutPolicy": "WAIT_INDEFINITELY",
+  "approvalCompletesBacklogTask": true
+}
+```
+
+A task a person approved then lands on the backlog as `COMPLETED` (not
+`VERIFIED` — nobody verified it) with the approved result, which is the
+approver's edit when `review.allowResultEdits` was used, and is counted in
+`metrics.tasksApproved` and the member's `perMemberStats.tasksApproved` rather
+than `tasksVerified`. Only an approval somebody gave counts: the task list
+records each approval's decider (`taskList.approvals`), and a timeout
+auto-approval (`decidedBy: system:timeout`, under `timeoutPolicy: AUTO_APPROVE`)
+is a decision nobody made, so its tasks return to `PENDING` as before — the same
+line earned-autonomy evidence draws. A task that completed in an ungated phase,
+or that a later VERIFY phase failed, also returns to `PENDING`. The switch
+defaults to `false`, so stored configs behave exactly as before; it is read from
+the group's current version at writeback, and an unreadable config falls back to
+the default (logged).
+
 **Stale claims are reclaimed.** The default group HITL timeout policy is
 `WAIT_INDEFINITELY`, so a pause nobody resolves never reaches a terminal state:
 without a backstop the claim would be held forever, every subsequent fire
@@ -598,6 +636,12 @@ combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
 that combination is what makes the backstop reachable — but is not rejected: it
 is legitimate for a team whose approver really is always available.
 
+**Monthly budget.** A team can also carry a calendar-month dollar cap, `teamBudget`, that covers
+its cadence runs and its ad-hoc discussions alike: a fire of a team whose budget is spent is
+skipped (not failed), and the run that reaches the cap finishes through the synthesis exemption when the
+group's cost policy is `SYNTHESIZE_NOW`; under `ABORT` it stops instead.
+See [Team Budgets](team-budgets.md).
+
 **Creation is atomic.** The workspace is created on first use, and that first use
 can happen on several pods at once (two backlog adds, a cadence fire and a
 read). It is written with an insert-only write under the group's id, so the
@@ -611,8 +655,10 @@ generated id and are still found by their `groupId`.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
-a soft (versioned) delete keeps it, because the group can come back. Not in
-v1: cross-team handoff, Manager UI, reputation weighting.
+a soft (versioned) delete keeps it, because the group can come back. Another
+team or a standalone agent can file tasks into a workspace: see
+[Cross-Team Handoff](team-handoff.md). A backlog task can be a **bet** (hypothesis, metric, review date) and a team
+can record the real-world **outcomes** of its work: see [Team Learning Loop](team-learning-loop.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 
@@ -683,7 +729,10 @@ POST /groupstore/templates/{id}/instantiate      {"name": "...", "roleAssignment
 ```
 
 MCP: `list_group_templates`, `create_group_from_template`. Missing or unknown
-roles fail loudly, naming the template's real roles.
+roles fail loudly, naming the template's real roles. The group is saved through
+the normal store path, so an assigned agent you may not use is refused there,
+exactly as for a hand-written config: `403` over REST, and
+`"errorCode": "FORBIDDEN"` from the MCP tool.
 
 | Template | Style | What it packages |
 |---|---|---|
@@ -789,7 +838,7 @@ controls that shape *when it stops* and *what it costs*:
   "repeats": 3,
   "requiresApproval": false,
   "allowAbstention": true,
-  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "SERVICE" }
+  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "MODERATOR" }
 }
 ```
 
@@ -797,7 +846,7 @@ controls that shape *when it stops* and *what it costs*:
 mechanism behind DELPHI's rounds.
 
 **`requiresApproval`** pauses the discussion at the phase boundary until a human
-approves or rejects (see [HITL](hitl.md)). At `TASK` granularity on an `EXECUTE`
+approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
 **`convergence` (I2)** ends a repeating phase early once the round stopped
@@ -807,10 +856,11 @@ scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
 nothing to compare against) guards against calling convergence before there is
 evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
 the judge (in its own conversation, so the judge's JSON-only prompts never leak
-into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
-logs a warning and falls back to the same moderator-agent path, so it currently
-costs the same as `MODERATOR` rather than the cheaper dedicated call the name
-suggests. Either way, a group with no moderator skips the judge and the phase
+into a later SYNTHESIS turn). `SERVICE` with a `service` model makes one cheap
+direct model call instead, needs no moderator, and books its spend as
+`system:judge:*` — see [Group Convergence Judge: SERVICE](group-service-judge.md);
+without a `service` model it falls back to the moderator path with a warning.
+A `MODERATOR` judge in a group with no moderator is skipped and the phase
 simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
@@ -903,6 +953,9 @@ The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → 
    run without its output. Under `ABORT` the member's remaining tasks in that wave are not started.
 3. **VERIFY** — The moderator reviews each task result against the original goal
 4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
+
+A HUMAN member can execute tasks too, when a task is assigned to them explicitly — see
+[humans as task-force executors](group-human-decisions.md#humans-as-task-force-executors).
 
 #### Rework within a run (`maxReworks`)
 
@@ -1044,6 +1097,11 @@ During TASK_FORCE (or any group) discussions, agents with the appropriate LLM to
 | `RecruitAgentTool` | Bring a discovered agent into the discussion as a member |
 | `TeardownAgentTool` | Clean up dynamically created agents |
 
+The model calls them by their method names (`createSubAgent`, `converseWithAgent`, `findAgentsByCapability`,
+`recruitAgent`, `teardownAgent`, plus `retainAgent` / `unretainAgent` on the teardown tool). They need the member's
+`enableBuiltInTools`, and a member whose `builtInToolsWhitelist` is non-empty receives each only if the list names its
+slug: `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent`.
+
 #### Recruitment
 
 Discovery and recruitment are two halves of one capability, and both are gated by
@@ -1111,7 +1169,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
 | `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused. The ceiling travels with the chain: each hop applies the stricter of its own limit and the one it was handed, so a delegate with a higher limit cannot extend a chain the originator capped |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
-| `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
+| `lifecyclePolicy` | `ephemeral` | `ephemeral`, `keep-deployed`, `undeploy-only`, or `agent-decides` (stored and returned in this form; upper-case `KEEP_DEPLOYED` is accepted on input too) |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
 | `allowedProviders` | `null` (any) | Whitelist of LLM providers |
 | `allowedModels` | `null` (any) | Per-provider model whitelist |
@@ -1132,7 +1190,11 @@ Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentI
   `dynamicOrigin` names this discussion, leaves agents marked for another one
   alone, and only **undeploys** — never deletes — an agent with no marker (one
   created before markers existed, or never created by `create_sub_agent`).
-- `retain_agent` flags persist across turns; `unretain_agent` removes them for good.
+- An undeploy by either of them is a real undeploy, as over REST: the agent's
+  `production` deployment records are marked undeployed, so neither the
+  deployment sweep nor a restart brings it back, and in a cluster every node
+  undeploys it.
+- Retain flags set by the `retainAgent` tool persist across turns; `unretainAgent` removes them for good.
 - `converse_with_agent` continues only a conversation owned by the same user the
   calling conversation belongs to (a conversation of another user, or one that
   records no owner, is refused). Every delegation — a new conversation or a
@@ -1207,7 +1269,10 @@ bounds *dollars*, which is what actually differs between a cheap 40-turn round
 table and an expensive 8-turn one with large contexts. Hitting the cost ceiling
 under `SYNTHESIZE_NOW` skips the remaining discussion phases and jumps straight
 to synthesis, so the caller still gets an answer for what was already spent;
-`ABORT` fails the discussion instead. Every LLM call in the discussion is
+`ABORT` fails the discussion instead. The skipped phases' `requiresApproval`
+gates are skipped with them — and so is that of the phase in which the ceiling
+tripped — but a synthesis phase that runs keeps its own: its answer is paused for
+approval as usual. Every LLM call in the discussion is
 attributed, including the facilitator's, the convergence judge's, and the
 summarizer's.
 
@@ -1223,7 +1288,8 @@ summarizer's.
 | `GET` | `/groupstore/groups/descriptors` | List group configs (`filter`, `index`, `limit`) |
 | `GET` | `/groupstore/groups/{id}` | Read group config |
 | `PUT` | `/groupstore/groups/{id}` | Update group config |
-| `DELETE` | `/groupstore/groups/{id}` | Delete group config |
+| `POST` | `/groupstore/groups/{id}?version=` | Duplicate a group config (new id) |
+| `DELETE` | `/groupstore/groups/{id}` | Delete group config (`?permanent=true` also deletes the standing-team workspace) |
 | `GET` | `/groupstore/groups/styles` | List discussion styles |
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
@@ -1238,7 +1304,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{"state": …}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{groupConversationId, accepted, state}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |
@@ -1250,6 +1316,8 @@ summarizer's.
 | `POST` | `/groupstore/groups/{id}/workspace/backlog` | File a backlog task |
 | `POST` | `/groupstore/groups/{id}/workspace/cadences` | Add a cron cadence (409 if the workspace keeps changing under three revision-checked attempts; the schedule it created is deleted again) |
 | `DELETE` | `/groupstore/groups/{id}/workspace/cadences/{cadenceId}` | Remove a cadence, then its schedule (409 as above; cadence and schedule then both stay) |
+
+The bet-review endpoints (`/workspace/backlog/due-reviews`, `/workspace/backlog/{taskId}/bet/review`), team outcomes (`/groupstore/groups/{groupId}/outcomes`) and lessons (`/groupstore/groups/{groupId}/lessons`) are listed in [Team Learning Loop](team-learning-loop.md); team budgets in [Team Budgets](team-budgets.md).
 
 ## SSE Events
 
@@ -1271,6 +1339,7 @@ speaker and phase pairs.
 | `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
 | `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
 | `artifact_updated` | A shared artifact was created or revised (I17) |
+| `team_handoff` | A handoff attempt to another team, from a member's `handoff_to_team` call or an `onDecision` rule: `{handoffId, targetAlias, targetGroupId, outcome, mode, trigger, subject}`. Refusals that reach the filing service are announced too (`outcome` is e.g. `NOT_ACCEPTED`); a call rejected earlier by the tool itself (unknown alias, per-turn limit exceeded) emits no event. Never carries the description. See [Cross-Team Handoff](team-handoff.md) |
 | `member_tool_call` | A member's tool loop is about to run a tool: `{agentId, displayName, tool}`. Name only, never arguments (the same rule as the 1:1 `tool_call`). A best-effort liveness signal while the member's non-streamed turn is running; the engine skips it for a speaker the orchestrator has cancelled, but cancellation or a timeout can race with the notification, so it may trail `speaker_complete` of a turn already closed |
 | `cost_updated` | A cost attribution landed in the discussion ledger: `{attributionKey, displayName, attributedCost, totalCost}`. `attributedCost` is that key's cumulative cost, so a consumer overwrites per key rather than adding. Also fires for system spend (`system:...` keys that name no member) |
 | `stance_updated` | A member's one-line stance was recomputed at a phase boundary: `{agentId, displayName, stance, llmGenerated, coveredContributions}`. Fires only when the text changed |
@@ -1315,6 +1384,13 @@ split is internal.
 | `list_group_templates` | List the preset group templates (I10) |
 | `create_group_from_template` | Create a group from a template + role assignments |
 
+`discuss_with_group`, `start_group_discussion`, `followup_with_member` and
+`continue_group_discussion` hold their arguments to the REST request ceilings: a
+question is required and at most 50,000 characters, and `userId` and
+`targetAgentId` at most 256. A refusal is
+`{"error": "…", "errorCode": "BAD_REQUEST"}`, returned before anything is read
+or run.
+
 ## Slack Integration
 
 Group discussions integrate natively with Slack. See [slack-integration.md](slack-integration.md) for full setup instructions.
@@ -1354,6 +1430,20 @@ Configure trigger keywords in `ChannelIntegrationConfiguration` to route to spec
 ### Follow-up Conversations
 
 After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
+## Restarts
+
+A discussion's leg runs in the JVM that started or resumed it, and nothing
+picks it up after that process dies. On a single node (`eddi.messaging.type=in-memory`)
+the startup HITL crash recovery therefore **cancels** every discussion still
+`IN_PROGRESS` or `SYNTHESIZING` that was last written before the process
+started, so it does not sit in a running state that `continue` and `followup`
+refuse. Paused discussions are not affected: their timeout schedules are
+re-armed instead. Details, and when to turn it off
+(`eddi.hitl.crash-recovery.recover-in-progress`), are in
+[HITL → Crash Recovery](hitl.md#crash-recovery). In NATS cluster mode an
+interrupted discussion still needs a manual cancel — or, for a standing team,
+the claim TTL (see [Standing Teams](#standing-teams-i13)).
 
 ## Not yet supported
 

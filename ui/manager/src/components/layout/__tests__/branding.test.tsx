@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { act, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter } from "react-router-dom";
 import { type ReactNode } from "react";
@@ -12,7 +12,6 @@ import { WorkforceSidebar } from "@/components/workforce/workforce-sidebar";
 import { LandingPage } from "@/pages/landing-page";
 import { App } from "@/app";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 import { setBrand } from "@/lib/brand";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
@@ -116,6 +115,51 @@ describe("sidebar logo", () => {
     expect(icon).toHaveAttribute("aria-label", "Zebra Labs");
   });
 
+  it("branded: a failed /branding/icon shows the initial, never the EDDI wordmark", () => {
+    setBrand(ZEBRA);
+    renderWithProviders(<Sidebar collapsed onToggle={() => {}} />);
+    fireEvent.error(screen.getByTestId("sidebar-brand-icon"));
+    const icon = screen.getByTestId("sidebar-brand-icon");
+    expect(icon.tagName).toBe("SPAN");
+    expect(icon).toHaveTextContent("Z");
+    expect(document.querySelector('img[src*="logo_eddi"], img[src^="data:"]')).toBeNull();
+  });
+
+  it("unbranded: a failed icon falls back to the bundled wordmark once, visible in both themes", () => {
+    renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
+    const icon = screen.getByTestId("workforce-sidebar-icon") as HTMLImageElement;
+    expect(icon).toHaveAttribute("src", "/branding/icon");
+    fireEvent.error(icon);
+    const fallback = icon.getAttribute("src");
+    expect(fallback).not.toContain("/branding/icon");
+    expect(icon.className).toContain("invert");
+    expect(icon.className).toContain("dark:invert-0");
+    fireEvent.error(icon);
+    expect(icon.getAttribute("src")).toBe(fallback);
+  });
+
+  it("a later brand revision gets its own attempt after an earlier failure", () => {
+    setBrand(ZEBRA);
+    renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
+    fireEvent.error(screen.getByTestId("workforce-sidebar-icon"));
+    expect(screen.getByTestId("workforce-sidebar-icon").tagName).toBe("SPAN");
+    act(() => setBrand({ ...ZEBRA, revision: 4 }));
+    const icon = screen.getByTestId("workforce-sidebar-icon");
+    expect(icon.tagName).toBe("IMG");
+    expect(icon).toHaveAttribute("src", "/branding/icon?r=4");
+    fireEvent.error(icon);
+    expect(screen.getByTestId("workforce-sidebar-icon").tagName).toBe("SPAN");
+  });
+
+  it("branded: a failed logo shows the product name as text, never the EDDI wordmark", () => {
+    setBrand(ZEBRA);
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+    fireEvent.error(screen.getByTestId("sidebar-logo"));
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo.tagName).toBe("SPAN");
+    expect(logo).toHaveTextContent("Zebra Labs");
+  });
+
   it("follows a brand applied after the first render", () => {
     renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
     act(() => setBrand(ZEBRA));
@@ -162,6 +206,17 @@ describe("version and About", () => {
     );
   });
 
+  it("closing About from the Help menu hands focus back to the Help button", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+    await user.click(screen.getByTestId("sidebar-help"));
+    await user.click(screen.getByTestId("help-about"));
+    expect(screen.getByTestId("about-dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("about-dialog")).not.toBeInTheDocument());
+    expect(screen.getByTestId("sidebar-help")).toHaveFocus();
+  });
+
   it("branded: the version names the brand and opens About, with no Powered-by when switched off", async () => {
     setBrand(ZEBRA);
     const user = userEvent.setup();
@@ -196,7 +251,6 @@ describe("version and About", () => {
 describe("update UI (R5)", () => {
   it("branded: no Updates nav entry, no banner, and no request to GitHub even with auto-check on", async () => {
     setBrand(ZEBRA);
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     let githubCalls = 0;
     server.use(
       http.get(LATEST_URL, () => {
@@ -220,7 +274,6 @@ describe("update UI (R5)", () => {
 
   it("branded with showUpdateCheck: the update UI is back", async () => {
     setBrand({ ...ZEBRA, showUpdateCheck: true });
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(
       <>
         <Sidebar collapsed={false} onToggle={() => {}} />

@@ -445,6 +445,10 @@ export function normalizeConvergence(config: Partial<ConvergenceConfig>): Conver
         : DEFAULT_CONVERGENCE_THRESHOLD,
     judge: config.judge === "SERVICE" ? "SERVICE" : "MODERATOR",
     mode,
+    // Carried through untouched: rebuilding the block from the fields above used
+    // to be complete, and dropping the SERVICE judge's model here would silently
+    // send every save back to the moderator fallback.
+    ...(config.service ? { service: config.service } : {}),
   };
 }
 

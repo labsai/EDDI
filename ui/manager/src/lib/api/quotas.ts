@@ -17,6 +17,11 @@ export interface TenantUsage {
   conversationsToday: number;
   apiCallsThisMinute: number;
   monthlyCostUsd: number;
+  /**
+   * Budget set aside for turns still running (hard-ceiling mode, EDDI 6.7+);
+   * absent on older servers and 0 when the mode is off.
+   */
+  reservedUsd?: number;
   minuteWindowStart: string;
   dayStart: string;
 }

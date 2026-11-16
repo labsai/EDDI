@@ -79,7 +79,7 @@
   "conversation.attach.maxFiles": "Sie können höchstens {{max}} Dateien pro Nachricht anhängen.",
   "conversation.attach.notAttached": "Nicht angehängt: {{files}}",
   "conversation.attach.done": "{{file}} angehängt.",
-  "conversation.attach.doneLarge": "{{file}} angehängt, ist aber zu groß für den direkten Versand – der Assistent kann sie möglicherweise nicht lesen.",
+  "conversation.attach.doneLarge": "{{file}} angehängt. Die Datei ist zu groß, um sie direkt in die Nachricht aufzunehmen, deshalb erhält der Assistent sie stattdessen als Verweis.",
   "conversation.attach.removed": "{{file}} entfernt.",
   "conversation.attach.remove": "{{file}} entfernen",
   "conversation.attach.removeNth": "{{file}} entfernen ({{n}} von {{total}})",
