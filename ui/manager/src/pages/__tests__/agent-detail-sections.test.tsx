@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -310,5 +310,32 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     await user.click(screen.getByTestId("discard-btn"));
     await user.click(screen.getByTestId("unsaved-confirm"));
     await waitFor(() => expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops-slack"));
+  });
+
+  it("an unsavable Slack name counts as an unsaved edit: dirty marker, Discard enabled, and Discard clears it", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } },
+        }),
+      ),
+    );
+    renderPage("agent-hitl");
+
+    const field = await screen.findByTestId("hitl-notify-slack-integration");
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+    // One change event, so no valid intermediate name reaches the draft.
+    fireEvent.change(field, { target: { value: "ops|slack" } });
+
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("discard-btn")).toBeEnabled();
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument());
+    expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops-slack");
   });
 });

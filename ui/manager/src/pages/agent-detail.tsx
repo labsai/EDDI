@@ -299,8 +299,13 @@ export function AgentDetailPage() {
   const renameMutation = useUpdateAgentDescriptor();
 
   // ── Draft ──
+  /** Whether the HITL section holds a value (email recipients, Slack name, approval context) that cannot be saved (see `HitlConfigSection`). */
+  const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
   const editable = draft ?? agent;
-  const isDirty = isAgentDraftDirty(draft, agent);
+  // An unsavable value typed into the HITL section (a Slack name with '|', bad email
+  // recipients) is not in `draft`, but it is an unsaved edit all the same: it must
+  // show as one, enable Discard and trip the leave-page guard.
+  const isDirty = isAgentDraftDirty(draft, agent) || hitlNotifyInvalid;
   const changedFields = useMemo(() => changedAgentFields(draft, agent), [draft, agent]);
   const isSaving = updateAgentMutation.isPending;
   /**
@@ -334,8 +339,6 @@ export function AgentDetailPage() {
   const [ceilingInvalid, setCeilingInvalid] = useState(false);
   /** Whether the max-continuations box holds a count that cannot be saved (see `ContinuationSection`). */
   const [continuationInvalid, setContinuationInvalid] = useState(false);
-  /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
-  const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
   /** Bumped by a discard so sections holding state outside the draft start over. */
   const [discardCount, setDiscardCount] = useState(0);
   /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
@@ -343,7 +346,7 @@ export function AgentDetailPage() {
 
   /** Writes the draft as one new version. Resolves whether it landed. */
   const saveDraft = useCallback(async (): Promise<boolean> => {
-    if (!draft || !isDirty) return true;
+    if (!isDirty) return true;
     // Every save path comes through here — the buttons, the shortcut and the
     // leave-page guard — so this is the one place that can refuse them all.
     if (ceilingInvalid) {
@@ -371,6 +374,8 @@ export function AgentDetailPage() {
       toast.error(t("agentDetail.rating.invalid", "Fix the highlighted fields in Ratings before saving."));
       return false;
     }
+    // Only an unsavable HITL value was pending, and it was refused above.
+    if (!draft) return true;
     const sent = draft;
     try {
       const result = await updateAgentMutation.mutateAsync({ id: id!, version: resolvedVersion, agent: sent });
