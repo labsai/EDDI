@@ -165,6 +165,7 @@ class AutoApproveCopilotPolicyTest {
                 "ui/bundle-budget.json",
                 "ui/manager/vitest.config.ts", "ui/chat/vite.config.ts", "ui/manager/playwright.config.ts",
                 "ui/chat/eslint.config.js", "ui/manager/tsconfig.app.json", "ui/manager/stryker.config.json",
+                "ui/packages/core/vitest.config.ts", "ui/packages/core/eslint.config.js", "ui/packages/core/tsconfig.json",
                 ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore",
                 // The security-critical code: the guards, the vault, the outbound HTTP
                 // client, stored connections and the shipped defaults.
