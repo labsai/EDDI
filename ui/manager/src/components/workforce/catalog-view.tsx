@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";

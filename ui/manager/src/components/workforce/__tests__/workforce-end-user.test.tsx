@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { AuthContext, GUEST_CONTEXT } from "@/components/auth/auth-context";
 import { createTestQueryClient } from "@/test/test-utils";
 import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "@/test/mocks/handlers";

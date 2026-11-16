@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { LibraryBig } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 
 /**
  * What an empty catalog says. Listing is opt-in, so "nothing listed" is the
