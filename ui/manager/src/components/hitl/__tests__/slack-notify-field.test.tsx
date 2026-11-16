@@ -60,7 +60,37 @@ describe("SlackNotifyField", () => {
   });
 });
 
+describe("SlackNotifyField — owner changes", () => {
+  it("shows the field off and empty when the parent clears the saved name", () => {
+    const { rerender } = renderWithProviders(<SlackNotifyField value="ops-slack" onChange={vi.fn()} subject="agent" />);
+    expect(screen.getByTestId("hitl-notify-slack-enabled")).toBeChecked();
+
+    rerender(<SlackNotifyField value={null} onChange={vi.fn()} subject="agent" />);
+
+    expect(screen.getByTestId("hitl-notify-slack-enabled")).not.toBeChecked();
+    expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
+  });
+
+  it("says that switching it off falls back to the deployment default", () => {
+    renderWithProviders(<SlackNotifyField value="ops-slack" onChange={vi.fn()} subject="agent" />);
+    expect(screen.getByTestId("hitl-notify-slack-hint").textContent).toContain("eddi.slack.hitl.notify.default-integration");
+  });
+});
+
 describe("HitlConfigSection — notify.slack beside notify.email", () => {
+  it("collapsing the section does not clear an unsavable Slack name", () => {
+    const onValidityChange = vi.fn();
+    const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { slack: { integration: "ops-slack" } } } };
+    renderWithProviders(<HitlConfigSection agent={agent} onChange={vi.fn()} onValidityChange={onValidityChange} />);
+    fireEvent.change(screen.getByTestId("hitl-notify-slack-integration"), { target: { value: "ops|slack" } });
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
+
+    expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("adding the Slack card keeps the email recipients", () => {
     const onChange = vi.fn();
     const agent: Agent = {

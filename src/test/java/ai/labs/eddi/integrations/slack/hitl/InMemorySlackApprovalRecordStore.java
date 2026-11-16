@@ -74,13 +74,19 @@ public class InMemorySlackApprovalRecordStore implements ISlackApprovalRecordSto
     }
 
     @Override
-    public List<SlackApprovalRecord> findPosted(int limit) {
+    public List<SlackApprovalRecord> findPosted(int limit, int offset) {
         Instant now = Instant.now();
         return records.values().stream()
                 .filter(r -> r.messageTs() != null && r.expiresAt().isAfter(now))
-                .sorted(Comparator.comparing(SlackApprovalRecord::createdAt))
+                .sorted(Comparator.comparing(SlackApprovalRecord::createdAt).thenComparing(r -> String.valueOf(r.cardId())))
+                .skip(Math.max(0, offset))
                 .limit(Math.max(1, limit))
                 .toList();
+    }
+
+    /** Seeds a record as it is (a test sets its own creation time and ts). */
+    public void add(SlackApprovalRecord record) {
+        records.put(key(record.integrationName(), record.subject(), record.pauseEpoch()), record);
     }
 
     /** The record for one pause, or null. */

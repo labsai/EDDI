@@ -196,5 +196,13 @@ public interface ISlackApprovalRecordStore {
      * cards still to be updated when their pause is resolved — oldest first, at
      * most {@code limit}.
      */
-    List<SlackApprovalRecord> findPosted(int limit);
+    default List<SlackApprovalRecord> findPosted(int limit) {
+        return findPosted(limit, 0);
+    }
+
+    /**
+     * As {@link #findPosted(int)}, skipping the first {@code offset} records of the
+     * same oldest-first order, so a caller can walk past records it keeps.
+     */
+    List<SlackApprovalRecord> findPosted(int limit, int offset);
 }

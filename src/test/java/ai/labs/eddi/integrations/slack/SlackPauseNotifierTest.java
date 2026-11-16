@@ -41,6 +41,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -59,6 +60,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -554,6 +556,7 @@ class SlackPauseNotifierTest {
             var notifier = notifier();
             notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
 
+            when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY); // the pause has ended
             notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.REJECTED, "admin", resumed()));
 
             ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);
@@ -563,11 +566,53 @@ class SlackPauseNotifierTest {
         }
 
         @Test
+        @DisplayName("a late resume event finalizes the ended pause's card, never the card of a newer pause")
+        void lateResumeKeepsNewerPauseCard() throws Exception {
+            var notifier = notifier();
+            notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
+            // the first pause was resumed and the conversation paused again before the
+            // event reached its observer
+            Instant later = PAUSED_AT.plusSeconds(600);
+            conversationPaused(later);
+            notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, HitlDecision.pauseIdOf(later)));
+            assertEquals(2, records.size());
+
+            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.APPROVED, "admin", resumed()));
+
+            verify(slackApi, times(1)).updateMessage(anyString(), anyString(), anyString(), anyString(), any());
+            assertNull(records.get(INT, CONV, PAUSE_ID), "the ended pause's card is finalized");
+            assertNotNull(records.get(INT, CONV, HitlDecision.pauseIdOf(later)), "the newer pause's card stays live");
+        }
+
+        @Test
+        @DisplayName("50 older pending cards do not hide a newer resolved one from the sweep")
+        void sweepReachesPastPendingPage() throws Exception {
+            when(memoryStore.getConversationState(anyString())).thenReturn(ConversationState.AWAITING_HUMAN);
+            when(memoryStore.getConversationState("done")).thenReturn(ConversationState.ENDED);
+            var snapshot = conversationPaused(PAUSED_AT);
+            when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.AWAITING_HUMAN);
+            when(memoryStore.loadConversationMemorySnapshot(anyString())).thenReturn(snapshot);
+            Instant base = Instant.parse("2026-11-15T09:00:00Z");
+            for (int i = 0; i < SlackPauseNotifier.SWEEP_BATCH; i++) {
+                records.add(new SlackApprovalRecord(INT, "pending-" + i, PAUSE_ID, "card-" + i, "C_APPROVALS", base.plusSeconds(i),
+                        base.plus(Duration.ofDays(30)), "ts-" + i));
+            }
+            records.add(new SlackApprovalRecord(INT, "done", PAUSE_ID, "card-done", "C_APPROVALS", base.plusSeconds(1000),
+                    base.plus(Duration.ofDays(30)), "ts-done"));
+
+            notifier().sweepOnce();
+
+            verify(slackApi).updateMessage(eq("Bearer xoxb-ops"), eq("C_APPROVALS"), eq("ts-done"), anyString(), any());
+            assertEquals(SlackPauseNotifier.SWEEP_BATCH, records.size(), "the pending cards are kept");
+        }
+
+        @Test
         @DisplayName("a timeout shows as cancelled or expired")
         void timeoutUpdatesCard() {
             var notifier = notifier();
             notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
 
+            when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY); // the pause has ended
             notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, null, "system:timeout", resumed()));
 
             ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);

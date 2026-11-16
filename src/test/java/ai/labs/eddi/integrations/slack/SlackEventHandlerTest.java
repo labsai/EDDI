@@ -241,6 +241,42 @@ class SlackEventHandlerTest {
     }
 
     /**
+     * The card's Slack ts is stored on its record, so the sweep can update the card
+     * when its pause ends elsewhere; a storage failure there leaves the delivered
+     * card alone.
+     */
+    @Test
+    void notifyApprovers_storesTheCardTimestamp() {
+        var slackApi = mock(SlackWebApiClient.class);
+        doReturn("1700000000.000100").when(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), any(), anyString());
+        var records = new InMemorySlackApprovalRecordStore();
+        var handler = newHandler(slackApi, mock(ChannelTargetRouter.class), records);
+
+        handler.notifyApprovers(resolvedWithApprovalChannel(), "conv-1", "agent-1", bookmarkPausedAt(Instant.ofEpochMilli(1_000L)));
+
+        assertEquals("1700000000.000100", records.get("acme-int", "conv-1", "1000").messageTs());
+    }
+
+    @Test
+    void notifyApprovers_markPostedFailure_doesNotFailDelivery() {
+        var slackApi = mock(SlackWebApiClient.class);
+        doReturn("1700000000.000100").when(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), any(), anyString());
+        var records = new InMemorySlackApprovalRecordStore() {
+            @Override
+            public void markPosted(String integrationName, String subject, String pauseEpoch, String messageTs) {
+                throw new IllegalStateException("storage down");
+            }
+        };
+        var handler = newHandler(slackApi, mock(ChannelTargetRouter.class), records);
+
+        handler.notifyApprovers(resolvedWithApprovalChannel(), "conv-1", "agent-1", bookmarkPausedAt(Instant.ofEpochMilli(1_000L)));
+
+        // delivered once, record kept (not forgotten as if delivery had failed)
+        verify(slackApi, times(1)).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), any(), anyString());
+        assertEquals(1, records.size());
+    }
+
+    /**
      * Same pause identity (identical hitlPausedAt) → re-message-while-paused is a
      * no-op: exactly one card.
      */
@@ -390,6 +426,11 @@ class SlackEventHandlerTest {
     }
 
     private static SlackEventHandler newHandler(SlackWebApiClient slackApi, ChannelTargetRouter router) {
+        return newHandler(slackApi, router, new InMemorySlackApprovalRecordStore());
+    }
+
+    private static SlackEventHandler newHandler(SlackWebApiClient slackApi, ChannelTargetRouter router,
+                                                InMemorySlackApprovalRecordStore records) {
         var cacheFactory = mock(ICacheFactory.class);
         doReturn(new FakeCache<>()).when(cacheFactory).getCache(anyString(), any(Duration.class));
         return new SlackEventHandler(
@@ -405,7 +446,7 @@ class SlackEventHandlerTest {
                 // constants used to hard-code.
                 new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
                         SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS),
-                new InMemorySlackApprovalRecordStore(),
+                records,
                 mock(IUserMemoryStore.class));
     }
 

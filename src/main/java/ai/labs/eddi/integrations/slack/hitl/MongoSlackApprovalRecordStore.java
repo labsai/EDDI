@@ -131,13 +131,14 @@ public class MongoSlackApprovalRecordStore implements ISlackApprovalRecordStore 
     }
 
     @Override
-    public List<SlackApprovalRecord> findPosted(int limit) {
+    public List<SlackApprovalRecord> findPosted(int limit, int offset) {
         var filter = Filters.and(
                 Filters.exists(FIELD_MESSAGE_TS),
                 Filters.ne(FIELD_MESSAGE_TS, null),
                 Filters.gt(FIELD_EXPIRES, Date.from(Instant.now())));
         List<SlackApprovalRecord> result = new ArrayList<>();
-        for (Document document : records.find(filter).sort(Sorts.ascending(FIELD_CREATED)).limit(Math.max(1, limit))) {
+        for (Document document : records.find(filter).sort(Sorts.ascending(FIELD_CREATED, FIELD_CARD)).skip(Math.max(0, offset))
+                .limit(Math.max(1, limit))) {
             result.add(toRecord(document));
         }
         return result;

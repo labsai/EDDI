@@ -33,11 +33,16 @@ announces its pauses, and every committed pause gets the same card.
   it). On `HitlResumeCompletedEvent` the conversation's card gets the verdict text; a sweep
   (`eddi.slack.hitl.notify.sweep-interval`, default 60 s) finalizes every other tracked card whose subject left that
   pause — group decisions, cancels, timeouts, replaced pauses, deleted subjects — and removes the record. Unreadable
-  subjects wait for the next sweep. Cards from the Slack thread path are not tracked (unchanged behaviour).
+  subjects wait for the next sweep. The sweep pages through the tracked cards (`findPosted(limit, offset)`, oldest
+  first, past the ones kept) so 50 pending cards cannot starve a newer resolved one, and a late resume event
+  finalizes only cards whose own pause ended, never a newer pause's. Cards from the Slack thread path
+  (`SlackEventHandler.notifyApprovers`) store their `ts` too; older ones carry none and behave as before.
 - **Metric** `eddi_slack_hitl_notify_total{outcome}`.
 - **Manager.** A shared `SlackNotifyField` on the agent's and the group's Human-in-the-Loop settings, validation
   mirrored in `slackIntegrationProblem`, and `mergeNotify` so that switching email off no longer drops `notify` as a
-  whole (it would have wiped the Slack card) and vice versa. 8 keys × 11 locales.
+  whole (it would have wiped the Slack card) and vice versa. 8 keys × 11 locales. Clearing the field is "use the
+  deployment default" (there is no per-agent opt-out), and the wording in all locales says so; collapsing the section
+  keeps an unsavable name blocking the save.
 - **Platform Operator.** The prompt explains when a pause gets a Slack card and which settings decide it; revision
   69 → 70.
 
@@ -65,7 +70,5 @@ operator (555) and i18n (116) tests pass; `i18n:check`, `typecheck` and lint on 
 
 ### What's next
 
-- Cards posted by the Slack thread path could be tracked the same way (one `markPosted` call each) so they, too,
-  lose their buttons when the pause is decided in the Manager.
 - `SlackEventHandler.notifyApprovers` and `SlackPauseNotifier.postCard` build the card along the same lines; folding
   them into one poster is a refactor worth doing separately.

@@ -177,19 +177,20 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     }
 
     @Override
-    public List<SlackApprovalRecord> findPosted(int limit) {
+    public List<SlackApprovalRecord> findPosted(int limit, int offset) {
         createSchema();
         String sql = """
 
                 SELECT integration_name, subject, pause_epoch, card_id, approval_channel_id, created_at, expires_at, message_ts
                   FROM slack_hitl_approval_records
                  WHERE message_ts IS NOT NULL AND expires_at > ?
-                 ORDER BY created_at
-                 LIMIT ?
+                 ORDER BY created_at, card_id
+                 LIMIT ? OFFSET ?
                 """;
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setTimestamp(1, Timestamp.from(Instant.now()));
             statement.setInt(2, Math.max(1, limit));
+            statement.setInt(3, Math.max(0, offset));
             return readRecords(statement);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to read posted Slack HITL approval records", e);

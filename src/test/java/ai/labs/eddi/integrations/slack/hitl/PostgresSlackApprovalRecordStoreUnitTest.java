@@ -155,13 +155,15 @@ class PostgresSlackApprovalRecordStoreUnitTest {
         when(rows.getTimestamp("created_at")).thenReturn(Timestamp.from(now));
         when(rows.getTimestamp("expires_at")).thenReturn(Timestamp.from(now.plusSeconds(60)));
 
-        List<SlackApprovalRecord> records = store.findPosted(7);
+        List<SlackApprovalRecord> records = store.findPosted(7, 3);
 
         assertEquals("1700000000.000100", records.get(0).messageTs());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(connection, atLeastOnce()).prepareStatement(sql.capture());
         String select = sql.getAllValues().stream().filter(s -> s.contains("message_ts IS NOT NULL")).findFirst().orElseThrow();
         assertTrue(select.contains("expires_at > ?") && select.contains("LIMIT ?"), select);
+        assertTrue(select.contains("OFFSET ?"), select);
         verify(statement).setInt(2, 7);
+        verify(statement).setInt(3, 3);
     }
 }

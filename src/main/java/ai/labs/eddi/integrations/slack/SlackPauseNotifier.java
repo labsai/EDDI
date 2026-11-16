@@ -93,6 +93,10 @@ public class SlackPauseNotifier {
 
     /** Cards one sweep checks. */
     static final int SWEEP_BATCH = 50;
+    /** Pages one sweep reads at most. */
+    static final int SWEEP_PAGES = 20;
+    /** Where the next sweep resumes in the oldest-first list of tracked cards. */
+    private volatile int sweepCursor;
 
     static final String RESOLVED_TEXT = "✔️ This approval request is no longer waiting — it was decided, cancelled or expired.";
     static final String GROUP_REJECTED_TEXT = "⛔ Rejected — the discussion did not continue past this approval.";
@@ -179,9 +183,10 @@ public class SlackPauseNotifier {
             }
             String text = SlackHitlResumeObserver.decisionSummary(event.verdict(), event.decidedBy(), snapshot);
             for (SlackApprovalRecord record : approvalRecords.findBySubject(integrationName, event.conversationId())) {
-                if (record.messageTs() != null) {
-                    // The event fires only once the conversation is no longer paused, so every
-                    // card of it is for a pause that has ended.
+                // The event is observed asynchronously: by now the conversation may be in a
+                // NEWER pause, whose card must stay live. Only a card whose own pause has
+                // ended is finalized.
+                if (record.messageTs() != null && resolutionText(record) != null) {
                     finalizeCard(record, text);
                 }
             }
@@ -499,16 +504,33 @@ public class SlackPauseNotifier {
      * read right now is left for the next sweep.
      */
     void sweepOnce() {
-        for (SlackApprovalRecord record : approvalRecords.findPosted(SWEEP_BATCH)) {
-            try {
-                String text = resolutionText(record);
-                if (text != null) {
-                    finalizeCard(record, text);
+        // Oldest-first pages, walked past the records that are kept (still pending), so
+        // a full page of old pending cards cannot hide a newer resolved one. A sweep
+        // reads at most SWEEP_PAGES pages and the next one carries on from there.
+        int offset = sweepCursor;
+        for (int page = 0; page < SWEEP_PAGES; page++) {
+            List<SlackApprovalRecord> records = approvalRecords.findPosted(SWEEP_BATCH, offset);
+            for (SlackApprovalRecord record : records) {
+                boolean finalized = false;
+                try {
+                    String text = resolutionText(record);
+                    if (text != null) {
+                        finalizeCard(record, text);
+                        finalized = true;
+                    }
+                } catch (RuntimeException e) {
+                    LOGGER.debugf("Slack approval card for %s not checked: %s", sanitize(record.subject()), e.getMessage());
                 }
-            } catch (RuntimeException e) {
-                LOGGER.debugf("Slack approval card for %s not checked: %s", sanitize(record.subject()), e.getMessage());
+                if (!finalized) {
+                    offset++; // a finalized record is gone, so the next one slid into its place
+                }
+            }
+            if (records.size() < SWEEP_BATCH) {
+                sweepCursor = 0; // reached the end: start over from the oldest
+                return;
             }
         }
+        sweepCursor = offset;
     }
 
     /**

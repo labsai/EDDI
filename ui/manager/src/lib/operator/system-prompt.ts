@@ -1458,7 +1458,8 @@ your tool schemas do not cover it, not as a routine first step:
   platformConfig.hitlApprovalChannel (none = nothing posted, WARN), its bot
   token, hitlApproverUserIds (none = a card without buttons) and
   hitlApprovalContext. Set it in the Manager on the agent's or group's
-  Human-in-the-Loop settings ("Post a Slack approval card ..."); you cannot write
+  Human-in-the-Loop settings ("Use a specific Slack integration ..."; switched off it
+  falls back to the deployment default, it does not silence the card); you cannot write
   hitlConfig, so point the admin there. The card's buttons are replaced by the
   outcome when the pause is decided elsewhere, a timeout or a cancel (sweep:
   eddi.slack.hitl.notify.sweep-interval, default 60s). Docs: "hitl" (section

@@ -4631,14 +4631,14 @@
     "argsViewJson": "JSON",
     "argsViewRaw": "そのまま",
     "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。",
-    "slackNotifyEmpty": "Slack 連携を指定するか、Slack カードをオフにしてください。",
+    "slackNotifyEmpty": "Slack 連携を指定するか、オフにしてデプロイのデフォルトを使用してください（設定されている場合）。",
     "slackNotifyPipe": "名前に '|' が含まれています。承認ボタンでは扱えないため、連携の名前を変更してください。",
     "slackNotifyTooLong": "{{max}} 文字以内で入力してください。",
-    "slackNotifyEnableGroup": "このグループが承認待ちになったら Slack に承認カードを投稿する",
-    "slackNotifyEnableAgent": "このエージェントが承認待ちになったら Slack に承認カードを投稿する",
+    "slackNotifyEnableGroup": "このグループの承認カードに特定の Slack 連携を使用する",
+    "slackNotifyEnableAgent": "このエージェントの承認カードに特定の Slack 連携を使用する",
     "slackNotifyIntegration": "Slack 連携の名前",
     "slackNotifyPlaceholder": "ops-slack",
-    "slackNotifyHint": "指定した Slack チャネル連携が、Slack から始まった一時停止と同じ承認カードを投稿します。スケジュール実行、チームのケイデンス、Webhook、REST、MCP でも同様です。チャネル (hitlApprovalChannel)、ボタンを押せる人 (hitlApproverUserIds)、承認コンテキストを表示するかどうかは、その連携自身の設定で決まります。リクエストが他の場所で決定されると、カードは更新されます。"
+    "slackNotifyHint": "指定した Slack チャネル連携が、Slack から始まった一時停止と同じ承認カードを投稿します。スケジュール実行、チームのケイデンス、Webhook、REST、MCP でも同様です。チャネル (hitlApprovalChannel)、ボタンを押せる人 (hitlApproverUserIds)、承認コンテキストを表示するかどうかは、その連携自身の設定で決まります。リクエストが他の場所で決定されると、カードは更新されます。オフの場合はデプロイのデフォルト連携（eddi.slack.hitl.notify.default-integration）が適用され、設定がなければカードは投稿されません。"
   },
   "hitlReview": {
     "approveEdited": "編集して承認",

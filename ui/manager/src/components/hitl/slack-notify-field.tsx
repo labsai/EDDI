@@ -21,9 +21,9 @@ export function SlackNotifyField({
   disabled = false,
   subject,
 }: {
-  /** The saved integration name, or null when off. */
+  /** The saved integration name, or null when none is set. */
   value: string | null;
-  /** A valid, trimmed name, or null to switch the card off. */
+  /** A valid, trimmed name, or null to remove the override (the deployment default, if any, then applies). */
   onChange: (integration: string | null) => void;
   onInvalidChange?: (invalid: boolean) => void;
   disabled?: boolean;
@@ -43,14 +43,20 @@ export function SlackNotifyField({
       setOn(true);
       setDraft((current) => (current.trim() === value ? current : value));
     } else if (!switchedOffByUser.current) {
-      setDraft((current) => (slackIntegrationProblem(current) === null ? current : ""));
+      // The parent cleared the saved name (a reset, a discard) rather than the user
+      // switching it off here: show the field off and empty.
+      setOn(false);
+      setDraft("");
     }
   }, [value]);
 
   const problem = on ? slackIntegrationProblem(draft) : null;
   useEffect(() => {
     onInvalidChange?.(problem !== null);
-    return () => onInvalidChange?.(false);
+    // No cleanup: when a collapsing section unmounts this field its typed draft is
+    // lost but the owner still holds the earlier name, so the owner keeps the
+    // "unsavable" flag (and drops it itself when HITL is switched off) instead of
+    // letting the save persist that earlier name unannounced.
   }, [problem, onInvalidChange]);
 
   function commit(next: string) {
@@ -71,7 +77,7 @@ export function SlackNotifyField({
   function problemText(): string | null {
     switch (problem) {
       case "empty":
-        return t("hitl.slackNotifyEmpty", "Name a Slack integration, or switch the Slack card off.");
+        return t("hitl.slackNotifyEmpty", "Name a Slack integration, or switch this off to use the deployment default (if one is set).");
       case "pipe":
         return t("hitl.slackNotifyPipe", "The name contains '|', which approval buttons cannot carry — rename the integration.");
       case "tooLong":
@@ -94,8 +100,8 @@ export function SlackNotifyField({
           data-testid="hitl-notify-slack-enabled"
         />
         {subject === "group"
-          ? t("hitl.slackNotifyEnableGroup", "Post a Slack approval card when this group waits for approval")
-          : t("hitl.slackNotifyEnableAgent", "Post a Slack approval card when this agent waits for approval")}
+          ? t("hitl.slackNotifyEnableGroup", "Use a specific Slack integration for this group's approval cards")
+          : t("hitl.slackNotifyEnableAgent", "Use a specific Slack integration for this agent's approval cards")}
       </label>
       {on && (
         <div className="mt-3">
@@ -119,7 +125,7 @@ export function SlackNotifyField({
             {error ??
               t(
                 "hitl.slackNotifyHint",
-                "The named Slack channel integration posts the same approval card a Slack-started pause gets — also for scheduled runs, team cadences, webhooks, REST and MCP. Its own settings decide the channel (hitlApprovalChannel), who may press the buttons (hitlApproverUserIds) and whether the approval context is shown. The card is updated when the request is decided anywhere else.",
+                "The named Slack channel integration posts the same approval card a Slack-started pause gets — also for scheduled runs, team cadences, webhooks, REST and MCP. Its own settings decide the channel (hitlApprovalChannel), who may press the buttons (hitlApproverUserIds) and whether the approval context is shown. The card is updated when the request is decided anywhere else. With this off, the deployment default integration (eddi.slack.hitl.notify.default-integration) applies; without one, no card is posted.",
               )}
           </p>
         </div>
