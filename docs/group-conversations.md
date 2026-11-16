@@ -592,6 +592,35 @@ reviewer's feedback appended to the description — **the cross-run retry
 loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
+**Human approval as done.** A team gated by a person instead of a VERIFY phase —
+`hitlConfig.granularity: TASK` with a `requiresApproval` EXECUTE phase — ends
+each run with its approved tasks `COMPLETED`, not `VERIFIED`, so by the rule
+above they return to `PENDING` and the next fire runs them again (for a team that
+publishes, it posts the same thing twice). Set
+`hitlConfig.approvalCompletesBacklogTask: true` to keep them done:
+
+```json
+"hitlConfig": {
+  "granularity": "TASK",
+  "timeoutPolicy": "WAIT_INDEFINITELY",
+  "approvalCompletesBacklogTask": true
+}
+```
+
+A task a person approved then lands on the backlog as `COMPLETED` (not
+`VERIFIED` — nobody verified it) with the approved result, which is the
+approver's edit when `review.allowResultEdits` was used, and is counted in
+`metrics.tasksApproved` and the member's `perMemberStats.tasksApproved` rather
+than `tasksVerified`. Only an approval somebody gave counts: the task list
+records each approval's decider (`taskList.approvals`), and a timeout
+auto-approval (`decidedBy: system:timeout`, under `timeoutPolicy: AUTO_APPROVE`)
+is a decision nobody made, so its tasks return to `PENDING` as before — the same
+line earned-autonomy evidence draws. A task that completed in an ungated phase,
+or that a later VERIFY phase failed, also returns to `PENDING`. The switch
+defaults to `false`, so stored configs behave exactly as before; it is read from
+the group's current version at writeback, and an unreadable config falls back to
+the default (logged).
+
 **Stale claims are reclaimed.** The default group HITL timeout policy is
 `WAIT_INDEFINITELY`, so a pause nobody resolves never reaches a terminal state:
 without a backstop the claim would be held forever, every subsequent fire
@@ -819,6 +848,20 @@ mechanism behind DELPHI's rounds.
 **`requiresApproval`** pauses the discussion at the phase boundary until a human
 approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
+
+**`onApproved`** (EXECUTE phases with `requiresApproval` at `TASK` granularity)
+makes one configured `httpcalls` call with each task a person approves — the
+approved, possibly edited result goes out exactly as approved, with no member
+turn in between. It is how a team publishes only human-approved text (a member's
+own gated tool call is rejected inside a group turn). Exactly-once rules,
+credentials and a GitHub-comment example: [Group Approved-Result
+Actions](group-approved-result-actions.md).
+
+```json
+{ "name": "Draft", "type": "EXECUTE", "requiresApproval": true,
+  "onApproved": { "action": { "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1", "call": "postIssueComment" },
+                  "onFailure": "FAIL_TASK" } }
+```
 
 **`convergence` (I2)** ends a repeating phase early once the round stopped
 producing movement, so a group that agreed after round 2 does not pay for round

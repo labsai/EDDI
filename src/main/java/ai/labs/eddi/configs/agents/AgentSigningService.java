@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.configs.agents;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -46,14 +47,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * Key lifecycle:
  * <ol>
- * <li>Private key in {@link ISecretProvider} under
- * {@code agent-signing-key:{agentId}}, or
- * {@code agent-signing-key:{agentId}:v{n}} for a rotated key (Base64 PKCS#8,
- * never in config JSON); this service only reads it. Nothing in EDDI writes one
- * — see the "Cryptographic Agent Identity" section of
- * {@code docs/architecture.md}</li>
- * <li>Public key in {@code AgentConfiguration.identity.publicKey}, or
- * {@code identity.keys[]} for rotated keys</li>
+ * <li>{@link #generateKey} creates a key pair when an admin asks for one
+ * ({@code POST /agentstore/agents/{id}/signing-keys}): the private key goes
+ * into {@link ISecretProvider} under {@code agent-signing-key:{agentId}:v{n}}
+ * (Base64 PKCS#8, never in config JSON), the public key into the agent's
+ * {@code identity.keys[]}. A legacy unversioned key, under
+ * {@code agent-signing-key:{agentId}} with its public half in
+ * {@code identity.publicKey}, is still read but no longer written</li>
+ * <li>{@link #checkSigningKey} tells an agent save whether the key it declares
+ * can actually sign</li>
  * <li>On permanent agent deletion:
  * {@link #deleteKeyPair(String, String, Collection)} removes the vault
  * entries</li>
@@ -67,8 +69,8 @@ public class AgentSigningService {
     private static final String ALGORITHM = "Ed25519";
     /**
      * Reserved key-name prefix, defined once in {@link SecretReference} so that the
-     * reader here and the resolution-time refusal in {@code SecretResolver} cannot
-     * drift apart.
+     * key names used here and the resolution-time refusal in {@code SecretResolver}
+     * cannot drift apart.
      */
     private static final String VAULT_KEY_PREFIX = SecretReference.AGENT_SIGNING_KEY_PREFIX;
     /**
@@ -76,6 +78,13 @@ public class AgentSigningService {
      * test can pin the number of vault round trips one agent deletion costs.
      */
     static final int MAX_KEY_VERSION_SCAN = 100;
+    /**
+     * How many versions {@link #generateKey} tries past one that is already taken
+     * in the vault before giving up.
+     */
+    static final int MAX_FREE_VERSION_ATTEMPTS = 10;
+    /** What {@link #checkSigningKey} signs: any fixed bytes do. */
+    private static final String KEY_CHECK_PROBE = "eddi-agent-signing-key-check";
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
@@ -95,7 +104,7 @@ public class AgentSigningService {
      * picked up, and this node went on signing with the old one — every signature
      * then failing verification against the new public key. A key added, replaced
      * or removed in the vault is now picked up within the TTL; this node's own
-     * delete takes effect at once.
+     * {@link #generateKey} and delete take effect at once.
      * </p>
      */
     static final long KEY_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
@@ -133,6 +142,180 @@ public class AgentSigningService {
         signCounter = meterRegistry.counter("eddi.agent.identity.sign.count");
         verifySuccessCounter = meterRegistry.counter("eddi.agent.identity.verify.success");
         verifyFailCounter = meterRegistry.counter("eddi.agent.identity.verify.fail");
+    }
+
+    /** A key pair {@link #generateKey} created: its version and its public half. */
+    public record GeneratedKey(int version, String publicKeyB64) {
+    }
+
+    /**
+     * Creates an Ed25519 key pair for an agent and stores its private key in the
+     * vault under the first free version at or above {@code fromVersion}.
+     *
+     * <p>
+     * The write is {@link ISecretProvider#storeIfAbsent}, never an upsert. The
+     * vault entry and the version in {@code identity.keys[]} are two separate
+     * writes, so the vault can hold a version the configuration does not name — a
+     * concurrent provisioning of the same agent, or one whose configuration write
+     * never landed. Overwriting that entry would replace a private key whose public
+     * half may already be published; skipping to the next version cannot.
+     * </p>
+     *
+     * @param fromVersion
+     *            the lowest version to use, 1 or higher — normally one above the
+     *            highest version the agent declares
+     * @return the version stored and the Base64 X.509 public key, which the caller
+     *         adds to the agent's {@code identity.keys[]}
+     * @throws AgentSigningException
+     *             if the vault could not store the key, or
+     *             {@value #MAX_FREE_VERSION_ATTEMPTS} versions in a row were taken
+     */
+    public GeneratedKey generateKey(String tenantId, String agentId, int fromVersion) throws AgentSigningException {
+        if (fromVersion < 1 || fromVersion > AgentPublicKey.MAX_VERSION) {
+            throw new IllegalArgumentException(
+                    "A generated key is versioned: fromVersion must be 1 to " + AgentPublicKey.MAX_VERSION + ", was " + fromVersion);
+        }
+        // Never past MAX_VERSION, and computed in a range where "+ attempts" cannot
+        // overflow.
+        int lastVersion = Math.min(fromVersion + MAX_FREE_VERSION_ATTEMPTS - 1, AgentPublicKey.MAX_VERSION);
+        KeyPair keyPair;
+        try {
+            keyPair = KeyPairGenerator.getInstance(ALGORITHM).generateKeyPair();
+        } catch (NoSuchAlgorithmException e) {
+            throw new AgentSigningException("Ed25519 is not available in this JVM", e);
+        }
+        String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
+        for (int version = fromVersion; version <= lastVersion; version++) {
+            boolean stored;
+            try {
+                stored = secretProvider.storeIfAbsent(new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version)), privateKeyB64,
+                        "Ed25519 signing key v" + version + " of agent " + agentId, List.of(agentId));
+            } catch (ISecretProvider.SecretProviderException | RuntimeException e) {
+                throw new AgentSigningException("Could not store the signing key in the secrets vault: " + e.getMessage(), e);
+            } finally {
+                // A "no key" this node remembered for this version is wrong from now on.
+                keyCache.invalidate(versionedCacheKey(tenantId, agentId, version));
+            }
+            if (stored) {
+                LOGGER.infof("Generated Ed25519 signing key v%d for agent '%s' in tenant '%s'", version, sanitize(agentId), sanitize(tenantId));
+                return new GeneratedKey(version, Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded()));
+            }
+            LOGGER.warnf("Signing key v%d of agent '%s' is already in the vault but was not declared; trying the next version", version,
+                    sanitize(agentId));
+        }
+        throw new AgentSigningException("Signing key versions " + fromVersion + " to " + lastVersion
+                + " of agent " + agentId + " are all taken in the vault", null);
+    }
+
+    /**
+     * Removes one key from the vault: a key {@link #generateKey} stored for an
+     * agent configuration that could not be written, or a key an admin revoked.
+     * Best effort: a failure is logged, and the key is then swept by the agent's
+     * permanent delete only while some later version is declared.
+     *
+     * @param keyVersion
+     *            the rotated key version, or {@code 0} for the legacy unversioned
+     *            key. A negative version removes nothing: no vault entry can exist
+     *            for one, and reading it as "legacy" would delete the private half
+     *            of a key the agent may still declare
+     */
+    public void discardKey(String tenantId, String agentId, int keyVersion) {
+        if (keyVersion < 0) {
+            return;
+        }
+        DeleteTally tally = new DeleteTally();
+        if (keyVersion > 0) {
+            deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, keyVersion), versionedCacheKey(tenantId, agentId, keyVersion), tally);
+        } else {
+            deleteVaultKey(tenantId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
+        }
+        if (tally.failed > 0) {
+            LOGGER.warnf("Could not remove signing key v%d of agent '%s' from the vault: %s", keyVersion, sanitize(agentId),
+                    sanitize(tally.firstFailure));
+        }
+    }
+
+    /**
+     * Whether {@code publicKeyB64} is a Base64 X.509 Ed25519 public key — the form
+     * {@code identity.keys[].publicKeyB64} must have. Checks the shape only;
+     * whether the vault holds the matching private key is {@link #checkSigningKey}.
+     */
+    public static boolean isEd25519PublicKey(String publicKeyB64) {
+        if (publicKeyB64 == null) {
+            return false;
+        }
+        try {
+            KeyFactory.getInstance(ALGORITHM).generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)));
+            return true;
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** What {@link #checkSigningKey} found. */
+    public enum SigningKeyStatus {
+        /** The vault key signs, and the declared public key verifies it. */
+        USABLE,
+        /** The declared public key is not a Base64 X.509 Ed25519 public key. */
+        INVALID_PUBLIC_KEY,
+        /** The vault holds no private key for this agent and version. */
+        NOT_IN_VAULT,
+        /** The vault entry is not a Base64 PKCS#8 Ed25519 private key. */
+        UNREADABLE,
+        /** The vault key signs, but not as the declared public key. */
+        MISMATCH
+    }
+
+    /**
+     * Whether {@code agentId} can sign with key {@code keyVersion} and have the
+     * result verify against {@code publicKeyB64}: signs a fixed probe with the
+     * vault key and verifies it with the public key. The verify metrics are not
+     * touched — this is a configuration check, not a verification.
+     *
+     * @param keyVersion
+     *            the version that would sign, {@code <= 0} for the legacy
+     *            unversioned key
+     * @throws AgentSigningException
+     *             if the vault could not answer
+     */
+    public SigningKeyStatus checkSigningKey(String tenantId, String agentId, int keyVersion, String publicKeyB64)
+            throws AgentSigningException {
+        if (publicKeyB64 == null) {
+            return SigningKeyStatus.INVALID_PUBLIC_KEY;
+        }
+        PublicKey publicKey;
+        try {
+            publicKey = KeyFactory.getInstance(ALGORITHM).generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)));
+        } catch (GeneralSecurityException | IllegalArgumentException e) {
+            return SigningKeyStatus.INVALID_PUBLIC_KEY;
+        }
+        PrivateKey privateKey;
+        try {
+            privateKey = loadPrivateKey(tenantId, agentId, keyVersion);
+        } catch (PrivateKeyLoadException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof ISecretProvider.SecretNotFoundException) {
+                return SigningKeyStatus.NOT_IN_VAULT;
+            }
+            if (cause instanceof GeneralSecurityException || cause instanceof IllegalArgumentException) {
+                return SigningKeyStatus.UNREADABLE;
+            }
+            throw new AgentSigningException("Could not read the signing key of agent " + agentId + " from the secrets vault: "
+                    + cause.getMessage(), cause);
+        }
+        try {
+            byte[] probe = KEY_CHECK_PROBE.getBytes(StandardCharsets.UTF_8);
+            Signature signer = Signature.getInstance(ALGORITHM);
+            signer.initSign(privateKey);
+            signer.update(probe);
+            byte[] signature = signer.sign();
+            Signature verifier = Signature.getInstance(ALGORITHM);
+            verifier.initVerify(publicKey);
+            verifier.update(probe);
+            return verifier.verify(signature) ? SigningKeyStatus.USABLE : SigningKeyStatus.MISMATCH;
+        } catch (GeneralSecurityException e) {
+            throw new AgentSigningException("Could not check the signing key of agent " + agentId, e);
+        }
     }
 
     /**
@@ -298,7 +481,7 @@ public class AgentSigningService {
 
         deleteVaultKey(tenantId, vaultKeyName(agentId), cacheKey(tenantId, agentId), tally);
         for (int v : versionsToSweep(knownVersions)) {
-            deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, v), cacheKey(tenantId, agentId) + ";v=" + v, tally);
+            deleteVaultKey(tenantId, vaultKeyNameVersioned(agentId, v), versionedCacheKey(tenantId, agentId, v), tally);
         }
 
         // Reports what actually happened. The old unconditional "Deleted signing
@@ -433,7 +616,7 @@ public class AgentSigningService {
      *             wrapping the original cause, so callers can report precisely
      */
     private PrivateKey loadPrivateKey(String tenantId, String agentId, int keyVersion) {
-        String cacheKeyStr = keyVersion > 0 ? cacheKey(tenantId, agentId) + ";v=" + keyVersion : cacheKey(tenantId, agentId);
+        String cacheKeyStr = keyVersion > 0 ? versionedCacheKey(tenantId, agentId, keyVersion) : cacheKey(tenantId, agentId);
 
         Optional<PrivateKey> cached = keyCache.getIfPresent(cacheKeyStr);
         if (cached != null) {
@@ -474,6 +657,10 @@ public class AgentSigningService {
      */
     private static String cacheKey(String tenantId, String agentId) {
         return "tenant=" + tenantId + ";agent=" + agentId;
+    }
+
+    private static String versionedCacheKey(String tenantId, String agentId, int keyVersion) {
+        return cacheKey(tenantId, agentId) + ";v=" + keyVersion;
     }
 
     /**

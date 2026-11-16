@@ -45,6 +45,107 @@ export function reactApp({ ecmaVersion }) {
 }
 
 /**
+ * The base for a shared package under ui/packages/: the same recommended rules
+ * without React, plus the boundaries the frontend unification plan (§3.1) sets.
+ * Apps may import packages; a package never imports an app, and a package that
+ * declares itself framework-free (`frameworkFree: true`, as `@eddi/core` does)
+ * imports neither React nor `@eddi/ui` and touches no DOM global beyond fetch.
+ * `src/boundaries.test.ts` in `@eddi/core` checks the same rules and the
+ * absence of import cycles across every package.
+ *
+ * A React package (`react: true`, as `@eddi/ui` is) lints `.tsx` with the rules
+ * of hooks. With `noApi: true` (also `@eddi/ui`) it may not call the backend:
+ * no `@eddi/core` import, no `fetch`/`XMLHttpRequest`/`EventSource`/`WebSocket`,
+ * and no `window.__EDDI_*__` — what the server says reaches it as props or
+ * options from the app.
+ *
+ * With `routerFree: true` (`@eddi/conversation`) it imports no router — hosts
+ * pass ids and callbacks — and reads no `window.__EDDI_*__` either; it may call
+ * the backend through `@eddi/core`.
+ *
+ * @param {{ frameworkFree: boolean, react?: boolean, noApi?: boolean, routerFree?: boolean }} options
+ */
+export function sharedPackage({ frameworkFree, react = false, noApi = false, routerFree = false }) {
+  const appImports = [
+    {
+      group: ["@/*", "**/manager/**", "**/chat/**", "**/workforce/**"],
+      message: "A shared package never imports an app. Move the code into the package, or pass it in from the app.",
+    },
+  ];
+  const apiImports = noApi
+    ? [
+        {
+          group: ["@eddi/core", "@eddi/core/*", "@eddi/conversation", "@eddi/conversation/*"],
+          message: "@eddi/ui makes no API calls and sits below @eddi/conversation. Take the data as a prop or option from the app.",
+        },
+      ]
+    : [];
+  const apiGlobals = noApi
+    ? ["fetch", "XMLHttpRequest", "EventSource", "WebSocket"].map((name) => ({
+        name,
+        message: `@eddi/ui makes no API calls ('${name}'). The app fetches and passes the result in.`,
+      }))
+    : [];
+  const routerImports = routerFree
+    ? [
+        {
+          group: ["react-router", "react-router/*", "react-router-dom", "react-router-dom/*"],
+          message: "@eddi/conversation is router-free: the host passes ids and callbacks (onNavigate, …) instead.",
+        },
+      ]
+    : [];
+  const frameworkImports = frameworkFree
+    ? [
+        {
+          group: ["react", "react/*", "react-dom", "react-dom/*", "@eddi/ui", "@eddi/ui/*", "@eddi/conversation", "@eddi/conversation/*"],
+          message: "@eddi/core is framework-free: no React and no UI package. Put React code in @eddi/conversation or the app.",
+        },
+      ]
+    : [];
+  const domGlobals = frameworkFree
+    ? ["window", "document", "localStorage", "sessionStorage", "navigator", "history"].map((name) => ({
+        name,
+        message: `@eddi/core uses no DOM beyond fetch. Take what you need from '${name}' as a parameter from the app.`,
+      }))
+    : [];
+  return [
+    { ignores: ["dist"] },
+    {
+      extends: [js.configs.recommended, ...tseslint.configs.recommended],
+      files: react ? ["**/*.{ts,tsx}"] : ["**/*.ts"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        globals: globals.browser,
+      },
+      plugins: react ? { "react-hooks": reactHooks } : {},
+      rules: {
+        "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports, ...apiImports, ...routerImports] }],
+        "no-restricted-globals": ["error", ...domGlobals, ...apiGlobals],
+        ...(noApi || routerFree ? { "no-restricted-syntax": ["error", NO_EDDI_GLOBAL, NO_ALWAYS_TRUE_LENGTH] } : {}),
+        ...(react
+          ? {
+              "react-hooks/rules-of-hooks": "error",
+              "react-hooks/exhaustive-deps": "warn",
+            }
+          : {}),
+      },
+    },
+  ];
+}
+
+/**
+ * `window.__EDDI_BRAND__`, `window.__EDDI_CHAT__` and the rest are what the
+ * server injects into an app's page. A shared package never reads them: the app
+ * does, and passes the value in. A `no-restricted-syntax` entry (see
+ * NO_ALWAYS_TRUE_LENGTH on why every block setting that rule lists all of its).
+ */
+export const NO_EDDI_GLOBAL = {
+  selector: "MemberExpression[property.name=/^__EDDI_/]",
+  message: "A shared package never reads window.__EDDI_*__. The app reads it and passes the value in.",
+};
+
+/**
  * `expect(xs.length).toBeGreaterThanOrEqual(0)` asserts nothing: it holds for
  * every array. It reads like a check, which is worse than no check at all. For
  * "indexOf found it", use `toContain`; for "this loaded something", assert what
