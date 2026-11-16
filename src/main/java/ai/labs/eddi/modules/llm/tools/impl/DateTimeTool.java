@@ -181,7 +181,7 @@ public class DateTimeTool {
         }
     }
 
-    @Tool("Lists common IANA timezone names with their current local time")
+    @Tool("Lists all available timezone names")
     public String listTimezones() {
         StringBuilder sb = new StringBuilder("Available timezones:\n");
 

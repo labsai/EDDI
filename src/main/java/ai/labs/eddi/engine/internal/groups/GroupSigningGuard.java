@@ -181,11 +181,13 @@ public class GroupSigningGuard {
      * <li>Loads the speaker's public key from the agent config</li>
      * <li>Verifies the signature against the canonical envelope form</li>
      * </ol>
-     * Invalid signatures, and entries with no envelope data at all, are logged at
-     * ERROR; this method only logs and never rejects an entry or throws. Entries
-     * from {@code user} and engine-written reviewer edits are skipped. This is
-     * defense-in-depth: the signing code already self-verifies at creation time, so
-     * failures here indicate either key rotation issues or data corruption.
+     * A signature that fails to verify, and an entry with no envelope data at all,
+     * are logged at ERROR; a missing public key or a verification error at WARN.
+     * This method only logs and never rejects an entry or throws. Entries from
+     * {@code user}, engine-written reviewer edits and entries without content are
+     * skipped. This is defense-in-depth: the signing code already self-verifies at
+     * creation time, so failures here indicate either key rotation issues or data
+     * corruption.
      *
      * @param receivingAgentId
      *            the agent about to receive the transcript

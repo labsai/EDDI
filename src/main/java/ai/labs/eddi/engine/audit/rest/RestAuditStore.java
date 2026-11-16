@@ -265,7 +265,7 @@ public class RestAuditStore implements IRestAuditStore {
         // anything. Anchoring at the origin would report them as missing and accuse
         // the deployment of deleting audit records it never had. Unsequenced rows also
         // make a genuine deletion undetectable, so the honest answer for a mixed window
-        // is UNAVAILABLE unless a hole proves a deletion.
+        // is UNAVAILABLE unless a hole or a duplicate breaks the chain.
         boolean mixed = entries.stream().anyMatch(e -> e.sequence() < 0);
         List<Long> sequences = entries.stream().filter(e -> e.sequence() >= 0).filter(e -> !signingEnabled || signsSequence(e))
                 .map(AuditEntry::sequence).sorted().toList();

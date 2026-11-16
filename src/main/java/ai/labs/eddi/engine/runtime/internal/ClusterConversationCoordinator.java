@@ -453,9 +453,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     /**
      * Moves the dead letters this node had to keep locally while NATS was
      * unreachable into the shared stream, so every node lists them and they survive
-     * this node's restart. Runs on every (re)connect and, while any local entry is
-     * left, every {@value #LOCAL_FORWARD_SECONDS} seconds; stops at the first
-     * failure and tries the rest on the next run.
+     * this node's restart. Runs on every (re)connect and, while connected and any
+     * local or unverified entry is left, every {@value #LOCAL_FORWARD_SECONDS}
+     * seconds; stops at the first failure and tries the rest on the next run.
      *
      * @return how many entries were forwarded
      */

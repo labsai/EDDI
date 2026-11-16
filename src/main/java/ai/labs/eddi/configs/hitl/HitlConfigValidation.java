@@ -27,8 +27,9 @@ import org.jboss.logging.Logger;
  * wait-forever at runtime (project rule: actionable errors, not silent
  * failures). The policy/granularity fields are enum-typed and validated by
  * Jackson at deserialization; this class checks everything Jackson cannot: the
- * ISO-8601 approval durations, tool-approval patterns and rules, notify
- * recipients, and the nested oversight, review and approval-context blocks.
+ * ISO-8601 approval durations, the pause-reason length, the maxRevisionsPerTurn
+ * range (1-10), tool-approval patterns and rules, notify recipients, and the
+ * nested oversight, review and approval-context blocks.
  */
 public final class HitlConfigValidation {
 

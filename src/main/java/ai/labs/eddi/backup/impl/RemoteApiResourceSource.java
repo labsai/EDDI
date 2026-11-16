@@ -1011,12 +1011,11 @@ public class RemoteApiResourceSource implements IResourceSource {
      * <p>
      * Almost every failure to read the source that this class raises is one:
      * unreachable, refusing the token, answering a status or a body that cannot be
-     * used. (Not an unresolvable latest agent version, which is a plain
-     * {@code RuntimeException}, nor a malformed base URL, which is an
-     * {@code IllegalArgumentException}.) Naming the category lets the endpoints
-     * answer {@code 502 Bad Gateway} for it and keep {@code 500} for what this
-     * deployment itself got wrong — a distinction an operator needs and a single
-     * {@code RuntimeException} could not carry.
+     * used, or no resolvable latest agent version. (Not a malformed base URL, which
+     * is an {@code IllegalArgumentException}.) Naming the category lets the
+     * endpoints answer {@code 502 Bad Gateway} for it and keep {@code 500} for what
+     * this deployment itself got wrong — a distinction an operator needs and a
+     * single {@code RuntimeException} could not carry.
      */
     public static class RemoteReadException extends RuntimeException {
 

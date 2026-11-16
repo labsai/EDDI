@@ -101,7 +101,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * of turn execution is how post-approval behaviour drifts from ordinary
  * behaviour without anyone noticing. Hence the back-reference to
  * {@link ConversationService} for the facade members this cluster calls (among
- * them {@code say}, {@code getAgent}, {@code createPropertiesHandler},
+ * them {@code getAgent}, {@code createPropertiesHandler},
  * {@code storeConversationMemoryIfState}, {@code cacheConversationState},
  * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError} and
  * {@code rejectIfShuttingDown}). Same pattern and the same safety argument as

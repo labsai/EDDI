@@ -50,8 +50,9 @@ public final class GroupConversationEventSink {
     public static final String EVENT_MEMBER_PAUSE_SKIPPED = "member_pause_skipped";
     /**
      * A {@link GroupConversation.DecisionRecord} was set on the discussion (Wave 0,
-     * F3): a verdict (I3), an agreement (I11), a vote (I14) or an award (I18). A
-     * record of type {@code NONE} is forwarded too; the Slack listener skips it.
+     * F3): a verdict (I3), an agreement (I11) or a vote (I14); I18 (awards) is
+     * declared but no producer writes it yet. A record of type {@code NONE} is
+     * forwarded too; the Slack listener skips it.
      */
     public static final String EVENT_DECISION_REACHED = "decision_reached";
     /**

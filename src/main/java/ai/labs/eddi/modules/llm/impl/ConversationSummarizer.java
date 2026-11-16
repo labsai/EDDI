@@ -295,7 +295,7 @@ public class ConversationSummarizer {
         props.put(PROP_RUNNING_SUMMARY, new Property(PROP_RUNNING_SUMMARY, summary, Scope.conversation));
         props.put(PROP_SUMMARY_THROUGH_STEP, new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
 
-        LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers the first %d steps, summary length=%d chars",
+        LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers steps 1-%d, summary length=%d chars",
                 sanitize(memory.getConversationId()), summarizeThroughStep, summary.length());
         return usage;
     }

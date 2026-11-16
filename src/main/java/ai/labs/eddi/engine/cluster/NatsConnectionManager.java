@@ -564,7 +564,7 @@ public class NatsConnectionManager {
 
     /**
      * Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread, and
-     * immediately if the connection is already up.
+     * if the connection is already up, schedules it at once on the same executor.
      */
     public void onConnected(Runnable hook) {
         connectedHooks.add(hook);

@@ -1254,7 +1254,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         return Response.status(Response.Status.BAD_REQUEST)
                 .entity("Schedules marked as team cadences (metadata " + TeamCadenceService.METADATA_TYPE_KEY
                         + ") cannot be created via this API, and a schedule cannot be turned into one. Manage cadences "
-                        + "via POST /groupstore/groups/{groupId}/workspace/cadences.")
+                        + "via POST /groups/{groupId}/workspace/cadences.")
                 .build();
     }
 

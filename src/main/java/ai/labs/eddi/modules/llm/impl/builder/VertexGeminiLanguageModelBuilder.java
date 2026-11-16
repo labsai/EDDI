@@ -140,8 +140,8 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (isGemini3OrLater(modelId)) {
             LOGGER.warnf("gemini-vertex model '%s' is Gemini 3.x or later, which cannot use tools on this provider: "
                     + "Gemini 3.x requires the thoughtSignature it attaches to each functionCall echoed back on the "
-                    + "follow-up request, and langchain4j's vertex-ai-gemini module does not carry that field. "
-                    + "Tool calls will fail with "
+                    + "follow-up request, and neither langchain4j's vertex-ai-gemini module nor the Vertex AI Part "
+                    + "protobuf it depends on can carry that field. Tool calls will fail with "
                     + "'400 INVALID_ARGUMENT — Function call is missing a thought_signature'. Use the 'gemini' "
                     + "provider for Gemini 3.x with tools; 'gemini-vertex' supports Gemini 2.x. "
                     + "See https://ai.google.dev/gemini-api/docs/thought-signatures", sanitize(modelId));

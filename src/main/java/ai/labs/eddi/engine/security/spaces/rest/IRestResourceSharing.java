@@ -141,8 +141,7 @@ public interface IRestResourceSharing {
     @Path("/visibility")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Set visibility",
-               description = "private = owner and explicit grants only; space = everyone in the resource's space; "
-                       + "internal = everyone signed in may use it, without reading how it is built; published = everyone with access to the deployment.")
+               description = "private = owner and explicit grants only; space = everyone in the resource's space; published = everyone.")
     @APIResponse(responseCode = "200", description = "Updated and skipped resource ids.")
     Response setVisibility(@PathParam("id") String id,
                            @QueryParam("visibility") String visibility,
@@ -184,7 +183,8 @@ public interface IRestResourceSharing {
      * whose owner has left, which cannot depend on that owner acting.
      *
      * @param ownerId
-     *            the new owner's principal
+     *            the new owner, by principal, name or email (resolved through the
+     *            user directory)
      * @param spaceId
      *            the space to file the resource under; omitted, the new owner's
      *            personal space

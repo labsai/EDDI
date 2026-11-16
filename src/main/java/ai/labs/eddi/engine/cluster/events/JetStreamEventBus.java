@@ -81,7 +81,7 @@ import java.util.function.Consumer;
  * <p>
  * Events from this node's own boot are ignored (the change was applied locally
  * before publishing), and handlers run in arrival order on two single-thread
- * lanes: cache evictions on one, every other event on the other.
+ * lanes: cache evictions and clears on one, every other event on the other.
  */
 @ApplicationScoped
 // ClusterStartable as well: ClusterBootstrap finds what to start through

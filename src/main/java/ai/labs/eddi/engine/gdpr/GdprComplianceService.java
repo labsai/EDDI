@@ -433,11 +433,11 @@ public class GdprComplianceService {
      * <li>Run every registered {@link IGdprParticipant}, in {@code order()}</li>
      * </ol>
      * <p>
-     * Conversation IDs are resolved once, before the first deletion, and reused by
-     * every per-conversation step. The attachment, journal, descriptor and
-     * checkpoint deletions run <em>before</em> the conversation snapshots are
-     * deleted because they are found through the conversation IDs that the bulk
-     * delete removes.
+     * Conversation IDs are resolved once, after the user memories are deleted and
+     * before the first per-conversation step, and reused by every per-conversation
+     * step. The attachment, journal, descriptor and checkpoint deletions run
+     * <em>before</em> the conversation snapshots are deleted because they are found
+     * through the conversation IDs that the bulk delete removes.
      *
      * @param userId
      *            the user to erase
@@ -551,7 +551,7 @@ public class GdprComplianceService {
         // 2. Delete attachments for all user conversations
         long attachmentsDeleted = 0;
 
-        // Resolve conversation IDs once — needed by steps 2 to 4b.
+        // Resolve conversation IDs once — needed by steps 2 to 4b-bis.
         // Must happen BEFORE the bulk snapshot delete (step 4c) which removes
         // the documents that getConversationIdsByUserId queries.
         List<String> conversationIds = List.of();
