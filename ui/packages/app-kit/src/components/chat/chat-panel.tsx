@@ -36,7 +36,12 @@ import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "../../hooks/use-chat-ratings";
 import { lastStepIndex, ratableSteps, stepIndexes } from "@eddi/core";
-import { ReplyAnnouncer, type AnnouncedMessage } from "@eddi/conversation";
+import {
+  ReplyAnnouncer,
+  offersQuickReplies,
+  resolveComposerMode,
+  type AnnouncedMessage,
+} from "@eddi/conversation";
 import {
   ToolActivityCards,
   ToolTurnNotice,
@@ -215,6 +220,7 @@ export function ChatPanel({
   const activeInputField = useChatStore((s) => s.activeInputField);
   const isSecretMode = useChatStore((s) => s.isSecretMode);
   const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
+  const composerMode = resolveComposerMode({ activeInputField, isSecretMode });
   // A conversation load is reading: the transcript and its id still belong to
   // the conversation being left, so nothing may be sent until it settles.
   const isLoadingConversation = useChatStore((s) => s.loadingConversationId !== null);
@@ -1295,7 +1301,7 @@ export function ChatPanel({
 
         {/* Quick replies — hidden while paused so a pill can't fire a send
             against an AWAITING_HUMAN conversation (the input/send are also guarded). */}
-        {controls.quickReplies && quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && !reviewPending && (
+        {controls.quickReplies && offersQuickReplies(composerMode) && quickReplies.length > 0 && !isProcessing && !isPaused && !isLoadingConversation && !conversationBusy && !reviewPending && (
           <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
             {quickReplies.map((reply, i) => (
               <button
@@ -1329,16 +1335,19 @@ export function ChatPanel({
           />
         )}
 
-        {/* Input — show SecretInput when backend requests it or user toggles 🔒 */}
-        {activeInputField ? (
+        {/* Input — one composer mode at a time (T2.5): the field the agent
+            asked for, the 🔒 secret mode, or the ordinary textarea. */}
+        {composerMode.kind === "field" ? (
           <SecretInputField
-            label={activeInputField.label}
-            placeholder={activeInputField.placeholder}
-            defaultValue={activeInputField.defaultValue}
-            subType={activeInputField.subType}
+            label={composerMode.field.label}
+            placeholder={composerMode.field.placeholder}
+            defaultValue={composerMode.field.defaultValue}
+            subType={composerMode.field.subType}
             // The send clears the field itself, and hands it back if the
-            // backend refuses the message without consuming it.
-            onSend={(val) => handleSend(val, true)}
+            // backend refuses the message without consuming it. Only a
+            // password field is a secret turn.
+            onSend={(val, isSecret) => handleSend(val, isSecret)}
+            onCancel={() => useChatStore.getState().clearInputField()}
             disabled={isProcessing || isPaused || isLoadingConversation || conversationBusy || reviewPending}
           />
         ) : (
@@ -1448,7 +1457,14 @@ function ChatInputWithSecretToggle({
   mention?: ChatMentionConfig;
 }) {
   const { t } = useTranslation();
+  /** The text draft. It survives a trip into secret mode and back. */
   const [value, setValue] = useState("");
+  /**
+   * The masked value while the lock is on — never the text draft, so turning
+   * the lock off cannot show a secret in the clear textarea (T2.5,
+   * `composer-mode.ts` in @eddi/conversation). Dropped when secret mode ends.
+   */
+  const [secretValue, setSecretValue] = useState("");
   const [secretVisible, setSecretVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1512,10 +1528,18 @@ function ChatInputWithSecretToggle({
     setPickedStatus("");
   }, [isSecretMode]);
 
+  // However secret mode ends — sent, the lock switched off, the conversation
+  // replaced — the masked value goes with it.
+  useEffect(() => {
+    if (isSecretMode) return;
+    setSecretValue("");
+    setSecretVisible(false);
+  }, [isSecretMode]);
+
   const handleSend = useCallback(() => {
-    const trimmed = value.trim();
     if (mention && mentionTarget && !isSecretMode) {
       // A hand-off carries the text only; it never sends to this chat's agent.
+      const trimmed = value.trim();
       if (!trimmed || disabled || isProcessing) return;
       if (mention.onHandOff(mentionTarget, trimmed) === false) return;
       setValue("");
@@ -1523,21 +1547,28 @@ function ChatInputWithSecretToggle({
       setPickedStatus("");
       return;
     }
-    // Allow an attachment-only turn (empty text) once a file is uploaded.
-    if ((!trimmed && !hasReadyAttachment) || disabled || isProcessing || isUploading) return;
-    if (!onSend(trimmed, isSecretMode)) return;
-    setValue("");
+    if (disabled || isProcessing || isUploading) return;
     if (isSecretMode) {
+      // Sent as typed: whitespace is valid in a password or a token.
+      if (!secretValue) return;
+      if (!onSend(secretValue, true)) return;
+      setSecretValue("");
       onToggleSecret();
       setSecretVisible(false);
+      return;
     }
+    const trimmed = value.trim();
+    // Allow an attachment-only turn (empty text) once a file is uploaded.
+    if (!trimmed && !hasReadyAttachment) return;
+    if (!onSend(trimmed, false)) return;
+    setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
       // A click on Send moved focus to the button; the next message starts
       // in the composer. (A touch keyboard stays as the person left it.)
       if (!window.matchMedia?.("(pointer: coarse)").matches) textareaRef.current.focus();
     }
-  }, [value, mention, mentionTarget, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
+  }, [value, secretValue, mention, mentionTarget, hasReadyAttachment, disabled, isProcessing, isUploading, isSecretMode, onSend, onToggleSecret]);
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current;
@@ -1572,7 +1603,10 @@ ${unsent}` : draft.text));
 
   const canSend = mentionTarget && !isSecretMode
     ? value.trim().length > 0 && !disabled && !isProcessing
-    : (value.trim().length > 0 || hasReadyAttachment) && !disabled && !isProcessing && !isUploading;
+    : (isSecretMode ? secretValue.length > 0 : value.trim().length > 0 || hasReadyAttachment) &&
+      !disabled &&
+      !isProcessing &&
+      !isUploading;
 
   return (
     <div className="border-t border-border bg-background p-4 min-w-0" data-tour="chat-input-area">
@@ -1698,8 +1732,8 @@ ${unsent}` : draft.text));
           <div className="relative flex-1">
             <input
               type={secretVisible ? "text" : "password"}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              value={secretValue}
+              onChange={(e) => setSecretValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
                   e.preventDefault();

@@ -11,6 +11,7 @@ import {
   Users,
   BarChart3,
   LayoutDashboard,
+  Brain,
 } from "lucide-react";
 import { Button, useTheme } from "@eddi/ui";
 import { cn } from "@eddi/app-kit/lib/utils";
@@ -307,8 +308,26 @@ export function WorkforceSidebar({
         </ul>
       </nav>
 
-      {/* ── Footer: Theme Toggle ─────────────────────────────────── */}
-      <div className="shrink-0 border-t border-border ps-3 pe-3 py-2">
+      {/* ── Footer: the person's own things — their memory (T2.4), the theme ── */}
+      <div className="shrink-0 space-y-0.5 border-t border-border ps-3 pe-3 py-2">
+        <Link
+          to="/workforce/memory"
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg ps-2 pe-2 py-2 text-sm transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            collapsed && "justify-center ps-0 pe-0",
+            location.pathname === "/workforce/memory"
+              ? "bg-muted text-foreground font-medium"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={collapsed ? t("Workforce.memory.navLabel") : undefined}
+          aria-label={collapsed ? t("Workforce.memory.navLabel") : undefined}
+          data-testid="workforce-memory-link"
+          {...(location.pathname === "/workforce/memory" ? { "aria-current": "page" as const } : {})}
+        >
+          <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {!collapsed && <span>{t("Workforce.memory.navLabel")}</span>}
+        </Link>
         <Button
           variant="ghost"
           size={collapsed ? "icon" : "sm"}

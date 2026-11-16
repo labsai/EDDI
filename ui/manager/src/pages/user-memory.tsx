@@ -25,8 +25,8 @@ import {
   useUserMemories,
   useDeleteMemory,
   useDeleteAllMemories,
-} from "@/hooks/use-user-memory";
-import type { UserMemoryEntry } from "@/lib/api/user-memory";
+} from "@eddi/app-kit/hooks/use-user-memory";
+import type { UserMemoryEntry } from "@eddi/app-kit/lib/api/user-memory";
 
 const CATEGORIES = ["all", "preference", "fact", "context"] as const;
 

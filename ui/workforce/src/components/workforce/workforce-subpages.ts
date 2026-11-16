@@ -20,4 +20,5 @@ export const WORKFORCE_SUBPAGES: ReadonlySet<string> = new Set([
   "new",
   "analytics",
   "chat",
+  "memory",
 ]);

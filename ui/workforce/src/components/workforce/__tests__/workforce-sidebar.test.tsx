@@ -86,6 +86,21 @@ describe("WorkforceSidebar", () => {
     );
   });
 
+  it("links every role to what is remembered about them (T2.4), named even when collapsed", async () => {
+    mockBoards([]);
+    const { unmount } = render("/workforce/memory", "/workforce/memory");
+    const link = await screen.findByTestId("workforce-memory-link");
+    expect(link).toHaveAttribute("href", "/workforce/memory");
+    expect(link).toHaveTextContent("My memory");
+    expect(link).toHaveAttribute("aria-current", "page");
+    unmount();
+
+    render("/workforce", "/workforce", true);
+    const collapsed = await screen.findByTestId("workforce-memory-link");
+    expect(collapsed).toHaveAccessibleName("My memory");
+    expect(collapsed).not.toHaveAttribute("aria-current");
+  });
+
   it("lists task forces from the backend", async () => {
     mockBoards([
       { id: "b1", name: "Launch review" },

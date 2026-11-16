@@ -2,7 +2,7 @@
 
 > The token hand-off protocol and `eddi.chat.img-sources` are newer than 6.5.0. Under 6.5.0 a framed widget with authentication on could not start a conversation, and agent output images from other hosts were blocked.
 
-EDDI serves a chat widget at `/chat`. Another site can show it in an `<iframe>`. This page is the contract between that host page and the widget: who may frame it, how a signed-in user's token gets into it with authentication on, and which images it may load.
+EDDI serves a chat widget at `/chat`. Another site can show it in an `<iframe>`, or add one `<script>` tag and get a floating chat button that opens it ([section 6](#6-the-launcher-chatembedjs)). This page is the contract between that host page and the widget: who may frame it, how a signed-in user's token gets into it with authentication on, and which images it may load.
 
 ## 1. Allow the host page to frame `/chat`
 
@@ -114,6 +114,84 @@ Nothing here needs configuring; it is listed so an embedder knows what users see
 - **Stop** (the square button, or **Esc** inside the widget) aborts the stream and calls `POST /agents/{conversationId}/cancel`. That stops a running turn only on the node running it ([HITL](hitl.md)), so the widget reads the conversation again shortly after: when the turn ran on, a line in the conversation says so and shows the reply in full.
 - When the stream drops mid-reply, the widget says it is reconnecting and re-reads the conversation for about half a minute; a turn that finished on the server meanwhile is shown in place of the partial reply.
 - Code blocks name their language, and a block marked `mermaid` is drawn as a diagram by Mermaid (`securityLevel: "strict"`). Mermaid, like KaTeX and highlight.js, is a separate chunk under `/scripts/js/`, loaded only when a reply needs it: the widget's first load is unchanged. The paused-turn and rating cards load the same way, the first time they are shown. All of them are same-origin scripts, so `script-src 'self'` covers them.
+
+## 6. The launcher (`/chat/embed.js`)
+
+Instead of placing an iframe yourself, add one script tag. It draws a floating button in a corner of your page; the button opens the agent's widget in a panel, and closes it again.
+
+```html
+<script
+  src="https://eddi.example.com/chat/embed.js"
+  data-agent-id="<agentId>"
+  defer
+></script>
+```
+
+The panel is the same `/chat` widget in an iframe, so everything above still applies. In particular, **list your page's origin in `eddi.chat.frame-ancestors`** ([section 1](#1-allow-the-host-page-to-frame-chat)); otherwise the button appears but the browser refuses to show the panel. The agent must be deployed to the environment the launcher names.
+
+### Settings
+
+All settings are `data-` attributes on the script tag. Only `data-agent-id` is required.
+
+| Attribute | Default | What it does |
+| --- | --- | --- |
+| `data-agent-id` | — | The agent to chat with. Letters, digits, `.`, `_` and `-` only. Without a usable value, the launcher draws nothing and logs a console warning |
+| `data-environment` | `production` | The environment the agent is deployed to, for example `test` |
+| `data-position` | `bottom-right` | `bottom-right` or `bottom-left` |
+| `data-color` | blue | The button's and the panel header's colour; it is also passed to the widget as `accentColor`. Only a plain colour is accepted (hex, `rgb()`/`hsl()` with numbers, or a named colour), by the same rule as the widget's colour parameters; anything else is ignored with a console warning |
+| `data-label` | per locale | The button's text and the panel's accessible name, at most 60 characters. Without it the launcher uses a built-in word for "Chat" in the widget's eleven languages, picked from `data-lang`, then your page's `<html lang>`, then the browser |
+| `data-open` | off | `"true"` opens the panel when the page loads, without moving focus into it. On a narrow screen (480 px or less), where the panel covers the page, it stays closed until the person taps the button |
+| `data-lang` | — | Passed to the widget as `lang` (any of its eleven languages) |
+| `data-theme` | — | Passed to the widget as `theme`: `light`, `dark` or `system` |
+| `data-token-provider` | — | The name of a function on your page that returns an access token, or a promise of one. Only needed with authentication on; see below |
+
+The launcher also puts one object on your page, `window.EddiChat`, with `open()`, `close()`, `toggle()` and `setTokenProvider(fn)`. Including the script twice draws one button.
+
+### With authentication on
+
+The launcher relays the widget's own token hand-off ([section 2](#2-hand-the-widget-a-token-authentication-on)), so your page does not need to write the message listener itself. Give it a function that returns a fresh access token:
+
+```html
+<script>
+  // Your application's: for keycloak-js, something like this.
+  async function getEddiToken() {
+    await keycloak.updateToken(30);
+    return keycloak.token;
+  }
+</script>
+<script
+  src="https://eddi.example.com/chat/embed.js"
+  data-agent-id="<agentId>"
+  data-token-provider="getEddiToken"
+  defer
+></script>
+```
+
+Or call `window.EddiChat.setTokenProvider(fn)` before the panel is first opened. With a provider, the launcher frames the widget with `?tokenOrigin=<your page's origin>` and answers its `eddi-chat-ready` and `eddi-chat-token-request` messages with your token. Without one, it leaves `tokenOrigin` off, since the widget would otherwise wait five seconds for a token that never comes, and the widget chats anonymously, as an agent that allows it permits.
+
+What the launcher enforces:
+
+- **Exact origins.** A message is answered only when it comes from the launcher's own iframe (`event.source`) and from the EDDI origin the script was loaded from (`event.origin`). The token is posted to that exact origin, never to `"*"`. A message of any other type, or from any other window or origin, is ignored.
+- **Nothing read from your page.** The launcher never reads your cookies, `localStorage` or `sessionStorage`, never uses `eval`, `new Function` or `innerHTML`, and keeps the token only as long as it takes to post it. Its button and panel live in a shadow root, so your page's styles do not reach them and theirs do not reach your page.
+- **Plausible tokens only.** A value that is not printable ASCII without whitespace, at most 16 KB, is not sent.
+
+### Your page's Content Security Policy
+
+If your page sends a CSP, allow the EDDI origin for the script and for the frame:
+
+```text
+script-src 'self' https://eddi.example.com;
+frame-src  https://eddi.example.com;
+```
+
+The launcher's styles are inside its shadow root as a `<style>` element, so a page whose `style-src` forbids inline styles must allow `'unsafe-inline'` for them. The script is a fixed URL, not content-hashed, so it cannot carry a Subresource Integrity hash that would survive an EDDI upgrade. EDDI serves it with `Cache-Control: public, max-age=3600`, so an upgrade reaches your page within an hour. A jar built with `-DskipUi=true` answers `/chat/embed.js` with 404.
+
+### Accessibility
+
+- The button is a real `<button>` with a visible label, `aria-expanded` and `aria-controls`.
+- The panel is a labelled dialog (`role="dialog"`). When the person opens it, focus moves to the panel; **Tab** cycles through the close button and the conversation without leaving the panel; **Esc** on the panel, or the close button (named "Close chat" in the page's language), closes it and puts focus back on the button. Inside the conversation, Esc keeps its widget meaning and stops a running reply; press Shift+Tab to reach the close button, then Esc.
+- On a screen 480 px wide or less, the panel fills the screen and respects the safe areas of a notched phone.
+- The opening animation runs only under `prefers-reduced-motion: no-preference`.
 
 ## Upgrading: HTML in replies is off by default
 

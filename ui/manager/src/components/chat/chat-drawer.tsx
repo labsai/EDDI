@@ -415,17 +415,19 @@ function DrawerSecretInput({
       defaultValue={field.defaultValue}
       subType={field.subType}
       disabled={disabled}
-      onSend={(value) => {
+      onSend={(value, isSecret) => {
         // Read live, not from the render: a load that began in the render gap
         // still has the conversation being left on screen. Returning false
         // keeps the typed value in the field.
         if (useChatStore.getState().loadingConversationId) return false;
-        // A secret turn never carries a file, so anything staged is dropped
-        // rather than silently held for the next message.
-        staging.discardAll();
-        sendMessage.mutate({ message: value, isSecret: true });
+        // Only a password field is a secret turn (T2.5). A secret turn never
+        // carries a file, so anything staged is dropped rather than silently
+        // held for the next message; an ordinary field leaves the staging be.
+        if (isSecret) staging.discardAll();
+        sendMessage.mutate({ message: value, isSecret });
         return true;
       }}
+      onCancel={() => useChatStore.getState().clearInputField()}
     />
   );
 }
