@@ -43,9 +43,10 @@ describe("useMyChatDescriptors", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(urls).toHaveLength(1);
-    expect(urls[0].searchParams.get("mine")).toBe("true");
-    expect(urls[0].searchParams.get("excludeGroupMembers")).toBe("true");
-    expect(urls[0].searchParams.get("limit")).toBe("100");
+    const [url] = urls;
+    expect(url?.searchParams.get("mine")).toBe("true");
+    expect(url?.searchParams.get("excludeGroupMembers")).toBe("true");
+    expect(url?.searchParams.get("limit")).toBe("100");
   });
 
   it("keeps every row the backend returns — no client-side comparison with the username", async () => {

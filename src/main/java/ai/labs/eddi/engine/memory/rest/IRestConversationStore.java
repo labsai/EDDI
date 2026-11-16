@@ -80,8 +80,8 @@ public interface IRestConversationStore {
      * <p>
      * {@code excludeGroupMembers=true} leaves out the private conversations a group
      * discussion started for its members (those whose descriptor records a
-     * {@code groupConversationId}; member conversations started before 6.7.0
-     * record none and are still listed).
+     * {@code groupConversationId}; member conversations started before 6.7.0 record
+     * none and are still listed).
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
