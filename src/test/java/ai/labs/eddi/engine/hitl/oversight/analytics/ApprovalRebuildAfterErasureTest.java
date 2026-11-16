@@ -37,11 +37,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,6 +68,7 @@ class ApprovalRebuildAfterErasureTest {
     private OversightGdprParticipant participant;
     private ApprovalBackfillService backfill;
     private ApprovalDecisionProjector projector;
+    private AutonomyService autonomyService;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -78,6 +81,9 @@ class ApprovalRebuildAfterErasureTest {
 
         metrics = mock(OversightMetrics.class);
         Instance<AutonomyService> autonomy = mock(Instance.class);
+        autonomyService = mock(AutonomyService.class);
+        when(autonomy.isResolvable()).thenReturn(true);
+        when(autonomy.get()).thenReturn(autonomyService);
         projector = new ApprovalDecisionProjector(decisions, metrics, autonomy, erasedSubjects);
 
         IAuditStore auditStore = mock(IAuditStore.class);
@@ -382,6 +388,57 @@ class ApprovalRebuildAfterErasureTest {
     }
 
     @Test
+    @DisplayName("a pending row whose ledger lookup stops at its page bound stays pending, instead of settling masked")
+    void truncatedLedgerLookupStaysPending() {
+        ApprovalDecision raw = ApprovalDecision.of(HitlApprovalAudit.parse(entry("d9", "alice", "bob", DECIDED)).getFirst(), 0);
+        decisions.insertPendingIfAbsent(raw.withPersonalFields(null, pseudonym("bob")));
+        // The conversation holds more entries than one lookup reads, none of them the
+        // row's (its entry would come after the bound).
+        Map<String, Object> noise = Map.of("note", "x");
+        for (int i = 0; i < ApprovalBackfillService.LEDGER_LOOKUP_PAGES * ApprovalBackfillService.PAGE_SIZE; i++) {
+            ledger.add(new AuditEntry("n" + i, raw.conversationId(), "agent-1", 2, "alice", "production", -1, "other.task", "x", -1, 0L,
+                    Map.of(), noise, null, null, List.of(), 0.0, DECIDED, null, null));
+        }
+
+        assertEquals(0, backfill.reconcilePending());
+
+        assertEquals(Set.of(raw.id()), decisions.pending, "unknown is not \"not found\"");
+    }
+
+    @Test
+    @DisplayName("a rejection settled by reconciliation reaches earned autonomy, so its demote code still resets the evidence")
+    void reconciledRowsReachEarnedAutonomy() {
+        ledger.add(entry("d1", "alice", "bob", DECIDED));
+        decisions.failConfirmations = 1;
+        projectLive(ledger.getFirst());
+        verify(autonomyService, never()).onDecisions(anyList());
+
+        assertEquals(1, backfill.reconcilePending());
+
+        verify(autonomyService).onDecisions(List.of(decisions.rows.get(ApprovalDecision.idOf("d1", 0))));
+    }
+
+    @Test
+    @DisplayName("a stale settler cannot restore an identity after an erasure masked the row back to the values it expects")
+    void staleSettlerAfterErasureToTheSameValues() {
+        // Owner and decider are the same person, so erasure returns the row to its
+        // masked pair exactly.
+        ledger.add(entry("d1", "bob", "bob", DECIDED));
+        ApprovalDecision raw = ApprovalDecision.of(HitlApprovalAudit.parse(ledger.getFirst()).getFirst(), 0);
+        ApprovalDecision masked = raw.withPersonalFields(null, pseudonym("bob"));
+        decisions.insertPendingIfAbsent(masked);
+        assertTrue(decisions.updateIdentities(masked.id(), 0, "bob", "bob", true), "settler A writes bob back");
+        erase("bob", ERASED);
+
+        assertTrue(!decisions.updateIdentities(masked.id(), 0, "bob", "bob", true), "settler B, stale");
+        assertTrue(!decisions.updateIdentities(masked.id(), 1, "bob", "bob", false), "settler A's confirmation, stale");
+        assertEquals(1, backfill.reconcilePending());
+
+        assertTrue(!anyRowNames("bob"), decisions.rows.values().toString());
+        assertTrue(decisions.pending.isEmpty());
+    }
+
+    @Test
     @DisplayName("a node that answered \"not erased\" before another node's erasure does not store the raw id afterwards")
     void otherNodesErasureSeenAtOnce() {
         ledger.add(entry("d1", "alice", "bob", DECIDED));
@@ -410,6 +467,7 @@ class ApprovalRebuildAfterErasureTest {
     static final class InMemoryDecisions implements IApprovalDecisionStore {
         final Map<String, ApprovalDecision> rows = new LinkedHashMap<>();
         final Set<String> pending = new LinkedHashSet<>();
+        final Map<String, Long> versions = new LinkedHashMap<>();
         Consumer<ApprovalDecision> afterInsert = d -> {
         };
         Consumer<ApprovalDecision> afterWriteBack = d -> {
@@ -419,6 +477,7 @@ class ApprovalRebuildAfterErasureTest {
         void clear() {
             rows.clear();
             pending.clear();
+            versions.clear();
         }
 
         @Override
@@ -427,6 +486,7 @@ class ApprovalRebuildAfterErasureTest {
                 return false;
             }
             rows.put(decision.id(), decision);
+            versions.put(decision.id(), INITIAL_VERSION);
             afterInsert.accept(decision);
             return true;
         }
@@ -437,24 +497,25 @@ class ApprovalRebuildAfterErasureTest {
                 return false;
             }
             rows.put(decision.id(), decision);
+            versions.put(decision.id(), INITIAL_VERSION);
             pending.add(decision.id());
             afterInsert.accept(decision);
             return true;
         }
 
         @Override
-        public boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy,
-                                        boolean stillPending) {
+        public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean stillPending) {
             if (!stillPending && failConfirmations > 0) {
                 failConfirmations--;
                 throw new IllegalStateException("store down");
             }
             ApprovalDecision r = rows.get(id);
-            if (r == null || !Objects.equals(r.userId(), expectedUserId) || !Objects.equals(r.decidedBy(), expectedDecidedBy)) {
+            if (r == null || versions.getOrDefault(id, INITIAL_VERSION) != expectedVersion) {
                 return false;
             }
             ApprovalDecision next = r.withPersonalFields(userId, decidedBy);
             rows.put(id, next);
+            versions.put(id, expectedVersion + 1);
             if (stillPending) {
                 pending.add(id);
                 afterWriteBack.accept(next);
@@ -465,8 +526,8 @@ class ApprovalRebuildAfterErasureTest {
         }
 
         @Override
-        public List<ApprovalDecision> pendingCheck(int limit) {
-            return pending.stream().map(rows::get).limit(limit).toList();
+        public List<Pending> pendingCheck(int limit) {
+            return pending.stream().map(id -> new Pending(rows.get(id), versions.getOrDefault(id, INITIAL_VERSION))).limit(limit).toList();
         }
 
         private List<ApprovalDecision> settled() {
@@ -502,6 +563,7 @@ class ApprovalRebuildAfterErasureTest {
                 String decider = Objects.equals(r.decidedBy(), userId) ? pseudonym : r.decidedBy();
                 if (!Objects.equals(user, r.userId()) || !Objects.equals(decider, r.decidedBy())) {
                     e.setValue(r.withPersonalFields(user, decider));
+                    versions.merge(e.getKey(), 1L, Long::sum);
                     changed++;
                 }
             }

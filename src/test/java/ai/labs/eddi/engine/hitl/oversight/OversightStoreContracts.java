@@ -126,14 +126,15 @@ public final class OversightStoreContracts {
             assertTrue(decisions().query(all, 0, 10).isEmpty(), "analytics never read a pending row");
             assertEquals(0, decisions().count(all));
             assertTrue(decisions().readByUser("gdpr:alice", 10).isEmpty(), "nor does the export");
-            assertEquals(List.of(masked), decisions().pendingCheck(10));
+            assertEquals(List.of(new IApprovalDecisionStore.Pending(masked, IApprovalDecisionStore.INITIAL_VERSION)), decisions().pendingCheck(10));
 
             // Write the confirmed identity back, still pending: still hidden.
-            assertTrue(decisions().updateIdentities(masked.id(), null, "gdpr:alice", "user-1", "alice", true));
+            assertTrue(decisions().updateIdentities(masked.id(), 0, "user-1", "alice", true));
             assertTrue(decisions().query(all, 0, 10).isEmpty());
             assertTrue(decisions().readByUser("alice", 10).isEmpty());
 
-            assertTrue(decisions().updateIdentities(masked.id(), "user-1", "alice", "user-1", "alice", false));
+            assertFalse(decisions().updateIdentities(masked.id(), 0, "user-1", "alice", false), "the version moved on");
+            assertTrue(decisions().updateIdentities(masked.id(), 1, "user-1", "alice", false));
             assertEquals(List.of(decision("APPROVED", NOW)), decisions().query(all, 0, 10));
             assertEquals(1, decisions().readByUser("alice", 10).size());
             assertTrue(decisions().pendingCheck(10).isEmpty());
@@ -146,8 +147,8 @@ public final class OversightStoreContracts {
             decisions().insertIfAbsent(first);
             decisions().insertIfAbsent(second);
 
-            assertFalse(decisions().updateIdentities(first.id(), "someone-else", "alice", null, "gdpr:alice", false), "stale expectation");
-            assertTrue(decisions().updateIdentities(first.id(), "user-1", "alice", null, "gdpr:alice", false));
+            assertFalse(decisions().updateIdentities(first.id(), 7, null, "gdpr:alice", false), "stale version");
+            assertTrue(decisions().updateIdentities(first.id(), 0, null, "gdpr:alice", false));
 
             var rows = decisions().query(DecisionFilter.ofCategory(AGENT, CATEGORY, null, null), 0, 10);
             ApprovalDecision changed = rows.stream().filter(r -> r.id().equals(first.id())).findFirst().orElseThrow();
@@ -164,10 +165,46 @@ public final class OversightStoreContracts {
             decisions().insertPendingIfAbsent(raw);
             decisions().eraseUser("alice", "gdpr:alice");
 
-            assertFalse(decisions().updateIdentities(raw.id(), "user-1", "alice", "user-1", "alice", false),
+            assertFalse(decisions().updateIdentities(raw.id(), 0, "user-1", "alice", false),
                     "a settlement that read before the erasure must not restore the raw id");
-            ApprovalDecision stored = decisions().pendingCheck(10).getFirst();
+            ApprovalDecision stored = decisions().pendingCheck(10).getFirst().row();
             assertEquals("gdpr:alice", stored.decidedBy());
+        }
+
+        /**
+         * Two settlers and an erasure that returns the row to the very values a stale
+         * settler expects (owner and decider are the same erased person): the version,
+         * not the values, decides, so neither stale write lands.
+         */
+        @Test
+        default void staleSettlersCannotRestoreAnIdentityAfterErasure_evenToTheSameValues() {
+            ApprovalDecision raw = decision("APPROVED", NOW).withPersonalFields("bob", "bob");
+            ApprovalDecision masked = raw.withPersonalFields(null, "gdpr:bob");
+            decisions().insertPendingIfAbsent(masked);
+            // Settler A writes bob back (version 0 -> 1) and pauses before confirming.
+            assertTrue(decisions().updateIdentities(masked.id(), 0, "bob", "bob", true));
+            // Erasure masks the row again, to exactly the pair settler B read.
+            decisions().eraseUser("bob", "gdpr:bob");
+
+            assertFalse(decisions().updateIdentities(masked.id(), 0, "bob", "bob", true), "settler B's stale write-back");
+            assertFalse(decisions().updateIdentities(masked.id(), 1, "bob", "bob", false), "settler A's stale confirmation");
+
+            IApprovalDecisionStore.Pending stored = decisions().pendingCheck(10).getFirst();
+            assertNull(stored.row().userId());
+            assertEquals("gdpr:bob", stored.row().decidedBy());
+            assertTrue(stored.version() > 1, "erasure moved the version on");
+            DecisionFilter all = new DecisionFilter(null, null, null, null, null, null, null, null, null);
+            assertTrue(decisions().readByUser("bob", 10).isEmpty());
+            assertTrue(decisions().query(all, 0, 10).isEmpty(), "still pending, so no read sees it");
+
+            // The settlement that runs next reads the current version and settles the
+            // erased form.
+            assertTrue(decisions().updateIdentities(masked.id(), stored.version(), null, "gdpr:bob", false));
+            List<ApprovalDecision> settled = decisions().query(all, 0, 10);
+            assertEquals(1, settled.size());
+            assertNull(settled.getFirst().userId());
+            assertEquals("gdpr:bob", settled.getFirst().decidedBy());
+            assertTrue(decisions().readByUser("bob", 10).isEmpty(), "no read returns the erased identity");
         }
 
         /**
@@ -212,7 +249,7 @@ public final class OversightStoreContracts {
             // Failed between write-back and confirmation: the identity is back, still
             // pending.
             assertTrue(decisions().insertPendingIfAbsent(bob.withPersonalFields(null, "gdpr-erased:k1:bob")));
-            assertTrue(decisions().updateIdentities(bob.id(), null, "gdpr-erased:k1:bob", "user-1", "bob", true));
+            assertTrue(decisions().updateIdentities(bob.id(), 0, "user-1", "bob", true));
 
             DecisionFilter all = new DecisionFilter(null, null, null, null, null, null, null, null, null);
             assertTrue(decisions().query(all, 0, 10).isEmpty(), "reads before reconciliation see neither row");

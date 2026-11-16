@@ -67,11 +67,14 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
             "CREATE INDEX IF NOT EXISTS idx_approval_decisions_decider ON approval_decisions (decided_by)",
             // Added after 6.7.0's first schema: rows awaiting the erased-subject check.
             "ALTER TABLE approval_decisions ADD COLUMN IF NOT EXISTS pending_check BOOLEAN",
-            "CREATE INDEX IF NOT EXISTS idx_approval_decisions_pending_check ON approval_decisions (id) WHERE pending_check"
+            "CREATE INDEX IF NOT EXISTS idx_approval_decisions_pending_check ON approval_decisions (id) WHERE pending_check",
+            "ALTER TABLE approval_decisions ADD COLUMN IF NOT EXISTS settle_version BIGINT"
     };
 
     /** Rows that are not pending — what every read sees. */
     static final String SETTLED = "pending_check IS NOT TRUE";
+    /** Increments a row's settlement version. */
+    private static final String BUMP = "settle_version = COALESCE(settle_version, 0) + 1";
 
     private static final String COLUMNS = "id, agent_id, group_id, category, decided_at, surface, pause_type, channel, agent_version, "
             + "user_id, decided_by, data";
@@ -112,8 +115,8 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
 
     private boolean insert(ApprovalDecision d, boolean pending) {
         ensureSchema();
-        String sql = "INSERT INTO approval_decisions (" + COLUMNS + ", pending_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                + "ON CONFLICT (id) DO NOTHING";
+        String sql = "INSERT INTO approval_decisions (" + COLUMNS + ", pending_check, settle_version) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, d.id());
             ps.setString(2, d.agentId());
@@ -136,6 +139,7 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
             } else {
                 ps.setNull(13, Types.BOOLEAN);
             }
+            ps.setLong(14, INITIAL_VERSION);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to store approval decision", e);
@@ -184,29 +188,42 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public long eraseUser(String userId, String pseudonym) {
         ensureSchema();
-        long changed = update("UPDATE approval_decisions SET user_id = NULL WHERE user_id = ?", List.of(userId));
-        changed += update("UPDATE approval_decisions SET decided_by = ? WHERE decided_by = ?", List.of(pseudonym, userId));
+        long changed = update("UPDATE approval_decisions SET user_id = NULL, " + BUMP + " WHERE user_id = ?", List.of(userId));
+        changed += update("UPDATE approval_decisions SET decided_by = ?, " + BUMP + " WHERE decided_by = ?", List.of(pseudonym, userId));
         return changed;
     }
 
     @Override
-    public boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy,
-                                    boolean pending) {
+    public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending) {
         ensureSchema();
         List<Object> params = new ArrayList<>();
         params.add(userId);
         params.add(decidedBy);
         params.add(id);
-        params.add(expectedUserId);
-        params.add(expectedDecidedBy);
-        return update("UPDATE approval_decisions SET user_id = ?, decided_by = ?, pending_check = " + (pending ? "TRUE" : "NULL")
-                + " WHERE id = ? AND user_id IS NOT DISTINCT FROM ? AND decided_by IS NOT DISTINCT FROM ?", params) > 0;
+        params.add(expectedVersion);
+        return update("UPDATE approval_decisions SET user_id = ?, decided_by = ?, pending_check = " + (pending ? "TRUE" : "NULL") + ", "
+                + BUMP + " WHERE id = ? AND COALESCE(settle_version, 0) = ?", params) > 0;
     }
 
     @Override
-    public List<ApprovalDecision> pendingCheck(int limit) {
+    public List<Pending> pendingCheck(int limit) {
         ensureSchema();
-        return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE pending_check LIMIT ?", List.of(Math.max(0, limit)));
+        String sql = "SELECT " + COLUMNS + ", settle_version FROM approval_decisions WHERE pending_check LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, Math.max(0, limit));
+            List<Pending> rows = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ApprovalDecision stored = OversightJson.read(rs.getString("data"), ApprovalDecision.class);
+                    long version = rs.getLong("settle_version");
+                    rows.add(new Pending(stored.withPersonalFields(rs.getString("user_id"), rs.getString("decided_by")),
+                            rs.wasNull() ? INITIAL_VERSION : version));
+                }
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read pending approval decisions", e);
+        }
     }
 
     /** The WHERE clause of a filter (settled rows only); appends its parameters. */

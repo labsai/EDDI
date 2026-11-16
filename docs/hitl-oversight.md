@@ -278,10 +278,14 @@ The stored state is always the safe one. A row with an identity is inserted **ma
 pseudonymised) and **pending**, and a pending row is left out of every read: the analytics queries and counts, and the
 GDPR export (`readByUser`). It is then settled: a fresh check says which identities may be kept, they are written back to
 that row alone with a compare-and-set (still pending), a second fresh check confirms them or reverts the row if an
-erasure was recorded in between, and only then is the pending mark cleared. A failure or a crash at any step leaves the
+erasure was recorded in between, and only then is the pending mark cleared. Every compare-and-set is bound to a
+settlement version that each identity write increments, erasure's included, so a stale settler cannot match a row that
+erasure masked back to the very values it expected. A settled row also reaches earned autonomy, so a demote-coded
+rejection resets the evidence window even when it was settled late. A failure or a crash at any step leaves the
 row pending and hidden; the hourly maintenance run and every rebuild settle pending rows again (at most 1,000 per run),
 reading their identities back from the ledger entry of their conversation. A pending row whose entry is gone or redacted
-settles in its masked form. Only a failure in the moment between writing an identity back and confirming it leaves that
+settles in its masked form; one whose entry is not found within the lookup bound (10,000 entries of its conversation)
+stays pending. Only a failure in the moment between writing an identity back and confirming it leaves that
 identity at rest, still pending and hidden, until the next maintenance run.
 
 ## Metrics and properties

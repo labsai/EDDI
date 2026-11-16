@@ -13,8 +13,8 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -74,38 +74,60 @@ public class ApprovalBackfillService {
      * @return how many rows were settled
      */
     public int reconcilePending() {
-        List<ApprovalDecision> pending;
+        List<IApprovalDecisionStore.Pending> pending;
         try {
             pending = projector.pendingRows(RECONCILE_LIMIT);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read approval decisions pending the erased-subject check: %s", e.getMessage());
             return 0;
         }
-        int settled = 0;
-        for (ApprovalDecision row : pending) {
+        List<ApprovalDecision> settled = new ArrayList<>();
+        for (IApprovalDecisionStore.Pending p : pending) {
+            ApprovalDecision row = p.row();
             try {
-                Optional<ApprovalDecision> raw = fromLedger(row);
-                boolean done = raw.isPresent() ? projector.settle(raw.get(), row) != null : projector.settleMasked(row);
-                if (done) {
-                    settled++;
+                LedgerLookup lookup = fromLedger(row);
+                if (!lookup.complete()) {
+                    LOGGER.warnf("The ledger entry of pending approval decision %s was not found within %d entries of its conversation; "
+                            + "it stays pending", sanitize(row.id()), LEDGER_LOOKUP_PAGES * PAGE_SIZE);
+                    continue;
+                }
+                ApprovalDecision now = lookup.row() != null
+                        ? projector.settle(lookup.row(), row, p.version())
+                        : projector.settleMasked(row, p.version());
+                if (now != null) {
+                    settled.add(now);
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf("Pending approval decision %s could not be settled yet: %s", sanitize(row.id()), e.getMessage());
             }
         }
-        if (settled > 0) {
-            LOGGER.infof("Settled %d approval decision row(s) left pending the erased-subject check", settled);
+        // A rejection whose live settlement failed reaches earned autonomy here.
+        projector.evaluate(settled);
+        if (!settled.isEmpty()) {
+            LOGGER.infof("Settled %d approval decision row(s) left pending the erased-subject check", settled.size());
         }
-        return settled;
+        return settled.size();
+    }
+
+    /**
+     * The result of looking a pending row's entry up in the ledger.
+     *
+     * @param row
+     *            the row as the ledger has it, or null when the entry was not found
+     * @param complete
+     *            false when the lookup stopped at its page bound: "not found" is
+     *            then unknown, not an answer
+     */
+    record LedgerLookup(ApprovalDecision row, boolean complete) {
     }
 
     /**
      * The row as the ledger has it: the {@code hitl.approval} entry of the row's
      * conversation that holds its decision, at the row's unit index.
      */
-    Optional<ApprovalDecision> fromLedger(ApprovalDecision row) {
+    LedgerLookup fromLedger(ApprovalDecision row) {
         if (row.conversationId() == null || row.decisionId() == null) {
-            return Optional.empty();
+            return new LedgerLookup(null, true);
         }
         for (int page = 0; page < LEDGER_LOOKUP_PAGES; page++) {
             List<AuditEntry> entries = auditStore.getEntries(row.conversationId(), page * PAGE_SIZE, PAGE_SIZE);
@@ -116,14 +138,14 @@ public class ApprovalBackfillService {
                 List<HitlDecisionUnit> units = HitlApprovalAudit.parse(entry);
                 int index = row.unitIndex();
                 if (index >= 0 && index < units.size() && units.get(index) != null && row.decisionId().equals(units.get(index).decisionId())) {
-                    return Optional.of(ApprovalDecision.of(units.get(index), index));
+                    return new LedgerLookup(ApprovalDecision.of(units.get(index), index), true);
                 }
             }
             if (entries.size() < PAGE_SIZE) {
-                break;
+                return new LedgerLookup(null, true);
             }
         }
-        return Optional.empty();
+        return new LedgerLookup(null, false);
     }
 
     /** Whether a rebuild is running on this node. */

@@ -32,6 +32,7 @@ import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.ne;
 import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
+import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
 import static com.mongodb.client.model.Updates.unset;
 
@@ -65,6 +66,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     static final String DECIDED_BY = "decidedBy";
     static final String DATA = "data";
     static final String PENDING_CHECK = "pendingCheck";
+    static final String SETTLE_VERSION = "settleVersion";
     /** Rows that are not pending — what every read sees. */
     private static final Bson SETTLED = ne(PENDING_CHECK, true);
 
@@ -86,7 +88,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public boolean insertIfAbsent(ApprovalDecision decision) {
         try {
-            collection.insertOne(toDocument(decision));
+            collection.insertOne(toDocument(decision).append(SETTLE_VERSION, INITIAL_VERSION));
             return true;
         } catch (MongoException e) {
             if (e.getCode() == DUPLICATE_KEY) {
@@ -99,7 +101,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public boolean insertPendingIfAbsent(ApprovalDecision decision) {
         try {
-            collection.insertOne(toDocument(decision).append(PENDING_CHECK, true));
+            collection.insertOne(toDocument(decision).append(PENDING_CHECK, true).append(SETTLE_VERSION, INITIAL_VERSION));
             return true;
         } catch (MongoException e) {
             if (e.getCode() == DUPLICATE_KEY) {
@@ -140,24 +142,25 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
 
     @Override
     public long eraseUser(String userId, String pseudonym) {
-        long changed = collection.updateMany(eq(USER_ID, userId), set(USER_ID, null)).getModifiedCount();
-        changed += collection.updateMany(eq(DECIDED_BY, userId), set(DECIDED_BY, pseudonym)).getModifiedCount();
+        long changed = collection.updateMany(eq(USER_ID, userId), combine(set(USER_ID, null), inc(SETTLE_VERSION, 1L))).getModifiedCount();
+        changed += collection.updateMany(eq(DECIDED_BY, userId), combine(set(DECIDED_BY, pseudonym), inc(SETTLE_VERSION, 1L)))
+                .getModifiedCount();
         return changed;
     }
 
     @Override
-    public boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy,
-                                    boolean pending) {
+    public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending) {
         Bson mark = pending ? set(PENDING_CHECK, true) : unset(PENDING_CHECK);
-        return collection.updateOne(and(eq(ID, id), eq(USER_ID, expectedUserId), eq(DECIDED_BY, expectedDecidedBy)),
-                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), mark)).getMatchedCount() > 0;
+        return collection.updateOne(and(eq(ID, id), eq(SETTLE_VERSION, expectedVersion)),
+                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), mark, inc(SETTLE_VERSION, 1L))).getMatchedCount() > 0;
     }
 
     @Override
-    public List<ApprovalDecision> pendingCheck(int limit) {
-        List<ApprovalDecision> rows = new ArrayList<>();
+    public List<Pending> pendingCheck(int limit) {
+        List<Pending> rows = new ArrayList<>();
         for (Document doc : collection.find(eq(PENDING_CHECK, true)).limit(Math.max(0, limit))) {
-            rows.add(fromDocument(doc));
+            Object version = doc.get(SETTLE_VERSION);
+            rows.add(new Pending(fromDocument(doc), version instanceof Number n ? n.longValue() : INITIAL_VERSION));
         }
         return rows;
     }

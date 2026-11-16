@@ -40,19 +40,31 @@ public interface IApprovalDecisionStore {
     boolean insertPendingIfAbsent(ApprovalDecision decision);
 
     /**
-     * Sets the two personal fields of one row, but only if they still hold the
-     * expected values (compare-and-set), and sets or clears its pending mark. A row
-     * that changed meanwhile (an erasure pseudonymised it) is left as it is. Only
-     * this row is touched.
+     * The settlement version a row is inserted with. Every write of a row's
+     * identities ({@link #updateIdentities}, {@link #eraseUser}) increments it.
+     */
+    long INITIAL_VERSION = 0;
+
+    /**
+     * Sets the two personal fields of one row and sets or clears its pending mark,
+     * but only if the row is still at {@code expectedVersion} (compare-and-set),
+     * and increments the version. A version, not the identity values, is compared:
+     * an erasure can return a row to the very values a stale settlement expects,
+     * but never to its version. Only this row is touched.
      *
      * @param pending
      *            whether the row stays pending
-     * @return whether the row was updated
+     * @return whether the row was updated (its version is then
+     *         {@code expectedVersion + 1})
      */
-    boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy, boolean pending);
+    boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending);
+
+    /** A pending row and its settlement version. */
+    record Pending(ApprovalDecision row, long version) {
+    }
 
     /** Up to {@code limit} pending rows. */
-    List<ApprovalDecision> pendingCheck(int limit);
+    List<Pending> pendingCheck(int limit);
 
     /**
      * Matching settled rows (pending ones are left out), newest {@code decidedAt}
@@ -76,7 +88,8 @@ public interface IApprovalDecisionStore {
     List<ApprovalDecision> readByUser(String userId, int limit);
 
     /**
-     * Removes the user from every row: their conversations' rows lose the
+     * Removes the user from every row, pending ones included, and increments the
+     * version of each row it changes: their conversations' rows lose the
      * {@code userId}, and their own decisions get {@code decidedBy = pseudonym}.
      * The rows themselves stay — they hold no content, and analytics stay correct.
      *

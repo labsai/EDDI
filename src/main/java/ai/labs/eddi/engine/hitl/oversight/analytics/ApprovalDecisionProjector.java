@@ -122,7 +122,7 @@ public class ApprovalDecisionProjector {
                 stored++;
                 metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
                 try {
-                    ApprovalDecision now = settle(row, safe);
+                    ApprovalDecision now = settle(row, safe, IApprovalDecisionStore.INITIAL_VERSION);
                     if (now != null) {
                         settled.add(now);
                     }
@@ -137,14 +137,25 @@ public class ApprovalDecisionProjector {
                         i, e.getMessage());
             }
         }
-        if (evaluate && !settled.isEmpty() && autonomy != null && autonomy.isResolvable()) {
-            try {
-                autonomy.get().onDecisions(settled);
-            } catch (RuntimeException e) {
-                LOGGER.warnf("Earned autonomy could not evaluate decision %s: %s", sanitize(units.getFirst().decisionId()), e.getMessage());
-            }
+        if (evaluate) {
+            evaluate(settled);
         }
         return stored;
+    }
+
+    /**
+     * Hands settled rows to earned autonomy, whose demote-coded rejections reset
+     * the evidence window. Idempotent, so a row handed over twice is harmless.
+     */
+    void evaluate(List<ApprovalDecision> settled) {
+        if (settled.isEmpty() || autonomy == null || !autonomy.isResolvable()) {
+            return;
+        }
+        try {
+            autonomy.get().onDecisions(settled);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Earned autonomy could not evaluate decision %s: %s", sanitize(settled.getFirst().decisionId()), e.getMessage());
+        }
     }
 
     /**
@@ -155,25 +166,31 @@ public class ApprovalDecisionProjector {
      * @param raw
      *            the row as the ledger has it
      * @param current
-     *            the row as it is stored now (its identities are what the first
-     *            compare-and-set expects)
+     *            the row as it is stored now
+     * @param version
+     *            its settlement version, which every compare-and-set is bound to
+     *            (an erasure increments it, so a stale settler cannot match a row
+     *            erasure has rewritten, even to the same values)
      * @return the row as finally stored, or null when another writer changed it
      *         first (it stays pending and is settled again later)
      * @throws RuntimeException
      *             the record or the store could not be read or written; the row
      *             stays pending
      */
-    ApprovalDecision settle(ApprovalDecision raw, ApprovalDecision current) {
+    ApprovalDecision settle(ApprovalDecision raw, ApprovalDecision current, long version) {
+        long expected = version;
         ApprovalDecision allowed = withoutErasedIdentities(raw);
         if (!sameIdentities(allowed, current)) {
-            if (!store.updateIdentities(current.id(), current.userId(), current.decidedBy(), allowed.userId(), allowed.decidedBy(), true)) {
+            if (!store.updateIdentities(current.id(), expected, allowed.userId(), allowed.decidedBy(), true)) {
                 return null;
             }
+            expected++;
         }
         // Confirm with a second fresh read: an erasure recorded since the first one
-        // reverts what was written back.
+        // reverts what was written back. An erasure's own pass bumped the version, so
+        // this write then loses and the row stays pending.
         ApprovalDecision confirmed = withoutErasedIdentities(raw);
-        if (!store.updateIdentities(current.id(), allowed.userId(), allowed.decidedBy(), confirmed.userId(), confirmed.decidedBy(), false)) {
+        if (!store.updateIdentities(current.id(), expected, confirmed.userId(), confirmed.decidedBy(), false)) {
             return null;
         }
         return confirmed;
@@ -183,15 +200,15 @@ public class ApprovalDecisionProjector {
      * Settles a pending row whose ledger entry is gone or no longer names anyone
      * (redacted): it keeps the masked identities, and the pending mark is cleared.
      *
-     * @return whether the row was settled
+     * @return the row as settled, or null when another writer changed it first
      */
-    boolean settleMasked(ApprovalDecision current) {
+    ApprovalDecision settleMasked(ApprovalDecision current, long version) {
         ApprovalDecision safe = masked(current);
-        return store.updateIdentities(current.id(), current.userId(), current.decidedBy(), safe.userId(), safe.decidedBy(), false);
+        return store.updateIdentities(current.id(), version, safe.userId(), safe.decidedBy(), false) ? safe : null;
     }
 
-    /** Up to {@code limit} rows still pending. */
-    List<ApprovalDecision> pendingRows(int limit) {
+    /** Up to {@code limit} rows still pending, with their versions. */
+    List<IApprovalDecisionStore.Pending> pendingRows(int limit) {
         return store.pendingCheck(limit);
     }
 
