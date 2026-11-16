@@ -6,6 +6,7 @@ import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { spendControlHandlers } from "./spend-control-handlers";
 import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
@@ -968,6 +969,8 @@ export const handlers = [
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // Spend-control changes waiting for an admin: /administration/spend-control-changes.
+  ...spendControlHandlers,
   // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
   ...teamBudgetHandlers,
 

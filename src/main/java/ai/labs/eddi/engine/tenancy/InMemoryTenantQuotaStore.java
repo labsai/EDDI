@@ -101,6 +101,14 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     }
 
     @Override
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        if (expected == null) {
+            return quotas.putIfAbsent(next.tenantId(), next) == null;
+        }
+        return quotas.replace(next.tenantId(), expected, next);
+    }
+
+    @Override
     public List<TenantQuota> listQuotas() {
         return List.copyOf(quotas.values());
     }
