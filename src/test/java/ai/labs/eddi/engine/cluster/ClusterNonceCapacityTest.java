@@ -34,11 +34,13 @@ class ClusterNonceCapacityTest {
     private static final Duration WINDOW = Duration.ofSeconds(60);
 
     private final AtomicLong now = new AtomicLong(1_000_000_000L);
+    /** Milliseconds the clock moves on after every read; 0 is a frozen clock. */
+    private volatile long step;
 
     private ClusterMessageSigner signer(long maxNonces) {
         return new ClusterMessageSigner(
                 ClusterSigningConfig.of(KEY, List.of(), true, WINDOW).withMaxRememberedNonces(maxNonces), new SimpleMeterRegistry())
-                .withClock(now::get);
+                .withClock(() -> now.getAndAdd(step));
     }
 
     private static Signed sign(ClusterMessageSigner signer, String body) {
@@ -93,6 +95,41 @@ class ClusterNonceCapacityTest {
         now.addAndGet(WINDOW.toMillis());
 
         assertEquals(Rejection.REPLAYED, verify(signer, captured).rejection());
+    }
+
+    @Test
+    @DisplayName("the nonce is kept to the end of the window even when the clock moves while it is recorded")
+    void retentionIsNotShortenedByALaterClockRead() {
+        ClusterMessageSigner signer = signer(10);
+        long signedAt = now.get();
+        Signed captured = sign(signer, "first");
+        step = 1;
+        assertTrue(verify(signer, captured).accepted());
+        step = 0;
+
+        now.set(signedAt + WINDOW.toMillis());
+
+        assertEquals(Rejection.REPLAYED, verify(signer, captured).rejection(),
+                "a replay at the last fresh millisecond must still meet its nonce");
+    }
+
+    @Test
+    @DisplayName("a replay whose freshness ran out while its nonce was being recorded is refused as expired")
+    void freshnessIsCheckedAgainAfterRecording() {
+        ClusterMessageSigner signer = signer(10);
+        long signedAt = now.get();
+        Signed captured = sign(signer, "first");
+        assertTrue(verify(signer, captured).accepted());
+
+        // The first read (the freshness check) sees the last fresh millisecond; the
+        // thread then stalls past it, so the remembered nonce has expired by the
+        // time it is looked up.
+        now.set(signedAt + WINDOW.toMillis());
+        step = 2;
+        Verdict replay = verify(signer, captured);
+
+        assertFalse(replay.accepted(), "a stale replay must not be admitted");
+        assertEquals(Rejection.EXPIRED, replay.rejection());
     }
 
     @Test

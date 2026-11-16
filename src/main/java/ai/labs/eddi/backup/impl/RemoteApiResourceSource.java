@@ -997,18 +997,22 @@ public class RemoteApiResourceSource implements IResourceSource {
             OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken, peerSsrf).header("Accept", "application/json").build();
             OutboundResponse<String> response = sendJson(http, request);
 
-            if (response.status() != 200) {
-                throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.status());
-            }
-
+            // Counted before the status: an error body was read just the same, and
+            // the callers skip a failed document and go on to the next one, so a
+            // source answering every reference with a large error page would
+            // otherwise never reach the budget.
             String body = response.body();
             responseBytesRead += body == null ? 0 : body.length();
+            if (response.status() != 200) {
+                if (responseBytesRead > maxTotalResponseBytes) {
+                    throw totalBudgetExceeded();
+                }
+                throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.status());
+            }
             if (responseBytesRead > maxTotalResponseBytes) {
                 // Fails the whole sync like the request budget: skipping this one
                 // document would let the upgrade read the rest as removed.
-                throw new RequestBudgetExceededException("The sync stopped after reading more than " + maxTotalResponseBytes
-                        + " bytes from " + baseUrl + " (" + MAX_TOTAL_RESPONSE_BYTES_PROPERTY
-                        + "): the source serves more than this instance reads for one sync");
+                throw totalBudgetExceeded();
             }
             return body;
         } catch (InterruptedException e) {
@@ -1023,6 +1027,12 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
             throw new RemoteReadException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
+    }
+
+    /** The total read budget ran out; see {@link #maxTotalResponseBytes}. */
+    private RequestBudgetExceededException totalBudgetExceeded() {
+        return new RequestBudgetExceededException("The sync stopped after reading more than " + maxTotalResponseBytes + " bytes from "
+                + baseUrl + " (" + MAX_TOTAL_RESPONSE_BYTES_PROPERTY + "): the source serves more than this instance reads for one sync");
     }
 
     private static String normalizeBaseUrl(String url) {

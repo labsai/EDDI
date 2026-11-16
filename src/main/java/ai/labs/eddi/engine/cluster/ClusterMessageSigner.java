@@ -186,7 +186,9 @@ public class ClusterMessageSigner {
                 .expireAfter(new Expiry<String, Long>() {
                     @Override
                     public long expireAfterCreate(String nonce, Long expiresAt, long currentTime) {
-                        return TimeUnit.MILLISECONDS.toNanos(Math.max(1, expiresAt - clock.getAsLong()));
+                        // From the ticker reading Caffeine adds this to, not a second
+                        // clock read: a later read shortened the retention by the gap.
+                        return TimeUnit.MILLISECONDS.toNanos(Math.max(1, expiresAt - TimeUnit.NANOSECONDS.toMillis(currentTime)));
                     }
 
                     @Override
@@ -355,6 +357,11 @@ public class ClusterMessageSigner {
             // Kept through the last millisecond the freshness check above still passes.
             if (seenNonces.asMap().putIfAbsent(nonceKey, ts + window.toMillis() + 1) != null) {
                 return rejected(kind, Rejection.REPLAYED);
+            }
+            // Checked again: a thread paused after the first check could find the
+            // earlier copy's nonce already expired, and record this stale one.
+            if (Math.abs(clock.getAsLong() - ts) > window.toMillis()) {
+                return rejected(kind, Rejection.EXPIRED);
             }
         }
         return Verdict.accept(fields.get("n"));
