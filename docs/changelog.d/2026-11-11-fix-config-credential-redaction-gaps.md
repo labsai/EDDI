@@ -95,8 +95,11 @@ and the bearer rule (open PR #1338) were not touched.
   accepts only the scaffolding characters the read accepts.
 - With `connectionString` recognised as a credential name, a connection-string URL whose password
   slot is a vault reference (`jdbc:postgresql://app:${vault:db-password}@db/eddi`) was masked whole
-  on export, losing the reference and the host. Such a URL now goes through the part-by-part URL
-  pass, which still redacts a literal password and every credential-named query value.
+  on export, losing the reference and the host. Such a value is now kept only in exactly that
+  shape: a known connection scheme, a username, the vault reference in the password slot, then a
+  host, optional port and optional database name. Anything more — a query, a fragment, a further
+  path segment, a second reference, or a literal before `://` that only looks like a scheme — is
+  masked whole, as before (judging such values part by part kept literals outside the slot).
 
 ### Design decisions
 

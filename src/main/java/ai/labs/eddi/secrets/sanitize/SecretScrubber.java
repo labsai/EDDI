@@ -155,6 +155,23 @@ public class SecretScrubber {
     private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
 
     /**
+     * A connection URL whose only secret is a vault reference in the userinfo
+     * password slot:
+     * {@code jdbc:postgresql://app:${vault:db-password}@db:5432/eddi}. The scheme
+     * is one of the connection schemes by name — a grammar would also admit
+     * {@code hunter2://…}, and a password cannot be told from a scheme by its
+     * shape. After the slot only a host name, an optional port and an optional
+     * single database name may follow: no further path, no query, no fragment, no
+     * further {@code @}, reference or template. Possessive or bounded throughout,
+     * so it is linear on any input.
+     */
+    private static final Pattern VAULT_PASSWORD_SLOT_URL = Pattern.compile(
+            "\\s*+(?:jdbc:[a-z][a-z0-9]{0,20}+|mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|rediss|amqps?|nats|https?)"
+                    + "://[A-Za-z0-9._-]{0,200}+:\\$\\{(?:vault|eddivault):[A-Za-z0-9._/-]{1,200}+}"
+                    + "@[A-Za-z0-9.-]{1,253}+(?::[0-9]{1,5}+)?+(?:/[A-Za-z0-9_.-]{1,128}+)?+/?+\\s*+",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
      * Qualifiers that turn a credential noun into a COUNT of them.
      * <p>
      * Without this the suffix rule above is a round-trip bug on the most common LLM
@@ -763,6 +780,21 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
+        // A connection string under a credential name — connectionString, recognised by
+        // name since the read rules were adopted — whose ONLY secret is a vault
+        // reference in the userinfo password slot:
+        // "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi". It is
+        // kept as written, so the export keeps the pointer and the host. Nothing else
+        // is: any other credential-named value containing "://" is judged by the rules
+        // below and, being a literal, masked whole. Judging such values part by part
+        // kept whatever sat outside the password slot — "hunter2://${vault:k}", a
+        // literal in the path, the fragment or a query value — and a scheme grammar
+        // cannot tell a password from a scheme name, so the shape is matched exactly:
+        // no query, no fragment, no second reference, nothing but a username before the
+        // slot.
+        if (isSecretFieldName(fieldName, parentFieldName) && VAULT_PASSWORD_SLOT_URL.matcher(textValue).matches()) {
+            return textValue;
+        }
         if (!looksLikeUrl(textValue)) {
             if (SOLE_CONNECTION_REFERENCE.matcher(textValue).matches()) {
                 return null;
@@ -789,19 +821,6 @@ public class SecretScrubber {
                 // exported verbatim. There, only a scheme word and separators may sit
                 // beside the reference; anything else redacts the value.
                 if (isSecretFieldName(fieldName, parentFieldName) && !isReferenceScaffolding(remainder)) {
-                    // A connection string under a credential name — connectionString,
-                    // recognised by name since the read rules were adopted — is a URL
-                    // whose password slot may be the reference:
-                    // "jdbc:postgresql://app:${vault:db-password}@db/eddi". Its scheme
-                    // carries a ':' the URL gate above does not admit, so it arrives here,
-                    // and masking it whole lost the reference and the host. It is judged
-                    // part by part instead, by the read redactor's URL rule: a literal
-                    // userinfo password and every credential-named query value are
-                    // replaced, references stay.
-                    if (textValue.contains("://")) {
-                        String parts = ConfigSecretRedactor.redactUrl(textValue).replace(ConfigSecretRedactor.IN_STRING_REDACTED, REDACTED);
-                        return parts.equals(textValue) ? textValue : parts;
-                    }
                     return REDACTED;
                 }
                 return null;
@@ -819,16 +838,7 @@ public class SecretScrubber {
         // above, by the stricter scaffolding rule. A pointer is returned as it is, so
         // the free-text shape scan that follows a null cannot take "Bearer ${vars.t}"
         // for a bearer token.
-        // One exception, the URL that carries a vault reference: a connection string
-        // under a credential name ("connectionString", now recognised by name like the
-        // read does) holding "jdbc:postgresql://app:${vault:db-password}@db/eddi" is a
-        // URL whose password slot is a pointer. Masking it whole lost the reference
-        // and the host; it goes to the part-by-part URL pass below instead, which
-        // redacts a literal password and every credential-named query value and keeps
-        // a reference legible. A URL under a credential name with no vault reference
-        // is masked whole, as before.
-        boolean urlWithVaultReference = looksLikeUrl(textValue) && (textValue.contains("${vault:") || textValue.contains("${eddivault:"));
-        if (isSecretFieldName(fieldName, parentFieldName) && !urlWithVaultReference) {
+        if (isSecretFieldName(fieldName, parentFieldName)) {
             return ConfigSecretRedactor.isLiteral(textValue) ? REDACTED : textValue;
         }
 

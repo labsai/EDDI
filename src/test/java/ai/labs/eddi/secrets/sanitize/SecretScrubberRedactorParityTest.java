@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -178,13 +180,28 @@ class SecretScrubberRedactorParityTest {
         String kept = exportedAndRead("connectionString", "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi").get(0);
         assertEquals("jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi", kept);
 
-        String mixed = exportedAndRead("connectionString", "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi?password=plainliteral")
-                .get(0);
-        assertFalse(mixed.contains("plainliteral"), mixed);
-        assertTrue(mixed.contains("${vault:db-password}"), mixed);
-
         // No reference at all: masked whole, as on the read path.
         assertEquals(SecretScrubber.REDACTED, exportedAndRead("connectionString", "jdbc:postgresql://app:plainliteral@db.internal/eddi").get(0));
+    }
+
+    @ParameterizedTest(name = "{0} is masked whole")
+    @ValueSource(strings = {
+            // a literal before "://" that only looks like a scheme
+            "hunter2!://${vault:k}", "hunter2://${vault:k}", "hunter2://app:${vault:k}@db.internal/eddi",
+            // the reference is the username, the password slot a literal
+            "jdbc:postgresql://${vault:u}:plainliteral@db.internal/eddi",
+            // a literal in a query value, the fragment, a second path segment or the host
+            // part
+            "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi?password=plainliteral",
+            "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi?note=plainliteral",
+            "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi#plainliteral",
+            "jdbc:postgresql://app:${vault:db-password}@db.internal/eddi/plainliteral",
+            "jdbc:postgresql://app:${vault:db-password}@plainliteral@db.internal/eddi",
+            // a second, non-vault reference beside the vault one
+            "jdbc:postgresql://app:${vault:db-password}@{properties.host}/eddi"})
+    void connectionStringsWithMoreThanAVaultPasswordAreMaskedWhole(String value) throws Exception {
+        String exported = exportedAndRead("connectionString", value).get(0);
+        assertEquals(SecretScrubber.REDACTED, exported, value);
     }
 
     @Test
