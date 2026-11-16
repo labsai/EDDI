@@ -186,6 +186,7 @@ describe("mountLauncher — the button and the panel", () => {
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(panel).toHaveAttribute("role", "dialog");
     expect(panel).toHaveAttribute("aria-label", "Ask us");
+    expect(panel).toHaveAttribute("aria-modal", "true");
     expect(l.root.activeElement).toBe(panel);
     expect(frame()!.src).toBe(`${EDDI}/chat/production/agent-1`);
     expect(frame()).toHaveAttribute("title", "Ask us");
@@ -196,6 +197,7 @@ describe("mountLauncher — the button and the panel", () => {
     button.click();
     panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(panel.hidden).toBe(true);
+    expect(panel).not.toHaveAttribute("aria-modal");
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(l.root.activeElement).toBe(button);
   });
@@ -222,9 +224,15 @@ describe("mountLauncher — the button and the panel", () => {
     const outside = document.createElement("button");
     document.body.appendChild(outside);
     outside.focus();
-    const { panel } = mount({ open: true });
+    const { panel, button } = mount({ open: true });
     expect(panel.hidden).toBe(false);
     expect(document.activeElement).toBe(outside);
+    // Not modal: the page the person is still on stays visible to a screen reader.
+    expect(panel).not.toHaveAttribute("aria-modal");
+    // Opened by the person (close, then the button), it is modal again.
+    button.click();
+    button.click();
+    expect(panel).toHaveAttribute("aria-modal", "true");
     outside.remove();
   });
 

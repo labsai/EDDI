@@ -101,7 +101,11 @@ function MemoryList({ userId }: { userId: string }) {
     [i18n.language],
   );
 
-  /** After a row goes, focus the row that took its place, else the search box. */
+  /**
+   * After a row goes, focus the row that took its place, else the search box.
+   * Called once the list was re-read without it (`useDeleteMemory` returns the
+   * invalidation), so the focused button is never one about to disappear.
+   */
   const focusAfterDelete = useCallback((index: number) => {
     requestAnimationFrame(() => {
       const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[data-testid="memory-forget"]');
@@ -327,9 +331,13 @@ function MemoryItem({
         <Button
           variant="ghost"
           size="sm"
-          className="shrink-0 gap-1 text-muted-foreground hover:text-destructive"
-          onClick={onForget}
-          disabled={disabled}
+          className="shrink-0 gap-1 text-muted-foreground hover:text-destructive aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+          // aria-disabled, not disabled: a disabled button drops the focus the
+          // person had on it while another delete runs.
+          onClick={() => {
+            if (!disabled) onForget();
+          }}
+          aria-disabled={disabled || undefined}
           aria-busy={deleting || undefined}
           aria-label={t("Workforce.memory.forgetAria", { key: label })}
           data-testid="memory-forget"

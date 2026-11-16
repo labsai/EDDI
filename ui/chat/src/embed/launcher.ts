@@ -22,7 +22,8 @@
      eval or new Function, and puts nothing in the host page's global scope but
      `window.EddiChat` (open, close, toggle, setTokenProvider).
    - Accessible: a labelled button with aria-expanded; the panel is a labelled
-     dialog that takes focus when the person opens it, keeps Tab inside it,
+     dialog that takes focus when the person opens it (modal only then: opened
+     by default it is not, so the page stays readable), keeps Tab inside it,
      closes on Esc and gives focus back to the button. Full-screen on a phone,
      and no animation under prefers-reduced-motion.
    ────────────────────────────────────────────── */
@@ -228,7 +229,6 @@ export function mountLauncher(cfg: LauncherConfig, win: Window = window): Launch
     id: "eddi-chat-panel",
     class: `panel ${cfg.position}`,
     role: "dialog",
-    "aria-modal": "true",
     "aria-label": cfg.label,
     tabindex: "-1",
     "data-testid": "panel",
@@ -280,12 +280,21 @@ export function mountLauncher(cfg: LauncherConfig, win: Window = window): Launch
     ensureFrame();
     panel.hidden = false;
     button.setAttribute("aria-expanded", "true");
-    if (moveFocus) panel.focus();
+    // Modal only when it took focus: opened by default (no focus move), an
+    // aria-modal panel would hide the host page from a screen reader while
+    // the person is still on it.
+    if (moveFocus) {
+      panel.setAttribute("aria-modal", "true");
+      panel.focus();
+    } else {
+      panel.removeAttribute("aria-modal");
+    }
   };
 
   const closePanel = (returnFocus: boolean) => {
     if (!isOpen()) return;
     panel.hidden = true;
+    panel.removeAttribute("aria-modal");
     button.setAttribute("aria-expanded", "false");
     if (returnFocus) button.focus();
   };

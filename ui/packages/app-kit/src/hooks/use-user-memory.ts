@@ -21,9 +21,9 @@ export function useDeleteMemory() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: (entryId) => deleteMemory(entryId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [USER_MEMORIES_KEY] });
-    },
+    // Returned, so a caller's onSuccess runs once the list no longer holds the
+    // entry (Workforce moves focus to the row that took its place).
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [USER_MEMORIES_KEY] }),
   });
 }
 

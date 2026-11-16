@@ -238,6 +238,20 @@ describe("WorkforceMemory — forgetting", () => {
     expect(screen.queryByText('{"name":"Falcon","since":2025}')).toBeNull();
   });
 
+  it("moves focus to the row that took the forgotten one's place, and keeps Forget focusable meanwhile", async () => {
+    serveMemories(ENTRIES);
+    renderMemory();
+    const items = await screen.findAllByTestId("memory-item");
+    const forget = within(items[0]!).getByTestId("memory-forget");
+    await userEvent.click(forget);
+    // While the delete runs, the other buttons say they are unavailable but stay focusable.
+    const other = within(items[1]!).getByTestId("memory-forget");
+    expect(other).not.toBeDisabled();
+    await waitFor(() => expect(screen.getAllByTestId("memory-item")).toHaveLength(2));
+    const next = within(screen.getAllByTestId("memory-item")[0]!).getByTestId("memory-forget");
+    await waitFor(() => expect(next).toHaveFocus());
+  });
+
   it("says why when the server refuses to forget an entry", async () => {
     serveMemories(ENTRIES);
     server.use(
