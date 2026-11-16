@@ -16,11 +16,11 @@
   "turnNotes": {
     "region": "Comment cette réponse a été obtenue",
     "escalation": {
-      "lowConfidence": "Un modèle plus grand a répondu, car la première réponse n’était pas assez sûre.",
-      "timeout": "Un autre modèle a répondu, car le premier mettait trop de temps.",
-      "error": "Un autre modèle a répondu, car le premier a échoué.",
-      "invalidOutput": "Un autre modèle a répondu, car la première réponse était inutilisable.",
-      "other": "Un autre modèle que celui essayé en premier a répondu."
+      "lowConfidence": "Un autre modèle a été essayé, car la première réponse n’était pas assez sûre.",
+      "timeout": "Un autre modèle a été essayé, car le premier mettait trop de temps.",
+      "error": "Un autre modèle a été essayé, car le premier a échoué.",
+      "invalidOutput": "Un autre modèle a été essayé, car la première réponse était inutilisable.",
+      "other": "Un autre modèle a été essayé après le premier."
     },
     "retry": {
       "empty": "Le modèle a été interrogé à nouveau, car sa première réponse était vide.",

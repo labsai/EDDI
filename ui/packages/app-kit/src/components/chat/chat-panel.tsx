@@ -118,8 +118,9 @@ export interface ChatPanelProps {
   onInitialMessageConsumed?: () => void;
   /**
    * Called with the id of the conversation the initial message started, once
-   * the server has given it (before the message is sent) — Workforce links an
-   * @mention hand-off to it.
+   * that message was sent there — Workforce links an @mention hand-off to it.
+   * Not called when the start or the send fails: the message then goes back
+   * into the composer instead.
    */
   onInitialConversationStarted?: (conversationId: string, message: InitialChatMessage) => void;
   /**
@@ -399,15 +400,27 @@ export function ChatPanel({
     initialTakenRef.current = initialMessage;
     onInitialMessageConsumed?.();
     useChatStore.getState().clearMessages();
+    // The question lives only in router state, which is dropped above: if the
+    // target does not take it, it goes back into the composer to be sent again.
+    const keepQuestion = () => setDraft({ text: initialMessage.text, nonce: Date.now() });
     startConversation
       .mutateAsync({ agentId: initialMessage.agentId, environment: environmentFor(initialMessage.agentId) })
-      .then((started) => {
-        // Installed only if nothing replaced the transcript meanwhile.
-        if (useChatStore.getState().conversationId !== started) return;
-        onInitialConversationStarted?.(started, initialMessage);
-        sendMessage.mutate({ message: initialMessage.text });
-      })
-      .catch((err) => toast.error(getErrorMessage(err)));
+      .then(
+        (started) => {
+          // Installed only if nothing replaced the transcript meanwhile.
+          if (useChatStore.getState().conversationId !== started) return;
+          // mutateAsync, not mutate: its promise settles even after this page
+          // unmounts, so a hand-off is linked whenever its question arrived.
+          sendMessage.mutateAsync({ message: initialMessage.text }).then(
+            () => onInitialConversationStarted?.(started, initialMessage),
+            keepQuestion,
+          );
+        },
+        (err) => {
+          toast.error(getErrorMessage(err));
+          keepQuestion();
+        },
+      );
   }, [initialMessage, deployedAgents, reviewPending, selectedAgentId, onInitialMessageConsumed, onInitialConversationStarted, startConversation, sendMessage, environmentFor]);
 
   // Smart auto-scroll: auto scrolls when at bottom, pauses when user scrolls up
@@ -1474,9 +1487,17 @@ function ChatInputWithSecretToggle({
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
+  // Secret input never leaves through a hand-off: entering secret mode drops
+  // the chosen target, so the next Send is a secret turn in this chat.
+  useEffect(() => {
+    if (!isSecretMode) return;
+    setMentionTarget(null);
+    setPickedStatus("");
+  }, [isSecretMode]);
+
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    if (mention && mentionTarget) {
+    if (mention && mentionTarget && !isSecretMode) {
       // A hand-off carries the text only; it never sends to this chat's agent.
       if (!trimmed || disabled || isProcessing) return;
       if (mention.onHandOff(mentionTarget, trimmed) === false) return;
@@ -1514,6 +1535,9 @@ function ChatInputWithSecretToggle({
   useEffect(() => {
     if (!draft) return;
     setValue(draft.text);
+    // An edited message goes back to this chat, not to a target picked before.
+    setMentionTarget(null);
+    setPickedStatus("");
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
@@ -1525,7 +1549,7 @@ function ChatInputWithSecretToggle({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftNonce]);
 
-  const canSend = mentionTarget
+  const canSend = mentionTarget && !isSecretMode
     ? value.trim().length > 0 && !disabled && !isProcessing
     : (value.trim().length > 0 || hasReadyAttachment) && !disabled && !isProcessing && !isUploading;
 

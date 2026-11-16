@@ -1195,8 +1195,9 @@ your tool schemas do not cover it, not as a routine first step:
   shows none. The embeddable chat widget shows no tool activity.
 - The same chats explain, under a reply, how it was reached, in plain words,
   from three stream events only: cascade_escalation (reason low_confidence,
-  timeout, error/retryable_error or invalid_output: "Answered by a larger
-  model because the first answer wasn't confident enough"), llm_retry (the
+  timeout, error/retryable_error or invalid_output: "Another model was tried
+  because the first answer wasn't confident enough" — said when the cascade
+  moves on, so it never claims the next model answered), llm_retry (the
   same model re-asked: empty, truncated, content_filter, invalid_json or
   schema_mismatch, context_too_long) and guardrail_triggered ("A safety check
   removed part of the answer (pii-redaction)"). Live only, like the tool

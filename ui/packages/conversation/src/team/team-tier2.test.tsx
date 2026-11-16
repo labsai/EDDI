@@ -169,6 +169,13 @@ describe("decisionSummary", () => {
     expect(JSON.stringify(sentences)).not.toContain("p3");
   });
 
+  it("tells an unparsed ruling apart from no decision", () => {
+    expect(decisionSummary(decision({ type: "NONE" }))[0]![0]).toBe("groups.decisionPlain.none");
+    expect(decisionSummary(decision({ type: "NONE", raw: "PRO wins, mostly." }))[0]![0]).toBe(
+      "groups.decisionPlain.unparsed",
+    );
+  });
+
   it("counts the members who disagreed", () => {
     const sentences = decisionSummary(
       decision({ winner: "A", dissents: [{ agentId: "x", displayName: "X", position: "no" }] }),

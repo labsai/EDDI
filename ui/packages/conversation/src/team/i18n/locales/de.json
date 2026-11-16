@@ -176,6 +176,7 @@
       "award": "Die Aufgabe ging an {{winner}}.",
       "awardNone": "Niemand hat die Aufgabe bekommen.",
       "none": "Das Team ist zu keiner klaren Entscheidung gekommen.",
+      "unparsed": "Es wurde keine strukturierte Entscheidung erkannt: Das Ergebnis steht unten als Text.",
       "dissents": "Mitglieder, die anderer Meinung waren: {{n}}."
     },
     "artifactPanel": {

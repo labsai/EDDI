@@ -10,6 +10,8 @@ import { readInitialTeamQuestion } from "@/lib/workforce-team-start";
 import { EndUserCatalog } from "@/components/workforce/catalog-view";
 import { readInitialChatMessage } from "@eddi/app-kit/lib/workforce-chat-start";
 import { NEW_CHAT_STATE } from "@/lib/workforce-keyboard";
+import { http, HttpResponse } from "msw";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 /**
  * Workforce Home for an end user (T1.4): a composer first with an agent
@@ -136,6 +138,19 @@ describe("Workforce Home", () => {
     // The question is not in the URL.
     expect(screen.getByTestId("team-probe-path")).toHaveTextContent(`/workforce/${team.groupId}?version=${team.version}`);
     expect(screen.getByTestId("team-probe-path").textContent).not.toContain("ship");
+  });
+
+  it("sends to a team when the person may use teams but no agent", async () => {
+    server.use(http.get("*/catalog/agents", () => HttpResponse.json([])));
+    renderHome();
+    const team = MOCK_CATALOG_GROUPS[0];
+    await screen.findByTestId(`home-team-option-${team.groupId}`);
+    const picker = screen.getByTestId("home-agent-picker") as HTMLSelectElement;
+    expect(picker.value).toBe(`team:${team.groupId}`);
+    const input = screen.getByTestId("home-composer-input");
+    fireEvent.change(input, { target: { value: "Should we ship?" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByTestId("team-probe-question")).toHaveTextContent(`${team.groupId}|Should we ship?`);
   });
 
   it("keeps Shift+Enter for a new line and sends nothing empty", async () => {

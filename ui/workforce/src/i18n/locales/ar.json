@@ -86,6 +86,9 @@
       "humanTurnForbidden": "لا يمكن الرد في هذا الدور إلا للعضو صاحب الدور أو لمسؤول.",
       "announceOtherTurn": "المناقشة بانتظار {{name}}.",
       "announceYourTurn": "حان دورك في هذه المناقشة.",
+      "heldQuestion": "هناك مناقشة جارية هنا بالفعل، لذلك لم يبدأ سؤالك «{{question}}». ابدأه بعد انتهائها، أو أوقفها أولًا.",
+      "heldQuestionStart": "ابدأه",
+      "heldQuestionDiscard": "تجاهل",
       "artifacts": "العناصر المشتركة ({{n}})",
       "artifactsPanel": "لوحة العناصر المشتركة",
       "artifactsTitle": "العناصر المشتركة",
@@ -618,7 +621,7 @@
       "toAgent": "سلّمتَ «{{question}}» إلى {{name}}.",
       "openSession": "فتح جلسة الفريق",
       "openChat": "فتح تلك المحادثة",
-      "notStarted": "لم تبدأ.",
+      "notLinked": "لم يُربَط بعد.",
       "fromChat": "مُسلَّم من محادثتك مع {{name}}.",
       "backToChat": "العودة إلى تلك المحادثة"
     }

@@ -176,6 +176,7 @@
       "award": "The work went to {{winner}}.",
       "awardNone": "Nobody was given the work.",
       "none": "The team didn't reach a clear decision.",
+      "unparsed": "No structured decision was read: the conclusion is kept as prose below.",
       "dissents": "Members who disagreed: {{n}}."
     },
     "artifactPanel": {

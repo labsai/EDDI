@@ -47,8 +47,9 @@ import {
 import { useSubmitHumanInput } from "@eddi/app-kit/hooks/use-hitl";
 import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 import { useAuth } from "@eddi/app-kit/hooks/use-auth";
-import { completeHandoff, useWorkforceHandoffs } from "@eddi/app-kit/lib/workforce-handoffs";
-import { readInitialTeamQuestion } from "@/lib/workforce-team-start";
+import { useWorkforceHandoffs } from "@eddi/app-kit/lib/workforce-handoffs";
+import { readInitialTeamQuestion, type InitialTeamQuestion } from "@/lib/workforce-team-start";
+import { linkTeamHandoffWhenNamed } from "@/lib/team-handoff-link";
 import { HandoffTargetMarker } from "@/components/workforce/handoff-marker";
 
 // The artifacts side panel loads when it is first opened (T2.6).
@@ -505,37 +506,42 @@ function WorkforceBoard() {
 
   // ─── A question handed to this team from elsewhere (T2.1, T2.2) ──
   // Home's composer with a team picked, or an @mention hand-off from a chat,
-  // carries the question in router state (never the URL). It starts a NEW
-  // session once — when the board is ready and nothing streams here — and is
-  // dropped from the history entry, so a reload cannot start it again.
+  // carries the question in router state (never the URL). It is taken once the
+  // board is ready and dropped from the history entry, so a reload cannot start
+  // it again. With nothing streaming here it starts a NEW session; while a
+  // discussion streams it is held, on screen, until the person starts or
+  // discards it — never started later on its own (a session costs money).
   const location = useLocation();
   const navigate = useNavigate();
   const initialTeamQuestion = useMemo(() => readInitialTeamQuestion(location.state), [location.state]);
   const takenTeamQuestionRef = useRef<typeof initialTeamQuestion>(null);
-  const pendingHandoffRef = useRef<string | null>(null);
+  const [heldQuestion, setHeldQuestion] = useState<InitialTeamQuestion | null>(null);
+  const startTeamQuestion = useCallback(
+    (q: InitialTeamQuestion) => {
+      setSelectedConvId(null);
+      void startStream(q.groupId, q.text);
+      const accepted = whenStreamAccepted(q.groupId);
+      // Linked from this start's own stream, wherever the person is by then.
+      if (q.handoffId) void linkTeamHandoffWhenNamed(principal, q.handoffId, q.groupId, accepted);
+      void accepted.then((ok) => {
+        if (ok) return;
+        // As for a typed question: hand it back when the composer returns.
+        setRefusedDraft({ boardId: q.groupId, message: q.text });
+        toast.error(streamErrorOf(q.groupId) ?? t("common.error", "Something went wrong"));
+      });
+    },
+    [principal, setSelectedConvId, startStream, t],
+  );
   useEffect(() => {
     const q = initialTeamQuestion;
     if (!q || takenTeamQuestionRef.current === q) return;
-    if (!boardId || q.groupId !== boardId || configLoading || !groupConfig || isStreaming) return;
+    if (!boardId || q.groupId !== boardId || configLoading || !groupConfig) return;
     takenTeamQuestionRef.current = q;
     navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
-    pendingHandoffRef.current = q.handoffId ?? null;
-    setSelectedConvId(null);
-    void startStream(boardId, q.text);
-    void whenStreamAccepted(boardId).then((ok) => {
-      if (!ok) {
-        pendingHandoffRef.current = null;
-        toast.error(streamErrorOf(boardId) ?? t("common.error", "Something went wrong"));
-      }
-    });
-  }, [initialTeamQuestion, boardId, configLoading, groupConfig, isStreaming, navigate, location.pathname, location.search, setSelectedConvId, startStream, t]);
-  // The session that question started has an id now: link the hand-off to it.
-  useEffect(() => {
-    const id = streamState.conversationId;
-    if (!id || !pendingHandoffRef.current) return;
-    completeHandoff(principal, pendingHandoffRef.current, id);
-    pendingHandoffRef.current = null;
-  }, [streamState.conversationId, principal]);
+    if (isStreaming) setHeldQuestion(q);
+    else startTeamQuestion(q);
+  }, [initialTeamQuestion, boardId, configLoading, groupConfig, isStreaming, navigate, location.pathname, location.search, startTeamQuestion]);
+  const shownHeldQuestion = heldQuestion && heldQuestion.groupId === boardId ? heldQuestion : null;
   // The marker above a session that a chat handed its question to.
   const handoffs = useWorkforceHandoffs(principal);
   const startedByHandoff = useMemo(
@@ -1063,6 +1069,41 @@ function WorkforceBoard() {
             per-message action thousands of pixels off-screen, where `MAIN`'s
             `overflow-hidden` clipped them away with nothing to scroll to. */}
         <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+          {shownHeldQuestion && (
+            <div
+              className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground"
+              role="status"
+              data-testid="board-held-question"
+            >
+              <span className="min-w-0 flex-1" dir="auto">
+                {t(
+                  "Workforce.board.heldQuestion",
+                  "A discussion is already running here, so your question “{{question}}” has not started. Start it once that one has ended, or stop it first.",
+                  { question: shownHeldQuestion.text },
+                )}
+              </span>
+              <Button
+                size="sm"
+                disabled={isStreaming}
+                onClick={() => {
+                  const q = shownHeldQuestion;
+                  setHeldQuestion(null);
+                  startTeamQuestion(q);
+                }}
+                data-testid="board-held-question-start"
+              >
+                {t("Workforce.board.heldQuestionStart", "Start it")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setHeldQuestion(null)}
+                data-testid="board-held-question-discard"
+              >
+                {t("Workforce.board.heldQuestionDiscard", "Discard")}
+              </Button>
+            </div>
+          )}
           {startedByHandoff && (
             <div className="flex justify-center px-4 pt-2 text-xs text-muted-foreground" data-testid="board-handoff-marker">
               <div className="max-w-[min(90%,40rem)] rounded-2xl border border-border bg-muted/40 px-3 py-1">

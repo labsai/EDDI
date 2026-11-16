@@ -49,7 +49,13 @@ export function decisionSummary(decision: DecisionRecord): SummarySentence[] {
       );
       break;
     default:
-      out.push(["groups.decisionPlain.none", "The team didn't reach a clear decision.", {}]);
+      // A NONE record with `raw` is a ruling that could not be parsed, not a
+      // failed decision: the card keeps it verbatim (`groups.decisionUnparsed`).
+      out.push(
+        decision.raw?.trim()
+          ? ["groups.decisionPlain.unparsed", "No structured decision was read: the conclusion is kept as prose below.", {}]
+          : ["groups.decisionPlain.none", "The team didn't reach a clear decision.", {}],
+      );
   }
   const dissents = decision.dissents?.length ?? 0;
   if (dissents > 0) {

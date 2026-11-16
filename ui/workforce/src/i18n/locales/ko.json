@@ -86,6 +86,9 @@
       "humanTurnForbidden": "이 차례에는 해당 멤버나 관리자만 답할 수 있습니다.",
       "announceOtherTurn": "토론이 {{name}} 님을 기다리고 있습니다.",
       "announceYourTurn": "이 토론에서 당신의 차례입니다.",
+      "heldQuestion": "이미 여기서 토론이 진행 중이어서 질문 “{{question}}”은(는) 시작되지 않았습니다. 그 토론이 끝난 뒤 시작하거나 먼저 중지하세요.",
+      "heldQuestionStart": "시작하기",
+      "heldQuestionDiscard": "버리기",
       "artifacts": "공유 아티팩트({{n}})",
       "artifactsPanel": "공유 아티팩트 패널",
       "artifactsTitle": "공유 아티팩트",
@@ -610,7 +613,7 @@
       "toAgent": "“{{question}}”을(를) {{name}}에게 넘겼습니다.",
       "openSession": "팀 세션 열기",
       "openChat": "그 채팅 열기",
-      "notStarted": "시작되지 않았습니다.",
+      "notLinked": "아직 연결되지 않았습니다.",
       "fromChat": "{{name}}와(과)의 채팅에서 넘어왔습니다.",
       "backToChat": "그 채팅으로 돌아가기"
     }

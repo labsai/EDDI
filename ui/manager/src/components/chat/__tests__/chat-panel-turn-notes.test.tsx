@@ -44,7 +44,7 @@ describe("ChatPanel — turn notes", () => {
     const notes = await screen.findAllByTestId("turn-notes");
     expect(notes).toHaveLength(1);
     expect(notes[0]).toHaveTextContent(
-      "Answered by a larger model because the first answer wasn't confident enough.",
+      "Another model was tried because the first answer wasn't confident enough.",
     );
     // After the turn's last bubble, before the next question.
     const lastReply = screen.getByText("Want an example?");

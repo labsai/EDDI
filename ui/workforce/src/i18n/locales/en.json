@@ -86,6 +86,9 @@
       "humanTurnForbidden": "Only the member whose turn it is, or an administrator, can answer this turn.",
       "announceOtherTurn": "The discussion is waiting for {{name}}.",
       "announceYourTurn": "It's your turn in this discussion.",
+      "heldQuestion": "A discussion is already running here, so your question “{{question}}” has not started. Start it once that one has ended, or stop it first.",
+      "heldQuestionStart": "Start it",
+      "heldQuestionDiscard": "Discard",
       "artifacts": "Shared artifacts ({{n}})",
       "artifactsPanel": "Shared artifacts panel",
       "artifactsTitle": "Shared artifacts",
@@ -610,7 +613,7 @@
       "toAgent": "You handed “{{question}}” over to {{name}}.",
       "openSession": "Open the team session",
       "openChat": "Open that chat",
-      "notStarted": "It did not start.",
+      "notLinked": "Not linked yet.",
       "fromChat": "Handed over from your chat with {{name}}.",
       "backToChat": "Back to that chat"
     }

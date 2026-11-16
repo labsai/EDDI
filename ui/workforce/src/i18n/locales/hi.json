@@ -86,6 +86,9 @@
       "humanTurnForbidden": "इस बारी का उत्तर केवल वही सदस्य, जिसकी बारी है, या कोई व्यवस्थापक दे सकता है।",
       "announceOtherTurn": "चर्चा {{name}} की प्रतीक्षा कर रही है।",
       "announceYourTurn": "इस चर्चा में आपकी बारी है।",
+      "heldQuestion": "यहाँ पहले से एक चर्चा चल रही है, इसलिए आपका प्रश्न “{{question}}” शुरू नहीं हुआ। उसके खत्म होने पर इसे शुरू करें, या पहले उसे रोकें।",
+      "heldQuestionStart": "इसे शुरू करें",
+      "heldQuestionDiscard": "हटाएँ",
       "artifacts": "साझा आर्टिफ़ैक्ट ({{n}})",
       "artifactsPanel": "साझा आर्टिफ़ैक्ट पैनल",
       "artifactsTitle": "साझा आर्टिफ़ैक्ट",
@@ -610,7 +613,7 @@
       "toAgent": "आपने “{{question}}” {{name}} को सौंप दिया।",
       "openSession": "टीम सत्र खोलें",
       "openChat": "वह चैट खोलें",
-      "notStarted": "यह शुरू नहीं हुआ।",
+      "notLinked": "अभी जुड़ा नहीं है।",
       "fromChat": "{{name}} के साथ आपकी चैट से सौंपा गया।",
       "backToChat": "उस चैट पर वापस जाएँ"
     }

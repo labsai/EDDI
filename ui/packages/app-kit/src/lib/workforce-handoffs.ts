@@ -103,6 +103,16 @@ export function readHandoffs(principal: string | null | undefined, storage?: Sto
   return list;
 }
 
+/**
+ * The stored list, never the cache: a write starts from what storage holds now.
+ * The cache is kept fresh by the `storage` listener only while a view
+ * subscribes; another tab may have written since then.
+ */
+function readStored(principal: string | null | undefined, storage?: Storage): readonly WorkforceHandoff[] {
+  cache.delete(handoffsStorageKey(principal));
+  return readHandoffs(principal, storage);
+}
+
 function write(principal: string | null | undefined, list: readonly WorkforceHandoff[], storage?: Storage): void {
   const key = handoffsStorageKey(principal);
   const kept = list.slice(-MAX_HANDOFFS);
@@ -128,7 +138,7 @@ export function addHandoff(
     createdAt: new Date().toISOString(),
     question: question.length > HANDOFF_QUESTION_CHARS ? `${question.slice(0, HANDOFF_QUESTION_CHARS - 1)}…` : question,
   };
-  write(principal, [...readHandoffs(principal, storage), record], storage);
+  write(principal, [...readStored(principal, storage), record], storage);
   return record;
 }
 
@@ -139,7 +149,7 @@ export function completeHandoff(
   conversationId: string,
   storage?: Storage,
 ): void {
-  const list = readHandoffs(principal, storage);
+  const list = readStored(principal, storage);
   const index = list.findIndex((h) => h.id === id);
   if (index < 0 || list[index]!.to.conversationId === conversationId) return;
   const next = [...list];
@@ -199,6 +209,8 @@ function subscribe(listener: () => void): () => void {
     listeners.delete(listener);
     if (listeners.size === 0 && typeof window !== "undefined") {
       window.removeEventListener("storage", onStorage);
+      // Nobody hears another tab's changes from now on: the next read goes to storage.
+      cache.clear();
     }
   };
 }

@@ -16,11 +16,11 @@
   "turnNotes": {
     "region": "How this answer was reached",
     "escalation": {
-      "lowConfidence": "Answered by a larger model because the first answer wasn't confident enough.",
-      "timeout": "Answered by another model because the first one took too long.",
-      "error": "Answered by another model because the first one failed.",
-      "invalidOutput": "Answered by another model because the first answer couldn't be used.",
-      "other": "Answered by another model than the first one tried."
+      "lowConfidence": "Another model was tried because the first answer wasn't confident enough.",
+      "timeout": "Another model was tried because the first one took too long.",
+      "error": "Another model was tried because the first one failed.",
+      "invalidOutput": "Another model was tried because the first answer couldn't be used.",
+      "other": "Another model was tried after the first one."
     },
     "retry": {
       "empty": "The model was asked again because its first reply was empty.",

@@ -86,6 +86,9 @@
       "humanTurnForbidden": "Só o membro da vez, ou um administrador, pode responder nesta vez.",
       "announceOtherTurn": "A discussão está aguardando {{name}}.",
       "announceYourTurn": "É a sua vez nesta discussão.",
+      "heldQuestion": "Já há uma discussão em andamento aqui, então sua pergunta “{{question}}” não foi iniciada. Inicie-a quando essa terminar ou pare-a antes.",
+      "heldQuestionStart": "Iniciar",
+      "heldQuestionDiscard": "Descartar",
       "artifacts": "Artefatos compartilhados ({{n}})",
       "artifactsPanel": "Painel de artefatos compartilhados",
       "artifactsTitle": "Artefatos compartilhados",
@@ -612,7 +615,7 @@
       "toAgent": "Você passou “{{question}}” para {{name}}.",
       "openSession": "Abrir a sessão da equipe",
       "openChat": "Abrir esse chat",
-      "notStarted": "Não chegou a começar.",
+      "notLinked": "Ainda não vinculado.",
       "fromChat": "Passado do seu chat com {{name}}.",
       "backToChat": "Voltar para esse chat"
     }

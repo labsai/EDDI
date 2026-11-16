@@ -32,7 +32,7 @@ import { readInitialTeamQuestion, workforceTeamStart } from "@/lib/workforce-tea
  * The composer is a combobox over the entries the host allows; a hand-off
  * never sends to the chat's own agent; the transcript gets a marker that
  * links to where the question went. The hand-off is recorded in this browser
- * only (no backend record exists), which the marker's title says.
+ * only (no backend record exists), which the marker says.
  */
 
 const CANDIDATES: ChatMentionCandidate[] = [
@@ -109,6 +109,16 @@ describe("hand-off records (this browser only)", () => {
     expect(localStorage.getItem(handoffsStorageKey("bob"))).toBeNull();
   });
 
+  it("never overwrite what another tab recorded while nothing listened", () => {
+    const mine = addHandoff("alice", base);
+    expect(readHandoffs("alice")).toHaveLength(1);
+    // Another tab adds one; no storage event reaches this tab's (stale) cache.
+    const other = { ...mine, id: "from-other-tab", question: "Other tab" };
+    localStorage.setItem(handoffsStorageKey("alice"), JSON.stringify([mine, other]));
+    addHandoff("alice", { ...base, question: "Third" });
+    expect(readHandoffs("alice").map((h) => h.question)).toEqual(["Where is my parcel?", "Other tab", "Third"]);
+  });
+
   it("ignore malformed storage", () => {
     localStorage.setItem(handoffsStorageKey("eve"), '[{"id":1},"x",null]');
     expect(readHandoffs("eve")).toEqual([]);
@@ -152,11 +162,14 @@ describe("hand-off links and the team start state", () => {
     );
     const origin = screen.getByTestId("handoff-origin-h1");
     expect(origin).toHaveTextContent("You handed “Should we ship?” over to the team Product Review Panel.");
-    expect(origin).toHaveAttribute("title", "Recorded in this browser only");
+    // Said in visible text, not only in a title a touch or keyboard user never sees.
+    expect(origin).not.toHaveAttribute("title");
+    expect(origin).toHaveTextContent("Recorded in this browser only");
+    expect(screen.getByTestId("handoff-target-h1")).toHaveTextContent("Recorded in this browser only");
     expect(screen.getByTestId("handoff-open-h1")).toHaveAttribute("href", "/workforce/grp1?version=2&conversation=gc9");
     expect(screen.getByTestId("handoff-target-h1")).toHaveTextContent("Handed over from your chat with Support Bot.");
     expect(screen.getByTestId("handoff-back-h1")).toHaveAttribute("href", "/workforce/chat?agentId=agent1&conversationId=conv1");
-    expect(screen.getByTestId("handoff-origin-h2")).toHaveTextContent("It did not start.");
+    expect(screen.getByTestId("handoff-origin-h2")).toHaveTextContent("Not linked yet.");
     expect(screen.queryByTestId("handoff-open-h2")).toBeNull();
   });
 });
@@ -313,6 +326,52 @@ describe("ChatPanel — @mention combobox", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(input.value).toBe("Where is my order?");
     expect(screen.getByTestId("chat-mention-target")).toBeInTheDocument();
+  });
+
+  it("never hands secret input over: secret mode drops the chosen target", async () => {
+    const { input, type, onHandOff } = setup();
+    await waitFor(() => expect(input).not.toBeDisabled());
+    type("@ada");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("chat-mention-target")).toBeInTheDocument();
+
+    act(() => useChatStore.getState().toggleSecretMode());
+    const secret = (await screen.findByPlaceholderText("Enter secret value...")) as HTMLInputElement;
+    fireEvent.change(secret, { target: { value: "hunter2" } });
+    fireEvent.keyDown(secret, { key: "Enter" });
+    expect(onHandOff).not.toHaveBeenCalled();
+
+    // Leaving secret mode does not bring the old target back.
+    if (useChatStore.getState().isSecretMode) act(() => useChatStore.getState().toggleSecretMode());
+    expect(screen.queryByTestId("chat-mention-target")).toBeNull();
+  });
+
+  it("an edited message comes back without the target picked before", async () => {
+    server.use(
+      http.get("*/agents/:agentId/profile", ({ params }) =>
+        HttpResponse.json({
+          agentId: String(params.agentId),
+          reviewNotice: null,
+          conversationControls: {
+            undo: true, redo: true, attachments: true, rating: true, quickReplies: true, streaming: true, rawHtml: false,
+          },
+        }),
+      ),
+      http.post("*/agents/:convId/undo", () => new HttpResponse(null, { status: 200 })),
+    );
+    useChatStore.getState().setUndoRedo(true, false);
+    const { input, type, onHandOff } = setup();
+    await waitFor(() => expect(input).not.toBeDisabled());
+    await screen.findByTestId("edit-last");
+    type("@ada");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("chat-mention-target")).toBeInTheDocument();
+
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    await waitFor(() => expect(input.value).toBe("Hello"));
+    expect(screen.queryByTestId("chat-mention-target")).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onHandOff).not.toHaveBeenCalled();
   });
 
   it("without a mention prop the composer is a plain textbox", async () => {

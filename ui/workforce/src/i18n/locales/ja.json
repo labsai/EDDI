@@ -86,6 +86,9 @@
       "humanTurnForbidden": "この番に回答できるのは、番が回ってきたメンバーか管理者だけです。",
       "announceOtherTurn": "ディスカッションは {{name}} を待っています。",
       "announceYourTurn": "このディスカッションであなたの番です。",
+      "heldQuestion": "ここではすでにディスカッションが進行中のため、質問「{{question}}」は開始されていません。そのディスカッションが終わってから開始するか、先に停止してください。",
+      "heldQuestionStart": "開始する",
+      "heldQuestionDiscard": "破棄",
       "artifacts": "共有アーティファクト（{{n}}）",
       "artifactsPanel": "共有アーティファクトパネル",
       "artifactsTitle": "共有アーティファクト",
@@ -610,7 +613,7 @@
       "toAgent": "「{{question}}」を {{name}} に引き継ぎました。",
       "openSession": "チームセッションを開く",
       "openChat": "そのチャットを開く",
-      "notStarted": "開始されませんでした。",
+      "notLinked": "まだリンクされていません。",
       "fromChat": "{{name}} とのチャットから引き継がれました。",
       "backToChat": "そのチャットに戻る"
     }

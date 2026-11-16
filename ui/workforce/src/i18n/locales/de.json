@@ -86,6 +86,9 @@
       "humanTurnForbidden": "Nur das Mitglied, das an der Reihe ist, oder ein Administrator kann diesen Zug beantworten.",
       "announceOtherTurn": "Die Diskussion wartet auf {{name}}.",
       "announceYourTurn": "Du bist in dieser Diskussion an der Reihe.",
+      "heldQuestion": "Hier läuft bereits eine Diskussion, daher wurde deine Frage „{{question}}“ nicht gestartet. Starte sie, wenn diese beendet ist, oder stoppe sie vorher.",
+      "heldQuestionStart": "Starten",
+      "heldQuestionDiscard": "Verwerfen",
       "artifacts": "Geteilte Artefakte ({{n}})",
       "artifactsPanel": "Bereich für geteilte Artefakte",
       "artifactsTitle": "Geteilte Artefakte",
@@ -610,7 +613,7 @@
       "toAgent": "Du hast „{{question}}“ an {{name}} übergeben.",
       "openSession": "Teamsitzung öffnen",
       "openChat": "Diesen Chat öffnen",
-      "notStarted": "Sie wurde nicht gestartet.",
+      "notLinked": "Noch nicht verknüpft.",
       "fromChat": "Übergeben aus deinem Chat mit {{name}}.",
       "backToChat": "Zurück zu diesem Chat"
     }

@@ -86,6 +86,9 @@
       "humanTurnForbidden": "Seul le membre dont c’est le tour, ou un administrateur, peut répondre à ce tour.",
       "announceOtherTurn": "La discussion attend {{name}}.",
       "announceYourTurn": "C’est votre tour dans cette discussion.",
+      "heldQuestion": "Une discussion est déjà en cours ici, votre question « {{question}} » n’a donc pas démarré. Lancez-la une fois celle-ci terminée, ou arrêtez-la d’abord.",
+      "heldQuestionStart": "La lancer",
+      "heldQuestionDiscard": "Abandonner",
       "artifacts": "Artefacts partagés ({{n}})",
       "artifactsPanel": "Panneau des artefacts partagés",
       "artifactsTitle": "Artefacts partagés",
@@ -612,7 +615,7 @@
       "toAgent": "Vous avez transmis « {{question}} » à {{name}}.",
       "openSession": "Ouvrir la session d’équipe",
       "openChat": "Ouvrir ce chat",
-      "notStarted": "Elle n’a pas démarré.",
+      "notLinked": "Pas encore relié.",
       "fromChat": "Transmis depuis votre chat avec {{name}}.",
       "backToChat": "Revenir à ce chat"
     }

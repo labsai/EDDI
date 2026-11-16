@@ -146,19 +146,21 @@ export class TurnNotesLog {
 
 /** The i18n key (under `turnNotes.`) and English fallback of a note. */
 export function turnNoteKey(note: TurnNote): [key: string, fallback: string] {
+  // An escalation is recorded when the cascade moves on, before the next
+  // model has answered (it may fail too, or be stopped): say it was tried.
   if (note.kind === "escalation") {
     switch (note.reason) {
       case "low_confidence":
-        return ["turnNotes.escalation.lowConfidence", "Answered by a larger model because the first answer wasn't confident enough."];
+        return ["turnNotes.escalation.lowConfidence", "Another model was tried because the first answer wasn't confident enough."];
       case "timeout":
-        return ["turnNotes.escalation.timeout", "Answered by another model because the first one took too long."];
+        return ["turnNotes.escalation.timeout", "Another model was tried because the first one took too long."];
       case "error":
       case "retryable_error":
-        return ["turnNotes.escalation.error", "Answered by another model because the first one failed."];
+        return ["turnNotes.escalation.error", "Another model was tried because the first one failed."];
       case "invalid_output":
-        return ["turnNotes.escalation.invalidOutput", "Answered by another model because the first answer couldn't be used."];
+        return ["turnNotes.escalation.invalidOutput", "Another model was tried because the first answer couldn't be used."];
       default:
-        return ["turnNotes.escalation.other", "Answered by another model than the first one tried."];
+        return ["turnNotes.escalation.other", "Another model was tried after the first one."];
     }
   }
   switch (note.reason) {

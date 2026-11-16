@@ -86,6 +86,9 @@
       "humanTurnForbidden": "只有轮到的成员或管理员可以回答这一轮。",
       "announceOtherTurn": "讨论正在等待 {{name}}。",
       "announceYourTurn": "这次讨论轮到你了。",
+      "heldQuestion": "这里已有讨论在进行，所以你的问题“{{question}}”尚未开始。请等它结束后再开始，或先停止它。",
+      "heldQuestionStart": "开始",
+      "heldQuestionDiscard": "放弃",
       "artifacts": "共享成果（{{n}}）",
       "artifactsPanel": "共享成果面板",
       "artifactsTitle": "共享成果",
@@ -610,7 +613,7 @@
       "toAgent": "你把“{{question}}”转交给了 {{name}}。",
       "openSession": "打开团队会话",
       "openChat": "打开那个对话",
-      "notStarted": "未能开始。",
+      "notLinked": "尚未关联。",
       "fromChat": "从你与 {{name}} 的对话转交而来。",
       "backToChat": "返回那个对话"
     }

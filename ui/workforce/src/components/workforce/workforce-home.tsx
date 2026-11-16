@@ -79,10 +79,12 @@ export function HomeComposer() {
     () => (catalogGroups ?? []).map((g) => ({ id: g.groupId, name: g.name || g.groupId, version: g.version })),
     [catalogGroups],
   );
+  // A team when one is picked — or when the person may use teams but no agent,
+  // so the box is never left with nothing to send to.
   const team =
-    picked?.startsWith(TEAM_VALUE_PREFIX)
+    (picked?.startsWith(TEAM_VALUE_PREFIX)
       ? (teams.find((g) => g.id === picked.slice(TEAM_VALUE_PREFIX.length)) ?? null)
-      : null;
+      : null) ?? (agents.length === 0 ? (teams[0] ?? null) : null);
   const agentId = team ? null : picked && agents.some((a) => a.id === picked) ? picked : defaultAgentId;
   const agent = agents.find((a) => a.id === agentId) ?? null;
   const starters = (agentId ? appearanceById.get(agentId)?.appearance?.starters : undefined) ?? [];

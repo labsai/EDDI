@@ -130,10 +130,11 @@ board) shows them too.
 
 Sometimes a line under an answer explains how it was reached, in plain words:
 
-- **"Answered by a larger model because the first answer wasn't confident enough."** The agent's
-  designer set it up to try a fast model first and to hand the question to a stronger one when
+- **"Another model was tried because the first answer wasn't confident enough."** The agent's
+  designer set it up to try one model first and to hand the question to the next one when
   needed. The line also says when the first model took too long, failed, or gave an answer that
-  could not be used.
+  could not be used. It says that another model was *tried*: it appears as soon as the switch
+  happens, before that model has answered.
 - **"The model was asked again because its first reply was cut off."** (or was empty, was stopped
   by the provider's content filter, was not in the expected format, or the conversation was too
   long for it).
@@ -159,6 +160,12 @@ to it, and the new conversation says where it came from, with a link back. These
 kept **in this browser only**: on another device, or after signing out, the conversations are still
 there but the lines are not. The agent or team you hand over to sees your question, not the chat it
 came from. Files you attached are not handed over.
+
+Until the new conversation has your question, the line in the chat you came from says **Not
+linked yet**. If the new chat cannot start, or your question cannot be sent there, the question is
+put back into its message box so you can send it again. A team that is already running a
+discussion in this browser does not start yours on its own: the board shows your question with
+**Start it** (once the running discussion has ended) and **Discard**.
 
 ### Changing what you asked
 

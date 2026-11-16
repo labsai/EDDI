@@ -184,6 +184,7 @@
       "award": "Le travail a été confié à {{winner}}.",
       "awardNone": "Le travail n’a été confié à personne.",
       "none": "L’équipe n’est pas parvenue à une décision claire.",
+      "unparsed": "Aucune décision structurée n’a pu être lue : la conclusion est conservée ci-dessous en texte.",
       "dissents": "Membres en désaccord : {{n}}."
     },
     "artifactPanel": {

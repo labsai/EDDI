@@ -184,6 +184,7 @@
       "award": "El trabajo fue para {{winner}}.",
       "awardNone": "Nadie recibió el trabajo.",
       "none": "El equipo no llegó a una decisión clara.",
+      "unparsed": "No se pudo leer una decisión estructurada: la conclusión se conserva abajo como texto.",
       "dissents": "Miembros en desacuerdo: {{n}}."
     },
     "artifactPanel": {

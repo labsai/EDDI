@@ -144,6 +144,72 @@ describe("WorkforceBoard — a question handed in", () => {
     );
   });
 
+  it("hands the question back to the composer when its start is refused", async () => {
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", () =>
+        new HttpResponse("no budget left", { status: 400, headers: { "Content-Type": "text/plain" } }),
+      ),
+    );
+    const handoff = addHandoff(null, {
+      from: { agentId: "agent1", agentName: "Support Bot", conversationId: "conv1", afterStep: 1 },
+      to: { kind: "team", id: "grp1", name: "Product Review Panel", version: 1, conversationId: null },
+      question: "Should we ship?",
+    });
+    const start = workforceTeamStart("grp1", "Should we ship?", { version: 1, handoffId: handoff.id });
+    const [pathname, search] = start.to.split("?");
+    renderBoard({ pathname: pathname!, search: `?${search}`, state: start.state });
+
+    fireEvent.click(await screen.findByTestId("board-error-start-over"));
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Should we ship?"));
+    expect(readHandoffs(null)[0]!.to.conversationId).toBeNull();
+  });
+
+  it("holds a question that arrives while a discussion streams, until the person starts it", async () => {
+    const bodies: string[] = [];
+    server.use(
+      http.post("*/groups/:groupId/conversations/stream", async ({ request }) => {
+        bodies.push(await request.text());
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(frame("group_start", { groupConversationId: "gc-held", question: "Should we ship?" }));
+          },
+        });
+        return new HttpResponse(body, { headers: { "Content-Type": "text/event-stream" } });
+      }),
+      http.get("*/groups/:groupId/conversations/:convId", ({ params }) =>
+        HttpResponse.json(conversationDoc(String(params.convId), { state: "IN_PROGRESS", transcript: [] })),
+      ),
+    );
+    useGroupStreamStore.getState().update("grp1", (s) => ({ ...s, isStreaming: true }));
+    const start = workforceTeamStart("grp1", "Should we ship?", { version: 1 });
+    const [pathname, search] = start.to.split("?");
+    renderBoard({ pathname: pathname!, search: `?${search}`, state: start.state });
+
+    const held = await screen.findByTestId("board-held-question");
+    expect(held).toHaveTextContent("Should we ship?");
+    expect(screen.getByTestId("board-held-question-start")).toBeDisabled();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("no-state"));
+
+    // The running discussion ends: nothing starts by itself.
+    useGroupStreamStore.getState().update("grp1", (s) => ({ ...s, isStreaming: false }));
+    await waitFor(() => expect(screen.getByTestId("board-held-question-start")).not.toBeDisabled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bodies).toHaveLength(0);
+
+    fireEvent.click(screen.getByTestId("board-held-question-start"));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(screen.queryByTestId("board-held-question")).toBeNull();
+  });
+
+  it("can discard a held question", async () => {
+    useGroupStreamStore.getState().update("grp1", (s) => ({ ...s, isStreaming: true }));
+    const start = workforceTeamStart("grp1", "Should we ship?", { version: 1 });
+    const [pathname, search] = start.to.split("?");
+    renderBoard({ pathname: pathname!, search: `?${search}`, state: start.state });
+    fireEvent.click(await screen.findByTestId("board-held-question-discard"));
+    expect(screen.queryByTestId("board-held-question")).toBeNull();
+  });
+
   it("ignores a question meant for another team", async () => {
     const posted = vi.fn();
     server.use(http.post("*/groups/:groupId/conversations/stream", () => {

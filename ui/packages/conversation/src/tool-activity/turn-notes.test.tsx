@@ -70,7 +70,7 @@ describe("parseTurnNote", () => {
 describe("turnNoteKey", () => {
   it("words every documented escalation reason, error and retryable_error alike", () => {
     expect(turnNoteKey({ kind: "escalation", reason: "low_confidence" })[1]).toBe(
-      "Answered by a larger model because the first answer wasn't confident enough.",
+      "Another model was tried because the first answer wasn't confident enough.",
     );
     expect(turnNoteKey({ kind: "escalation", reason: "timeout" })[0]).toBe("turnNotes.escalation.timeout");
     expect(turnNoteKey({ kind: "escalation", reason: "error" })[0]).toBe("turnNotes.escalation.error");
@@ -158,7 +158,7 @@ describe("TurnNotes", () => {
     );
     const lines = screen.getAllByTestId("turn-note").map((l) => l.textContent);
     expect(lines).toEqual([
-      "Answered by a larger model because the first answer wasn't confident enough.",
+      "Another model was tried because the first answer wasn't confident enough.",
       "The model was asked again because its first reply was cut off.",
     ]);
     expect(screen.getByTestId("turn-notes")).toHaveAttribute("aria-label", "How this answer was reached");
@@ -173,7 +173,7 @@ describe("TurnNotes", () => {
     wrap(<Probe />);
     expect(screen.queryByTestId("turn-notes")).toBeNull();
     act(() => log.record("c", 1, { kind: "escalation", reason: "timeout" }));
-    expect(screen.getByTestId("turn-note")).toHaveTextContent("Answered by another model because the first one took too long.");
+    expect(screen.getByTestId("turn-note")).toHaveTextContent("Another model was tried because the first one took too long.");
   });
 });
 
