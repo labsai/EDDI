@@ -264,7 +264,8 @@ export const READ_ENDPOINTS: readonly string[] = [
   // `${vault:...}` references resolved at runtime (`VaultGrantChecker` reads
   // this store for exactly that reason), not plaintext the read hands back.
   //
-  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, a source's `run`
+  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, the matching
+  // `DELETE /ragstore/rags/{id}/documents`, a source's `run`
   // and `preview`, file upload and delete, and the state purge all stay
   // excluded, as `planning/operator-write-scope-plan.md` §5 requires — but
   // "did the documents actually land?" is the question an admin asks about a
@@ -334,6 +335,89 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /alerts/events/unacknowledged-count",
   "GET /alerts/rules",
   "GET /alerts/rules/{ruleId}",
+  // Cost and prices (EDDI 6.7.0+): the deployment's price catalog with its
+  // effective unpriced-call policy, which entry prices a given model, the models
+  // called without any price on this node, and one tenant's usage against its
+  // monthly cost budget. "Why does my budget never stop anything?" is usually an
+  // unpriced model, and these reads are how the operator sees it.
+  //
+  // Deliberately NOT granted:
+  // - `PUT /administration/model-prices` and `GET …/model-prices/reference`: a
+  //   price is a budget lever — a $0 price raises every budget that model counts
+  //   against — so price edits stay a human's, on the Manager's Model Prices page;
+  //   the reference list is only useful for such an edit.
+  // - `POST /administration/quotas/{tenantId}/usage/reset` and
+  //   `PUT /administration/quotas/{tenantId}`: resetting usage or changing a quota
+  //   is a spending decision, as before.
+  "GET /administration/model-prices",
+  "GET /administration/model-prices/resolve",
+  "GET /administration/model-prices/unpriced",
+  "GET /administration/quotas/{tenantId}/usage",
+  // Cross-team handoff intake (EDDI 6.7.0+): a standing team's inbox of handoffs
+  // waiting for review and where each handed-off backlog task came from — the read
+  // that answers "why didn't Account Desk get the lead?". The backend checks VIEW
+  // on the group, as the Manager's workspace page does.
+  //
+  // Deliberately NOT granted: `POST …/handoffs/{handoffId}/accept`, `…/decline`
+  // and `DELETE …/backlog/{taskId}`. An intake decision is a human decision — the
+  // REVIEW mode exists so a person looks at work crossing a team boundary — and an
+  // operator accepting through its own approval pause would launder one approval
+  // through another. The workspace read itself (`GET …/workspace`) is not needed
+  // for this and stays out.
+  "GET /groupstore/groups/{groupId}/workspace/handoffs",
+  // Team learning loop (EDDI 6.8.0+): the real-world outcomes a team's work
+  // reported, and the bets whose review date has arrived. Reads only; the backend
+  // checks VIEW on the group, and `GET /hitl/analytics/outcomes` needs the
+  // approver or admin role (it joins approval decisions, which carry deciders).
+  //
+  // Deliberately NOT granted: `POST …/outcomes` (an outcome is a fact reported by
+  // the system that observed it; an operator writing one would be inventing
+  // evidence the team's retro then learns from) and `POST …/bet/review` (a verdict
+  // on a bet is the team's).
+  "GET /groupstore/groups/{groupId}/outcomes",
+  // Team lessons (EDDI 6.8.0+): a team's retro lessons, what other teams share
+  // with it, what consolidation removed, and whether the job is scheduled. Reads
+  // only; the backend checks VIEW on the group.
+  //
+  // Deliberately NOT granted: `PUT/DELETE …/lessons/consolidation/schedule` and
+  // `POST …/lessons/consolidation/run`. Consolidation rewrites a team's institutional
+  // memory and spends the tenant's budget on a model call; an operator doing that
+  // through its own approval pause would launder one approval through another.
+  "GET /groupstore/groups/{groupId}/lessons",
+  "GET /groupstore/groups/{groupId}/lessons/shared",
+  "GET /groupstore/groups/{groupId}/lessons/history",
+  "GET /groupstore/groups/{groupId}/lessons/consolidation",
+  "GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews",
+  "GET /hitl/analytics/outcomes",
+  // Team budgets (EDDI 6.7.0+): one team's budget this month and its history, and
+  // the cross-team listing. Counters and adjustment reasons only, no conversation
+  // content; VIEW on each group is checked by the backend.
+  //
+  // Deliberately NOT granted: `PUT /groupstore/groups/{groupId}/budget/current-month`
+  // and `POST /administration/team-budgets/transfers`. Money moves stay with the
+  // administrator, exactly like tenant quotas: the operator explains the refusal
+  // and gives the exact call, the admin makes it.
+  "GET /groupstore/groups/{groupId}/budget",
+  "GET /groupstore/groups/{groupId}/budget/history",
+  "GET /administration/team-budgets",
+  // HITL oversight (EDDI 6.7.0+): approval analytics, earned-autonomy states and
+  // one category's evidence, and the sampled-audit queue's size. "Which approval
+  // categories are close to autonomy?" is answered from these.
+  //
+  // Deliberately NOT granted:
+  // - `GET /hitl/samples` and `GET /hitl/samples/{sampleId}`: a sample carries a
+  //   user's redacted tool arguments (and, with includeResult, the result), which
+  //   would go to the operator's model provider. The count answers "how many wait".
+  // - `GET /hitl/analytics/decisions`: per-row conversation ids and deciders.
+  // - Every write: `PATCH /hitl/samples/{sampleId}` (a verdict is evidence),
+  //   `POST /hitl/autonomy/{agentId}/apply|dismiss|suspend|lift` (ungating, or
+  //   re-gating, an agent) and `POST /hitl/analytics/rebuild`. The backend refuses
+  //   them anyway when they come from an agent's tool call (403
+  //   AGENT_ORIGINATED); the operator does not even hold them.
+  "GET /hitl/analytics/summary",
+  "GET /hitl/autonomy",
+  "GET /hitl/autonomy/{agentId}/category",
+  "GET /hitl/samples/pending-count",
 ] as const;
 
 /**
@@ -442,7 +526,11 @@ export const READ_ENDPOINTS: readonly string[] = [
  * this pair different. `POST /groupstore/groups/{id}` (duplicate) stays out
  * for the same document-integrity reason as `PUT`. Also excluded: any
  * schedule verb but disable (creating one is attacker persistence — see
- * above), and every `DELETE` (no undo exists in any of these stores).
+ * above), every `DELETE` (no undo exists in any of these stores), and
+ * `POST /agentstore/agents/{id}/signing-keys` and its `/{keyVersion}/revoke`:
+ * both are eddi-admin only on the backend because whoever mints or retires an
+ * agent's signing key decides what signs as that agent, and the system prompt
+ * sends the administrator to the Manager instead.
  *
  * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
  * unconditionally, anything added here is gated the moment it is added — the
@@ -829,6 +917,83 @@ export function grantsAlertReads(endpoints: readonly string[]): boolean {
   );
 }
 
+/** The price-catalog reads the prompt's cost section uses. */
+const MODEL_PRICE_READS = [
+  "GET /administration/model-prices",
+  "GET /administration/model-prices/resolve",
+  "GET /administration/model-prices/unpriced",
+] as const;
+
+/**
+ * Whether the price-catalog reads are granted — the catalog, a model's resolution
+ * and the unpriced sightings. One predicate for all three, as for the ratings.
+ */
+export function grantsModelPriceReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return MODEL_PRICE_READS.every((entry) => set.has(entry));
+}
+
+/** Whether a standing team's handoff intake inbox can be read. */
+export function grantsTeamHandoffReads(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("GET /groupstore/groups/{groupId}/workspace/handoffs");
+}
+
+/** The team-learning reads the prompt's learning section uses. */
+const TEAM_LEARNING_READS = [
+  "GET /groupstore/groups/{groupId}/outcomes",
+  "GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews",
+] as const;
+
+/** Whether a team's outcomes and due bet reviews can be read. */
+export function grantsTeamLearningReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_LEARNING_READS.every((entry) => set.has(entry));
+}
+
+/** The team-lesson reads the prompt's lessons section uses. */
+const TEAM_LESSON_READS = [
+  "GET /groupstore/groups/{groupId}/lessons",
+  "GET /groupstore/groups/{groupId}/lessons/shared",
+  "GET /groupstore/groups/{groupId}/lessons/history",
+  "GET /groupstore/groups/{groupId}/lessons/consolidation",
+] as const;
+
+/** Whether a team's lessons, shared lessons, consolidation history and state can be read. */
+export function grantsTeamLessonReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_LESSON_READS.every((entry) => set.has(entry));
+}
+
+/** The team-budget reads the prompt's budget section uses. */
+const TEAM_BUDGET_READS = [
+  "GET /groupstore/groups/{groupId}/budget",
+  "GET /groupstore/groups/{groupId}/budget/history",
+  "GET /administration/team-budgets",
+] as const;
+
+/** Whether the team-budget reads are granted — one team, its history, several teams. */
+export function grantsTeamBudgetReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_BUDGET_READS.every((entry) => set.has(entry));
+}
+
+/** The oversight reads the prompt's oversight section uses. */
+const OVERSIGHT_READS = [
+  "GET /hitl/analytics/summary",
+  "GET /hitl/autonomy",
+  "GET /hitl/autonomy/{agentId}/category",
+  "GET /hitl/samples/pending-count",
+] as const;
+
+/**
+ * Whether the HITL oversight reads are granted — the analytics summary, the
+ * earned-autonomy states, one category's evidence and the sample count.
+ */
+export function grantsOversightReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return OVERSIGHT_READS.every((entry) => set.has(entry));
+}
+
 /** Whether an upload source's stored files can be listed. */
 export function grantsIngestionFileReads(endpoints: readonly string[]): boolean {
   return new Set(endpoints).has("GET /ragstore/rags/{id}/sources/{sourceId}/files");
@@ -836,7 +1001,7 @@ export function grantsIngestionFileReads(endpoints: readonly string[]): boolean 
 
 /**
  * Whether the granted endpoints can change a knowledge base — create or edit a
- * configuration, or ingest a document into one.
+ * configuration, or ingest a document into one or delete one from it.
  *
  * Currently always `false`; it exists so the prompt's "you cannot author one"
  * sentence is derived rather than asserted. If a RAG write is ever allow-listed,
@@ -851,7 +1016,8 @@ export function grantsKnowledgeBaseAuthoring(endpoints: readonly string[]): bool
     // so an operator holding this can create one — omitting it would leave the
     // prompt appending "you cannot create a knowledge base" to an agent that can.
     set.has("POST /ragstore/rags/{id}") ||
-    set.has("POST /ragstore/rags/{id}/ingest")
+    set.has("POST /ragstore/rags/{id}/ingest") ||
+    set.has("DELETE /ragstore/rags/{id}/documents")
   );
 }
 

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -12,9 +14,11 @@ import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskApproval;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffLineage;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -112,6 +116,18 @@ public class TeamCadenceService {
     private final ITemplatingEngine templatingEngine;
     private final MeterRegistry meterRegistry;
     private final Duration claimTtl;
+
+    /** F6; field-injected so direct construction in tests runs unbudgeted. */
+    @Inject
+    TeamBudgetService teamBudgetService;
+
+    /**
+     * Reads {@code hitlConfig.approvalCompletesBacklogTask} at writeback.
+     * Field-injected like {@link #teamBudgetService}: direct construction in tests
+     * leaves it null, which reads as the default (only VERIFIED counts).
+     */
+    @Inject
+    IAgentGroupStore groupStore;
 
     private Counter cadenceRunsStarted;
     private Counter cadenceRunsSkipped;
@@ -231,6 +247,21 @@ public class TeamCadenceService {
             if (cadence == null) {
                 return CadenceResult.failed(groupId, cadenceId,
                         "Cadence " + cadenceId + " no longer exists on the workspace — delete its schedule");
+            }
+
+            // F6: a team with no budget left this month does not start a run. A skip is a
+            // success (not retried, the backlog is untouched); an unreadable budget is a
+            // failure, so the poller's retry and dead-letter machinery makes it visible.
+            if (teamBudgetService != null) {
+                TeamBudgetService.Decision budget = teamBudgetService.decide(groupId);
+                if (!budget.allowed()) {
+                    teamBudgetService.countRefusal(TeamBudgetService.Surface.CADENCE, budget.reason());
+                    if ("unavailable".equals(budget.reason())) {
+                        return CadenceResult.failed(groupId, cadenceId, budget.message());
+                    }
+                    cadenceRunsSkipped.increment();
+                    return CadenceResult.skipped(groupId, cadenceId, budget.message());
+                }
             }
 
             // 2. Pull: top-N executable backlog tasks, highest priority first.
@@ -440,6 +471,12 @@ public class TeamCadenceService {
      * VERIFIED on the backlog (and credit the assignee's stats); anything else
      * returns to PENDING with the reviewer feedback appended to the description,
      * which is the cross-run retry loop.
+     * <p>
+     * With {@code hitlConfig.approvalCompletesBacklogTask} on, a third outcome
+     * stays done: a task a person approved at a TASK gate. It lands COMPLETED (not
+     * VERIFIED — nobody verified it) with the approved, possibly edited, result,
+     * and is counted in {@code tasksApproved}. Without this, a team gated by a
+     * human instead of a VERIFY phase re-ran every approved task on its next run.
      */
     boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc) {
         return writebackCompleted(workspace, gc, 0);
@@ -448,6 +485,8 @@ public class TeamCadenceService {
     private boolean writebackCompleted(GroupWorkspace workspace, GroupConversation gc, int attempt) {
         String settledDiscussionId = workspace.getRunningDiscussionId();
         SharedTaskList discussionTasks = gc.getTaskList();
+        boolean approvalCountsAsDone = !workspace.getPulledTaskIds().isEmpty()
+                && approvalCompletesBacklogTask(workspace.getGroupId());
         for (String pulledId : workspace.getPulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
             if (backlogTask == null) {
@@ -463,11 +502,24 @@ public class TeamCadenceService {
                         backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now()));
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
                 workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
                 if (outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksVerified() + 1);
+                }
+            } else if (approvalCountsAsDone && approvedByPerson(discussionTasks, outcome)) {
+                // outcome.result() is the approver's edit when there was one
+                // (approveTaskWithEditedResult stores it in place of the agent's).
+                workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
+                        backlogTask.description(), TaskStatus.COMPLETED, outcome.assignedAgentId(),
+                        outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
+                        outcome.verificationNote(), false, backlogTask.priority(), backlogTask.createdAt(),
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+                workspace.getMetrics().setTasksApproved(workspace.getMetrics().getTasksApproved() + 1);
+                if (outcome.assignedAgentId() != null) {
+                    memberStats(workspace, outcome.assignedAgentId()).setTasksApproved(
+                            memberStats(workspace, outcome.assignedAgentId()).getTasksApproved() + 1);
                 }
             } else {
                 String feedback = outcome != null && outcome.verificationNote() != null
@@ -476,7 +528,8 @@ public class TeamCadenceService {
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
-                        backlogTask.priority(), backlogTask.createdAt(), null));
+                        backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
+                        backlogTask.bet()));
                 if (outcome != null && outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
@@ -484,6 +537,45 @@ public class TeamCadenceService {
             }
         }
         return settle(workspace, gc, settledDiscussionId, attempt, fresh -> writebackCompleted(fresh, gc, attempt + 1));
+    }
+
+    /**
+     * Whether {@code outcome} completed through an approval a person gave: status
+     * COMPLETED (a later VERIFY that failed it leaves it FAILED) and an approval on
+     * record whose decider is not a {@code system:*} actor. A task that completed
+     * in an ungated phase has no approval on record; a timeout auto-approval is a
+     * decision nobody made, the same line the earned-autonomy evidence draws.
+     */
+    static boolean approvedByPerson(SharedTaskList discussionTasks, TaskItem outcome) {
+        if (outcome == null || discussionTasks == null || outcome.status() != TaskStatus.COMPLETED) {
+            return false;
+        }
+        TaskApproval approval = discussionTasks.approvalOf(outcome.id());
+        return approval != null && approval.byPerson();
+    }
+
+    /**
+     * The group's {@code hitlConfig.approvalCompletesBacklogTask}, read from its
+     * current version. Unreadable or absent means {@code false} — the original rule
+     * — and is logged, since it means an approved task will run again.
+     */
+    private boolean approvalCompletesBacklogTask(String groupId) {
+        if (groupStore == null || groupId == null) {
+            return false;
+        }
+        try {
+            var resourceId = groupStore.getCurrentResourceId(groupId);
+            if (resourceId == null) {
+                return false;
+            }
+            AgentGroupConfiguration config = groupStore.read(groupId, resourceId.getVersion());
+            return config != null && config.getHitlConfig() != null
+                    && config.getHitlConfig().isApprovalCompletesBacklogTask();
+        } catch (Exception e) {
+            LOGGER.warnf("Cadence writeback for group %s could not read hitlConfig.approvalCompletesBacklogTask (%s) — "
+                    + "only VERIFIED tasks stay done this time", LogSanitizer.sanitize(groupId), e.getClass().getSimpleName());
+            return false;
+        }
     }
 
     /**
@@ -578,7 +670,7 @@ public class TeamCadenceService {
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
         return new TaskItem(task.id(), task.subject(), task.description(), status, task.assignedAgentId(),
                 task.assignedDisplayName(), task.dependsOnIds(), task.result(), task.verificationNote(),
-                task.verified(), task.priority(), task.createdAt(), task.completedAt());
+                task.verified(), task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
     }
 
     /**

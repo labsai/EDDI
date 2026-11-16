@@ -162,7 +162,7 @@ class AlertMaintenanceServiceTest {
     @Test
     @DisplayName("events held for a deleted rule are released — a stale cache on another replica created them after the delete")
     void releasesEventsOfADeletedRule() {
-        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(RULE_ID));
+        when(events.findDigestPendingRuleIds(null, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(RULE_ID));
         doReturn(Optional.empty()).when(rules).read(RULE_ID);
         doReturn(3L).when(events).releaseDigestPending(RULE_ID);
 
@@ -179,7 +179,8 @@ class AlertMaintenanceServiceTest {
         AlertRule digesting = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
                 AlertRule.DigestMode.HOURLY);
         AlertRule off = withThrottle(digesting, null, AlertRule.DigestMode.NONE);
-        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("disabled-rule", "none-rule", "live-rule"));
+        when(events.findDigestPendingRuleIds(null, AlertMaintenanceService.DIGEST_BATCH))
+                .thenReturn(List.of("disabled-rule", "none-rule", "live-rule"));
         doReturn(Optional.of(disabled(digesting).withId("disabled-rule"))).when(rules).read("disabled-rule");
         doReturn(Optional.of(off.withId("none-rule"))).when(rules).read("none-rule");
         doReturn(Optional.of(digesting.withId("live-rule"))).when(rules).read("live-rule");
@@ -193,9 +194,29 @@ class AlertMaintenanceServiceTest {
     }
 
     @Test
+    @DisplayName("a full page resumes after its last rule next pass, and a short page starts over")
+    void theOrphanScanAdvancesAcrossPasses() {
+        List<String> full = new ArrayList<>();
+        for (int i = 0; i < AlertMaintenanceService.DIGEST_BATCH; i++) {
+            full.add(String.format("rule-%04d", i));
+        }
+        when(events.findDigestPendingRuleIds(null, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(full, List.of());
+        String last = full.get(full.size() - 1);
+        when(events.findDigestPendingRuleIds(last, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("rule-zzzz"));
+
+        service.run();
+        service.run();
+        service.run();
+
+        verify(events).findDigestPendingRuleIds(last, AlertMaintenanceService.DIGEST_BATCH);
+        // the third pass found the second one short and began at the start again
+        verify(events, times(2)).findDigestPendingRuleIds(null, AlertMaintenanceService.DIGEST_BATCH);
+    }
+
+    @Test
     @DisplayName("a rule that cannot be read does not stop the reconciliation of the others")
     void reconciliationSurvivesOneFailingRule() {
-        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("broken", "gone"));
+        when(events.findDigestPendingRuleIds(null, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("broken", "gone"));
         doThrow(new IllegalStateException("db down")).when(rules).read("broken");
         doReturn(Optional.empty()).when(rules).read("gone");
         doReturn(2L).when(events).releaseDigestPending("gone");

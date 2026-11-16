@@ -17,7 +17,7 @@ EDDI v6 uses **Qute templates** with `{expression}` syntax, NOT Thymeleaf `[[${e
 ❌ WRONG:     {properties.agentName.valueString}  → fails at runtime (String has no .valueString)
 ```
 
-This is because `ConversationProperties.put()` stores `property.getValueString()` (or `getValueObject()`, etc.) directly into the internal `propertiesMap`. By the time templates see it, the Property wrapper is gone.
+This is because `ConversationProperties.toMap()` unwraps each `Property` to its value (`valueString`, `valueObject`, etc.) every time the template map is built, and omits properties whose value is null. By the time templates see it, the Property wrapper is gone.
 
 ### Template variables available in all contexts
 
@@ -62,9 +62,9 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 
 ## Behavior Rule Safety Rules
 
-### Every rule MUST have an `actionmatcher` on `lastStep`
+### Rules that belong to a multi-step flow need an `actionmatcher` on `lastStep`
 
-Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+Within a group, rules are evaluated in order and — by default (`executionStrategy: executeUntilFirstSuccess`) — **only the first rule whose conditions match fires**; the rest of the group is skipped. Put independent rules in separate groups, or set `"executionStrategy": "executeAll"` on the group to let every matching rule fire. Either way, a rule that is part of a multi-step flow and has only `inputmatcher` conditions is dangerous — it matches globally regardless of conversation state, so gate it on the previous step's action. Global rules (small talk, "cancel", "start over") intentionally have no `lastStep` gate; they are meant to fire at any step.
 
 ```
 ❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
@@ -93,18 +93,18 @@ Within a group, rules are evaluated in order and — by default (`executionStrat
 
 ### Quick reply expressions must be unique identifiers
 
-Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
+Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS_PROPERTY` also has engine-defined meaning (when it is an action of the previous step, `PropertySetterTask` stores the next raw input as the property `user_input`). The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
 
 ```
 ❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 7 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
+> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 
-When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as a **contiguous sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present — it is AND semantics, not OR.
+When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as an **ordered, adjacent sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present, in that order and with nothing between them — it is AND semantics, not OR, and `b,a` does not match a step whose actions are `[a, b]`. The `inputmatcher` and `contextmatcher` expression lists behave the same way.
 
 ```
 ❌ WRONG — tries to match any of these, but actually requires ALL FIVE contiguously:
@@ -139,7 +139,7 @@ Matcher:      "actions" : "ask_for_model"
 | `longTerm` | Persisted to `usermemories` collection across conversations |
 | `secret` | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
-> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `PropertySetterTask.autoVaultSecret` and [Properties](properties.md).) For wizard-style agents that collect API keys and pass them to an endpoint (see [Reference Implementation](#reference-implementation)), prefer `scope: "conversation"` and delegate vaulting to the receiving service — a dev instance without a master key cannot complete a secret-scoped turn at all.
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If the vault is disabled — which is the shipped default — `autoVaultSecret()` **fails closed**: it scrubs the plaintext from the conversation step, logs an ERROR, and throws a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY`. The whole turn fails; the plaintext is never persisted. (An earlier release persisted the plaintext instead; that behaviour was removed deliberately — see the comment in `SecretPropertyVault.autoVaultSecret` and [Properties](properties.md).) For wizard-style agents that collect API keys and pass them to an endpoint (see [Reference Implementation](#reference-implementation)), `scope: "conversation"` with vaulting delegated to the receiving service works on a dev instance without a master key, which cannot complete a secret-scoped turn at all. **The trade-off:** only `scope: "secret"` scrubs and vaults the value, so with `conversation` scope the plaintext key stays in the stored conversation (the `input:initial` data and the property) and in every later `{properties.x}` render until the conversation is deleted. Use that pattern for a development wizard only; real deployments should use `secret` scope with a vault key.
 
 ### Capturing user input vs. setting fixed values
 
@@ -213,7 +213,7 @@ request is written to conversation memory. Disable with
 
 ### Requesting specialized input fields from the UI
 
-The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `secret-input-field.tsx`, rendered by `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
 
 ```json
 {
@@ -226,7 +226,7 @@ The output system supports an `inputField` output type that tells the UI to swit
 }
 ```
 
-Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+Supported `subType` values: `"password"` (the default when omitted), `"text"`, `"email"`. The Chat UI masks and sends only a `password` response as a secret turn; the Manager sends the response of all three subtypes as a secret turn and masks it in the conversation. The item also accepts `defaultValue` and a `validation` object (`minLength`, `maxLength`, `validationErrorMessage`). Neither the Chat UI nor the Manager enforces `validation`, so a response can be shorter or longer than the limits; validate it in the agent's own rules. A `sizematcher` is not a safe length check for this: it reads a numeric string as a number, so `"123"` has size 123 and passes a minimum of 8. Do not rely on it to enforce a minimum length for numeric input. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
 
@@ -302,7 +302,7 @@ follow the deployed version, like the rest of the profile.
 | `appearance.starters` | `[]` | ≤ 6 one-click starters of ≤ 200 characters, sent as the user's message exactly as written |
 | `conversationControls.undo` · `redo` · `attachments` · `quickReplies` · `streaming` | shown | `false` hides the control; absent keeps it |
 | `conversationControls.rating` | shown | `false` hides the rating controls `ratingConfig` enables; it cannot switch ratings on |
-| `conversationControls.rawHtml` | **`false`** | `true` renders HTML in the agent's replies (through the client's sanitizer). Absent or `false` shows HTML as text |
+| `conversationControls.rawHtml` | **`false`** | The configured default, as the profile reports it: `true` asks clients to render HTML in the agent's replies (through their sanitizer), absent or `false` to show it as text. **The Chat UI widget does not apply it yet** and still renders HTML for every agent; see the upgrade note |
 
 The profile returns `conversationControls` with every default applied
 (booleans, never absent), and `appearance` as stored or `null`. These are
@@ -310,9 +310,14 @@ presentation switches: hiding undo does not disable the undo endpoint. A save
 with an invalid value answers 400 naming the field — on every write path,
 including ZIP import and agent sync, which carry both blocks unchanged.
 
-> **Upgrade note — `rawHtml` defaults to off.** Before 6.7.0 the Chat UI
-> rendered HTML in every agent's replies. An agent whose replies are meant to
-> contain HTML needs `"conversationControls": { "rawHtml": true }`; see
+> **Upgrade note — `rawHtml` defaults to off.** From 6.7.0 the profile reports
+> `rawHtml: false` for every agent that does not set it. That is the configured
+> default, not yet what the widget does: the Chat UI keeps rendering HTML in
+> every agent's replies until the release whose widget reads
+> `conversationControls`, so leaving `rawHtml` off changes nothing visible today.
+> An agent whose replies are meant to contain HTML should get
+> `"conversationControls": { "rawHtml": true }` now, so it keeps rendering once
+> the widget follows the setting; see
 > [chat-ui-embedding.md](chat-ui-embedding.md#upgrading-html-in-replies-is-off-by-default).
 
 ## Conversation Titles (`titleGeneration`)
@@ -369,7 +374,7 @@ descriptor ([gdpr-compliance.md](gdpr-compliance.md)).
 
 ## ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID for anything shorter than 18 characters or containing a character other than `0-9a-fA-F` and `-` — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service extracts each ID with `RestUtilities.extractResourceId()`, which returns no ID unless the id is at least 18 characters long and is either all hex (an ObjectId-style id) or a canonical 8-4-4-4-12 UUID — dashes are accepted nowhere else — and the import then fails further down. Semantic names like `my-agent-wf1` will be rejected.
 
 The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
@@ -411,7 +416,7 @@ connections/
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
-> **Pipeline step**: If your output templates contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` as the last workflow step. Without it, Qute expressions are not resolved.
+> **Pipeline step**: If your output texts or quick replies contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` after every step that produces that output. Without it, Qute expressions in output are not resolved. Prompts, HTTP call bodies and property values need no such step: `LlmTask`, `ApiCallsTask` and `PropertySetterTask` render their own.
 
 ### URI format (v6 canonical)
 
@@ -426,6 +431,9 @@ Always use v6 canonical URIs in new configs:
 | Property | `eddi://ai.labs.property/propertysetterstore/propertysetters/{id}?version=1` |
 | Output | `eddi://ai.labs.output/outputstore/outputsets/{id}?version=1` |
 | LLM | `eddi://ai.labs.llm/llmstore/llms/{id}?version=1` |
+| MCP calls | `eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/{id}?version=1` |
+| RAG | `eddi://ai.labs.rag/ragstore/rags/{id}?version=1` |
+| Parser | `eddi://ai.labs.parser/parserstore/parsers/{id}?version=1` |
 | Dictionary | `eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}?version=1` |
 
 > Legacy URIs (e.g. `ai.labs.bot/botstore/bots/`) are auto-normalized by `AbstractBackupService.normalizeLegacyUris()` during import, but new configs should always use v6 format.
@@ -442,7 +450,7 @@ Always use v6 canonical URIs in new configs:
 | `eddi://ai.labs.llm` | `eddi://ai.labs.llm/...` | Optional — LLM interaction |
 | `eddi://ai.labs.mcpcalls` | `eddi://ai.labs.mcpcalls/...` | Optional — MCP tool calls |
 | `eddi://ai.labs.rag` | `eddi://ai.labs.rag/...` | Optional — binds a knowledge base; retrieval itself runs inside the LLM task |
-| `eddi://ai.labs.templating`| — (no config URI) | Yes when any output or system prompt contains `{…}` placeholders — must be last |
+| `eddi://ai.labs.templating`| — (no config URI) | Yes when output texts or quick replies contain `{…}` placeholders — place it after every step that produces output |
 
 `eddi://ai.labs.rules` and `eddi://ai.labs.apicalls` are also registered as step types (aliases of `behavior` and `httpcalls`). Existing configs use the names in the table; write those.
 
@@ -452,8 +460,10 @@ Always use v6 canonical URIs in new configs:
 
 - Behavior rule patterns with `actionmatcher` + `inputmatcher`
 - Property setter capturing free-text input via `{memory.current.input}` (it uses `scope: "conversation"` throughout and delegates secret vaulting to the receiving `create_agent` HTTP call — the wizard pattern from [Property Setter Patterns](#property-setter-patterns), deliberately **not** `scope: "secret"`)
-- HTTP call template syntax
+- HTTP call template syntax. Do not copy its request-body pattern: it splices free-text input such as the system prompt into JSON string literals, which a value like `hi","deploy":true` can break out of. In your own configs serialise values with `{json:serialize(properties.x)}` (see [HTTP Calls](httpcalls.md)). The fixture also uses the legacy key `retryHttpCallInstruction` (a `@JsonAlias`; write `retryApiCallInstruction`) and sets `expressionsAsActions: true` in its behavior config, which is a simplification: keep it off when an action triggers something that matters
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
+
+`docs/agent-configs/google-workspace-tools/` is the LLM-agent counterpart: a `PER_USER` OAuth connection under `connections/` and two httpcalls configurations used as LLM tools, each with an `argumentSchema`. It is the worked example for `${connection:…}` headers and for building a value Gmail wants base64url-encoded with `{encoder:base64Url(...)}` — see [Google Workspace](google-workspace.md).
 
 **For contributors:** two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".

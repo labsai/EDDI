@@ -124,6 +124,7 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
         snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         snapshot.setHitlApprovalContext(conversationMemory.getHitlApprovalContext());
+        snapshot.setHitlPlanHash(conversationMemory.getHitlPlanHash());
         return snapshot;
     }
 
@@ -189,6 +190,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.setHitlApprovalContext(snapshot.getHitlApprovalContext());
+        conversationMemory.setHitlPlanHash(snapshot.getHitlPlanHash());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
 
@@ -251,12 +253,6 @@ public class ConversationMemoryUtilities {
         return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
     }
 
-    /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
     /**
      * Sums {@code audit:cost} over every step of the conversation. The value is per
      * step — {@code LlmTask} accumulates it on the current step, and each new step
@@ -346,6 +342,12 @@ public class ConversationMemoryUtilities {
         return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -462,11 +464,19 @@ public class ConversationMemoryUtilities {
         // each side can be paired with the other — but only when the two lists agree:
         // on a drifted document an index names different turns on each side.
         boolean paired = allOutputs.size() == allSteps.size();
-        var conversationOutputs = returnCurrentStepOnly ? List.of(allOutputs.getLast()) : allOutputs;
-        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
+        // A drifted document can hold outputs and no steps (or the reverse): each side
+        // is
+        // taken on its own, so the one that is empty yields nothing instead of failing
+        // the read.
+        List<ConversationOutput> conversationOutputs = returnCurrentStepOnly ? lastOnly(allOutputs) : allOutputs;
+        List<ConversationStepSnapshot> conversationSteps = returnCurrentStepOnly ? lastOnly(allSteps) : allSteps;
         return convertSimpleConversationMemory(conversationMemorySnapshot, conversationOutputs, conversationSteps, paired, allSteps.size() > 1,
                 !conversationMemorySnapshot.getRedoCache().isEmpty(), conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()),
                 returnDetailed);
+    }
+
+    private static <T> List<T> lastOnly(List<T> list) {
+        return list.isEmpty() ? List.of() : List.of(list.getLast());
     }
 
     /**
@@ -475,13 +485,13 @@ public class ConversationMemoryUtilities {
      * {@link #convertSimpleConversationMemory(ConversationMemorySnapshot, boolean, boolean)}
      * gives with {@code returnCurrentStepOnly} for the full snapshot of the same
      * conversation, built from its last step and output plus the totals the tail
-     * carries. An empty conversation fails exactly as the full projection does
-     * ({@link NoSuchElementException} from {@code getLast()}).
+     * carries. A list that is empty (a drifted document) contributes nothing, as in
+     * the full projection.
      */
     static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemoryTail tail, boolean returnDetailed) {
         var snapshot = tail.snapshot();
-        var lastOutput = List.of(snapshot.getConversationOutputs().getLast());
-        var lastStep = List.of(snapshot.getConversationSteps().getLast());
+        var lastOutput = lastOnly(snapshot.getConversationOutputs());
+        var lastStep = lastOnly(snapshot.getConversationSteps());
         return convertSimpleConversationMemory(snapshot, lastOutput, lastStep, tail.outputCount() == tail.stepCount(), tail.stepCount() > 1,
                 tail.redoCount() > 0, tail.conversationCost(), returnDetailed);
     }
@@ -1091,6 +1101,10 @@ public class ConversationMemoryUtilities {
         // which reads the persisted document. Unlike requestFingerprint no boolean is
         // derived from it, so it is dropped rather than replaced with a marker.
         batch.setFingerprint(null);
+        // The plan nonce is the secret that keeps the published plan hash from being
+        // an offline guessing oracle over the raw arguments (see HitlPlanHash) —
+        // served next to the hash it would undo exactly that.
+        batch.setPlanNonce(null);
         if (batch.getCalls() == null) {
             return snapshot;
         }

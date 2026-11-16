@@ -335,7 +335,12 @@ describe("useSendMessage — streamed refusals and detached streams", () => {
     const root = "../../src/main/java/ai/labs/eddi/engine";
     const streaming = readFileSync(`${root}/internal/RestAgentEngineStreaming.java`, "utf8");
     const mapper = readFileSync(`${root}/exception/InputTooLargeExceptionMapper.java`, "utf8");
-    const emitted = new Set([...streaming.matchAll(/code = "([a-z_]+)";/g)].map((m) => m[1]!));
+    // skippedResumeErrorEvent (resume/stream, dropped after accept) is not a send
+    // refusal: its codes never reach useSendMessage, so only scan what precedes it.
+    const resumeDrops = streaming.indexOf("private String skippedResumeErrorEvent(");
+    expect(resumeDrops, "RestAgentEngineStreaming.skippedResumeErrorEvent moved or was renamed").toBeGreaterThan(0);
+    const sendRefusals = streaming.slice(0, resumeDrops);
+    const emitted = new Set([...sendRefusals.matchAll(/code = "([a-z_]+)";/g)].map((m) => m[1]!));
     const inputTooLarge = /ERROR_CODE = "([a-z_]+)"/.exec(mapper)?.[1];
     expect(inputTooLarge).toBeTruthy();
     emitted.add(inputTooLarge!);

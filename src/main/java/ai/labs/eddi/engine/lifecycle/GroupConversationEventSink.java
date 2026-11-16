@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -217,14 +218,20 @@ public final class GroupConversationEventSink {
      *            not the approver-facing text.
      */
     public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
-            @JsonIgnore RenderedApprovalContext approvalContext) {
+            @JsonIgnore RenderedApprovalContext approvalContext, @JsonIgnore String planHash) {
+
+        /** Without a plan hash (the pre-6.8 shape). */
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
+                RenderedApprovalContext approvalContext) {
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, approvalContext, null);
+        }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
-            this(phaseIndex, phaseName, reason, granularity, pausedAt, null);
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, null, null);
         }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
-            this(phaseIndex, phaseName, reason, granularity, null, null);
+            this(phaseIndex, phaseName, reason, granularity, null, null, null);
         }
     }
 
@@ -237,7 +244,13 @@ public final class GroupConversationEventSink {
      * member's UI reads; an SSE frame is the wrong place for a full transcript
      * rendering.
      */
-    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+    public record HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName,
+            HumanRequestDetail detail) {
+
+        /** A plain speaking turn: no {@code detail}. */
+        public HumanInputRequestedEvent(String memberId, String displayName, int phaseIndex, String phaseName) {
+            this(memberId, displayName, phaseIndex, phaseName, null);
+        }
     }
 
     /**

@@ -4,6 +4,8 @@ import {
   addWorkspaceBacklogTask,
   addWorkspaceCadence,
   deleteWorkspaceCadence,
+  getDueBetReviews,
+  reviewBet,
   type AddBacklogTaskRequest,
   type AddCadenceRequest,
 } from "@/lib/api/group-workspace";
@@ -42,6 +44,25 @@ export function useDeleteWorkspaceCadence(groupId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (cadenceId: string) => deleteWorkspaceCadence(groupId!, cadenceId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
+  });
+}
+
+/** Bets whose review date has arrived (polled with the workspace so a bet falling due shows up on its own). */
+export function useDueBetReviews(groupId: string | undefined) {
+  return useQuery({
+    queryKey: [...WORKSPACE_KEY, groupId, "due-reviews"],
+    queryFn: () => getDueBetReviews(groupId!),
+    enabled: !!groupId,
+    refetchInterval: 60_000,
+  });
+}
+
+/** Close a bet's review, or reopen it for a later date. */
+export function useReviewBet(groupId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, rescheduleTo }: { taskId: string; rescheduleTo?: string }) => reviewBet(groupId!, taskId, rescheduleTo),
     onSuccess: () => void qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
   });
 }

@@ -71,17 +71,16 @@ public class TurnCostMeter {
     private final MeterRegistry meterRegistry;
 
     /**
-     * Receives every charge the tenant counter accepted (the attribution SPI).
-     * Field-injected so the direct constructor and its tests are unaffected; null
-     * delivers nothing.
+     * Receives every charge the tenant counter accepted (the attribution SPI). Code
+     * built without CDI passes {@link SpendSinks#NONE}.
      */
-    @Inject
-    SpendSinks spendSinks;
+    private final SpendSinks spendSinks;
 
     @Inject
-    public TurnCostMeter(TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry) {
+    public TurnCostMeter(TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry, SpendSinks spendSinks) {
         this.tenantQuotaService = tenantQuotaService;
         this.meterRegistry = meterRegistry;
+        this.spendSinks = spendSinks;
     }
 
     /**
@@ -92,6 +91,30 @@ public class TurnCostMeter {
      * @return the amount charged (0 when nothing was)
      */
     public double meterSettledStep(IConversationMemory memory) {
+        try {
+            return meterAndRecord(memory);
+        } finally {
+            releaseHolds(memory);
+        }
+    }
+
+    /**
+     * Gives back what the turn held against the budget (the hard ceiling), after
+     * the charge: charging first means the money is counted as spent before it
+     * stops being counted as held, never in neither.
+     */
+    private void releaseHolds(IConversationMemory memory) {
+        try {
+            if (memory != null && memory.getTenantCostHolds() != null) {
+                tenantQuotaService.releaseHolds(tenantQuotaService.getDefaultTenantId(), memory.getTenantCostHolds());
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Releasing the cost holds of conversation %s failed — they expire on their own",
+                    sanitize(memory.getConversationId()));
+        }
+    }
+
+    private double meterAndRecord(IConversationMemory memory) {
         try {
             var step = memory != null ? memory.getCurrentStep() : null;
             if (step == null) {
@@ -133,9 +156,7 @@ public class TurnCostMeter {
                 step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, spendMap(0, 0, 0)));
             }
             count(result.allowed() ? "recorded" : "over_budget");
-            if (spendSinks != null) {
-                spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge, carriedSpend));
-            }
+            spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge, carriedSpend));
             return charge;
         } catch (RuntimeException e) {
             count("error");

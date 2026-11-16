@@ -26,7 +26,7 @@
 }
 ```
 
-If the system message or output uses `{...}` placeholders, also add `eddi://ai.labs.templating` as the last workflow step.
+If an output text or quick reply uses `{...}` placeholders, also add `eddi://ai.labs.templating` after the output step. The system message needs no such step; the LLM task renders it itself.
 
 See [LLM Integration](langchain.md) for the complete guide with all 19 named providers (eleven model builders plus eight OpenAI-compatible providers with their own type; any other OpenAI-compatible endpoint works through `openai` with a `baseUrl`).
 

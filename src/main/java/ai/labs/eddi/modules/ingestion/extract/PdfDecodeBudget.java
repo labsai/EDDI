@@ -203,7 +203,17 @@ public final class PdfDecodeBudget {
             long colors = Math.min(decodeParams.getInt(COSName.COLORS, 1), 32);
             long bitsPerComponent = decodeParams.getInt(COSName.BITS_PER_COMPONENT, 8);
             long columns = decodeParams.getInt(COSName.COLUMNS, 1);
-            long rowBytes = (columns * colors * bitsPerComponent + 7) / 8;
+            if (columns <= 0 || colors <= 0 || bitsPerComponent <= 0) {
+                throw new IOException("Predictor dimensions must be positive");
+            }
+            long rowBytes;
+            try {
+                // Three int-sized factors can wrap a long: a negative product would pass the
+                // bound below
+                rowBytes = (Math.multiplyExact(Math.multiplyExact(columns, colors), bitsPerComponent) + 7) / 8;
+            } catch (ArithmeticException overflow) {
+                throw new IOException("Predictor row size overflows", overflow);
+            }
             if (rowBytes > MAX_PREDICTOR_ROW_BYTES) {
                 throw new IOException("Predictor rows of " + rowBytes + " bytes exceed the limit of "
                         + MAX_PREDICTOR_ROW_BYTES);

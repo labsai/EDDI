@@ -6,6 +6,8 @@ answer arrives. EDDI recovers from each of these in a fixed order, always tries 
 leaves a trail an operator can read afterwards. This page is the map: what can fail, what the engine does about
 it, which settings control it and where to look when a turn did not go as expected.
 
+**In short:** with no settings an LLM call is attempted up to 3 times on transient failures, there is no cascade and no fallback model, and the turn still ends with an answer or an error the caller can read.
+
 Everything here is **optional and off by default** unless stated otherwise. An agent with no resilience
 settings behaves as it did before, with two exceptions that are bug fixes: a reply that is not valid JSON no
 longer fails the turn under `convertToObject`, and an HTTP 500 from a provider is now retried.
@@ -98,6 +100,7 @@ Two rules hold at every step:
 | --- | --- | --- |
 | `retry.maxAttempts` | Total attempts of one model call, including the first. Clamped to 1..10. **An LLM task with no `retry` block still retries**; `1` turns it off | `3` |
 | `retry.backoffDelayMs` / `backoffMultiplier` / `maxBackoffDelayMs` | Exponential backoff between attempts | `1000` / `2.0` / `10000` |
+| `retry.jitterRatio` | Shortens each backoff at random by up to this fraction (never lengthens it, never touches a provider-requested wait), so conversations hit by one outage do not retry in one burst; `0` turns it off, clamped to 0..1 | `0.2` |
 | `retry.honorRetryAfter` | Sleep the delay the provider asked for instead of the backoff | `true` |
 | `retry.maxRetryAfterMs` | Longest provider-requested wait accepted; a longer one stops retrying **without sleeping** so a cascade escalates at once (engine ceiling 30000) | `10000` |
 | `responseValidation.enabled` | Master switch of the `responseValidation` policies below (`retry` and the validation `fallback` need it) | `false` |
@@ -121,6 +124,7 @@ Two rules hold at every step:
 | `nonBlankFields` | Fields of the parsed reply that must hold a non-blank string (`"htmlResponseText"`, `"answer.text"`) | none |
 | `parameters.responseSchema` | A JSON Schema the reply must match; also sent natively to providers that support it | none |
 | `jsonResponseFormat` | `auto`, `on` or `off`: whether the request carries the provider's JSON mode | `auto` |
+| `answerMode` / `answerToolChoice` | `tool` makes the model answer through a terminal `reply` tool whose arguments are the `responseSchema` — provider-enforced also with tools on Gemini, Anthropic and Bedrock. A plain-text answer still goes through `onInvalidJson`; no extra model call compared to `text` ([details](langchain.md#answering-through-a-reply-tool-answermode-tool)) | `text` / `required` |
 | `modelCascade.steps[i].maxFormatRetries` | Per-step override of `maxRetries` | task value |
 | `modelCascade.steps[i].timeoutMs` | Per-step timeout; also caps the step model's request `timeout` | `30000` |
 
@@ -255,7 +259,10 @@ Notes on the choices:
 ### In the conversation step
 
 These keys are written to the turn's step. They are **not** part of the public conversation snapshot (the
-`llm:` prefix keeps them out); `returnDetailed=true` shows them, and so does the conversation log.
+`llm:` prefix keeps them out); `returnDetailed=true` shows the `llm:` keys. The `langchain:cascade:trace:*` and
+`audit:*` keys are withheld from that view too; read them from the raw conversation
+(`GET /conversationstore/conversations/{conversationId}`, the conversation's owner or an admin) or, for
+`audit:model_name`, from the audit ledger's `llmDetail.modelName`.
 
 | Key | Meaning |
 | --- | --- |
@@ -310,7 +317,8 @@ All counters are Micrometer meters on `/q/metrics` (names below as Prometheus re
 | `eddi_llm_failure_total` | `class`, `model` | A failed model call by failure class: every failed cascade step, and every failed single-model task |
 | `eddi_llm_recovery_total` | `action`, `outcome`, `trigger` | One count per recovery action. `action` is `repair`, `wrap`, `retry`, `escalate`, `circuit_skip` or `fallback` (`wrap` with outcome `not_wrappable` counts a reply `onInvalidJson: "wrap"` could not rescue) |
 | `eddi_llm_output_total` | `outcome` | `convertToObject` replies by parse outcome (`valid`, `repaired`, `wrapped`, `invalid`, `empty`, `schema_mismatch`) |
-| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`) |
+| `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`, `httpcall_foreach`) |
+| `eddi_llm_answer_tool_total` | `outcome` | `answerMode: "tool"` decisions: `reply`, `text` (answered in text, handed to `onInvalidJson`), `duplicate`, `discarded_by_pause`, `no_reply` (iteration budget spent), `collision_dropped` |
 | `eddi_llm_cancelled_total` | `scope` | An attempt or cascade step abandoned on timeout |
 | `eddi_llm_circuit_total`, `eddi_llm_circuit_skipped_total`, `eddi_llm_circuit_open` | | Circuit breaker transitions, skipped turns and the gauge of open circuits |
 

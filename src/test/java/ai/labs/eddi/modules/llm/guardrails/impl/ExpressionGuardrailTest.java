@@ -66,7 +66,7 @@ class ExpressionGuardrailTest {
     @Test
     void typeAndPhases() {
         assertEquals("expression", guardrail.type());
-        assertEquals(Set.of(GuardrailPhase.OUTPUT), guardrail.phases());
+        assertEquals(Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL), guardrail.phases());
         assertFalse(guardrail.screensHistory());
     }
 

@@ -11,6 +11,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor.TitleSource;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -135,5 +136,36 @@ class ConversationDescriptorTitleWritesTest {
         verify(internalStore).setDescriptor(eq("conv-1"), eq(0), any());
         assertEquals("Renamed", descriptor.getTitle());
         assertTrue(descriptor.isPinned());
+    }
+
+    @Test
+    @DisplayName("ending is a single field update of conversationState — a concurrent rename or pin survives it")
+    void markEndedIsASingleField() throws Exception {
+        doReturn(true).when(internalStore).setFieldsIf(anyString(), any(), isNull(), any());
+
+        assertTrue(store.markEnded("conv-1"));
+
+        verify(internalStore).setFieldsIf(eq("conv-1"), eq(Map.of("conversationState", "ENDED")), isNull(), eq(List.of()));
+        verify(internalStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("fallback rewrite applies ENDED and keeps the title and pin")
+    void markEndedFallback() throws Exception {
+        doThrow(new UnsupportedOperationException()).when(internalStore).setFieldsIf(anyString(), any(), any(), any());
+        IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
+        doReturn(0).when(resourceId).getVersion();
+        doReturn(resourceId).when(internalStore).getCurrentResourceId("conv-1");
+        var descriptor = new ConversationDescriptor();
+        descriptor.setTitle("Mine");
+        descriptor.setPinned(true);
+        doReturn(descriptor).when(internalStore).readDescriptor("conv-1", 0);
+
+        assertTrue(store.markEnded("conv-1"));
+
+        assertEquals(ConversationState.ENDED, descriptor.getConversationState());
+        assertEquals("Mine", descriptor.getTitle());
+        assertTrue(descriptor.isPinned());
+        verify(internalStore).setDescriptor(eq("conv-1"), eq(0), any());
     }
 }

@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "메시지당 최대 {{max}}개의 파일을 첨부할 수 있습니다.",
   "conversation.attach.notAttached": "첨부되지 않음: {{files}}",
   "conversation.attach.done": "{{file}}을(를) 첨부했습니다.",
-  "conversation.attach.doneLarge": "{{file}}을(를) 첨부했지만 너무 커서 직접 보낼 수 없습니다. 어시스턴트가 읽지 못할 수 있습니다.",
+  "conversation.attach.doneLarge": "{{file}}을(를) 첨부했습니다. 메시지에 직접 넣기에는 너무 커서 어시스턴트는 이 파일을 참조로 받습니다.",
   "conversation.attach.removed": "{{file}}을(를) 제거했습니다.",
   "conversation.attach.remove": "{{file}} 제거",
   "conversation.attach.removeNth": "{{file}} 제거({{total}}개 중 {{n}}번째)",

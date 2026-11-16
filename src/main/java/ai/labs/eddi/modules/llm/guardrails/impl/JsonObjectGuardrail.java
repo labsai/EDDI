@@ -46,7 +46,7 @@ public class JsonObjectGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     @Override

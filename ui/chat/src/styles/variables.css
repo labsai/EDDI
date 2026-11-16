@@ -111,7 +111,10 @@
   --chat-agent-text: var(--color-card-foreground);
   --chat-user-bg: var(--chat-accent);
   --chat-input-border: var(--color-input);
-  --chat-input-focus: var(--color-ring);
+  /* The chat accent, not --color-ring: /branding/brand.css writes the
+     Manager's --color-ring (its primary) into this page too, and the focus
+     ring would leave the chat accent it has always matched. */
+  --chat-input-focus: var(--chat-accent);
   --chat-input-text: var(--color-foreground);
   --chat-border: var(--color-border);
   --chat-warning: var(--color-warning);

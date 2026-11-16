@@ -27,7 +27,7 @@ and replace **every character that is not a letter or a digit** with `_`. Both
 eddi.schedule.poll-interval         →  EDDI_SCHEDULE_POLL_INTERVAL
 eddi.vault.master-key               →  EDDI_VAULT_MASTER_KEY
 eddi.openai-compat.api-key          →  EDDI_OPENAI_COMPAT_API_KEY
-eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
+eddi.tools.websearch.brave.api-key  →  EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY
 ```
 
 > **Getting this wrong fails silently.** An unrecognised environment variable is
@@ -37,7 +37,7 @@ eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
 > `scope: "secret"` property setter then fails the whole turn. Nothing in the
 > startup log mentions the variable you set.
 >
-> To check what actually bound, read the value back from the Dev UI at `/q/dev`,
+> To check what actually bound, read the value back from the Dev UI at `/q/dev-ui`,
 > or compare against the spellings already used in `docker-compose.yml`,
 > `.env.example` and `k8s/`.
 
@@ -45,9 +45,11 @@ Quarkus profiles prefix the key: `%dev.eddi.usermemories.deleteOlderThanDays=-1`
 applies in dev mode only.
 
 > **Empty is not the same as unset.** Several properties ship deliberately empty
-> (`eddi.vault.master-key`, `eddi.deployment.env`). An empty value is a real
-> value that disables or defaults the feature; it is not an error, and startup
-> will not complain.
+> (`eddi.vault.master-key`, `eddi.openai-compat.api-key`). An empty value is a real
+> value that disables or defaults the feature; it is not an error. One exception:
+> with `authorization.enabled=true`, the OpenAI-compatible API enabled and an empty
+> `eddi.openai-compat.api-key`, startup fails (`OpenAiStartupGuard`) unless
+> `eddi.openai-compat.http-policy=authenticated` is set or the API is disabled.
 
 ---
 
@@ -136,22 +138,25 @@ contract and the operator runbook are in [Clustering](clustering.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.cluster.node-id` | host name | This replica's id. Must be unique per replica; falls back to `eddi.schedule.instance-id`, then the host name. Helm and the Kustomize overlay set it from the pod name |
+| `eddi.cluster.node-id` | host name | This replica's id. Must be unique per replica; falls back to `eddi.schedule.instance-id` (with a warning — it is often one value for every replica), then the host name. Helm and the Kustomize overlay set it from the pod name. A second live JVM with the same id is detected: it stops announcing itself and its readiness (`cluster-node-identity`) goes DOWN until the other one is gone |
 | `eddi.nats.url` | `nats://localhost:4222` | NATS servers, comma-separated — list every member of the NATS cluster |
 | `eddi.nats.prefix` | `EDDI` | Prefix of every KV bucket, stream and subject (`eddi.<prefix>.…`), so two deployments can share one NATS cluster |
-| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster. A bucket created with another value keeps it (logged as a warning) |
+| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster — with `1`, leases, nonces, audit positions and dead letters live on one server and go with it; EDDI warns at connect when `1` meets three or more servers, or the value exceeds the servers it knows. The Helm chart sets it for the in-chart NATS and from `nats.externalReplicas` (default `3`) for an external one. A bucket created with another value keeps it (logged as a warning) |
 | `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node. While left at the default it follows `eddi.nats.prefix` (`<prefix>_DEAD_LETTERS` for any prefix other than `EDDI`), so deployments with different prefixes on one NATS cluster never share it |
-| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials |
+| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials. Only one authentication method may be set (user/password, token, creds file or nkey seed file); two at once fail the boot |
 | `eddi.nats.token` | — | NATS token authentication |
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
 | `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
-| `eddi.nats.tls.enabled` | `false` | TLS to NATS |
-| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host(s) in `eddi.nats.url` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
-| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
+| `eddi.nats.tls.enabled` | `false` | TLS to every NATS server. TLS is also on for any `tls://` or `wss://` server in `eddi.nats.url`; either way EDDI verifies the certificate and its host name with its own context. `opentls://` (trust any certificate) fails the boot |
+| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host(s) in `eddi.nats.url` (a DNS SAN, with at most one leading wildcard label, or an IP SAN for an IP address). It is checked against the configured names, not the address dialled: jnats dials the resolved IP. `false` trusts any certificate the trust store accepts, for any host |
+| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate: PEM certificates (`.pem`/`.crt`/`.cer`, or any file starting with `-----BEGIN`, such as a cert-manager `ca.crt`; no password), `.p12`/`.pfx` as PKCS12, anything else as the JVM default type. Unset: the JVM's default CAs |
 | `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
 | `eddi.nats.request-timeout` | `2s` | Timeout of every KV, JetStream and RPC call. While disconnected, calls fail at once instead |
 | `eddi.nats.reconnect-wait` | `1s` | Pause between reconnect attempts (plus jitter); reconnects never stop |
+| `eddi.nats.ping-interval` | `5s` | How often the client pings the server. A server lost without a TCP reset is noticed only through missed pings, after about `ping-interval` × `max-pings-out` (the jnats default of 2 min × 2 kept a dead connection "up" for minutes) |
+| `eddi.nats.max-pings-out` | `2` | Unanswered pings after which the connection is declared dead and the client reconnects |
+| `eddi.nats.inbox-prefix` | `_INBOX` | Prefix of this node's reply subjects, one subject token. A deployment that shares a NATS account with another sets its own and names `<prefix>.>` in its user's permissions, so neither can read the other's replies (see [Clustering](clustering.md#runbook)) |
 | `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation. Its holder stops trusting it earlier: `ttl − 2 × heartbeat-interval` after the last renewal NATS acknowledged (10 s by default; when that is less than 1.5 heartbeats, halfway between one heartbeat and the TTL), the running turn is cancelled |
 | `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns (each lease is renewed once 3/4 of an interval has passed since its last renewal; the check runs every quarter interval). At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
@@ -159,13 +164,22 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
-| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
-| `eddi.cluster.degraded.nonces` | `reject` | Signed-envelope replay protection when NATS is down: `reject` refuses signed envelopes with `503` (fail closed); `local` checks node-locally only |
+| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` — **recommended for production** (Helm: `cluster.degradedTurns` in the chart's `eddi:` block; the Kustomize `nats` component sets it) |
+| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — signed-envelope nonces and the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes): `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
+| `eddi.cluster.readiness.require-first-connect` | `true` | Not ready until the node has connected to NATS once since boot: one that never connected cannot take a lease, so every turn it served ran unfenced. A later outage keeps it ready. `false` serves degraded from boot |
+| `eddi.cluster.readiness.fail-on-misconfiguration` | `true` | Not ready while the NATS connection fails for a reason retrying cannot heal — an authentication or authorization error, a TLS failure, client options that could not be built. The cause is logged at ERROR and counted in `eddi_cluster_nats_errors_total{cause}`. `false` restores running degraded (and unfenced) on such a node — once it has connected before. A node that never connected stays not-ready through `require-first-connect` as well, so serving from boot needs **both** set to `false` |
 | `eddi.cluster.events.max-age` | `1h` | Retention of the cluster event stream. A node disconnected for longer, or that sees a gap, flushes every invalidatable cache |
 | `eddi.cluster.activity.max-age` | `24h` | Retention of the cluster activity timeline (`<prefix>_ACTIVITY` stream, at most 10,000 entries) the cluster console shows: nodes joining and getting lost, lease takeovers, fenced writes, degraded mode, deployments and admin actions |
 | `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
+| `eddi.cluster.events.resync-jitter` | `5s` | A cache resync every node runs for the same reason (a cluster-wide request, a gap after an outage, a recreated event stream) starts after a random delay up to this, so the nodes do not reload from the database in the same second. An administrator's resync runs at once on the node that asked. `0s` turns it off |
+| `eddi.cluster.deployments.transient-ttl` | `10m` | Lifetime of the cluster record of a deployment made with `autoDeploy=false` (`<prefix>_DEPLOYMENTS` bucket). Nodes serving it rewrite it before it expires, so it lasts while the cluster runs, through rolling restarts, and is forgotten once no node has served it for this long |
+| `eddi.cluster.gdpr-stop-timeout` | `10s` | How long a GDPR erasure waits for every other node to confirm that it stopped the user's in-flight work (the wait ends early once all of them answered) |
+| `eddi.cluster.signing.key` | — | HMAC key that signs node RPCs, their replies and cluster events; at least 32 characters, the same on every node, kept outside NATS (a Kubernetes Secret, not the NATS credentials). Unset: messages are unsigned and a warning is logged at boot. Also seals the user-id hash a GDPR stop sends. See [Clustering](clustering.md#signed-control-plane) |
+| `eddi.cluster.signing.previous-keys` | — | Comma-separated keys still accepted for verification while a key is rotated |
+| `eddi.cluster.signing.required` | `false` | `true` refuses unsigned cluster messages, and a node without a key refuses to start. Leave `false` until every node signs — that is what lets a node of the previous version take part in a rolling upgrade ([order](clustering.md#rolling-upgrades)) |
+| `eddi.cluster.signing.max-age` | `60s` | How old (or how far ahead of this node's clock) a signed RPC may be, and how long its nonce is remembered against a replay. Events use the event retention instead, since a reconnecting node legitimately receives events that old |
 | `eddi.cluster.local-cache-ttl` | `60s` | Backstop expiry of node-local caches that events invalidate (agent triggers, user conversations), for an event that was lost anyway |
 | `eddi.cluster.model-cache.max-age` | `15m` | A cached chat model is rebuilt at least this often even while busy, so a rotated key reaches it even if the rotation event was lost |
 | `eddi.cluster.hitl-recovery.interval` | `60s` | Period of the leader-elected sweep that recovers conversations a crashed node left `IN_PROGRESS` |
@@ -174,6 +188,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
 | `eddi.coordinator.dead-letter.max-bytes` | `1073741824` | Size cap of the dead-letter stream in bytes (`<= 0`: none). When full, new dead letters are refused — the oldest are kept for the operator — and stay in the node-local ring (audit entries go to the JSONL file) until there is room |
+| `eddi.cluster.archives.max-bytes` | `1073741824` | Size cap of the `<prefix>_ARCHIVES` object store, where exported agent archives are shared between nodes (`<= 0`: none). It shares JetStream storage with the lease bucket, so an unbounded one could block lease creates; an export that does not fit stays on the node that made it. An existing bucket is given the cap on first use |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---
@@ -214,8 +229,9 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
-| `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
+| `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when a `/stream` SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.resume-cancel-on-client-disconnect` | `false` | The same for `POST /agents/{id}/resume/stream` only. Off by default: a resume is a deliberate human decision whose approved tool calls may already have run, so a dropped connection must not discard the turn. `true` cancels (and discards) the resumed turn |
+| `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. The same tick ends a stream whose turn has written an event and then none for `systemRuntime.agentTimeoutInSeconds` plus this interval, with an `error` event of code `turn_timeout`: the watchdog gave up on that turn and its pipeline never returned. `0` turns both off |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream), and one MCP server response to the MCP client. Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
@@ -265,6 +281,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+| `eddi.alerts.max-rules-per-agent` | `50` | Most rules, enabled or not, that may list one agent, and most rules over every agent (at least 1). A save that would pass it is refused with 409 `RULE_LIMIT_REACHED`; only agents the save adds are counted, so rules already over a lowered limit stay editable |
 
 ---
 
@@ -273,6 +290,8 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.rag.in-memory.max-segments` | `50000` | Most segments all `in-memory` knowledge bases may hold together. In-memory stores are never evicted, so this is what bounds their heap use — at 1536 dimensions, 50,000 segments are roughly 300 MB of vectors plus their text. A write past it fails (an ingestion run reports `FAILED` naming this setting) and nothing is evicted to make room. `0` or negative disables the cap — see [rag.md](rag.md#vector-stores) |
+| `eddi.rag.pgvector.pool.max-size` | `10` | Most connections one pgvector connection pool opens. EDDI keeps one pool per PostgreSQL server and login (host, port, database, user, password), shared by every knowledge base that uses it; each starts empty and closes idle connections after two minutes. Applies when a pool is created — see [rag.md](rag.md#pgvector-at-scale) |
+| `eddi.rag.evaluation.max-queries` | `100` | Most golden queries one `POST /ragstore/rags/{id}/evaluate` request may run; more is refused with a 400 naming this setting. Each query costs one embedding call and the request is synchronous, so this bounds both the provider bill and how long one request holds a worker — see [rag.md](rag.md#evaluating-retrieval) |
 
 ---
 
@@ -297,6 +316,7 @@ Full narrative: [agent-testing.md](agent-testing.md).
 
 | Property | Default | Description |
 |---|---|---|
+| `eddi.security.unauthenticated-reminder-interval` | `off` | Repeat the "OIDC is DISABLED" WARN at this interval (e.g. `1h`) when running unauthenticated in production; `off` logs only the startup ERROR. Values under `5m` are throttled to `5m` |
 | `eddi.security.allow-unauthenticated` | `false` | Permits running with OIDC disabled outside dev. `AuthStartupGuard` refuses a production boot without it |
 | `eddi.security.ssrf-protection.enabled` | `false` | **Opt-in.** Validates the fully resolved target of httpCalls, MCP and A2A calls and stops following redirects; also every configured LLM/embedding endpoint, vector-store host and OpenAPI spec location (exempt: `eddi.self.base-url` and the `allowed-hosts` below). Off by default because configured targets legitimately reach internal hosts — **turn it on if any outbound URL is influenced by conversation input.** The cloud instance-metadata service (and the link-local range it lives in) is refused regardless of this setting. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
 | `eddi.security.ssrf-protection.allowed-hosts` | *(unset)* | Internal hosts httpCalls, LLM/embedding endpoints, vector stores and OpenAPI spec locations may still reach with `eddi.security.ssrf-protection.enabled=true`: comma-separated exact `host` or `host:port` entries, case-insensitive, no wildcards (a bare host matches any port). Listed hosts skip the private-address check, never the cloud-metadata check. While protection is **off**, an httpCall whose host or port is a template is refused at deploy time, and production logs a `[SECURITY]` WARN at startup. See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
@@ -309,7 +329,8 @@ Full narrative: [agent-testing.md](agent-testing.md).
 | `eddi.caller-identity.enabled` | `true` | Enables `${caller:token}` / `${caller:userId}` in httpCall headers. See [httpcalls.md](httpcalls.md) |
 | `eddi.caller-identity.author-roles` | `eddi-admin` | Roles allowed to **save or import** a configuration containing `${caller:token}` (httpcalls, mcpcalls and LLM configs, through REST or an import or sync); any one suffices. Others get **403**. `${caller:userId}` is not affected. Applies only with `authorization.enabled=true`. Widen it (e.g. `eddi-admin,eddi-editor`) only if every editor is trusted with the privileges of everyone who chats with their agents. See [httpcalls.md](httpcalls.md#who-may-write-callertoken) |
 | `eddi.caller-identity.self-release.enabled` | `true` | Also releases `${caller:token}` to this deployment's own address (`eddi.self.base-url`), not only to the caller's origin — how the Platform Operator's tools call EDDI as the chatting user. The self address bypasses any reverse proxy in front of EDDI, so set `false` if that proxy enforces restrictions EDDI's own authorization does not. See [httpcalls.md](httpcalls.md) |
-| `eddi.self.base-url` | *(derived: `http://${quarkus.http.host}:${quarkus.http.port}` when `quarkus.http.host` names one specific address, loopback ones such as `127.0.0.5` or `::1` included, an IPv6 literal bracketed as `http://[::1]:7070`; `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty or `localhost` bind)* | The address EDDI can reach **itself** at — what the Platform Operator's generated tools target. A bare `scheme://host[:port]`; a path, query, fragment or credentials make it ignored. Set it only when loopback is wrong (TLS terminated in-process, a mesh-required service name) or when SSRF protection is on — the value must then pass the full SSRF target policy. Required with `quarkus.http.port=0`, where nothing can be derived. Served at `GET /administration/operator/self-url` |
+| `eddi.security.ssrf-protection.dns-timeout` | `5s` | Deadline of **one** DNS lookup made to check an httpCall target, at deploy and on every call. A lookup that exceeds it counts as "does not resolve" — never as allowed: with SSRF protection on the call is refused, and at deploy the host is logged and left to the check at execution. Lookups run on a small bounded pool, so a black-holed name server cannot hold a request or conversation thread for the OS resolver's default (tens of seconds per name server). See [security.md → SSRF Protection](security.md#ssrf-protection--urlvalidationutils) |
+| `eddi.self.base-url` | *(derived: `http://${quarkus.http.host}:${quarkus.http.port}` when `quarkus.http.host` names one specific address, loopback ones such as `127.0.0.5` or `::1` included, an IPv6 literal bracketed as `http://[::1]:7070`; `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty or `localhost` bind)* | The address EDDI can reach **itself** at — what the Platform Operator's generated tools target. A bare `scheme://host[:port]`; a path, query, fragment or credentials make it ignored. Set it only when loopback is wrong (TLS terminated in-process, a mesh-required service name) or when SSRF protection is on — the value must then pass the full SSRF target policy, or, for httpcalls (which have no self exception), have its host on `eddi.security.ssrf-protection.allowed-hosts`. Required with `quarkus.http.port=0`, where nothing can be derived. Served at `GET /administration/operator/self-url` |
 | `eddi.build.commit` | `unknown` | The git commit this build came from, reported by `GET /administration/version` and the `get_eddi_version` MCP tool so an operator can tell which build is running after an upgrade. The Docker image sets it at build time (environment variable `EDDI_BUILD_COMMIT`); set it yourself only for a jar run outside the image. A value that is not a hex commit is reported as `unknown` |
 | `eddi.keycloak.public.url` | *(empty)* | Browser-facing Keycloak URL when it differs from the in-cluster one |
 | `eddi.http.limits.default-max-body-size` | `25M` | Largest request body any endpoint accepts, **except** a knowledge base's file upload (`POST /ragstore/rags/{id}/sources/{sourceId}/files`, matched below `quarkus.http.root-path`), which keeps `quarkus.http.limits.max-body-size` (60 MB). Raised automatically to what an attachment at `eddi.attachments.max-size-bytes` takes base64-encoded in a JSON body (4/3 plus 1 MB — about 27.7 MB for the default 20 MB), so raising the attachment limit never leaves inline attachments refused here — up to `quarkus.http.limits.max-body-size`, which refuses a larger request before any endpoint sees it. An attachment limit above about 44 MB needs more than the 60 MB ceiling once base64-encoded: raise `quarkus.http.limits.max-body-size` with it (a 60 MiB attachment needs `82M`). EDDI logs a WARN at startup naming both settings and the ceiling needed when they disagree. A ZIP import is held to it too: raise it to import a larger archive. Judged on the declared `Content-Length` before the body is read; refusals close the connection. See [rag.md](rag.md#ingestion-sources) |
@@ -339,7 +360,7 @@ Full guide: [workspaces.md](workspaces.md).
 |---|---|---|
 | `eddi.workspaces.enabled` | `false` | Whether workspace access is actually enforced: listings filtered, and reads, writes, deletes and re-sharing each checked against the level the caller holds (`VIEW` / `USE` / `EDIT` / `OWN`). No effect while `authorization.enabled=false` — with no authenticated principal there is nothing to scope to, and startup warns rather than denying everyone everything |
 | `eddi.workspaces.groups-claim` | `groups` | The JWT claim listing the caller's teams. Needs a group-membership protocol mapper on the `eddi-backend` client; without one every user simply gets a personal space and no teams, which is a correct answer rather than a failure |
-| `eddi.workspaces.legacy-visibility` | *(unset → `shared`)* | Who may see resources with no recorded owner: `shared` (everyone, so an upgrade hides nothing) or `admin-only` (only `eddi-admin`, so an operator migrates deliberately and then closes the door). **Changeable at runtime** in the Manager or with `PUT /workspaces/settings`; setting the property *pins* it, and the API then refuses to change it. A pinned value other than the two fails startup rather than picking a policy by guessing |
+| `eddi.workspaces.legacy-visibility` | *(unset → `shared`)* | Who may see resources with no recorded owner: `shared` (everyone may read, use and edit them, so an upgrade hides nothing; deleting, sharing, publishing or moving one needs an administrator until it has an owner) or `admin-only` (only `eddi-admin`, so an operator migrates deliberately and then closes the door). **Changeable at runtime** in the Manager or with `PUT /workspaces/settings`; setting the property *pins* it, and the API then refuses to change it. A pinned value other than the two fails startup rather than picking a policy by guessing |
 | `eddi.workspaces.default-space` | *(empty)* | Where new resources are filed when a request names no space. Empty means the creator's personal space; a Keycloak group name gives a team-first deployment — for that group's members, while everyone else keeps their personal space. **Changeable at runtime** like `legacy-visibility`, and pinned the same way. A request's `X-EDDI-Space` header — the Manager's "Create in" choice — wins over it for that request |
 | `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Records every signed-in user (principal, name, username, email and whether the identity provider verified it, teams) so a share can be addressed by name or **verified** email and resolves to a real account, with autocomplete. Off: shares are taken exactly as typed, as before the directory existed. Unset, it is on exactly when workspaces are enforced. Suggestions start at three characters, and a non-admin is offered only their own teams and their members. Covered by GDPR erasure and export |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share-box suggestions show people's email addresses. Off shows the username instead. Even on, an address is shown only to `eddi-admin` or to somebody who shares a team with that person |
@@ -354,7 +375,7 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
 | `eddi.vault.allow-plaintext-remote-hosts` | `false` | A secret with an `allowedHosts` list is refused for `http://` or `ws://` to any host but loopback, even a listed one. `true` admits plaintext to a **listed** host, for an internal service reached over plain http; never to an unlisted one. See [secrets-vault.md](secrets-vault.md#destination-allow-list-allowedhosts) |
 | `eddi.vault.allow-weak-master-key` | `false` | Opt-out for the startup master-key strength gate, mirroring `eddi.security.allow-unauthenticated`. A weak or publicly-known master key (too short, too low-entropy, or a known demo/placeholder) normally **fails startup in production**; setting this `true` downgrades that to a WARN so a deployment already on a weak key can boot, rotate to a strong key via `POST /secretstore/secrets/admin/rotate-kek`, then remove the flag. Dev/test always warn regardless |
-| `eddi.vault.accept-unbound-legacy-data` | `true` | Whether a value sealed before ciphertexts were bound to their rows (no AAD) still opens through the legacy fallback. Every such open is counted in the `eddi_vault_legacy_unbound_opened_count_total` metric; once that stays at zero after a `POST /secretstore/secrets/{tenantId}/rotate-dek` on every tenant, set this `false` and an unbound value fails like any tampered ciphertext. See [secrets-vault.md](secrets-vault.md) |
+| `eddi.vault.accept-unbound-legacy-data` | `true` | Whether a value sealed before ciphertexts were bound to their rows (no AAD) still opens through the legacy fallback. Every fallback attempt is counted in the cumulative `eddi_vault_legacy_unbound_opened_count_total` metric, including attempts that are then refused; after a `POST /secretstore/secrets/{tenantId}/rotate-dek` on every tenant, once its rate stays at zero (the rotation itself opens legacy rows, so compare against a baseline taken after it), set this `false` and an unbound value fails like any tampered ciphertext. See [secrets-vault.md](secrets-vault.md) |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
 | `eddi.setup.vault-key-reuse` | `checksum` | `checksum` reuses an existing vault entry when the value matches; `never` always writes a new one. A typo fails startup |
@@ -382,7 +403,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds one under `agent-signing-key:{agentId}`. An agent without a key is not looked up again for 60 s, so a key written into the vault by hand is used within a minute |
+| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds the unversioned one under `agent-signing-key:{agentId}`. Generating a key (`POST /agentstore/agents/{id}/signing-keys`) writes versioned keys only, so audit entries carry no agent signature; see [architecture.md](architecture.md#cryptographic-agent-identity). Each node keeps the vault's answer for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
@@ -409,6 +430,7 @@ Full guide: [hitl.md](hitl.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
+| `eddi.hitl.plan-hash.strict` | `false` | Strict plan binding for every agent and group: a human HITL decision on a pause that has a `planHash` must carry it, or it is refused with `400` (the pause is not consumed). Off, a decision without it is accepted and logged; an agent or group can still require it with `hitlConfig.requirePlanHash`. Timeouts and other `system:*` decisions are exempt — see [Plan Binding](hitl.md#plan-binding-planhash) |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
 | `eddi.hitl.tool.journal-retention` | `30d` | How long completed tool-approval journal entries are kept. A claim left `EXECUTING` by a crash inside the tool is kept until its conversation is deleted, so a later approval of the same pause cannot run the call again |
 | `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
@@ -420,7 +442,15 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
-| `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
+| `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution, and cancel group discussions a restart interrupted (single-node startup pass; set `false` if a new JVM can start while the old one still runs against the same database — see [hitl.md](hitl.md#crash-recovery)) |
+| `eddi.hitl.analytics.retention` | `P400D` | How long approval-decision facts (the analytics projection of `hitl.approval` ledger entries) are kept. The ledger itself keeps the evidence. See [hitl-oversight.md](hitl-oversight.md) |
+| `eddi.hitl.analytics.initial-backfill` | `P90D` | How far back the one-time first-start rebuild reads the ledger into approval analytics. `P0D` disables it; `POST /hitl/analytics/rebuild` runs one by hand |
+| `eddi.hitl.samples.enabled` | `true` | Cluster-wide switch for the sampled audit of ungated tool calls (`hitlConfig.oversight.sampledAudit`) |
+| `eddi.hitl.samples.retention` | `P180D` | How long audit samples are kept |
+| `eddi.hitl.autonomy.maintenance-interval` | `PT1H` | How often the `hitl-autonomy-maintenance` system schedule runs (sample expiry, earned-autonomy evaluation, retention); at least 60 s |
+| `eddi.hitl.autonomy.suspension-cache-ttl` | `PT15S` | How long a node trusts its cached list of an agent's suspended categories — the longest a suspension takes to reach every pod |
+| `eddi.hitl.autonomy.max-agents-per-run` | `500` | Deployed agents one maintenance run evaluates (round-robin) |
+| `eddi.hitl.oversight.self-hosts` | *(empty)* | Extra names this deployment is reached by (`host` or `host:port`, comma-separated; a bare host matches any port). An httpcall to one of them, to `eddi.self.base-url`'s origin or to a loopback address carries `X-EDDI-Agent-Call`, so the oversight API can refuse an agent's own write. No other host ever sees the header |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
 
 ---
@@ -436,9 +466,11 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
 | `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
-| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
-| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
-| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
+| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key), `brave` (Brave Search API, $5 per 1,000 requests) or `google` (deprecated — Google shuts the Custom Search JSON API down on 2027-01-01; a startup WARN says so). A paid provider without its key falls back to `duckduckgo`. See [langchain.md → Web Search Tool](langchain.md#web-search-tool) |
+| `eddi.tools.websearch.brave.api-key` | *(empty)* | Required for the `brave` provider. A plain key or a `${vault:...}` reference; sent in the `X-Subscription-Token` header |
+| `eddi.tools.websearch.price-per-call` | *(empty)* | Dollars one `websearch` call costs in cost tracking, replacing the provider default (`0.005` for `brave` and `google`, `0.001` for `duckduckgo`). Empty uses the provider default; a negative or non-numeric value is ignored with a startup WARN. A per-agent `toolPricing` still wins |
+| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the deprecated `google` provider |
+| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID, for the deprecated `google` provider |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
@@ -455,15 +487,25 @@ EDDI's own outbound requests — the built-in tools, the RAG crawler, OAuth toke
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.http.outbound.engine` | `jdk` | The HTTP engine. `jdk` (`java.net.http`) is the only one in this release; any other value fails startup |
+| `eddi.http.outbound.engine` | `jdk` | The default HTTP engine for every profile: `jdk` (`java.net.http`) or `vertx` (the Vert.x core client of the Quarkus Vert.x instance). Any other value fails startup. Set explicitly, it also applies to `apicalls` |
+| `eddi.http.outbound.default.engine` | value of `eddi.http.outbound.engine` | Engine of the `default` profile (tools, crawler, OAuth, attachments) |
+| `eddi.http.outbound.llm-provider.engine` | value of `eddi.http.outbound.engine` | Engine of the `llm-provider` profile |
+| `eddi.http.outbound.apicalls.engine` | `vertx`, unless `eddi.http.outbound.engine` is set | Engine of the `apicalls` profile. `httpcalls.json` does not send through the facade yet, so this has no effect until it does |
+| `eddi.http.outbound.internal-peer.engine` | value of `eddi.http.outbound.engine` | Engine of the `internal-peer` profile (remote agent sync) |
+| `eddi.http.outbound.default.max-connections-per-host` | `50` on `vertx` | Pooled HTTP/1 connections per host and port; a request beyond it waits for one within its deadline. Only for a profile on the `vertx` engine — set on a `jdk` profile, it fails startup, because the JDK client has no such limit |
+| `eddi.http.outbound.llm-provider.max-connections-per-host` | `50` on `vertx` | As above, for `llm-provider` |
+| `eddi.http.outbound.apicalls.max-connections-per-host` | value of `httpClient.maxConnectionPerRoute` (200) | As above, for `apicalls` |
+| `eddi.http.outbound.internal-peer.max-connections-per-host` | `50` on `vertx` | As above, for `internal-peer` |
 | `eddi.http.outbound.default.connect-timeout` | value of `httpClient.connectTimeoutInMillis` (10 s) | TCP + TLS connect timeout per hop, as a duration (`10s`, `500ms`) |
 | `eddi.http.outbound.default.total-timeout` | 3 × connect timeout | Least wall-clock budget for reaching the final response, every redirect hop included. A request whose own timeout is longer gets that instead. The final response body is bounded separately, by 4 × the request's per-hop timeout |
-| `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2` |
+| `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2`. On the `vertx` engine `auto` speaks plain HTTP/1.1 in cleartext (no `h2c` upgrade) |
 | `eddi.http.outbound.default.tls.configuration-name` | *(empty)* | A named Quarkus TLS configuration (`quarkus.tls.<name>.*`) for trust and client certificates. Empty uses the JVM's default trust store. An unknown name fails the first request |
 | `eddi.http.outbound.proxy.host` | *(empty)* | Forward proxy for all of the above. Empty means no proxy |
 | `eddi.http.outbound.proxy.port` | *(none)* | Required when `eddi.http.outbound.proxy.host` is set |
 | `eddi.http.outbound.proxy.non-proxy-hosts` | *(empty)* | `\|`-separated hosts that bypass the proxy; `*` is a wildcard at either end, e.g. `localhost\|*.internal` |
-| `eddi.http.outbound.proxy.credentials` | *(empty)* | `user:password` for the proxy, ideally a `${vault:...}` reference. Answered only to the proxy's challenges, never a target server's. An unresolvable vault reference fails closed. The JDK does not send Basic credentials when tunnelling HTTPS through a proxy unless `jdk.http.auth.tunneling.disabledSchemes` allows it |
+| `eddi.http.outbound.proxy.credentials` | *(empty)* | `user:password` for the proxy, ideally a `${vault:...}` reference. Answered only to the proxy's challenges, never a target server's. An unresolvable vault reference fails closed. The JDK does not send Basic credentials when tunnelling HTTPS through a proxy unless `jdk.http.auth.tunneling.disabledSchemes` allows it; the `vertx` engine does |
+
+On the `vertx` engine, the address each connection actually reached is checked before the request is written ([security.md → DNS rebinding](security.md#dns-rebinding)), and nothing is decompressed: a response comes back as sent, and body caps count the bytes on the wire. The outbound request counter and duration timer carry an `engine` tag ([metrics.md](metrics.md#outbound-http-metrics)).
 
 ---
 
@@ -548,8 +590,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions, and on every text inside a peer tool's parameter schema |
 | `eddi.a2a.tool-schema.max-bytes` | `32768` | As `eddi.mcp.tool-schema.max-bytes`, for A2A peer tools |
 | `eddi.a2a.tool-schema.max-bytes-per-agent` | `524288` (512 KB) | As `eddi.mcp.tool-schema.max-bytes-per-server`, per A2A peer |
-| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
-| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
+| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | How old the timestamp of a signed group-transcript entry may be when its nonce is registered. Despite the prefix, A2A requests are not signed |
+| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | How far ahead of this node's clock that timestamp may be |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
@@ -664,11 +706,17 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.groups.cadence.claim-ttl` | `PT24H` | How long a standing-team cadence claim is held |
 | `eddi.groups.handoff.max-hops` | `3` | How many team boundaries one piece of work may cross by [cross-team handoff](team-handoff.md) before further handoffs are refused as a loop |
 | `eddi.groups.handoff.decline-memory` | `P30D` | How long a declined handoff blocks the same handoff being filed again. An upper limit, not a guarantee: only the 200 most recent decline tombstones are kept per workspace, so older declines can be forgotten sooner |
+| `eddi.groups.team-budget.admin-only-edits` | `true` | Changing a group's `teamBudget` needs `eddi-admin`; `false` lets editors change it (and so raise their own cap). See [Team Budgets](team-budgets.md#who-may-change-what) |
+| `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget of groups that configure a `teamBudget` (a group without one is never metered or gated). `false` is one global kill switch: no metering, no in-run ceiling, and no admission refusals for any team. A discussion already running when it is switched keeps its team ceiling until its current leg ends; its next leg (a resume, continuation or follow-up) drops it |
+| `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
 | `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-agents-per-tenant` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-api-calls-per-minute` | `-1` | `-1` = unlimited |
+| `eddi.tenant.quota.cost-reservation.enabled` | `false` | Hard ceiling: hold a call's maximum cost against the monthly budget before the call and refuse it when it does not fit — see [Tenant Quotas](tenant-quotas.md#hard-ceiling-cost-reservation-opt-in) |
+| `eddi.tenant.quota.cost-reservation.ttl` | `PT10M` | How long a hold that was never released (node died mid-turn) may pin the budget |
+| `eddi.tenant.quota.cost-reservation.default-max-output-tokens` | `4096` | Output-token cap assumed when sizing a hold for a model that sets none |
 | `eddi.tenant.quota.max-monthly-cost-usd` | `-1` | `-1` = unlimited. Priced LLM and tool spend per UTC month; once reached, LLM tasks serve their fallback answer and tool calls are refused. Unpriced models meter $0 — see [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget) |
 | `eddi.variables.cache-ttl-minutes` | `2` | [Global variable](global-variables.md) cache lifetime |
 | `eddi.deployment.env` | `development` *(when unset)* | Value matched by the `deploymentContext` behavior-rule condition, letting one agent behave differently per environment |
@@ -732,6 +780,19 @@ The Helm chart sets each of these from its `eddi.branding.*` values, and mounts 
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
+
+## Other keys EDDI reads
+
+Outside the `eddi.*` namespace, EDDI reads a few keys of its own from `application.properties`:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `httpClient.maxConnectionPerRoute` | `200` | Legacy HTTP client: connections per route |
+| `httpClient.connectTimeoutInMillis` | `10000` | Legacy HTTP client: connect timeout |
+| `httpClient.idleTimeoutInMillis` | `60000` | Legacy HTTP client: idle connection timeout |
+| `httpClient.maxRedirects` | `5` | Legacy HTTP client: redirects followed |
+
+Standard Quarkus keys (for example `quarkus.http.ssl.certificate.*` for TLS on the HTTPS port, `quarkus.http.non-application-root-path`, `quarkus.oidc.*`) are documented by Quarkus and are not repeated here.
 
 ## Migration
 

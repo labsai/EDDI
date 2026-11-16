@@ -47,14 +47,27 @@ function loadHighlight(): Promise<HighlightPlugins> {
 /**
  * A `$$…$$` span — the only math syntax enabled (see rich-math.ts). Single
  * dollars are prices far more often than formulas.
+ *
+ * A scan, not a regex: the lazy `\$\$[\s\S]*?\S[\s\S]*?\$\$` backtracked
+ * polynomially on a long run of `$` (and this runs on every streamed token).
+ * The answer is the same: a non-blank character after the first `$$` and
+ * before the last `$$` that starts after it.
  */
 export function looksLikeMath(text: string): boolean {
-  return /\$\$[\s\S]*?\S[\s\S]*?\$\$/.test(text);
+  const open = text.indexOf("$$");
+  if (open < 0) return false;
+  const close = text.lastIndexOf("$$");
+  if (close < open + 3) return false;
+  return /\S/.test(text.slice(open + 2, close));
 }
 
-/** A fenced code block. Inline code is not highlighted, so it does not count. */
+/**
+ * A fenced code block. Inline code is not highlighted, so it does not count.
+ * The indent excludes `\n`, so it cannot also match the line breaks the start
+ * anchor consumes — `(^|\n)\s*` backtracked polynomially on a run of newlines.
+ */
 export function looksLikeCode(text: string): boolean {
-  return /(^|\n)\s*(```|~~~)/.test(text);
+  return /(?:^|\n)[^\S\n]*(?:```|~~~)/.test(text);
 }
 
 /**

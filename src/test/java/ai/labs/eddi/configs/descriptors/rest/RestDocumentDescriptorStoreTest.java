@@ -12,6 +12,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
 import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -326,6 +329,118 @@ class RestDocumentDescriptorStoreTest {
         instruction.setOperation(PatchInstruction.PatchOperation.SET);
 
         assertThrows(BadRequestException.class, () -> restStore.patchDescriptor("id1", 1, instruction));
+    }
+
+    // --- Security review 2026-11, PATCH side note: the endpoint applies name and
+    // description only, and answered 204 to a document setting anything else — so
+    // `visibility: "private"` was reported as done while nothing changed. ---
+
+    /** The REST mapper's recipe, which ignores unknown properties. */
+    private static final ObjectMapper REST_MAPPER = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+
+    private static PatchInstruction<DocumentDescriptor> setFromJson(String documentJson) throws Exception {
+        var instruction = new PatchInstruction<DocumentDescriptor>();
+        instruction.setOperation(PatchInstruction.PatchOperation.SET);
+        instruction.setDocument(REST_MAPPER.readValue(documentJson, DocumentDescriptor.class));
+        return instruction;
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a document setting visibility is a 400 naming it and the endpoint that changes it, and nothing is written")
+    void patchSettingVisibilityIsRefused() throws Exception {
+        when(documentDescriptorStore.readDescriptor("id1", 1)).thenReturn(new DocumentDescriptor());
+
+        var refused = assertThrows(BadRequestException.class,
+                () -> restStore.patchDescriptor("id1", 1, setFromJson("{\"name\":\"n\",\"visibility\":\"private\"}")));
+
+        assertTrue(refused.getMessage().contains("visibility"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("PUT /descriptorstore/descriptors/{id}/shares/visibility"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("nothing was changed"), refused.getMessage());
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — each sharing field points at its own endpoint, and EDDI-maintained fields are named as such")
+    void patchSettingOtherDeclaredFieldsIsRefused() throws Exception {
+        var refused = assertThrows(BadRequestException.class, () -> restStore.patchDescriptor("id1", 1, setFromJson(
+                "{\"spaceId\":\"team:x\",\"ownerId\":\"bob\",\"grants\":[],\"deleted\":true,\"resource\":\"eddi://ai.labs.agent/x\",\"createdOn\":0}")));
+
+        String message = refused.getMessage();
+        for (String field : List.of("spaceId", "ownerId", "grants", "deleted", "resource", "createdOn")) {
+            assertTrue(message.contains(field), field + " must be named: " + message);
+        }
+        assertTrue(message.contains("/shares/space?spaceId="), message);
+        assertTrue(message.contains("/shares/owner?ownerId="), message);
+        assertTrue(message.contains("maintained by EDDI"), message);
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a key the descriptor does not declare (resourceVisibility) is refused too, quoted and sanitised")
+    void patchSettingAnUnmodeledFieldIsRefused() throws Exception {
+        var refused = assertThrows(BadRequestException.class,
+                () -> restStore.patchDescriptor("id1", 1, setFromJson("{\"name\":\"n\",\"resourceVisibility\":\"private\",\"evil\\nkey\":1}")));
+
+        String message = refused.getMessage();
+        assertTrue(message.contains("'resourceVisibility'"), message);
+        assertTrue(message.contains("'evil_key'"), "a caller's key is echoed only sanitised: " + message);
+        assertFalse(message.contains("\n"), message);
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a body with many unknown keys names ten and counts the rest")
+    void patchEchoIsBounded() {
+        var json = new StringBuilder("{");
+        for (int i = 0; i < 25; i++) {
+            json.append(i == 0 ? "" : ",").append("\"k").append(i).append("\":1");
+        }
+        json.append("}");
+
+        var refused = assertThrows(BadRequestException.class, () -> restStore.patchDescriptor("id1", 1, setFromJson(json.toString())));
+
+        assertTrue(refused.getMessage().contains("'k9'"), refused.getMessage());
+        assertFalse(refused.getMessage().contains("'k10'"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("15 more"), refused.getMessage());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — a DELETE naming another field is refused as well: it would not clear it either")
+    void deletePatchNamingAnotherFieldIsRefused() throws Exception {
+        var instruction = new PatchInstruction<DocumentDescriptor>();
+        instruction.setOperation(PatchInstruction.PatchOperation.DELETE);
+        instruction.setDocument(REST_MAPPER.readValue("{\"grants\":[]}", DocumentDescriptor.class));
+
+        assertThrows(BadRequestException.class, () -> restStore.patchDescriptor("id1", 1, instruction));
+        verify(documentDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("patchDescriptor — what every caller sends still goes through: name and description, deleted:false, read-only fields")
+    void patchOfNameAndDescriptionStillApplies() throws Exception {
+        var existing = new DocumentDescriptor();
+        when(documentDescriptorStore.readDescriptor("id1", 1)).thenReturn(existing);
+
+        // deleted:false is the primitive's default and so indistinguishable from
+        // absent; callerLevel and ownerName are read-only and never deserialised.
+        restStore.patchDescriptor("id1", 1,
+                setFromJson("{\"name\":\"n\",\"description\":\"d\",\"deleted\":false,\"callerLevel\":\"OWN\",\"ownerName\":\"Alice\"}"));
+
+        verify(documentDescriptorStore).setDescriptor("id1", 1, existing);
+        assertEquals("n", existing.getName());
+        assertEquals("d", existing.getDescription());
+    }
+
+    @Test
+    @DisplayName("the keys a descriptor did not declare are never serialised")
+    void unmodeledFieldsAreNotSerialised() throws Exception {
+        var descriptor = REST_MAPPER.readValue("{\"name\":\"n\",\"resourceVisibility\":\"private\"}", DocumentDescriptor.class);
+
+        assertEquals(Set.of("resourceVisibility"), descriptor.unmodeledFields());
+        String written = REST_MAPPER.writeValueAsString(descriptor);
+        assertFalse(written.contains("resourceVisibility"), written);
+        assertFalse(written.contains("unmodeled"), written);
+        assertTrue(new DocumentDescriptor().unmodeledFields().isEmpty());
     }
 
     @Test

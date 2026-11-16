@@ -22,7 +22,9 @@ import java.util.Optional;
 
 /**
  * The grant rule for vault references in a SERVICE judge's
- * {@code service.parameters}.
+ * {@code service.parameters} and in the lesson consolidation model's
+ * {@code lessonConfig.consolidation.parameters}: both are resolved for a group,
+ * not an agent.
  * <p>
  * A group configuration is not an agent, so the deploy-time
  * {@link VaultGrantChecker} has no identity to test a secret's
@@ -97,7 +99,8 @@ public class ServiceJudgeVaultGrants {
                 SecretMetadata metadata = secretProvider.getMetadata(reference);
                 if (metadata == null || !SecretMetadata.grantsAllAgents(metadata.allowedAgents())) {
                     return "references vault secret " + name + ", which is not granted to all agents — a group is not an agent, so "
-                            + "a SERVICE judge may only use a secret whose grant is open to every agent: grant it to all agents "
+                            + "a group-level model (SERVICE judge, lesson consolidation) may only use a secret whose grant is open to "
+                            + "every agent: grant it to all agents "
                             + "(allowedAgents [\"*\"]) first";
                 }
             } catch (SecretNotFoundException e) {

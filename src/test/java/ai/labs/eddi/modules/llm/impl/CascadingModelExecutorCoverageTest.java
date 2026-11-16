@@ -137,6 +137,36 @@ class CascadingModelExecutorCoverageTest {
     }
 
     @Test
+    @DisplayName("answerMode tool with no other tool — every step runs the tool loop, so the reply tool is offered")
+    void answerToolMode_withoutOtherTools_usesOrchestrator() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        cascade.setSteps(List.of(step));
+
+        var task = task();
+        task.setAnswerMode("tool");
+        assertFalse(task.isAgentMode(), "no other tool: not agent mode");
+
+        ChatModel model = modelReturning("legacy answer");
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+
+        AgentOrchestrator orchestrator = mock(AgentOrchestrator.class);
+        when(orchestrator.executeIfToolsEnabled(any(), anyString(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("{\"htmlResponseText\":\"hi\"}", List.of()));
+
+        var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task, memory(null), orchestrator,
+                Map.of(), false, true, false);
+
+        assertEquals("{\"htmlResponseText\":\"hi\"}", result.response());
+        assertNotNull(result.agentResult());
+        verify(model, never()).chat(anyList());
+    }
+
+    @Test
     @DisplayName("agent mode + structured_output — downgraded (no wrapper), evaluated heuristically")
     void agentMode_structuredOutputDowngraded() throws Exception {
         var cascade = new ModelCascadeConfig();

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Palette } from "lucide-react";
 import type { Agent, AgentAppearance, ConversationControls, TitleGeneration } from "@/lib/api/agents";
@@ -11,6 +11,37 @@ const DEFAULT_ON_CONTROLS = ["undo", "redo", "attachments", "rating", "quickRepl
 /** Mirrors the backend's AgentPresentationValidator caps. */
 const MAX_STARTERS = 6;
 const MAX_STARTER_LENGTH = 200;
+
+/** The starters a textarea's text stands for: non-blank lines, capped. Blank lines never reach the draft. */
+function parseStarters(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.slice(0, MAX_STARTER_LENGTH))
+    .filter((line) => line.trim())
+    .slice(0, MAX_STARTERS);
+}
+
+/**
+ * The text with the caps applied, so the textarea never shows what would not be saved:
+ * each line cut at MAX_STARTER_LENGTH. An edit that would make more than MAX_STARTERS
+ * starters returns null and is refused as a whole, so typing or pasting a seventh never
+ * deletes one that is already there. Blank lines stay, so a new line can be started.
+ */
+function capStartersText(text: string): string | null {
+  const lines = text.split("\n").map((raw) => raw.slice(0, MAX_STARTER_LENGTH));
+  return lines.filter((line) => line.trim()).length > MAX_STARTERS ? null : lines.join("\n");
+}
+
+/** The title model's parameters that are specific to one provider. */
+const PROVIDER_CREDENTIAL_PARAMETERS = ["apiKey", "baseUrl"];
+
+/** `parameters` without the provider's key and endpoint; undefined when nothing else is left. */
+function withoutProviderCredentials(parameters: Record<string, string>): Record<string, string> | undefined {
+  const rest = Object.fromEntries(
+    Object.entries(parameters).filter(([key]) => !PROVIDER_CREDENTIAL_PARAMETERS.includes(key)),
+  );
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
 
 /**
  * How the agent presents itself to the people chatting with it — `appearance`,
@@ -36,6 +67,17 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
   const controls: ConversationControls = agent.conversationControls ?? {};
   const titles: TitleGeneration = agent.titleGeneration ?? {};
 
+  // The textarea keeps what was typed, a trailing blank line included, so a new line can be
+  // started; the draft gets only parseStarters(text). When the stored starters change from
+  // outside (another agent or version, a discarded draft), the text follows them.
+  const storedStarters = (appearance.starters ?? []).join("\n");
+  const [startersText, setStartersText] = useState(storedStarters);
+  const [startersSource, setStartersSource] = useState(storedStarters);
+  if (startersSource !== storedStarters) {
+    setStartersSource(storedStarters);
+    if (parseStarters(startersText).join("\n") !== storedStarters) setStartersText(storedStarters);
+  }
+
   function patchAppearance(updates: Partial<AgentAppearance>) {
     onChange({ ...agent, appearance: { ...appearance, ...updates } });
   }
@@ -45,7 +87,14 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
   }
 
   function patchTitles(updates: Partial<TitleGeneration>) {
-    onChange({ ...agent, titleGeneration: { ...titles, ...updates } });
+    const next: TitleGeneration = { ...titles, ...updates };
+    // The endpoint and key belong to the provider they were written for: the title model is
+    // built from these parameters, so keeping them would send the old provider's key (a vault
+    // reference without allowedHosts) to the new one. Every other parameter stays.
+    if ("llmProvider" in updates && updates.llmProvider !== titles.llmProvider && titles.parameters) {
+      next.parameters = withoutProviderCredentials(titles.parameters);
+    }
+    onChange({ ...agent, titleGeneration: next });
   }
 
   const inputClass =
@@ -113,16 +162,13 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
             })}
           </span>
           <textarea
-            value={(appearance.starters ?? []).join("\n")}
-            onChange={(e) =>
-              patchAppearance({
-                starters: e.target.value
-                  .split("\n")
-                  .map((line) => line.slice(0, MAX_STARTER_LENGTH))
-                  .filter((line, index, all) => line.trim() || index === all.length - 1)
-                  .slice(0, MAX_STARTERS),
-              })
-            }
+            value={startersText}
+            onChange={(e) => {
+              const text = capStartersText(e.target.value);
+              if (text === null) return; // a seventh starter: the edit is refused
+              setStartersText(text);
+              patchAppearance({ starters: parseStarters(text) });
+            }}
             rows={3}
             disabled={disabled}
             className={inputClass}
@@ -163,7 +209,7 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
           <p className="text-[10px] text-muted-foreground">
             {t(
               "agentDetail.presentation.rawHtmlNote",
-              "Off by default: HTML in replies is shown as text. Turn it on only for an agent whose replies are meant to contain HTML."
+              "Off by default. The chat widget applies this setting only from the release whose widget reads conversation controls; until then it renders HTML for every agent. Turn it on now for an agent whose replies are meant to contain HTML."
             )}
           </p>
         </fieldset>

@@ -68,14 +68,20 @@ public interface IRestConversationStore {
      * with a 400 — each page counts off the matches before it, so the ceiling
      * bounds what one request can read; narrow the listing with a filter instead.
      * <p>
-     * {@code mine=true} lists only the caller's own conversations, for an admin too
-     * (who otherwise sees everyone's) and without the reviewer exception of an
-     * agent-filtered listing — the owner filter is part of the query on both
-     * MongoDB and PostgreSQL, so a busy deployment does not push the caller's own
-     * conversations off the page. {@code excludeGroupMembers=true} leaves out the
-     * private conversations a group discussion started for its members (those whose
-     * descriptor records a {@code groupConversationId}; member conversations
-     * started before 6.7.0 record none and are still listed).
+     * {@code mine=true} lists only the caller's own conversations, for every caller
+     * — an administrator, who otherwise sees everybody's, and an agent's reviewer
+     * included. A client that picks a conversation to continue (the chat panel's
+     * resume) must ask this, or it continues another user's. The owner is an exact
+     * match on the descriptor's {@code userId}, so a pre-v5.1.6 conversation that
+     * records no owner there is left out. Without a named caller, or with
+     * authorization disabled (a conversation then records the userId the client
+     * passed, not the principal), there is no owner to match and the flag changes
+     * nothing.
+     * <p>
+     * {@code excludeGroupMembers=true} leaves out the private conversations a group
+     * discussion started for its members (those whose descriptor records a
+     * {@code groupConversationId}; member conversations started before 6.7.0
+     * record none and are still listed).
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -88,19 +94,34 @@ public interface IRestConversationStore {
                                                              @QueryParam("agentVersion") Integer agentVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
                                                              @QueryParam("viewState") ConversationDescriptor.ViewState viewState,
-                                                             @Parameter(description = "Only the caller's own conversations, for an admin too (since 6.7.0)")
+                                                             @Parameter(name = "mine", required = false, example = "true",
+                                                                        description = "Only the caller's own conversations, an administrator's included")
                                                              @QueryParam("mine")
                                                              @DefaultValue("false") Boolean mine,
-                                                             @Parameter(description = "Leave out group members' private conversations (since 6.7.0)")
+                                                             @Parameter(name = "excludeGroupMembers", required = false, example = "true",
+                                                                        description = "Leave out group members' private conversations (since 6.7.0)")
                                                              @QueryParam("excludeGroupMembers")
                                                              @DefaultValue("false") Boolean excludeGroupMembers);
 
     /**
-     * The listing without the {@code mine} and {@code excludeGroupMembers} filters,
-     * for in-process callers (the MCP tools). Not a resource method.
+     * The listing with {@code mine} only, member threads included. Not a resource
+     * method.
      */
-    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
-                                                                     String agentId, Integer agentVersion,
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     String conversationId, String agentId, Integer agentVersion,
+                                                                     ConversationState conversationState,
+                                                                     ConversationDescriptor.ViewState viewState, Boolean mine) {
+        return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
+                mine, false);
+    }
+
+    /**
+     * The listing as the caller is entitled to see it ({@code mine=false}): every
+     * conversation for an administrator, their own (and those of agents they
+     * review) for anyone else.
+     */
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     String conversationId, String agentId, Integer agentVersion,
                                                                      ConversationState conversationState,
                                                                      ConversationDescriptor.ViewState viewState) {
         return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,

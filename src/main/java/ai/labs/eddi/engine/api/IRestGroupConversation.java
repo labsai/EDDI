@@ -199,11 +199,9 @@ public interface IRestGroupConversation {
                description = "Re-run all discussion phases with SSE event streaming for progress. "
                        + "Emits round_start (new round marker) followed by the same events as the "
                        + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
-                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL events "
                        + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
                        + "human_input_requested). NOTE: "
-                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
-                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
                        + "'attachments' are NOT supported on a continuation and are rejected with a "
                        + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")
@@ -294,11 +292,20 @@ public interface IRestGroupConversation {
 
     /**
      * Request body for {@link #submitHumanInput}: which HUMAN member is speaking,
-     * and what they said.
+     * and what they said. A tie-break ({@code pendingKind: TIE_BREAK}) answers with
+     * {@code choice} — exactly one of the tied options — and may add
+     * {@code content} as a rationale; every other kind requires {@code content}.
+     * The service enforces the per-kind rule with the same 400.
      */
     record HumanInputRequest(
             @NotBlank(message = "'memberId' must not be blank") String memberId,
-            @NotBlank(message = "'content' must not be blank") String content) {
+            String content,
+            String choice) {
+
+        /** A speaking turn: no {@code choice}. */
+        public HumanInputRequest(String memberId, String content) {
+            this(memberId, content, null);
+        }
     }
 
     @GET

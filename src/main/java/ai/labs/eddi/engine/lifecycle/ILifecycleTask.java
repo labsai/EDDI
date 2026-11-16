@@ -109,18 +109,21 @@ public interface ILifecycleTask {
      * executes. Common types include:
      * </p>
      * <ul>
-     * <li><code>input</code> - Raw input processing</li>
-     * <li><code>input:normalized</code> - Normalized input</li>
      * <li><code>expressions</code> - Parsed expressions</li>
      * <li><code>behavior_rules</code> - Rule evaluation</li>
-     * <li><code>actions</code> - Action triggers</li>
-     * <li><code>httpcalls</code> - External API calls</li>
+     * <li><code>properties</code> - Property setter</li>
+     * <li><code>httpCalls</code> - External API calls</li>
+     * <li><code>mcpCalls</code> - MCP tool calls</li>
+     * <li><code>langchain</code> - LLM task</li>
      * <li><code>output</code> - Response generation</li>
      * </ul>
      *
      * <p>
-     * The type is used by the LifecycleManager to determine execution order and
-     * filter tasks when partial lifecycle execution is needed.
+     * Matching is case-sensitive ({@code "httpcalls"} matches nothing). The type
+     * does not determine execution order, which is the workflow's step order; it
+     * only selects where a partial lifecycle run starts: the LifecycleManager runs
+     * the suffix of the pipeline beginning at the first task whose type starts with
+     * the requested type.
      * </p>
      *
      * @return type identifier of this lifecycle task
@@ -171,8 +174,7 @@ public interface ILifecycleTask {
      *            the conversation memory containing all conversation state and
      *            history
      * @param component
-     *            task-specific configuration/resources loaded from package
-     *            extensions
+     *            the component {@link #configure} returned for this workflow step
      * @throws LifecycleException
      *             if an error occurs during task execution
      */
@@ -183,7 +185,7 @@ public interface ILifecycleTask {
      *
      * <p>
      * This method is called during Agent initialization to set up task-specific
-     * configurations from package extensions. The default implementation returns
+     * configurations from its workflow step. The default implementation returns
      * null, indicating no configuration is needed.
      * </p>
      *
@@ -204,16 +206,16 @@ public interface ILifecycleTask {
      * <pre>{@code
      * @Override
      * public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
-     *     String uri = (String) extensions.get("uri");
-     *     MyConfig config = configStore.load(uri);
-     *     return config;
+     *     URI uri = URI.create(configuration.get("uri").toString());
+     *     return resourceClientLibrary.getResource(uri, MyConfig.class);
      * }
      * }</pre>
      *
      * @param configuration
-     *            task-specific configuration parameters from package config
+     *            the workflow step's {@code config} map (for a resource-backed
+     *            task, its {@code uri})
      * @param extensions
-     *            extension URIs and metadata from package definition
+     *            the workflow step's {@code extensions} map
      * @return configured component object to be passed to execute(), or null if no
      *         configuration needed
      * @throws WorkflowConfigurationException

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.caching;
 
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
 import ai.labs.eddi.engine.cluster.SharedBucket;
@@ -35,7 +36,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack event de-duplication, channel thread locks.
+     * paginated tool responses, Slack event de-duplication, channel thread locks,
+     * and knowledge-base ingestion statuses, which a poll may ask any node for.
      */
     static final Map<String, String> SHARED_BUCKETS = Map.of(
             "nonce-replay-protection", "NONCES",
@@ -46,7 +48,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
             "webhook-event-dedup", "DEDUP",
-            "channel-thread-locks", "CHANNEL");
+            "channel-thread-locks", "CHANNEL",
+            "rag-ingestion-status", "RAG_INGESTION");
 
     /**
      * Node-local copies of database state that the other nodes must drop when this
@@ -64,6 +67,20 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
 
     @Inject
     Instance<IClusterEventBus> clusterEvents;
+
+    /**
+     * Cluster mode: keys an eviction's key hash with the signing key when one is
+     * set (B5) — a plain SHA-256 of a key that contains a user id is reversible by
+     * dictionary for anyone who reads NATS. Field-injected; null in tests.
+     */
+    @Inject
+    Instance<ClusterMessageSigner> clusterSigner;
+
+    /**
+     * Key text to its keyed hash, like {@link #keyHashes}; used only with a signing
+     * key.
+     */
+    private final Cache<String, String> keyedHashes = Caffeine.newBuilder().maximumSize(KEY_HASH_MEMO_SIZE).build();
 
     private final AtomicBoolean subscribed = new AtomicBoolean();
 
@@ -97,7 +114,13 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         String bucket = SHARED_BUCKETS.get(name);
         if (bucket != null) {
             Duration bucketTtl = ttl != null ? ttl : defaultSharedTtl(name);
-            boolean failClosed = "nonce-replay-protection".equals(name)
+            // Replay protection fails closed (B4): signed-envelope nonces, and the webhook
+            // delivery de-duplication, which is the only replay protection of the github
+            // and
+            // generic-hmac schemes — a node-local fallback let a captured delivery be
+            // replayed
+            // against another node while NATS was down.
+            boolean failClosed = ("nonce-replay-protection".equals(name) || WEBHOOK_DEDUP.equals(name))
                     && ClusterConfig.REJECT.equals(clusterConfig.degradedNonces());
             return (ICache<K, V>) sharedWrappers.computeIfAbsent(localKey,
                     k -> new SharedKvCache<>(local, natsSharedState.get().bucket(new SharedBucket(bucket, bucketTtl, -1)), failClosed));
@@ -134,9 +157,23 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         events.onResync(() -> INVALIDATED.forEach(this::clearLocal));
     }
 
+    /** The cache whose shared bucket fails closed with the replay nonces (B4). */
+    static final String WEBHOOK_DEDUP = "webhook-event-dedup";
+
+    private ClusterMessageSigner signer() {
+        return clusterSigner != null && clusterSigner.isResolvable() ? clusterSigner.get() : null;
+    }
+
     @Override
     public void evicted(String cacheName, Object key) {
-        clusterEvents.get().publish(ClusterEvent.CACHE_EVICT, Map.of("cache", cacheName, "key", KvKeys.hashed(String.valueOf(key))));
+        // The memos hold the raw key text (it can carry a user id): forget it with the
+        // entry
+        keyHashes.invalidate(String.valueOf(key));
+        keyedHashes.invalidate(String.valueOf(key));
+        ClusterMessageSigner signer = signer();
+        String keyed = signer == null ? null : signer.keyedHash(String.valueOf(key));
+        clusterEvents.get().publish(ClusterEvent.CACHE_EVICT,
+                Map.of("cache", cacheName, "key", keyed != null ? keyed : KvKeys.hashed(String.valueOf(key))));
     }
 
     @Override
@@ -149,9 +186,19 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         if (cacheName == null || keyHash == null) {
             return;
         }
+        // A keyed hash (k_) comes from a node with the signing key, a plain one (h_)
+        // from a
+        // node without it — an older one during a rolling upgrade: match whichever
+        // arrived.
+        ClusterMessageSigner signer = keyHash.startsWith("k_") ? signer() : null;
+        if (keyHash.startsWith("k_") && (signer == null || !signer.isSigning())) {
+            return; // cannot be matched here; the TTL backstop and resyncs cover it
+        }
         caches.forEach((registered, cache) -> {
             if (registered.equals(cacheName) || registered.startsWith(cacheName + ":ttl=")) {
-                cache.asMap().keySet().removeIf(k -> keyHashes.get(String.valueOf(k), KvKeys::hashed).equals(keyHash));
+                cache.asMap().keySet().removeIf(k -> signer != null
+                        ? keyHash.equals(keyedHashes.get(String.valueOf(k), signer::keyedHash))
+                        : keyHashes.get(String.valueOf(k), KvKeys::hashed).equals(keyHash));
             }
         });
     }
@@ -216,6 +263,12 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // Listed rather than left to the default so the sizing sits on record next
             // to the per-user caches above.
             Map.entry("tenantQuotas", 1_000L),
+
+            // RagIngestionService: a status and at most one warning per ingestion of
+            // the last hour, under two keys. The two caches this replaced held 10_000
+            // each; at the 1_000 default a busy hour would forget ingestions still
+            // being polled, and the poll would answer 404.
+            Map.entry("rag-ingestion-status", 20_000L),
 
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something

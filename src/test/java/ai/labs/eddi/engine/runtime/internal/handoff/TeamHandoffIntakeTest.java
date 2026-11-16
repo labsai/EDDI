@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal.handoff;
 
+import ai.labs.eddi.configs.groups.model.SharedTaskList.Bet;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.HandoffOrigin;
@@ -282,4 +283,31 @@ class TeamHandoffIntakeTest {
         verify(audit, atLeastOnce()).submit(captor.capture());
         return captor.getValue();
     }
+
+    @Test
+    void acceptingAnInboxItemThatIsABetKeepsTheBetOnTheBacklogTask() throws Exception {
+        var bet = Bet.of("h", "m", null, "2026-12-01");
+        workspaces.mutate(GROUP, ws -> ws.getHandoffs().addInbox(new InboxItem("h-bet", "Bet lead", "d", 5, origin("h-bet"), bet)));
+
+        assertEquals(Status.OK, intake.accept(GROUP, "h-bet", null, "reviewer-1").status());
+
+        assertEquals(bet, workspace().getBacklog().getTasks().get(0).bet());
+    }
+
+    @Test
+    void deletingATaskThatOthersWaitOnKeepsTheirBets() throws Exception {
+        var bet = Bet.of("h", "m", null, "2026-12-01");
+        workspaces.mutate(GROUP, ws -> {
+            var first = ws.getBacklog().addTask(new TaskItem("first", "d", 0));
+            var dependent = ws.getBacklog().addTask(new TaskItem("second", "d", 0, bet));
+            ws.getBacklog().updateTask(new TaskItem(dependent.id(), "second", "d", dependent.status(), null, null, List.of(first.id()), null, null,
+                    false, 0, dependent.createdAt(), null, null, bet));
+        });
+        String firstId = workspace().getBacklog().getTasks().get(0).id();
+
+        assertEquals(Status.OK, intake.deleteBacklogTask(GROUP, firstId, "reviewer-1").status());
+
+        assertEquals(bet, workspace().getBacklog().getTasks().get(0).bet(), "rewriting the dependents must not drop the bet");
+    }
+
 }

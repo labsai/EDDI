@@ -39,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -77,6 +78,11 @@ public class ConversationMemory implements IConversationMemory {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
     /**
+     * Cluster mode: whether this turn's lease is lost; see
+     * {@link #setLeaseLostCheck}.
+     */
+    private transient volatile BooleanSupplier leaseLostCheck;
+    /**
      * Optimistic-concurrency revision of the document this memory was loaded from.
      * See {@link IConversationMemory#getRevision()}.
      */
@@ -105,6 +111,7 @@ public class ConversationMemory implements IConversationMemory {
      * In-flight paid calls held against the ceiling; transient, never persisted.
      */
     private final transient SpendReservations spendReservations = new SpendReservations();
+    private final transient TenantCostHolds tenantCostHolds = new TenantCostHolds();
     /** The agent's self-continuation settings; NOT persisted. */
     private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
@@ -595,6 +602,11 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public TenantCostHolds getTenantCostHolds() {
+        return tenantCostHolds;
+    }
+
+    @Override
     public ContinuationPolicy getContinuationPolicy() {
         return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
     }
@@ -662,7 +674,18 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public boolean isCancelled() {
-        return cancelled;
+        return cancelled || isLeaseLost();
+    }
+
+    @Override
+    public void setLeaseLostCheck(BooleanSupplier leaseLost) {
+        this.leaseLostCheck = leaseLost;
+    }
+
+    @Override
+    public boolean isLeaseLost() {
+        BooleanSupplier check = leaseLostCheck;
+        return check != null && check.getAsBoolean();
     }
 
     /**
@@ -703,6 +726,8 @@ public class ConversationMemory implements IConversationMemory {
     private transient PendingToolCallBatch hitlPendingToolCalls;
     // Approval-card context rendered at pause commit; persisted like the bookmark.
     private transient RenderedApprovalContext hitlApprovalContext;
+    // The current pause's plan hash (HitlPlanHash); persisted like the bookmark.
+    private transient String hitlPlanHash;
     // The agent-level tool-approval config, carried onto memory at conversation
     // start; NOT persisted (re-resolved from the pinned agent config each turn).
     private transient ToolApprovalsConfig agentToolApprovalsConfig;
@@ -797,6 +822,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlApprovalContext(RenderedApprovalContext context) {
         this.hitlApprovalContext = context;
+    }
+
+    @Override
+    public String getHitlPlanHash() {
+        return hitlPlanHash;
+    }
+
+    @Override
+    public void setHitlPlanHash(String planHash) {
+        this.hitlPlanHash = planHash;
     }
 
     @Override

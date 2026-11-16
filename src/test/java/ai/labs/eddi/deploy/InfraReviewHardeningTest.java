@@ -116,6 +116,21 @@ class InfraReviewHardeningTest {
         assertTrue(secret.contains("nats.externalPassword is set but nats.externalUsername is not"));
         assertTrue(secret.contains("nats.externalUsername/externalPassword are set but eddi.existingSecret is too"));
         assertTrue(read("helm/eddi/values.yaml").contains("externalAllowPlaintext: false"));
+        // a truthy string such as "false" must not switch the plaintext guard off
+        assertTrue(configmap.contains("(kindIs \"bool\" .Values.nats.externalAllowPlaintext)"));
+    }
+
+    @Test
+    @DisplayName("the Helm chart escapes external NATS credentials before writing them into a properties file")
+    void helmEscapesExternalNatsCredentials() throws IOException {
+        String secret = read("helm/eddi/templates/secret.yaml");
+        assertTrue(secret.contains("eddi.nats.username={{ include \"eddi.propertyValue\" .Values.nats.externalUsername }}"));
+        assertTrue(secret.contains("eddi.nats.password={{ include \"eddi.propertyValue\" "));
+        String helpers = read("helm/eddi/templates/_helpers.tpl");
+        assertTrue(helpers.contains("define \"eddi.propertyValue\""));
+        assertTrue(helpers.contains("replace \"\\\\\" \"\\\\\\\\\""), "backslash is doubled");
+        assertTrue(helpers.contains("replace \"${\" \"$${\""), "a property expression stays literal");
+        assertTrue(helpers.contains("hasPrefix \" \" $v"), "a leading blank survives Properties.load");
     }
 
     @Test

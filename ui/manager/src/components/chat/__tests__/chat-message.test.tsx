@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
@@ -33,7 +33,7 @@ const agentNoContent: ChatMessageType = {
 };
 
 describe("ChatMessage — untrusted HTML", () => {
-  it("never turns raw HTML in bot output into live frames or images", () => {
+  it("never turns raw HTML in bot output into live frames or images", async () => {
     // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
     // with full app-origin access (no CSP). The one markdown renderer
     // (@eddi/conversation) passes HTML only through rehype-sanitize, and turns
@@ -43,10 +43,14 @@ describe("ChatMessage — untrusted HTML", () => {
         message={{
           ...agentMessage,
           content:
-            '**hi**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
+            '**hi** <kbd>parsed</kbd>\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
         }}
       />
     );
+    // The raw-HTML parser is a lazy chunk; until it is in, no HTML renders at
+    // all and the negative checks below would pass without testing anything.
+    // An allowed tag appearing is the sign the sanitised HTML is on screen.
+    await waitFor(() => expect(container.querySelector("kbd")).not.toBeNull());
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
   });
@@ -302,7 +306,29 @@ describe("ChatMessage — designer images", () => {
     renderWithProviders(
       <ChatMessage message={{ ...agentNoContent, images: [{ uri: "https://cdn.example/chart.png", alt: "Chart" }] }} />,
     );
-    expect(screen.getByRole("img", { name: "Chart" })).toHaveAttribute("src", "https://cdn.example/chart.png");
-    expect(screen.queryByText("No response")).toBeNull();
+    const images = within(screen.getByTestId("message-images")).getAllByRole("img");
+    expect(images.map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("message-no-response")).toBeNull();
+  });
+});
+
+describe("ChatMessage — controller notices", () => {
+  it("renders a notice as a system line, not as an agent bubble with a copy button", () => {
+    // makeNotice writes role "agent" + kind "notice": the client talking
+    // ("…was not sent"), which is not something the agent said.
+    const notice: ChatMessageType = {
+      id: "n-1",
+      role: "agent",
+      kind: "notice",
+      content: "**Not** markdown. Your message was not sent.",
+      timestamp: new Date("2024-01-15T10:30:20Z").getTime(),
+    };
+    renderWithProviders(<ChatMessage message={notice} />);
+    const line = screen.getByTestId("chat-notice");
+    expect(line).toHaveAttribute("role", "note");
+    // Plain text: the asterisks stay, no <strong>.
+    expect(line).toHaveTextContent("**Not** markdown. Your message was not sent.");
+    expect(line.querySelector("strong")).toBeNull();
+    expect(screen.queryByTestId("copy-message")).toBeNull();
   });
 });

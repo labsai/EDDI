@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -358,6 +359,12 @@ public class MemberTurnExecutor {
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+        // F6: the team's budget (and, for a board, the budgets it oversees) as template
+        // values.
+        if (groupConversationService != null) {
+            groupConversationService.teamBudgetTemplateValues(gc)
+                    .forEach((key, value) -> context.put(key, new Context(Context.ContextType.object, value)));
+        }
 
         putDynamicAgentContext(gc, context);
 
@@ -451,6 +458,10 @@ public class MemberTurnExecutor {
                     // conversation's smaller one — silently shrinking totalCost and
                     // loosening I1's ceiling.
                     GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
+                    // F6: charge the increase to the root discussion's team.
+                    if (groupConversationService != null) {
+                        groupConversationService.chargeTeamBudget(gc);
+                    }
                     // Outside the ledger's monitor by construction — see announceCost.
                     announceCost(gc, convKey, member.displayName(), listener);
 
@@ -866,9 +877,12 @@ public class MemberTurnExecutor {
             // rather than a read of the current remainder — a design change, not a
             // tweak, and one that would also have to decide how to return unspent
             // slices. Sequential nesting — the common shape — is exact.
-            Double remainingBudget = protocol.maxCostPerDiscussion() == null
+            // F6: the ceiling includes the team's budget, so a nested group cannot
+            // spend past what the root's team has left either.
+            Double bindingCeiling = TeamBudgetCeilings.effective(gc, protocol).ceiling();
+            Double remainingBudget = bindingCeiling == null
                     ? null
-                    : Math.max(0.0, protocol.maxCostPerDiscussion() - gc.getTotalCost());
+                    : Math.max(0.0, bindingCeiling - gc.getTotalCost());
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
@@ -878,6 +892,7 @@ public class MemberTurnExecutor {
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
             // cancelled still counts the real spend its members already incurred.
             GroupCostLedger.accumulateNestedGroupCost(gc, member, subConversation);
+            groupConversationService.chargeTeamBudget(gc);
             // Same key GroupCostLedger derived, so the frame names the child
             // discussion rather than collapsing every child onto the agent id.
             announceCost(gc, subConversation.getId() != null ? member.agentId() + ":" + subConversation.getId() : member.agentId(),

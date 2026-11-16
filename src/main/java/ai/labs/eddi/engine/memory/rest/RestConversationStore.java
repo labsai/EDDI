@@ -312,18 +312,19 @@ public class RestConversationStore implements IRestConversationStore {
         // counted off for earlier pages: those are the caller's own conversations,
         // and charging them would put a caller's older conversations out of reach.
         //
-        // mine=true asks for the caller's own conversations only — an admin's too, so
-        // the owner filter is pushed into the query for them as well, and a row is
-        // admitted only if the caller IS its owner (no admin bypass, no reviewer
-        // exception). excludeGroupMembers=true leaves out the member threads a group
-        // discussion started (their descriptor records a groupConversationId).
-        final boolean ownOnly = Boolean.TRUE.equals(mine);
+        // `mine` narrows any caller, an admin included, to the conversations they own:
+        // a client choosing one to continue must not be handed somebody else's.
+        // Without a named caller, or with authorization disabled, there is no owner
+        // to narrow to, and it does nothing. excludeGroupMembers=true leaves out the
+        // member threads a group discussion started (their descriptor records a
+        // groupConversationId).
         final boolean withoutMembers = Boolean.TRUE.equals(excludeGroupMembers);
-        final boolean seesAllConversations = !ownOnly && conversationAccessGuard.seesAllConversations();
+        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        final String onlyOwner = Boolean.TRUE.equals(mine) ? conversationAccessGuard.ownConversationsOwner() : null;
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
-        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, ownOnly, withoutMembers, agentId, viewState);
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, withoutMembers, agentId, viewState);
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -352,7 +353,7 @@ public class RestConversationStore implements IRestConversationStore {
             do {
                 conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
                 if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)
-                        && searchMatchesNothing(textFilter, restrictions, seesAllConversations)) {
+                        && searchMatchesNothing(textFilter, restrictions, seesAllConversations, onlyOwner)) {
                     // A search that matches no conversation at all lists everything
                     // instead — decided once, on the first descriptor page, so every
                     // result page of the listing agrees on which rows it is paging through.
@@ -372,8 +373,8 @@ public class RestConversationStore implements IRestConversationStore {
                     // after rows nobody examined. A batch may therefore run past the
                     // budget by its own size; its foreign rows cost no conversation read.
                     scannedDescriptors++;
-                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, ownOnly, withoutMembers, agentId,
-                            reviewable);
+                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, onlyOwner, withoutMembers,
+                            agentId, reviewable);
                     if (candidateId != null) {
                         candidates.add(conversationDescriptor);
                         candidateIds.add(candidateId);
@@ -400,7 +401,7 @@ public class RestConversationStore implements IRestConversationStore {
                         orphanedDescriptors++;
                         continue;
                     }
-                    if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, ownOnly, agentId, agentVersion,
+                    if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, agentId, agentVersion,
                             conversationState, viewState)) {
                         continue;
                     }
@@ -455,18 +456,19 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * The checks the descriptor alone can make: it names a conversation, and — for
-     * a non-admin — the owner it records is the caller, or the caller reviews its
-     * agent. Every conversation since v5.1.6 records its owner on the descriptor,
-     * so a foreign row is rejected here without its conversation ever being read; a
-     * legacy row with no recorded owner is decided in {@link #conversationAdmits},
-     * once the conversation supplies its owner. A fully unowned (null both ways)
-     * conversation is listed to administrators only, matching
-     * ConversationAccessGuard.
+     * The checks the descriptor alone can make: it names a conversation, it records
+     * {@code onlyOwner} as its owner when the listing asked for the caller's own
+     * ({@code mine}), and — for a non-admin — the owner it records is the caller,
+     * or the caller reviews its agent. Every conversation since v5.1.6 records its
+     * owner on the descriptor, so a foreign row is rejected here without its
+     * conversation ever being read; a legacy row with no recorded owner is decided
+     * in {@link #conversationAdmits}, once the conversation supplies its owner. A
+     * fully unowned (null both ways) conversation is listed to administrators only,
+     * matching ConversationAccessGuard.
      *
      * @return the conversation's id, or {@code null} when the row is not listed
      */
-    private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, boolean ownOnly,
+    private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, String onlyOwner,
                                        boolean withoutMembers, String agentId, Map<URI, Boolean> reviewable) {
         try {
             URI resourceUri = conversationDescriptor.getResource();
@@ -481,9 +483,12 @@ public class RestConversationStore implements IRestConversationStore {
             }
 
             String recordedOwner = conversationDescriptor.getUserId();
+            if (onlyOwner != null && !onlyOwner.equals(recordedOwner)) {
+                return null;
+            }
             if (!seesAllConversations && !isNullOrEmpty(recordedOwner)
-                    && !admitsOwner(recordedOwner, ownOnly)
-                    && (ownOnly || !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable))) {
+                    && !conversationAccessGuard.canAccessConversation(recordedOwner)
+                    && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
                 return null;
             }
             return conversationResourceId.getId();
@@ -529,7 +534,7 @@ public class RestConversationStore implements IRestConversationStore {
      * to; they stay the authority.
      */
     private boolean conversationAdmits(ConversationDescriptor conversationDescriptor, ConversationListingSummary summary,
-                                       boolean seesAllConversations, boolean ownOnly, String agentId, Integer agentVersion,
+                                       boolean seesAllConversations, String agentId, Integer agentVersion,
                                        ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
         try {
             boolean ownerRecorded = !isNullOrEmpty(conversationDescriptor.getUserId());
@@ -553,7 +558,7 @@ public class RestConversationStore implements IRestConversationStore {
             // Legacy safety net: the descriptor recorded no owner; the conversation
             // has now supplied it (pre-v5.1.6 fallback), so check it.
             if (!seesAllConversations && !ownerRecorded
-                    && !admitsOwner(conversationDescriptor.getUserId(), ownOnly)) {
+                    && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
                 return false;
             }
 
@@ -623,14 +628,17 @@ public class RestConversationStore implements IRestConversationStore {
      * pre-v5.1.6 conversation, whose owner comes from its memory). Not pushed when
      * an agent is named: a reviewer of that agent may list conversations they do
      * not own (see {@link #mayReview}), and the agent group narrows the query
-     * instead.</li>
+     * instead. With {@code onlyOwner} ({@code mine}) it is that owner exactly, for
+     * every caller and with or without an agent.</li>
+     * <li><b>Group members</b> ({@code excludeGroupMembers}) — no recorded
+     * {@code groupConversationId}.</li>
      * <li><b>View state</b> — equality; a descriptor without one never
      * matched.</li>
      * </ul>
      * The conversation state is not here: it is read from the conversation memory,
      * not from the descriptor.
      */
-    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, boolean ownOnly, boolean withoutMembers,
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String onlyOwner, boolean withoutMembers,
                                                    String agentId, ConversationDescriptor.ViewState viewState) {
         List<QueryFilters> restrictions = new LinkedList<>();
         if (!isNullOrEmpty(agentId)) {
@@ -638,10 +646,8 @@ public class RestConversationStore implements IRestConversationStore {
                     new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
                     new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
         }
-        if (isNullOrEmpty(agentId) || ownOnly) {
-            // mine=true has no reviewer exception, so the owner group is pushed even
-            // when an agent is named.
-            restrictions.addAll(ownerScope(seesAllConversations));
+        if (onlyOwner != null || isNullOrEmpty(agentId)) {
+            restrictions.addAll(ownerScope(seesAllConversations, onlyOwner));
         }
         if (withoutMembers) {
             restrictions.add(new QueryFilters(List.of(new QueryFilter(FIELD_GROUP_CONVERSATION_ID, new NotMatching(NOT_BLANK)))));
@@ -650,14 +656,6 @@ public class RestConversationStore implements IRestConversationStore {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
         }
         return restrictions;
-    }
-
-    /**
-     * Whether the owner a row records admits the caller: as its owner, or (without
-     * {@code mine}) by the guard's usual rule, which also admits an admin.
-     */
-    private boolean admitsOwner(String ownerId, boolean ownOnly) {
-        return ownOnly ? conversationAccessGuard.ownsConversation(ownerId) : conversationAccessGuard.canAccessConversation(ownerId);
     }
 
     /**
@@ -675,20 +673,26 @@ public class RestConversationStore implements IRestConversationStore {
      * users' ids, names and agent names. A conversation the caller may not list
      * must not change what the caller is shown.
      */
-    private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions, boolean seesAllConversations)
+    private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions, boolean seesAllConversations,
+                                         String onlyOwner)
             throws ResourceStoreException, ResourceNotFoundException {
         if (restrictions.isEmpty()) {
             return true;
         }
-        return readConversationDescriptors(0, 1, textFilter, ownerScope(seesAllConversations)).isEmpty();
+        return readConversationDescriptors(0, 1, textFilter, ownerScope(seesAllConversations, onlyOwner)).isEmpty();
     }
 
     /**
      * The conversations a caller may list regardless of any listing filter: their
      * own, plus the legacy ones that record no owner (their owner is decided per
-     * row from memory). Empty — everything — for a caller who sees all.
+     * row from memory). Empty — everything — for a caller who sees all. With
+     * {@code onlyOwner} ({@code mine}), exactly that owner's, whoever the caller
+     * is.
      */
-    private List<QueryFilters> ownerScope(boolean seesAllConversations) {
+    private List<QueryFilters> ownerScope(boolean seesAllConversations, String onlyOwner) {
+        if (onlyOwner != null) {
+            return List.of(new QueryFilters(List.of(QueryFilter.exact(FIELD_USER_ID, onlyOwner))));
+        }
         if (seesAllConversations) {
             return List.of();
         }
@@ -940,16 +944,10 @@ public class RestConversationStore implements IRestConversationStore {
      * descriptor was already retired (soft-deleted) or never written is ended on
      * its snapshot alone — that is not an error for a bulk end.
      */
-    private void markDescriptorEnded(String conversationId) throws ResourceStoreException {
-        try {
-            ConversationDescriptor conversationDescriptor = conversationDescriptorStore.readDescriptor(conversationId,
-                    CONVERSATION_DESCRIPTOR_VERSION);
-            if (conversationDescriptor == null) {
-                return;
-            }
-            conversationDescriptor.setConversationState(ConversationState.ENDED);
-            conversationDescriptorStore.setDescriptor(conversationId, CONVERSATION_DESCRIPTOR_VERSION, conversationDescriptor);
-        } catch (ResourceNotFoundException e) {
+    private void markDescriptorEnded(String conversationId) {
+        // A single field update: a whole-descriptor rewrite here could undo an owner's
+        // rename or pin made between its read and its write.
+        if (!conversationDescriptorStore.markEnded(conversationId)) {
             log.debug(format("No live descriptor to mark ENDED for conversation %s", sanitize(conversationId)));
         }
     }
@@ -1369,7 +1367,7 @@ public class RestConversationStore implements IRestConversationStore {
                 ended.add(conversationId);
                 try {
                     markDescriptorEnded(conversationId);
-                } catch (ResourceStoreException | RuntimeException e) {
+                } catch (RuntimeException e) {
                     log.warn(format("Conversation %s was ended but its descriptor could not be marked ENDED: %s",
                             sanitize(conversationId), sanitize(e.getMessage())));
                 }
@@ -1388,21 +1386,8 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
-     * point to — every version, including those only its undo history and redo
-     * cache still reference. Each auto-vaulted write owns its own slot (see
-     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
-     * resolve them any more — left in place they would be orphaned plaintext
-     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
-     * the references live.
-     * <p>
-     * Unlike the attachment cleanup this is not best effort. A snapshot deleted
-     * after a failed vault delete takes the only record of the slot names with it,
-     * and neither a retry nor a GDPR erasure could find them again (a custom tenant
-     * is named only there).
-     *
-     * @return {@code false} when the slots could not be deleted — the caller must
-     *         then keep the conversation so the cleanup can be retried
+     * The injected purge service, or one built from this resource's own stores when
+     * none was injected.
      */
     private ConversationPurgeService purgeService() {
         if (conversationPurgeService != null) {
@@ -1412,6 +1397,22 @@ public class RestConversationStore implements IRestConversationStore {
                 autoVaultedSecretsInstance, attachmentStorageInstance);
     }
 
+    /**
+     * Deletes the vault slots the conversation's {@code scope: "secret"} properties
+     * point to — every version, including those only its undo history and redo
+     * cache still reference. Each auto-vaulted write owns its own slot (see
+     * {@link AutoVaultedSecrets}), so once the conversation is gone nothing can
+     * resolve them any more — left in place they would be orphaned plaintext
+     * credentials. Must run BEFORE the snapshot is deleted: the snapshot is where
+     * the references live.
+     * <p>
+     * This is not best effort. A snapshot deleted after a failed vault delete takes
+     * the only record of the slot names with it, and neither a retry nor a GDPR
+     * erasure could find them again (a custom tenant is named only there).
+     *
+     * @return {@code false} when the slots could not be deleted — the caller must
+     *         then keep the conversation so the cleanup can be retried
+     */
     private boolean deleteAutoVaultedSecretsForConversation(String conversationId) {
         return purgeService().deleteAutoVaultedSecrets(conversationId);
     }
@@ -1448,10 +1449,6 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    /**
-     * Delete any binary attachments stored for a conversation. Silently skips if no
-     * attachment storage is configured.
-     */
     /**
      * Delete the channel mappings ({@code (intent, userId)} rows of
      * {@link IUserConversationStore}) that point at a conversation the retention

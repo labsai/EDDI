@@ -14,7 +14,12 @@ import { waitForBackend } from "./fullstack-helpers";
  * It checks the document direction and that the layout follows it: the
  * composer's attach button sits on the right of the message box in Arabic and
  * on its left in English, and an agent message's avatar is on the right.
+ *
+ * Opened on the backend's port, not the run's `baseURL`: locally that is the
+ * Manager's Vite dev server, which has no `/chat` (as in
+ * ratings-feedback.fullstack.spec.ts).
  */
+const CHAT_BASE = `http://localhost:${Number(process.env.EDDI_PORT) || 7070}`;
 
 async function centreX(locator: Locator): Promise<number> {
   const box = await locator.boundingBox();
@@ -28,7 +33,7 @@ test.describe("Chat UI — right to left", () => {
   });
 
   test("?lang=ar lays the widget out right to left", async ({ page }) => {
-    await page.goto("/chat/demo/showcase?lang=ar");
+    await page.goto(`${CHAT_BASE}/chat/demo/showcase?lang=ar`);
 
     const html = page.locator("html");
     await expect(html).toHaveAttribute("dir", "rtl");
@@ -50,7 +55,7 @@ test.describe("Chat UI — right to left", () => {
   });
 
   test("an explicit ?lang=en stays left to right", async ({ page }) => {
-    await page.goto("/chat/demo/showcase?lang=en");
+    await page.goto(`${CHAT_BASE}/chat/demo/showcase?lang=en`);
 
     await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
     const input = page.getByTestId("chat-input");

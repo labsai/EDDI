@@ -205,6 +205,8 @@ raw map: it reads schema 1 and 2 into `HitlDecisionUnit`s.
 | `timeoutPolicy` | the pause's effective timeout policy |
 | `approvalCategory`, `approvalCategorySource` | the pause's category; `CONFIG` \| `DERIVED` |
 | `reasonCode`, `note` | the decision's |
+| `planHash` | since 6.8: the [plan hash](hitl.md#plan-binding-planhash) of the pause the decision applied to (`v1:` + hex); absent for a pause committed before plan hashing and on a cancellation |
+| `planBinding` | since 6.8: how the decision was bound to that plan — `MATCHED` (it carried the hash), `NOT_PRESENTED` (it carried none; strict binding off), `SYSTEM` (an automated decision), `LEGACY_UNHASHED` (the pause has no hash), `PLAN_HASH_UNAVAILABLE` (the pause's hash could not be computed when it was committed, and strict binding is off; `planHash` is then `"unavailable"`; see [Plan Binding](hitl.md#plan-binding-planhash)) |
 | `groupId`, `phaseName`, `mode`, `pauseReason`, `toolDecisions`, `onRejection` | legacy / context fields |
 | `units` | below |
 

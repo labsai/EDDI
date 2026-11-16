@@ -166,4 +166,26 @@ class TeamHandoffToolTest {
         assertEquals("Seen", outcomes.get(0).subject());
         assertEquals("g-legal", outcomes.get(0).target().groupId());
     }
+
+    @Test
+    void betFieldsRideTheRequestAndAHalfBetFilesNothing() {
+        when(service.file(any())).thenReturn(filed("h-1"));
+        call(tool(2), "{\"team\":\"legal\",\"subject\":\"s\",\"description\":\"d\",\"hypothesis\":\"h\",\"metric\":\"m\","
+                + "\"target\":\">= 3\",\"reviewDate\":\"2026-12-01\"}");
+        var captor = ArgumentCaptor.forClass(HandoffRequest.class);
+        verify(service).file(captor.capture());
+        assertEquals("m", captor.getValue().bet().metric());
+
+        String refused = call(tool(2), "{\"team\":\"legal\",\"subject\":\"s2\",\"description\":\"d\",\"hypothesis\":\"h\"}");
+        assertTrue(refused.contains("Nothing was handed off"), refused);
+        verify(service, org.mockito.Mockito.times(1)).file(any());
+    }
+
+    @Test
+    void theSpecOffersTheOptionalBetFieldsButRequiresNone() {
+        var schema = (JsonObjectSchema) tool(2).specification().parameters();
+        assertTrue(schema.properties().keySet().containsAll(List.of("hypothesis", "metric", "target", "reviewDate")));
+        assertEquals(List.of("team", "subject", "description"), schema.required());
+    }
+
 }

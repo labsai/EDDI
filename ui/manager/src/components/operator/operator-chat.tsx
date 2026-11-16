@@ -24,12 +24,13 @@ import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView }
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/ime";
 import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
+import type { ToolActivity } from "@/lib/tool-labels";
 
 export interface OperatorChatProps {
   messages: ChatMessage[];
   events: PipelineEvent[];
   /** Live tool_call names for the turn in flight — drives "Using {tool}…". */
-  liveToolCalls?: string[];
+  liveToolCalls?: ToolActivity[];
   /** True once the model resumed writing after its last tool call. */
   liveToolsSettled?: boolean;
   /** Completed turns' traces, keyed by the agent message they belong to. */

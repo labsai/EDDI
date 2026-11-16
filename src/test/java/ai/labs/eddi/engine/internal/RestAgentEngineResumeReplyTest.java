@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -162,6 +164,21 @@ class RestAgentEngineResumeReplyTest {
         assertInstanceOf(ForbiddenException.class, captor.getValue());
         verify(conversationService, never()).resumeConversation(anyString(), any(), any());
         verify(conversationService, never()).resumeConversation(anyString(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("resume/stream: an approver-only caller gets 403, nothing is resumed and the pause is not consumed")
+    void approverOnlyCannotStreamTheResume() throws Exception {
+        doThrow(new ForbiddenException("not the owner")).when(ownershipValidator).requireOwnerOrAdminStrict(any(), any(), any());
+        var handler = mock(IConversationService.StreamingResponseHandler.class);
+
+        assertThrows(ForbiddenException.class,
+                () -> engine.resumeStreaming(CONVERSATION_ID, approved(), handler, false, true, List.of()));
+
+        verify(conversationService, never()).resumeConversationStreaming(anyString(), any(), any(), any(), any(), any());
+        verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        verify(conversationService, never()).resumeConversation(anyString(), any(), any(), any(), any(), any());
+        verifyNoInteractions(handler);
     }
 
     @Test

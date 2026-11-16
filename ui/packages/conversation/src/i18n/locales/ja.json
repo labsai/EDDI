@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "1 つのメッセージに添付できるファイルは最大 {{max}} 個です。",
   "conversation.attach.notAttached": "添付されなかったファイル: {{files}}",
   "conversation.attach.done": "{{file}} を添付しました。",
-  "conversation.attach.doneLarge": "{{file}} を添付しましたが、大きすぎるため直接送信できません。アシスタントが読み取れない可能性があります。",
+  "conversation.attach.doneLarge": "{{file}} を添付しました。メッセージに直接含めるには大きすぎるため、アシスタントには参照として渡されます。",
   "conversation.attach.removed": "{{file}} を削除しました。",
   "conversation.attach.remove": "{{file}} を削除",
   "conversation.attach.removeNth": "{{file}} を削除({{total}} 件中 {{n}} 件目)",

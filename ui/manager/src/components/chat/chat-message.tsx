@@ -116,6 +116,11 @@ export const ChatMessage = memo(function ChatMessage({
       .join("\n\n");
   }, [structured, verdict, message.content, t]);
 
+  // The conversation controller's own sentences ("…was not sent", "Undo is not
+  // possible right now") are the client talking, not the agent: a system line,
+  // with no avatar, no markdown and nothing to copy or rate.
+  if (message.kind === "notice") return <ChatNotice content={message.content} />;
+
   return (
     <div
       className={cn(
@@ -187,7 +192,9 @@ export const ChatMessage = memo(function ChatMessage({
               ) : message.isStreaming ? (
                 <TypingIndicator />
               ) : message.images?.length ? null : (
-                <p className="text-muted-foreground italic">{t("groups.noResponse", "No response")}</p>
+                <p className="text-muted-foreground italic" data-testid="message-no-response">
+                  {t("groups.noResponse", "No response")}
+                </p>
               )}
               {message.images?.length ? (
                 /* Images the agent designer put in the output (never ones from
@@ -336,6 +343,27 @@ export function MessageAttachments({ attachments }: { attachments: MessageAttach
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ==================== Notice ====================
+
+/**
+ * A notice written by the client (`kind: "notice"`), not said by the agent.
+ * Shared with the Workforce member thread, whose transcript carries the same
+ * controller notices.
+ */
+export function ChatNotice({ content }: { content: string }) {
+  return (
+    <div
+      role="note"
+      className="flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground"
+      data-testid="chat-notice"
+    >
+      <span className="h-px flex-1 bg-border/60" aria-hidden="true" />
+      <span className="max-w-[min(75%,40rem)] whitespace-pre-wrap text-center">{content}</span>
+      <span className="h-px flex-1 bg-border/60" aria-hidden="true" />
     </div>
   );
 }

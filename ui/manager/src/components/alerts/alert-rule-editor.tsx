@@ -77,7 +77,8 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
     const code = alertErrorCode(err);
     if (code === "ADMIN_SCOPE_REQUIRED") return t("alerts.errorAdminScope", "Only an administrator can watch every agent or several agents.");
     if (code === "WEBHOOK_ADMIN_ONLY") return t("alerts.errorWebhookAdmin", "Only an administrator can add a webhook target.");
-    if (code === "INVALID_RULE" && isApiError(err)) return err.message;
+    // The server's message names the field, or the full agent and the limit.
+    if ((code === "INVALID_RULE" || code === "RULE_LIMIT_REACHED") && isApiError(err)) return err.message;
     return t("alerts.saveFailed", "The rule could not be saved.");
   };
 

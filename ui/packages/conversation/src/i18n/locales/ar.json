@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "يمكنك إرفاق {{max}} ملفات كحد أقصى في كل رسالة.",
   "conversation.attach.notAttached": "لم يُرفق: {{files}}",
   "conversation.attach.done": "تم إرفاق {{file}}.",
-  "conversation.attach.doneLarge": "تم إرفاق {{file}}، لكنه كبير جدًا بحيث لا يمكن إرساله مباشرة — قد لا يتمكن المساعد من قراءته.",
+  "conversation.attach.doneLarge": "تم إرفاق {{file}}. حجمه كبير جدًا لتضمينه في الرسالة نفسها، لذلك يتلقاه المساعد كمرجع بدلًا من ذلك.",
   "conversation.attach.removed": "تمت إزالة {{file}}.",
   "conversation.attach.remove": "إزالة {{file}}",
   "conversation.attach.removeNth": "إزالة {{file}} ({{n}} من {{total}})",

@@ -140,13 +140,18 @@ public class JudgeGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     /** Output only; and a model call per earlier message would be too expensive. */
     @Override
     public boolean screensHistory() {
         return false;
+    }
+
+    @Override
+    public boolean callsModel() {
+        return true;
     }
 
     @Override

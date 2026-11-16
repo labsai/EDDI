@@ -1,7 +1,7 @@
 # Log Administration API
 
 > **Base path:** `/administration/logs`  
-> **Security:** `@RolesAllowed("eddi-admin")` — requires `eddi-admin` role when OIDC is enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`). Bypassed in dev mode (OIDC disabled by default).
+> **Security:** `@RolesAllowed("eddi-admin")` — requires `eddi-admin` role when OIDC is enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`). Not enforced while OIDC is disabled, which is the default in every launch mode.
 
 EDDI provides a built-in log management API for platform-wide observability. It captures all application log records into an in-memory ring buffer and optionally persists them to the database for cross-restart history.
 
@@ -24,7 +24,7 @@ Returns recent log entries from the in-memory ring buffer. These are fast to que
 | `agentId` | string | — | Filter by agent ID |
 | `conversationId` | string | — | Filter by conversation ID |
 | `level` | string | `INFO` | Minimum log level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`). Returns entries **at or above** this level |
-| `limit` | integer | `100` | Maximum number of entries to return |
+| `limit` | integer | `100` | Maximum number of entries to return, newest first. Above `eddi.rest.listing.max-limit` (default `1000`) the request is refused with **400** |
 
 > The ring buffer only ever holds what the log manager actually emits. EDDI sets no
 > `quarkus.log.level` or `quarkus.log.min-level`, so the root logger is `INFO` and no
@@ -76,8 +76,8 @@ Returns historical logs from the database. These survive restarts and work acros
 | `conversationId` | string | — | Filter by conversation ID |
 | `userId` | string | — | Filter by user ID |
 | `instanceId` | string | — | Filter by EDDI instance ID (useful in multi-instance deployments) |
-| `skip` | integer | `0` | Number of entries to skip (pagination) |
-| `limit` | integer | `100` | Maximum entries to return; `0` or a negative value is treated as `100` |
+| `skip` | integer | `0` | Number of entries to skip (pagination). A negative value is refused with **400** |
+| `limit` | integer | `100` | Maximum entries to return; `0` or a negative value is treated as `100`, and a value above `eddi.rest.listing.max-limit` (default `1000`) is refused with **400** — page with `skip` instead |
 
 **Example:**
 
@@ -138,6 +138,8 @@ Returns the unique identifier for this EDDI instance. Useful for correlating log
 
 ## Configuration
 
+Log capture starts at application boot (the log store is created eagerly, and records logged before it is ready are buffered, up to 1000, and replayed into it), so the ring buffer and database history receive startup warnings without anyone having to open the log view first. Neither keeps them forever: the ring buffer holds the last `eddi.logs.buffer-size` entries, so on a busy instance older startup lines are evicted, and database history keeps only what reaches `eddi.logs.db-persist-min-level` (default `WARN`) while `eddi.logs.db-enabled` is `true`, subject to `eddi.logs.db-retention-days`. A live-tail client that connects later is first sent the 50 most recent matching entries from the ring buffer, then new ones, so an older startup warning may not appear there; `GET /administration/logs/history` is the place to look for it.
+
 All logging configuration lives in `application.properties`:
 
 | Property | Default | Description |
@@ -146,7 +148,7 @@ All logging configuration lives in `application.properties`:
 | `eddi.logs.db-enabled` | `true` | Enable/disable database persistence |
 | `eddi.logs.db-flush-interval-seconds` | `5` | How often the async writer flushes to the database |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level to persist to the database (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`) |
-| `eddi.logs.db-retention-days` | `-1` | Delete persisted entries older than this many days; `-1` keeps them |
+| `eddi.logs.db-retention-days` | `-1` | Delete persisted entries older than this many days; `-1` (or `0`) keeps them |
 | `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
 | `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
 
@@ -195,7 +197,7 @@ code that applied it.)
                          └───────────────────────┘
 ```
 
-The `LogCaptureFilter` captures **every** log record (all levels) into the ring buffer for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
+The `LogCaptureFilter` captures every record the logger emits into the ring buffer (INFO and above unless `quarkus.log.min-level` is lowered, see above) for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
 
 ### What the filter rewrites on the way out
 

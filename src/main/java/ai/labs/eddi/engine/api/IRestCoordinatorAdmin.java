@@ -52,12 +52,13 @@ public interface IRestCoordinatorAdmin {
     @POST
     @Path("/dead-letters/{entryId}/replay")
     @Operation(summary = "Replay a dead-letter entry", description = "Submits the failed turn's captured input as a NEW turn of its "
-            + "conversation (context replayOf=<id>), as the calling admin, and removes the entry once the turn was accepted. "
-            + "The failed task itself is never re-run.")
-    @APIResponse(responseCode = "204", description = "Replay submitted; entry removed.")
+            + "conversation (context replayOf=<id>, an Idempotency-Key derived from the entry id), claims the entry so two "
+            + "administrators replay it once, records the replay in the audit ledger, and removes the entry only once the "
+            + "replayed turn commits. The failed task itself is never re-run.")
+    @APIResponse(responseCode = "204", description = "Replay submitted; the entry is removed when the replayed turn commits.")
     @APIResponse(responseCode = "404", description = "Entry not found.")
-    @APIResponse(responseCode = "409", description = "Not replayable (no captured input) or the conversation cannot take a turn; "
-            + "the entry is kept.")
+    @APIResponse(responseCode = "409", description = "Not replayable (no captured input), being replayed right now, or the "
+            + "conversation cannot take a turn; the entry is kept.")
     void replayDeadLetter(@PathParam("entryId") String entryId);
 
     @DELETE

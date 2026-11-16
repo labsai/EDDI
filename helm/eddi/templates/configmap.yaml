@@ -126,18 +126,23 @@
 {{- end }}
 {{- /*
   Credentials for an external NATS must not cross the network in clear text.
-  EDDI's client turns TLS on for a tls:// (or wss://) server URL by itself, with
-  the JVM's default trust store, so the guard is on the URL scheme. It fires for
+  EDDI turns TLS on for a tls:// (or wss://) server URL by itself, verifying the
+  certificate and its host name (the JVM's default CAs, or nats.externalCaSecretName),
+  so the guard is on the URL scheme. It fires for
   the credentials the chart renders (externalUsername/externalPassword); what an
   operator puts in eddi.existingSecret the chart cannot see, and values.yaml asks
   for tls:// there too. nats.externalAllowPlaintext is the explicit opt-out, for a
   transport that is encrypted underneath EDDI (e.g. a service mesh with mTLS).
 */}}
+{{- /* A string is truthy in Helm: "false" from --set-string would switch the guard off. */}}
+{{- if and (not (kindIs "invalid" .Values.nats.externalAllowPlaintext)) (not (kindIs "bool" .Values.nats.externalAllowPlaintext)) }}
+{{- fail "nats.externalAllowPlaintext must be the boolean true or false, not a string (use --set, not --set-string, and no quotes in a values file): a non-empty string is truthy and would switch the plaintext-credentials guard off." }}
+{{- end }}
 {{- if and (not .Values.nats.enabled) .Values.nats.externalUrl (or .Values.nats.externalUsername .Values.nats.externalPassword) (not .Values.nats.externalAllowPlaintext) }}
 {{- range $server := splitList "," .Values.nats.externalUrl }}
 {{- $s := trim $server | lower }}
 {{- if and $s (not (or (hasPrefix "tls://" $s) (hasPrefix "wss://" $s))) }}
-{{- fail (printf "nats.externalUrl lists %q, which is not tls:// or wss://, while nats.externalUsername/externalPassword are set: the credentials would be sent in clear text. Use tls:// for every server (EDDI then connects over TLS with the JVM's default trust store), or set nats.externalAllowPlaintext=true if the transport is encrypted underneath EDDI, e.g. by a service mesh." (trim $server)) }}
+{{- fail (printf "nats.externalUrl lists %q, which is not tls:// or wss://, while nats.externalUsername/externalPassword are set: the credentials would be sent in clear text. Use tls:// for every server (EDDI then connects over TLS and verifies the certificate and its host name; a private CA goes in nats.externalCaSecretName), or set nats.externalAllowPlaintext=true if the transport is encrypted underneath EDDI, e.g. by a service mesh." (trim $server)) }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -187,11 +192,32 @@ data:
   EDDI_MESSAGING_TYPE: {{ include "eddi.messagingType" . | quote }}
   {{- if eq (include "eddi.messagingType" .) "nats" }}
   EDDI_NATS_URL: {{ include "eddi.natsUrl" . | quote }}
+  {{- /*
+    Replication of EDDI's buckets and streams. It used to be rendered for the
+    in-chart NATS only, so an external three-node NATS silently got the code
+    default of 1: leases, nonces, audit positions and dead letters on ONE server.
+  */}}
   {{- if .Values.nats.enabled }}
   EDDI_NATS_REPLICAS: {{ if and .Values.nats.cluster.enabled (ge (int .Values.nats.replicas) 3) }}"3"{{ else }}"1"{{ end }}
   {{- if .Values.nats.tls.enabled }}
   EDDI_NATS_TLS_ENABLED: "true"
   {{- end }}
+  {{- else }}
+  {{- /* `helm upgrade --reuse-values` from an older chart carries no externalReplicas: use the chart default */}}
+  {{- $externalReplicas := 3 }}
+  {{- if hasKey .Values.nats "externalReplicas" }}{{ $externalReplicas = int .Values.nats.externalReplicas }}{{ end }}
+  {{- if or (lt $externalReplicas 1) (gt $externalReplicas 5) }}
+  {{- fail (printf "nats.externalReplicas must be between 1 and 5, got %d" $externalReplicas) }}
+  {{- end }}
+  EDDI_NATS_REPLICAS: {{ $externalReplicas | quote }}
+  {{- end }}
+  {{- with include "eddi.natsCaSecret" . }}
+  {{- /* The CA the deployment mounts (deployment.yaml), as EDDI's NATS trust store. */}}
+  EDDI_NATS_TLS_TRUSTSTORE_PATH: "/etc/eddi/nats-ca/ca.crt"
+  {{- end }}
+  EDDI_NATS_INBOX_PREFIX: {{ include "eddi.natsInboxPrefix" . | quote }}
+  {{- with (.Values.eddi.cluster | default dict).degradedTurns }}
+  EDDI_CLUSTER_DEGRADED_TURNS: {{ . | quote }}
   {{- end }}
   {{- end }}
   {{- with include "eddi.shutdownDrainTimeoutSeconds" . }}

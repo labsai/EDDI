@@ -176,7 +176,7 @@ public class TeamHandoffIntake {
                 }
                 Instant now = clock.instant();
                 Intake decided = edited.isEmpty() ? Intake.APPROVED : Intake.APPROVED_EDITED;
-                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority));
+                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, item.bet()));
                 HandoffOrigin origin = item.origin().reviewed(decided, now);
                 handoffs.putOrigin(task.id(), origin);
                 handoffs.removeInbox(handoffId);
@@ -263,7 +263,7 @@ public class TeamHandoffIntake {
                         other = new TaskItem(other.id(), other.subject(), other.description(), other.status(), other.assignedAgentId(),
                                 other.assignedDisplayName(), deps, other.result(), other.verificationNote(), other.verified(), other.priority(),
                                 other.createdAt(),
-                                other.completedAt(), other.createdByAgentId());
+                                other.completedAt(), other.createdByAgentId(), other.bet());
                     }
                     remaining.add(other);
                 }

@@ -178,8 +178,15 @@ public final class AgentPresentationValidator {
         return value == null || value.isBlank();
     }
 
+    /**
+     * Control and format characters, except ZWNJ (U+200C) and ZWJ (U+200D):
+     * Persian, the Indic scripts and emoji sequences need those two to render
+     * correctly, while the other format characters (bidi overrides such as U+202E)
+     * can disguise a name.
+     */
     private static boolean hasControlCharacter(String value) {
-        return value.codePoints().anyMatch(cp -> Character.getType(cp) == Character.CONTROL || Character.getType(cp) == Character.FORMAT);
+        return value.codePoints().anyMatch(cp -> cp != 0x200C && cp != 0x200D
+                && (Character.getType(cp) == Character.CONTROL || Character.getType(cp) == Character.FORMAT));
     }
 
     private static IllegalArgumentException invalid(String message) {

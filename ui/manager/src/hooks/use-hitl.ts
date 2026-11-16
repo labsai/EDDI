@@ -23,19 +23,11 @@ import {
 } from "@/lib/hitl-pause-binding";
 import { submitHumanInput, type GroupConversation } from "@/lib/api/groups";
 import { patchQueries, restoreQueries } from "@/lib/optimistic";
-import { useChatStore } from "@/hooks/use-chat";
+import { clearChatPause } from "@/hooks/use-chat";
 
-/** Clear a stale pause banner in the (persistent, app-wide) chat store when the
- *  conversation it belongs to is resumed/cancelled from elsewhere (e.g. the
- *  conversation-detail page or the approvals inbox) — the chat panel/drawer
- *  doesn't reload on its own and would otherwise keep showing "awaiting
- *  approval" for an already-resolved conversation. */
-function clearChatPauseIfCurrent(conversationId: string) {
-  const chatState = useChatStore.getState();
-  if (chatState.conversationId === conversationId) {
-    chatState.setPaused(false, null);
-  }
-}
+// A conversation resumed or cancelled here may be the one the (persistent,
+// app-wide) chat panel or drawer is showing. Neither reloads on its own, so
+// clearChatPause unlocks it and tells its controller the pause is over.
 
 // ── Queries ──────────────────────────────────────────────────────
 
@@ -279,7 +271,7 @@ export function useResumeConversation() {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
-      clearChatPauseIfCurrent(conversationId);
+      clearChatPause(conversationId);
     },
     onError: (err, { conversationId }) => {
       // The reviewer is looking at a pause that no longer exists: show them the
@@ -301,7 +293,7 @@ export function useCancelConversation() {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["pending-approvals"] });
       qc.invalidateQueries({ queryKey: ["approval-status", conversationId] });
-      clearChatPauseIfCurrent(conversationId);
+      clearChatPause(conversationId, "EXECUTION_INTERRUPTED");
     },
   });
 }
@@ -380,12 +372,15 @@ export function useSubmitHumanInput() {
       gcId,
       memberId,
       content,
+      choice,
     }: {
       groupId: string;
       gcId: string;
       memberId: string;
       content: string;
-    }) => submitHumanInput(groupId, gcId, memberId, content),
+      /** A tie-break's chosen option. */
+      choice?: string;
+    }) => submitHumanInput(groupId, gcId, memberId, content, choice),
     // The turn is the user's to hand over, so it leaves them at once: the
     // cached conversation moves off AWAITING_HUMAN_INPUT before the request is
     // even answered, and the banner goes with it. (This used to await two

@@ -48,6 +48,9 @@ public class McpToolFilter implements ToolFilter {
             "read_conversation_log", "list_conversations", "get_agent",
             // Build identity (McpVersionTools) — which EDDI is running
             "get_eddi_version",
+            // Model price catalog (McpPricingTools) — read only; prices are a budget
+            // lever an administrator changes in the Manager
+            "read_model_prices",
             // Admin tools
             "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent", "delete_agent",
             "update_agent",
@@ -65,6 +68,10 @@ public class McpToolFilter implements ToolFilter {
             // Group Conversations (Phase 10)
             "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
             "add_team_task", "list_team_backlog",
+            // Cross-team handoff intake (McpTeamHandoffTools) — VIEW/EDIT on the group
+            "list_team_handoffs", "accept_team_handoff", "decline_team_handoff",
+            // Team budgets (McpTeamBudgetTools) — reads as REST, writes admin-only
+            "read_team_budget", "list_team_budgets", "adjust_team_budget", "transfer_team_budget",
             "list_group_templates", "create_group_from_template",
             "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
             // Group Conversation Follow-Ups
@@ -78,6 +85,9 @@ public class McpToolFilter implements ToolFilter {
             "list_pending_approvals", "get_approval_status", "resume_conversation", "cancel_conversation",
             "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
             "approve_group_phase", "cancel_group_discussion", "submit_group_human_input",
+            // HITL oversight reads (McpOversightTools) — analytics, earned-autonomy
+            // states, the sampled-audit count; no oversight write is ever a tool
+            "summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state", "count_pending_audit_samples",
             // Persistent user memory (McpMemoryTools) — role-guarded (viewer read / admin
             // write) + per-user ownership
             "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key",

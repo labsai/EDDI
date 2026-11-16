@@ -60,8 +60,21 @@ public class NatsLeaseManager extends KvLeaseManager {
                     public Optional<String> liveBoot(String nodeId) {
                         return presence.memberStrict(nodeId).map(m -> String.valueOf(m.get("boot")));
                     }
+
+                    @Override
+                    public boolean isDuplicateNode() {
+                        return presence.isDuplicate();
+                    }
+
+                    @Override
+                    public boolean isNodeIdentityConfirmed() {
+                        return presence.isIdentityConfirmed();
+                    }
                 }, meterRegistry);
         connections.onConnected(this::sweepOwnStaleLeases);
+        // The first connect usually comes before presence has settled the id (one
+        // presence interval later), so the sweep is retried when it does.
+        presence.onIdentityConfirmed(this::sweepOwnStaleLeases);
         connections.onShutdown(this::releaseAll);
     }
 

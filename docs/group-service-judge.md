@@ -42,7 +42,7 @@ should stop repeating once it has converged.
 | `llmProvider` | — | Provider type, the same names an LLM task uses (`openai`, `anthropic`, `ollama`, ...). Required together with `llmModel` |
 | `llmModel` | — | The model to ask. Written under the provider's own model key, so `ollama`, `bedrock` and `azure-openai` work as well |
 | `parameters` | `{}` | Extra model-builder parameters: `apiKey`, `baseUrl`, `temperature`, ... |
-| `inputPricePer1M` / `outputPricePer1M` | unpriced | USD per million tokens. Absent or negative means the call books $0, the same rule as `contextWindow` and `stanceSummary` |
+| `inputPricePer1M` / `outputPricePer1M` | catalog, else unpriced | USD per million tokens. A price left out comes from the [price catalog](model-pricing.md) entry for `llmProvider`/`llmModel`; with no price anywhere the call books $0, the same rule as every other model call |
 | `timeoutMs` | `20000` | Per-call timeout. Capped at `60000`; a `timeout` in `parameters` is overridden |
 
 Both modes work: `SIMILARITY` (the default) compares this repeat with the previous one against `threshold`,

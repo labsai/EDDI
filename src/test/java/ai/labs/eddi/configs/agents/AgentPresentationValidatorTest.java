@@ -93,6 +93,16 @@ class AgentPresentationValidatorTest {
     }
 
     @Test
+    @DisplayName("displayName: ZWNJ and ZWJ are allowed (Persian, Indic scripts, emoji sequences)")
+    void displayNameJoiners() {
+        var appearance = new AgentAppearance();
+        appearance.setDisplayName("می‌خواهم");
+        assertDoesNotThrow(() -> AgentPresentationValidator.validate(withAppearance(appearance)));
+        appearance.setDisplayName("👩‍💻 Ava");
+        assertDoesNotThrow(() -> AgentPresentationValidator.validate(withAppearance(appearance)));
+    }
+
+    @Test
     @DisplayName("starters: capped in count and length, none blank")
     void starters() {
         var appearance = new AgentAppearance();

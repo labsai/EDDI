@@ -18,8 +18,10 @@ import type { TaskSectionProps } from "./task-section-props";
 import type { GuardrailConfig, LlmTask } from "./types";
 
 type ListField = "inputGuardrails" | "outputGuardrails";
+/** The phases this section edits; tool-call guardrails have a section of their own. */
+type ListPhase = Exclude<GuardrailPhaseName, "tool_call">;
 
-const FIELD_OF: Record<GuardrailPhaseName, ListField> = {
+const FIELD_OF: Record<ListPhase, ListField> = {
   input: "inputGuardrails",
   output: "outputGuardrails",
 };
@@ -41,7 +43,7 @@ function withList(task: LlmTask, field: ListField, list: GuardrailConfig[]): Llm
  */
 export function TaskGuardrailsSection({ task, onChange, readOnly }: TaskSectionProps) {
   const { t } = useTranslation();
-  const [editing, setEditing] = useState<{ phase: GuardrailPhaseName; index: number } | null>(null);
+  const [editing, setEditing] = useState<{ phase: ListPhase; index: number } | null>(null);
   const count = (task.inputGuardrails?.length ?? 0) + (task.outputGuardrails?.length ?? 0);
 
   const editedList = editing ? task[FIELD_OF[editing.phase]] : undefined;
@@ -91,8 +93,8 @@ function GuardrailList({
   readOnly,
   onEdit,
 }: TaskSectionProps & {
-  phase: GuardrailPhaseName;
-  onEdit: (target: { phase: GuardrailPhaseName; index: number }) => void;
+  phase: ListPhase;
+  onEdit: (target: { phase: ListPhase; index: number }) => void;
 }) {
   const { t } = useTranslation();
   const selectId = useId();

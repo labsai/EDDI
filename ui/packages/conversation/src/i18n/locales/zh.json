@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "每条消息最多可附加 {{max}} 个文件。",
   "conversation.attach.notAttached": "未附加：{{files}}",
   "conversation.attach.done": "已附加 {{file}}。",
-  "conversation.attach.doneLarge": "已附加 {{file}}，但它过大，无法直接发送——助手可能无法读取。",
+  "conversation.attach.doneLarge": "已附加 {{file}}。文件过大，无法直接放入消息中，因此助手会以引用的形式收到它。",
   "conversation.attach.removed": "已移除 {{file}}。",
   "conversation.attach.remove": "移除 {{file}}",
   "conversation.attach.removeNth": "移除 {{file}}（第 {{n}} 个，共 {{total}} 个）",

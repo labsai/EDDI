@@ -224,6 +224,24 @@ public interface IGroupConversationService {
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
     /**
+     * As {@link #submitHumanInput(String, String, String, String)}, with the
+     * {@code choice} a tie-break answer carries ({@code tiePolicy: HUMAN_DECIDES}).
+     * A tie-break needs {@code choice} — exactly one of the tied options — and
+     * takes {@code content} as an optional rationale; every other pending kind
+     * needs {@code content} and ignores {@code choice}.
+     *
+     * @throws IllegalArgumentException
+     *             as the four-argument form, or a {@code choice} that names no
+     *             single option — maps to HTTP 400
+     */
+    default GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String choice,
+                                               String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        return submitHumanInput(groupConversationId, memberId, content, submittedBy);
+    }
+
+    /**
      * SKIP_TURN resolution of an expired human turn (I6): records a SKIPPED entry
      * for the pending member and resumes the discussion. Called by the HITL timeout
      * scheduler. An already-resolved turn — or, with a non-null
@@ -325,6 +343,20 @@ public interface IGroupConversationService {
      */
     class GroupPauseMismatchException extends GroupDiscussionException {
         public GroupPauseMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A group HITL decision named a plan ({@code HitlDecision.planHash}) that is
+     * not the current pause's: what is awaiting approval is not what the reviewer
+     * saw. A {@link GroupPauseMismatchException}, so it is a conflict everywhere a
+     * changed pause is.
+     *
+     * @since 6.8.0
+     */
+    class GroupPlanMismatchException extends GroupPauseMismatchException {
+        public GroupPlanMismatchException(String message) {
             super(message);
         }
     }

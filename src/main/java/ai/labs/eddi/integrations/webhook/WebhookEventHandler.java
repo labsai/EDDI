@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
@@ -118,6 +119,11 @@ public class WebhookEventHandler {
 
     /** Metric outcome of a delivery refused for replay-protection capacity. */
     static final String OUTCOME_CAPACITY = "refused_capacity";
+    /**
+     * Refused: the cluster-wide de-duplication could not be checked (NATS
+     * unreachable).
+     */
+    static final String OUTCOME_DEDUP_UNAVAILABLE = "refused_dedup_unavailable";
 
     /**
      * Length of the per-integration delivery window, in one-minute buckets: one
@@ -387,6 +393,25 @@ public class WebhookEventHandler {
      */
     public Dispatch dispatch(String integrationId, ChannelIntegrationConfiguration integration,
                              WebhookChannelSettings settings, InboundEvent event, String replayKey) {
+        try {
+            return dispatchDeduplicated(integrationId, integration, settings, event, replayKey);
+        } catch (ClusterUnavailableException e) {
+            // Cluster mode, NATS unreachable, eddi.cluster.degraded.nonces=reject (B4): the
+            // de-duplication is the replay protection of the github and generic-hmac
+            // schemes,
+            // and it cannot be checked cluster-wide now. Refused retryably — the sender
+            // retries — rather than checked on this node only, where a captured delivery
+            // could
+            // be replayed against another node.
+            count(OUTCOME_DEDUP_UNAVAILABLE);
+            LOGGER.warnf("Webhook event for integration %s refused: delivery de-duplication unavailable (NATS unreachable)",
+                    sanitize(integrationId));
+            return Dispatch.error(503, "Temporarily unable to accept events — retry later.");
+        }
+    }
+
+    private Dispatch dispatchDeduplicated(String integrationId, ChannelIntegrationConfiguration integration,
+                                          WebhookChannelSettings settings, InboundEvent event, String replayKey) {
         // Two keys, either of which makes a delivery a repeat: the sender's event id
         // (a legitimate redelivery keeps it) and the canonical replay key of what
         // was signed (a captured request replayed under a NEW, unsigned id keeps
@@ -415,7 +440,13 @@ public class WebhookEventHandler {
         }
         List<String> reserved = new ArrayList<>(keys.size());
         for (String key : keys) {
-            String previous = dedup.putIfAbsent(key, IN_FLIGHT);
+            String previous;
+            try {
+                previous = dedup.putIfAbsent(key, IN_FLIGHT);
+            } catch (ClusterUnavailableException e) {
+                releaseQuietly(reserved);
+                throw e;
+            }
             if (previous == null) {
                 reserved.add(key);
                 continue;
@@ -444,14 +475,20 @@ public class WebhookEventHandler {
             outcome = refusal(integrationId, e);
         }
         for (String key : reserved) {
-            if (outcome.status() == 202) {
-                dedup.put(key, outcome.groupConversationId() != null
-                        ? "group:" + outcome.groupConversationId()
-                        : outcome.conversationId());
-            } else {
-                // A refused event was not processed: its retry must be, so the
-                // reservation is released rather than remembered.
-                dedup.remove(key, IN_FLIGHT);
+            try {
+                if (outcome.status() == 202) {
+                    dedup.put(key, outcome.groupConversationId() != null
+                            ? "group:" + outcome.groupConversationId()
+                            : outcome.conversationId());
+                } else {
+                    // A refused event was not processed: its retry must be, so the
+                    // reservation is released rather than remembered.
+                    dedup.remove(key, IN_FLIGHT);
+                }
+            } catch (ClusterUnavailableException e) {
+                // NATS dropped while the event was processed: the outcome stands, and the
+                // IN_FLIGHT reservation expires with the bucket's TTL.
+                LOGGER.debugf("Webhook de-duplication record not updated: %s", e.getMessage());
             }
         }
         if (outcome.status() != 202) {
@@ -683,6 +720,17 @@ public class WebhookEventHandler {
      */
     public void countRefused(int status) {
         count("refused_" + status);
+    }
+
+    /** Gives back reservations; best effort, NATS may be gone. */
+    private void releaseQuietly(List<String> reserved) {
+        for (String own : reserved) {
+            try {
+                dedup.remove(own, IN_FLIGHT);
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Webhook de-duplication reservation not released: %s", e.getMessage());
+            }
+        }
     }
 
     private void count(String outcome) {

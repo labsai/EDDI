@@ -20,6 +20,8 @@ conversation, transcript, memory entry or document is not a yes.
 | `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories` | Changes what agents know about a person | Deletions: none |
 | `delete_user_data` | GDPR erasure across all stores; needs `confirmation` `CONFIRM` | **None** |
 | `resume_conversation`, `approve_group_phase`, `cancel_conversation`, `cancel_group_discussion` | A decision attributed to the signed-in account | None |
+| `accept_team_handoff`, `decline_team_handoff` | An intake decision attributed to the signed-in account; a decline blocks the same handoff for 30 days | Accepted: delete the backlog task (REST or Manager). Declined: none |
+| `adjust_team_budget`, `transfer_team_budget` | Changes what a team may spend this month; kept in the audit ledger with the reason | Set the cap back, or transfer back |
 
 ## GDPR results are often partial — say so
 

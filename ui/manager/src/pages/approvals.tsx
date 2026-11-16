@@ -50,6 +50,7 @@ import type {
   PendingToolCallView,
 } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /**
  * The redacted-preview render prop shared by every `ApprovalBanner` consumer.
@@ -140,6 +141,10 @@ function ApprovalQueueRow({
   const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
   /** I6: a member's turn, not a decision anyone takes from this queue. */
   const isHumanTurn = item.pauseType === "HUMAN_TURN";
+  /** A tied vote waiting for its decider (tiePolicy HUMAN_DECIDES) — still a human turn. */
+  const isTieBreak = isHumanTurn && item.pendingKind === "TIE_BREAK";
+  /** A task-force task assigned to a HUMAN member. */
+  const isHumanTask = isHumanTurn && item.pendingKind === "TASK";
   /** A group phase pause: decided here, and reviewable in place like a tool call. */
   const isGroupDecision = !!item.groupId && !isHumanTurn;
   // A HUMAN turn names its member by id; the group's roster has the name a
@@ -260,18 +265,38 @@ function ApprovalQueueRow({
               data-testid={`human-turn-badge-${item.conversationId}`}
             >
               <UserCheck className="h-3 w-3" />{" "}
-              {t("hitl.humanTurn", "Member's turn")}
+              {isTieBreak
+                ? t("groupTieBreak.inboxBadge", "Tie-break")
+                : isHumanTask
+                  ? t("groupHumanTasks.inboxBadge", "Task")
+                  : t("hitl.humanTurn", "Member's turn")}
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
-            ? item.toolNames.join(", ")
+            ? Array.from(new Set(item.toolNames.map((name) => humanizeToolName(name) || name))).join(", ")
             : isHumanTurn
-              ? t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
-                  member:
-                    turnMemberName ||
-                    item.pendingMemberId ||
-                    t("hitl.humanTurnMemberFallback", "a member"),
-                })
+              ? (
+                  <span
+                    data-testid={`human-turn-reason-${item.conversationId}`}
+                    data-reason-kind={isTieBreak ? "tie-break" : isHumanTask ? "task" : "turn"}
+                  >
+                    {isTieBreak
+                      ? // Cause-neutral: a quorum failure pauses with the same pendingKind.
+                        t("groupTieBreak.inboxReason", "Waiting on {{member}} to decide the vote", {
+                          member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                        })
+                      : isHumanTask
+                        ? t("groupHumanTasks.inboxReason", "Waiting on {{member}} to finish an assigned task", {
+                            member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                          })
+                        : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                            member:
+                              turnMemberName ||
+                              item.pendingMemberId ||
+                              t("hitl.humanTurnMemberFallback", "a member"),
+                          })}
+                  </span>
+                )
               : item.pauseReason || "—"}
         </td>
         <td className="px-4 py-3 text-muted-foreground text-xs max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pausedAt", "Paused")}>
@@ -730,7 +755,8 @@ export function ApprovalsPage() {
       nameFor(a)?.toLowerCase().includes(q) ||
       a.pendingMemberId?.toLowerCase().includes(q) ||
       a.pauseReason?.toLowerCase().includes(q) ||
-      a.toolNames?.some((n) => n.toLowerCase().includes(q)) ||
+      // The list shows tools in words, so a search for what is on screen must match too.
+      a.toolNames?.some((n) => n.toLowerCase().includes(q) || humanizeToolName(n).toLowerCase().includes(q)) ||
       a.userId?.toLowerCase().includes(q)
     );
   });

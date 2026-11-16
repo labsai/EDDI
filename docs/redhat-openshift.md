@@ -51,7 +51,7 @@ The EDDI container image is submitted to Red Hat for container certification for
 | **Required labels**    | `name`, `vendor`, `version`, `release`, `summary`, `description`                               |
 | **OpenShift labels**   | `io.k8s.display-name`, `io.k8s.description`, `io.openshift.tags`                               |
 | **Health check**       | Docker-native `HEALTHCHECK` on `/q/health/ready`                                               |
-| **Security scanning**  | Trivy image scan in CI blocks push on OS-level CVEs                                            |
+| **Security scanning**  | Trivy image scan in CI blocks the push on CRITICAL/HIGH CVEs that have a fix (`ignore-unfixed`; exceptions in `.trivyignore`) |
 
 ### Automated Certification Workflow
 
@@ -85,8 +85,6 @@ Every push to `main` or release tag that produces a Docker image is validated by
 | `REDHAT_REGISTRY_KEY`      | The project's registry key (the robot account's password)                                    |
 | `DOCKER_USERNAME`          | Docker Hub username (used by `ci.yml`, not by certification)                                 |
 | `DOCKER_PASSWORD`          | Docker Hub password (used by `ci.yml`, not by certification)                                 |
-| `QUAY_USERNAME`          | Quay.io robot account (optional, for Quay.io publishing) |
-| `QUAY_PASSWORD`          | Quay.io password (optional)                              |
 
 ---
 
@@ -148,7 +146,7 @@ spec:
 The operator creates a route automatically. With the CR above, the route would be:
 `eddi-route-$NAMESPACE.apps.ocp.example.com`
 
-> **Note**: The EDDI operator is being updated for v6 to support both MongoDB and PostgreSQL storage backends. Stay tuned for the updated operator release.
+> **Note**: The operator and the CR above describe the MongoDB-only layout and are not verified against the current 6.x release. For OpenShift on 6.x, prefer the Helm chart (see [Kubernetes](kubernetes.md)), which supports both MongoDB and PostgreSQL.
 
 ---
 
@@ -193,7 +191,7 @@ docker run -d \
   -e EDDI_VAULT_MASTER_KEY="$EDDI_VAULT_MASTER_KEY" \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
-  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend 
+  -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
   labsai/eddi:6.6.0
 ```
 

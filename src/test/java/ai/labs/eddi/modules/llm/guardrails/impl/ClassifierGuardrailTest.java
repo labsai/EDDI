@@ -353,6 +353,27 @@ class ClassifierGuardrailTest {
         assertEquals("the answer", ((AiMessage) sent.get(1)).text());
     }
 
+    /**
+     * Tool-call arguments are text the model produced, exactly like an answer. With
+     * a {@code promptTemplate} they fill {@code {output}} (and the user's message
+     * {@code {input}}); without one they used to go out as a plain user message, so
+     * the classifier judged the model's own tool call as if the user had typed it.
+     * Both layouts now treat every non-input phase as model output.
+     */
+    @Test
+    @DisplayName("no promptTemplate, tool-call phase: question + assistant turn, as with a template")
+    void nativeConversationToolCall() throws Exception {
+        StubModel model = install(StubModel.answering("No"));
+
+        classifier.evaluate("{\"body\":\"post this\"}", context(GuardrailPhase.TOOL_CALL, params(),
+                List.of(UserMessage.from("the question")), null, null));
+
+        List<ChatMessage> sent = model.requests.get(0).messages();
+        assertEquals(2, sent.size());
+        assertEquals("the question", ((UserMessage) sent.get(0)).singleText());
+        assertEquals("{\"body\":\"post this\"}", ((AiMessage) sent.get(1)).text());
+    }
+
     @Test
     @DisplayName("an unsupported provider is unavailable")
     void unsupportedProvider() throws Exception {
@@ -478,7 +499,7 @@ class ClassifierGuardrailTest {
     @DisplayName("history is not screened by the classifier")
     void noHistory() {
         assertFalse(classifier.screensHistory());
-        assertEquals(Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT), classifier.phases());
+        assertEquals(Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL), classifier.phases());
     }
 
     // === through the GuardrailService: failMode ===

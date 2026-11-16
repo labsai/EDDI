@@ -152,6 +152,13 @@ class ConversationTitlesTest {
         }
 
         @Test
+        @DisplayName("ZWNJ and ZWJ survive (Persian, Indic scripts, emoji sequences)")
+        void joinersSurvive() {
+            assertEquals("می‌خواهم", ConversationTitles.normalize("می‌خواهم"));
+            assertEquals("👩‍💻 help", ConversationTitles.normalize("👩‍💻 help"));
+        }
+
+        @Test
         @DisplayName("a long message is cut at a word with an ellipsis")
         void truncateAtWord() {
             String title = ConversationTitles.deriveTitle("Please summarize the quarterly report for the board meeting next week", 30);

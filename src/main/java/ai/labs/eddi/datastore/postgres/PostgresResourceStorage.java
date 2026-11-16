@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.ISubstringSearchIndexing;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jboss.logging.Logger;
 import org.postgresql.PGStatement;
 
@@ -19,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -405,12 +406,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         if (!PostgresIds.isStorableId(id)) {
             return false;
         }
-        String patch;
-        try {
-            patch = jsonSerialization.serialize(new LinkedHashMap<>(fields));
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to serialize fields " + fields.keySet(), e);
-        }
+        String patch = toJsonPatch(fields);
         List<String> allowed = allowedGuardValues == null ? List.of() : List.copyOf(allowedGuardValues);
         // One UPDATE on the live row: || merges only these keys at the top level, and
         // the guard is part of the same statement, so the check and the write are
@@ -439,6 +435,27 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         } catch (SQLException e) {
             throw new RuntimeException("Failed to set fields " + fields.keySet(), e);
         }
+    }
+
+    /**
+     * The {@code ||} operand for {@link #setFieldsIf}, built as a tree rather than
+     * through the persistence mapper: that mapper omits null map entries, so a
+     * field set to null would drop out of the patch and keep its old value, while
+     * the contract stores it as JSON null. The values are only strings, booleans
+     * and nulls ({@link IResourceStorage#requireSettableFields}).
+     */
+    private static String toJsonPatch(Map<String, Object> fields) {
+        ObjectNode patch = JsonNodeFactory.instance.objectNode();
+        fields.forEach((name, value) -> {
+            if (value == null) {
+                patch.putNull(name);
+            } else if (value instanceof Boolean flag) {
+                patch.put(name, flag);
+            } else {
+                patch.put(name, (String) value);
+            }
+        });
+        return patch.toString();
     }
 
     @Override
@@ -687,15 +704,21 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     /**
-     * Archive the deleted-flagged version and drop the current row inside ONE
+     * Drop the current row and archive the deleted-flagged version inside ONE
      * transaction — the non-transactional sequence could leave a resource that is
      * archived as deleted while still live.
      * <p>
-     * The delete is conditioned on the version, and a mismatch rolls the tombstone
-     * back with it: an update that committed in between keeps its new version and
-     * the version it archived stays ordinary, non-deleted history. The tombstone
-     * sets the flag even on a row that already exists, for the same reason the
-     * MongoDB backend upserts it.
+     * The delete comes first and is conditioned on the version, and the tombstone
+     * is written only if it removed the row. That order is what makes the call safe
+     * against a concurrent {@link #removeAllPermanently}: the delete takes the row
+     * lock, so an erasure waits for it (and then also erases the tombstone, which
+     * is committed by the time its history delete runs), or has already removed the
+     * row, in which case the delete matches nothing and writes <em>nothing</em> — a
+     * tombstone written ahead of that check would resurrect the erased resource's
+     * data. A mismatch because an update committed in between leaves the new
+     * version alone and writes no tombstone either: the version the update archived
+     * stays ordinary, non-deleted history. The tombstone sets the flag even on a
+     * row that already exists, for the same reason the MongoDB backend upserts it.
      */
     @Override
     public void storeHistoryAndRemove(IHistoryResource<T> history, String id, int expectedCurrentVersion)
@@ -705,13 +728,6 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                try (PreparedStatement ps = conn.prepareStatement(UPSERT_TOMBSTONE_SQL)) {
-                    ps.setString(1, pgHistory.getId());
-                    ps.setString(2, collectionName);
-                    ps.setInt(3, pgHistory.getVersion());
-                    ps.setString(4, pgHistory.getJson());
-                    ps.executeUpdate();
-                }
                 int removed;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM resources WHERE id = ?::uuid AND collection_name = ? AND version = ?")) {
@@ -720,12 +736,24 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
                     ps.setInt(3, expectedCurrentVersion);
                     removed = ps.executeUpdate();
                 }
-                if (removed == 0 && currentRowExists(conn, id)) {
-                    conn.rollback();
-                    throw new IResourceStore.ResourceModifiedException(
-                            String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+                if (removed == 0) {
+                    if (currentRowExists(conn, id)) {
+                        conn.rollback();
+                        throw new IResourceStore.ResourceModifiedException(
+                                String.format("Resource was modified concurrently (id=%s, expected version=%d)", id, expectedCurrentVersion));
+                    }
+                    // No live row: a concurrent delete already tombstoned it, or a permanent
+                    // removal erased it. Deleted, as asked — and no tombstone of ours.
+                    conn.commit();
+                    return;
                 }
-                // removed == 0 with no live row: a concurrent delete won. Deleted, as asked.
+                try (PreparedStatement ps = conn.prepareStatement(UPSERT_TOMBSTONE_SQL)) {
+                    ps.setString(1, pgHistory.getId());
+                    ps.setString(2, collectionName);
+                    ps.setInt(3, pgHistory.getVersion());
+                    ps.setString(4, pgHistory.getJson());
+                    ps.executeUpdate();
+                }
                 conn.commit();
             } catch (SQLException e) {
                 conn.rollback();

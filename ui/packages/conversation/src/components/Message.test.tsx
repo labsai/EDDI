@@ -73,8 +73,8 @@ describe("ThinkingIndicator — guardrail state", () => {
   it("says the reply is being checked; a running tool wins over it", () => {
     const { rerender } = render(<ThinkingIndicator guardrail />);
     expect(screen.getByTestId("guardrail-indicator")).toHaveTextContent("Checking the reply…");
-    rerender(<ThinkingIndicator guardrail tool="search" />);
-    expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using search…");
+    rerender(<ThinkingIndicator guardrail tool={{ text: "search", phrase: false }} />);
+    expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using Search…");
     expect(indicatorStatusText(true, null, undefined, true)).toBe("Checking the reply…");
   });
 });

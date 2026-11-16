@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { renderPage, userEvent } from "@/test/test-utils";
 
 import * as useGroupsHook from "@/hooks/use-groups";
@@ -973,11 +973,11 @@ describe("WorkforceThread – on the shared controller (phase 3c)", () => {
     renderThread();
     await waitForInit();
     const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText(/Message Test Agent/i), "Show me");
-    await user.click(screen.getByRole("button", { name: /Send/i }));
+    await user.type(screen.getByTestId("thread-input"), "Show me");
+    await user.click(screen.getByTestId("thread-send"));
 
-    const image = await screen.findByRole("img", { name: "Chart" });
-    expect(image).toHaveAttribute("src", "https://cdn.example/chart.png");
-    expect(screen.queryByText(/No response/i)).not.toBeInTheDocument();
+    const gallery = await screen.findByTestId("message-images");
+    expect(within(gallery).getAllByRole("img").map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("thread-no-response")).not.toBeInTheDocument();
   });
 });

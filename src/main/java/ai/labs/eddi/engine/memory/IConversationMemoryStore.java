@@ -458,6 +458,24 @@ public interface IConversationMemoryStore {
     }
 
     /**
+     * Cluster mode: {@link #compareAndSetState} that also refuses when a newer
+     * lease holder has raised the document's {@code _fence} above {@code fence}.
+     * Used to undo a state move made under a lease that has since been lost (a HITL
+     * resume that lost its lease restores the pause), only while no node that took
+     * the conversation over has started on it.
+     *
+     * @return {@code true} when the state was {@code expected}, the fence not above
+     *         {@code fence}, and the state is now {@code target}
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    default boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence)
+            throws IResourceStore.ResourceStoreException {
+        // single-node stores have nothing to fence
+        return compareAndSetState(conversationId, expected, target);
+    }
+
+    /**
      * Find all conversation IDs currently in the given state.
      *
      * @param state

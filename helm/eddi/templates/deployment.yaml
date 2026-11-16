@@ -11,9 +11,17 @@
 {{- end }}
 {{- $grace := include "eddi.terminationGracePeriodSeconds" . | int }}
 {{- $drain := include "eddi.shutdownDrainTimeoutSeconds" . | int }}
-{{- if and $drain (le $grace (add $drain 3)) }}
-{{- fail (printf "eddi.terminationGracePeriodSeconds (%d) must exceed the shutdown drain (%d s) plus the readiness grace (3 s): Kubernetes kills the pod at the end of the grace period, so a longer drain is cut short and its turns are abandoned mid-write." $grace $drain) }}
+{{- $preStop := int (.Values.eddi.preStopSleepSeconds | default 0) }}
+{{- if lt $preStop 0 }}
+{{- fail "eddi.preStopSleepSeconds must not be negative" }}
 {{- end }}
+{{- if and $drain (le $grace (add $drain 3 $preStop)) }}
+{{- fail (printf "eddi.terminationGracePeriodSeconds (%d) must exceed the shutdown drain (%d s) plus the readiness grace (3 s) and the preStop sleep (%d s): Kubernetes kills the pod at the end of the grace period, which starts with preStop, so a longer drain is cut short and its turns are abandoned mid-write." $grace $drain $preStop) }}
+{{- end }}
+{{- if and (not $drain) (le $grace (add 23 $preStop)) }}
+{{- fail (printf "eddi.terminationGracePeriodSeconds (%d) must exceed the preStop sleep (%d s) plus EDDI's default drain (20 s) and readiness grace (3 s)." $grace $preStop) }}
+{{- end }}
+{{- $natsCa := include "eddi.natsCaSecret" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -150,6 +158,17 @@ spec:
           emptyDir: {}
         - name: eddi-data
           emptyDir: {}
+        {{- if and $clustered $natsCa }}
+        # The CA of the NATS server certificate — only ca.crt, never the server's
+        # key — read by EDDI as its NATS trust store (EDDI_NATS_TLS_TRUSTSTORE_PATH).
+        - name: nats-ca
+          secret:
+            secretName: {{ $natsCa }}
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
         {{- with ((.Values.eddi.branding | default dict).assets | default dict).configMap }}
         # White-labeling images (eddi.branding.assets.configMap), read-only. EDDI
         # reads them once at startup as the brand's seed images.
@@ -287,12 +306,27 @@ spec:
               mountPath: /deployments/tmp
             - name: eddi-data
               mountPath: /opt/eddi/data
+            {{- if and $clustered $natsCa }}
+            - name: nats-ca
+              mountPath: /etc/eddi/nats-ca
+              readOnly: true
+            {{- end }}
             {{- $brandAssets := (.Values.eddi.branding | default dict).assets | default dict }}
             {{- if $brandAssets.configMap }}
             - name: branding-assets
               mountPath: {{ $brandAssets.mountPath | default "/deployments/branding" | quote }}
               readOnly: true
             {{- end }}
+          {{- if gt $preStop 0 }}
+          # Kubernetes removes the pod from the Service endpoints while preStop runs;
+          # ingress controllers and kube-proxy notice a few seconds later. Requests
+          # routed here meanwhile are still served, instead of refused with 503 on
+          # every rolling update and scale-in. SIGTERM (and EDDI's drain) follows.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ $preStop }}"]
+          {{- end }}
           {{- $startupProbe := .Values.eddi.startupProbe | default dict }}
           # Liveness, not readiness: see eddi.startupProbe in values.yaml.
           startupProbe:

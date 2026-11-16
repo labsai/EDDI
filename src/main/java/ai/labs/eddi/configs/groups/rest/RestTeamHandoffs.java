@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffIntake;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -58,7 +59,7 @@ public class RestTeamHandoffs implements IRestTeamHandoffs {
             return Response.ok(body).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
-        } catch (WebApplicationException e) {
+        } catch (WebApplicationException | ForbiddenException e) {
             throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to read handoffs for group %s", sanitize(groupId));
@@ -76,7 +77,7 @@ public class RestTeamHandoffs implements IRestTeamHandoffs {
             return toResponse(intake.accept(groupId, handoffId, edits, actingUser()));
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
-        } catch (WebApplicationException e) {
+        } catch (WebApplicationException | ForbiddenException e) {
             throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to accept handoff %s for group %s", sanitize(handoffId), sanitize(groupId));
@@ -93,7 +94,7 @@ public class RestTeamHandoffs implements IRestTeamHandoffs {
                             actingUser()));
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
-        } catch (WebApplicationException e) {
+        } catch (WebApplicationException | ForbiddenException e) {
             throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to decline handoff %s for group %s", sanitize(handoffId), sanitize(groupId));
@@ -109,7 +110,7 @@ public class RestTeamHandoffs implements IRestTeamHandoffs {
             return result.ok() ? Response.noContent().build() : toResponse(result);
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
-        } catch (WebApplicationException e) {
+        } catch (WebApplicationException | ForbiddenException e) {
             throw e;
         } catch (Exception e) {
             LOG.errorf(e, "Failed to delete backlog task %s of group %s", sanitize(taskId), sanitize(groupId));

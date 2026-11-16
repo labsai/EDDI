@@ -69,6 +69,7 @@ import { useDebugStore, type ToolTraceEntry } from "@/hooks/use-debug-events";
 import { getErrorMessage } from "@/lib/api-client";
 import { toast } from "sonner";
 import { chatKeys } from "@/lib/query-keys";
+import { parseToolCallEvent, toolCallActivity, type ToolActivity } from "@/lib/tool-labels";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -217,7 +218,7 @@ interface ChatState {
   /** A cascade moved to a stronger model; cleared by the next token. */
   isEscalating: boolean;
   /** The tool the agent is running right now, from the live `tool_call` event. */
-  activeTool: string | null;
+  activeTool: ToolActivity | null;
   historyBusy: boolean;
   /** The controller's own attachment staging; the Manager's composers keep theirs. */
   pendingAttachments: AttachmentResult[];
@@ -284,6 +285,7 @@ export const useChatStore = create<ChatState>((set) => ({
   // must not keep the new one's input locked.
   setSelectedAgent: (agentId, agentName) =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -356,6 +358,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   clearMessages: () =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -409,6 +412,7 @@ export const useChatStore = create<ChatState>((set) => ({
 
   reset: () =>
     set((s) => {
+      chatConversation.forgetSecrets();
       revokeMessagePreviews(s.messages);
       latestLoadRequest++;
       // The live status line belongs to the transcript being replaced; move
@@ -1072,11 +1076,20 @@ function recordDebugEvent(event: SSEEvent): void {
       return;
     case "tool_call": {
       // The backend emits the NAME right before each tool executes (arguments
-      // arrive later, redacted, in task_complete's toolTrace).
-      const tool = str(p?.tool);
-      if (tool) debug.addToolCall(tool);
+      // arrive later, redacted, in task_complete's toolTrace). Since 6.7 the
+      // event may carry the designer's `toolDisplay` label and a few
+      // allow-listed values; the status line shows those, else the humanised name.
+      const call = parseToolCallEvent(event.data);
+      // Malformed payload — the status line just keeps saying "Thinking…".
+      if (call) debug.addToolCall(toolCallActivity(call));
       return;
     }
+    case "tool_result":
+      // 6.7: `{tool, callId, status, durationMs}` once per call, right after it
+      // ran. Calls run one after another, so a result settles the newest call:
+      // its spinner stops instead of turning only when the model writes again.
+      debug.markToolsSettled();
+      return;
     case "cascade_step_start": {
       const stepIndex = num(p?.stepIndex) ?? 0;
       debug.addEvent({
@@ -1217,11 +1230,21 @@ export function undoRedoFlags(
   ];
 }
 
-/** Fetch conversation history for the selected agent. */
+/**
+ * The caller's own conversations with an agent — what the chat panel lists and
+ * resumes from. Own only (`mine`), for an admin too: an admin's listing holds
+ * every user's, and the resume below continues the newest one it is handed.
+ * Browsing everybody's conversations is the Conversations page's job.
+ */
+function getOwnConversationHistory(agentId: string) {
+  return getConversationDescriptors(50, 0, "", agentId, undefined, undefined, undefined, { mine: true });
+}
+
+/** Fetch the caller's conversation history with the selected agent. */
 export function useConversationHistory(agentId: string | null) {
   return useQuery({
     queryKey: chatKeys.history(agentId),
-    queryFn: () => getConversationDescriptors(50, 0, "", agentId ?? ""),
+    queryFn: () => getOwnConversationHistory(agentId ?? ""),
     enabled: !!agentId,
     staleTime: 30_000,
   });
@@ -1344,6 +1367,38 @@ async function followExecutingTurn(conversationId: string, epoch: number, reques
 }
 
 /**
+ * Take a snapshot's conversation state into the store. The controller reads it
+ * there as the state the next send is judged against (isSkippedTurn): a load,
+ * undo, redo or rerun that left the previous AWAITING_HUMAN behind made the
+ * next turn that paused again look like one the server dropped — withdrawn as
+ * "not sent", with no pause banner.
+ */
+function adoptConversationState(snapshot: SimpleConversationMemorySnapshot): void {
+  if (!snapshot.conversationState) return;
+  useChatStore.setState({
+    conversationState: snapshot.conversationState,
+    endReason: snapshot.conversationState === "ENDED" ? (snapshot.endReason ?? null) : null,
+  });
+}
+
+/**
+ * The pause on the chat's conversation ended elsewhere — the review page, the
+ * approvals inbox, another reviewer, the timeout policy. Unlocks the composer
+ * AND tells the controller (pauseResolved): clearing only the banner left the
+ * controller at AWAITING_HUMAN, so the next turn that paused again was taken
+ * for a dropped one.
+ *
+ * @param conversationId Only the conversation still on screen is touched.
+ * @param state What it is now, when known (a cancel interrupts it).
+ */
+export function clearChatPause(conversationId: string | null, state?: ConversationState): void {
+  const chatState = useChatStore.getState();
+  if (!conversationId || chatState.conversationId !== conversationId) return;
+  chatState.setPaused(false, null);
+  chatConversation.pauseResolved(state);
+}
+
+/**
  * Put a snapshot of the conversation already selected in the store on screen:
  * its transcript, undo/redo, pause state and any requested input field.
  */
@@ -1352,6 +1407,7 @@ function installSnapshot(snapshot: SimpleConversationMemorySnapshot) {
   const messages = snapshotToMessages(snapshot);
   store.getState().replaceMessages(messages);
   store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+  adoptConversationState(snapshot);
   // Re-establish the pause state when loading a conversation that is still
   // AWAITING_HUMAN — otherwise a paused conversation opened from history
   // would show an enabled input with no banner until a send is rejected 409.
@@ -1454,8 +1510,10 @@ export function useResumeOrStartConversation() {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
+          // The same query as useConversationHistory, which shares this cache
+          // entry: the caller's own conversations, never another user's.
           queryKey: chatKeys.history(agentId),
-          queryFn: () => getConversationDescriptors(50, 0, "", agentId),
+          queryFn: () => getOwnConversationHistory(agentId),
           staleTime: 30_000,
         });
         resumable = pickResumableConversation(descriptors, environment);
@@ -1537,6 +1595,7 @@ async function moveStepAndReload(move: "undo" | "redo"): Promise<boolean> {
     if (store.getState().conversationId !== conversationId) return moved;
     store.getState().replaceMessages(snapshotToMessages(snapshot));
     store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+    adoptConversationState(snapshot);
     store.getState().setPaused(
       snapshot.conversationState === "AWAITING_HUMAN",
       null,
@@ -1610,6 +1669,12 @@ export function useRerunConversation() {
       const messages = snapshotToMessages(snapshot);
       store.getState().replaceMessages(messages);
       store.getState().setUndoRedo(...undoRedoFlags(snapshot));
+      adoptConversationState(snapshot);
+      store.getState().setPaused(
+        snapshot.conversationState === "AWAITING_HUMAN",
+        null,
+        snapshot.hitlPausedAt ?? null,
+      );
       return snapshot;
     },
   });

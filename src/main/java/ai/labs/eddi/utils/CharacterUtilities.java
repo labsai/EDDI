@@ -25,11 +25,8 @@ public class CharacterUtilities {
      * True when every character is a digit — and therefore false for null and for
      * the empty string, which contain no digits at all.
      * <p>
-     * The loop alone answered {@code true} for {@code ""}, so
-     * {@code IntegerDictionary.lookupTerm("")} minted an {@code integer("")}
-     * expression out of nothing. {@code WordSplitter.notNumeric} leaned on that
-     * quirk to skip its own first iteration and has been given an explicit index
-     * guard instead.
+     * The empty string is explicitly not an integer, so callers need not guard it
+     * themselves.
      */
     public static boolean isStringInteger(String lookup) {
         if (lookup == null || lookup.isEmpty()) {
@@ -73,8 +70,8 @@ public class CharacterUtilities {
     }
 
     /**
-     * Methode deletes all characters which are not defined in pattern to make sure
-     * that there are no unexpected chars when processing input.
+     * Deletes all characters which are not defined in pattern to make sure that
+     * there are no unexpected chars when processing input.
      *
      * @param sentence
      *            unprocessed String with any characters

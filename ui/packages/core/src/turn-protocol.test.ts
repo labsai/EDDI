@@ -285,6 +285,14 @@ describe("readSseStream — framing the three readers disagreed on", () => {
     ]);
   });
 
+  it("flushes the decoder at EOF: a body cut mid-character ends in one U+FFFD (deliberate, see sse.ts)", async () => {
+    const all = new TextEncoder().encode("event: token\ndata: Ship 🚀");
+    // Drop the emoji's last byte: the stream closes inside a four-byte sequence.
+    const truncated = all.slice(0, all.length - 1);
+
+    expect(await frames(bytes([truncated]), "token")).toEqual([{ type: "token", data: "Ship \uFFFD" }]);
+  });
+
   it("refuses a response without a body", async () => {
     await expect(frames(null as unknown as ReadableStream<Uint8Array>, "token")).rejects.toThrow("No readable stream");
   });

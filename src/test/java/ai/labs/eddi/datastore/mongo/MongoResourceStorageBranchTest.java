@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -33,9 +34,6 @@ import static org.mockito.Mockito.*;
  * <li>findHistoryResourceIdsContaining — Document vs non-Document _id</li>
  * <li>findResources — AND/OR filters, sort field null, skip/limit edge
  * cases</li>
- * <li>readHistoryLatest — non-null doc after sort</li>
- * <li>readHistoryLatest — null doc after sort (count > 0 but find returns
- * null)</li>
  * <li>checkInternalHistoryResource — rejects external implementations</li>
  * <li>constructor with custom indexes</li>
  * </ul>
@@ -102,6 +100,7 @@ class MongoResourceStorageBranchTest {
 
             FindIterable<Document> iterable = mock(FindIterable.class);
             when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+            when(iterable.projection(any(Bson.class))).thenReturn(iterable);
 
             doAnswer(inv -> {
                 Consumer<Document> consumer = inv.getArgument(0);
@@ -113,6 +112,10 @@ class MongoResourceStorageBranchTest {
             assertEquals(1, result.size());
             assertEquals(VALID_ID, result.getFirst().getId());
             assertEquals(3, result.getFirst().getVersion());
+            // The composite _id carries both id and version, so nothing else is fetched.
+            ArgumentCaptor<Bson> projection = ArgumentCaptor.forClass(Bson.class);
+            verify(iterable).projection(projection.capture());
+            assertEquals(BsonDocument.parse("{\"_id\": 1}"), projection.getValue().toBsonDocument());
         }
 
         @Test
@@ -123,6 +126,7 @@ class MongoResourceStorageBranchTest {
 
             FindIterable<Document> iterable = mock(FindIterable.class);
             when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+            when(iterable.projection(any(Bson.class))).thenReturn(iterable);
 
             doAnswer(inv -> {
                 Consumer<Document> consumer = inv.getArgument(0);
@@ -155,6 +159,7 @@ class MongoResourceStorageBranchTest {
             Document doc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
             FindIterable<Document> iterable = mock(FindIterable.class);
             when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
+            when(iterable.projection(any(Bson.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -185,6 +190,7 @@ class MongoResourceStorageBranchTest {
 
             FindIterable<Document> iterable = mock(FindIterable.class);
             when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
+            when(iterable.projection(any(Bson.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -209,6 +215,7 @@ class MongoResourceStorageBranchTest {
 
             FindIterable<Document> iterable = mock(FindIterable.class);
             when(currentCollection.find(any(BsonDocument.class))).thenReturn(iterable);
+            when(iterable.projection(any(Bson.class))).thenReturn(iterable);
             when(iterable.sort(any(Document.class))).thenReturn(iterable);
             when(iterable.limit(anyInt())).thenReturn(iterable);
             when(iterable.skip(anyInt())).thenReturn(iterable);
@@ -220,27 +227,6 @@ class MongoResourceStorageBranchTest {
 
             verify(iterable).limit(IResourceStorage.MAX_RESULT_LIMIT);
             verify(iterable).skip(0);
-        }
-    }
-
-    // ==================== readHistoryLatest edge cases ====================
-
-    @Nested
-    @DisplayName("readHistoryLatest edge cases")
-    class ReadHistoryLatestEdgeCases {
-
-        @Test
-        @DisplayName("count > 0 but find returns null → returns null")
-        void countPositiveButFindReturnsNull() throws Exception {
-            when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
-
-            FindIterable<Document> iterable = mock(FindIterable.class);
-            when(historyCollection.find(any(Document.class))).thenReturn(iterable);
-            when(iterable.sort(any(Document.class))).thenReturn(iterable);
-            when(iterable.limit(1)).thenReturn(iterable);
-            when(iterable.first()).thenReturn(null);
-
-            assertNull(storage.readHistoryLatest(VALID_ID));
         }
     }
 

@@ -37,9 +37,9 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
-**Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test`, …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
+**Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
 **Once per clone:** run `git config core.hooksPath .githooks` to activate the pre-push safety hook (§2 rule 4) — a fresh clone does not enable it automatically.
 
@@ -47,7 +47,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
@@ -89,6 +89,17 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
    - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
    - Opening the PR and working its review comments to the end is written down in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant.
+   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until all of these hold:
+     - CodeRabbit has reviewed the PR's **current head**. If commits landed after its last review, request another one: `@coderabbitai review` for new commits, `@coderabbitai full review` after a stretch where pushes went unreviewed.
+     - Every CodeRabbit finding — inline comments, nitpicks and outside-diff-range comments in the review body included — is either fixed or answered on the PR.
+     - Every CodeRabbit thread is resolved.
+
+     A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed**. Wait (`@coderabbitai rate limit` shows when capacity returns) and ask again; never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
+   - **Never merge into a red `main` (except the one PR that fixes or reverts the breakage), and never merge PRs in bulk.** A PR's green CI only proves it works against the `main` it was tested on. "Require branches to be up to date" is off, so two PRs that are each green can break `main` together: on 2026-11-12, #1352 renamed `ResourceAccessGuard.callerIsAdmin()` to `isAdmin()`, #1345 added a test calling `callerIsAdmin()`, both were merged minutes apart, and `main` stopped compiling its tests. Therefore:
+     - Before every merge, check the `CI/CD` run for `main`'s **current commit**: compare `gh run list -b main -w CI/CD -L 1 --json headSha,status,conclusion` with `gh api repos/labsai/EDDI/commits/main --jq .sha`. The run's `headSha` must equal the current `main` SHA; a green run for an older commit says nothing about the newest one. If no run for that commit exists yet, or it is queued or in progress, wait for it to finish ("not red yet" is not green). It must be **finished and green**. If it is red, fix `main` first: no other PR merges until it is green again.
+     - When `main` has a merge queue, merge only through it (`gh pr merge <n> --squash --auto` adds the PR to the queue). Never use `--admin` to bypass it.
+     - Without a queue, merge one PR at a time. Before the next merge, merge `origin/main` into that PR's branch and wait for its CI to pass again whenever `main` changed in a file the PR touches or depends on, including a renamed or removed symbol. If you must land several, first build `main` plus all of them together and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
+     - After merging, watch `main`'s `CI/CD` run for that commit. If it goes red, revert or fix it before anything else merges.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -147,12 +158,12 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Area | Where to read |
 | --- | --- |
 | Storage — MongoDB or PostgreSQL behind one abstraction, Caffeine cache, NATS JetStream event bus | [`docs/architecture.md`](docs/architecture.md) |
-| Conversation memory, token-aware windowing, rolling summaries, recall tool, commit flags | [`docs/conversation-memory.md`](docs/conversation-memory.md), [`docs/memory-policy.md`](docs/memory-policy.md) |
+| Conversation memory, token-aware windowing, rolling summaries, recall tool, commit flags | [`docs/conversation-memory.md`](docs/conversation-memory.md), [`docs/memory-policy.md`](docs/memory-policy.md); windowing and summaries: [`docs/langchain.md`](docs/langchain.md#conversation-window-management) |
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (80+ tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
-| Group conversations — 7 discussion styles, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
+| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
 | Scheduling and background work | [`docs/scheduling.md`](docs/scheduling.md) |
@@ -171,7 +182,7 @@ Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '
 | — | Session Forking | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7) |
 | — | Conversation Chaining | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3) |
 | 9 | DAG Pipeline | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped |
-| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
+| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses |
 | — | Guardrails | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`) |
 | 11b | Multi-Channel | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`) |
 | 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
@@ -215,7 +226,7 @@ The **single source of truth** for a conversation:
 - **`ConversationStep`** — an entry in the stack, holding `IData` objects for that turn
 - **`IData<T>`** — generic wrapper for data in a step. Use `Data<T>` to create new objects
 - **Reading**: `currentStep.getLatestData("key")` → check for null → `.getResult()`
-- **Writing**: `currentStep.storeData(new Data<>("key", value))`. What a client sees in the conversation snapshot is decided by **key prefix**, not by `setPublic`: `ConversationMemoryUtilities.convertSimpleConversationMemory` passes `input:initial`, `actions*`, `output*` and `quickReplies*` and drops the rest, and `returnDetailed=true` returns everything. `setPublic(...)` is copied into snapshots but filters nothing — never rely on it to hide data
+- **Writing**: `currentStep.storeData(new Data<>("key", value))`. What a client sees in the conversation snapshot is decided by **key prefix**, not by `setPublic`: `ConversationMemoryUtilities.convertSimpleConversationMemory` passes `input`, `input:initial`, `actions*`, `output*`, `quickReplies*` and `taskErrors` and drops the rest, and `returnDetailed=true` returns the rest, except that `audit:*`, `*:trace:*` and `*Error` keys are withheld and values are redacted (`isSensitiveDetailedKey`). `setPublic(...)` is copied into snapshots but filters nothing — never rely on it to hide data
 - **`ConversationProperties`** — long-term state (e.g., `agentName`, `userId`). Slot-filling uses `PropertySetterTask`
 
 > **Critical distinction**: Conversation memory has **two audiences**. (1) **Pipeline tasks** (BehaviorRules, PropertySetter, etc.) see the **full memory** — all steps, all data keys. (2) **The LLM** sees only a **windowed view** assembled by `ConversationHistoryBuilder` — last N conversationOutputs converted to ChatMessages. When you think about "conversation too long," these are two different problems: the LLM context window (what the model sees) and the stored document size (storage/load time). Most context management strategies only affect #1.
@@ -256,7 +267,7 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 1. Conversation.init()
    └─→ loadUserProperties()
        └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
-       └─→ Visibility scoping: self + group + global entries are loaded
+       └─→ Visibility scoping: self + group + global entries are loaded; the most specific scope wins per key
        └─→ Converted to Property objects with scope=longTerm
        └─→ Available as {properties.key} in all templates
 
@@ -269,7 +280,7 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 
 3. Conversation turn ends
    └─→ storePropertiesPermanently()
-       └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+       └─→ longTerm properties that changed (or are owed) saved via IUserMemoryStore.upsert()
        └─→ Visibility applied at persistence boundary (explicit or config default)
 ```
 
@@ -284,7 +295,8 @@ LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
           (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task; the context carries the memory)
+           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
+           carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -319,7 +331,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients until later phases of `planning/http-client-consolidation-plan.md`. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -332,7 +344,7 @@ Several infrastructure components are already built and should be reused, not du
 - `GroupConversationService.discuss()` creates individual conversations for each member agent
 - Group context (groupId, discussion phase, peer responses) is injected via the conversation's `Context` map
 - `GroupConversationEventSink` streams SSE events for real-time group discussion visibility
-- **Collaboration surfaces are opt-in by absence — but check which kind of absence.** For the two that expose **tools**, `artifactConfig` and `taskListConfig`, a null config means the tools are never *assembled*: they cost no prompt tokens and cannot be argued with, whereas a tool that exists and always says no invites retries. For `contextWindow` and `facilitator`, null means the behaviour does not run at all — no windowing pass, no checkpoint. But `retroConfig` and `humanMemberConfig` are **defaults, not switches**: a null `retroConfig` runs a RETRO phase with the default caps, and a null `humanMemberConfig` still pauses for a HUMAN member's turn — it just waits indefinitely. When adding a group capability, decide which of the three shapes you mean and say so in the field's Javadoc.
+- **Collaboration surfaces are opt-in by absence — but check which kind of absence.** For the two that expose **tools**, `artifactConfig` and `taskListConfig`, a null config means the tools are never *assembled*: they cost no prompt tokens and cannot be argued with, whereas a tool that exists and always says no invites retries. For `contextWindow` and `facilitator`, null means the behaviour does not run at all — no windowing pass, no checkpoint. But `retroConfig`, `humanMemberConfig`, `negotiationConfig` and the stance-summary config are **defaults, not switches**: a null `retroConfig` runs a RETRO phase with the default caps, and a null `humanMemberConfig` still pauses for a HUMAN member's turn — it just waits indefinitely (and a non-null `artifactConfig` or `taskListConfig` still assembles no tools unless its allow flag is true). When adding a group capability, decide which of the three shapes you mean and say so in the field's Javadoc.
 
 When a feature needs to know which group an agent belongs to (e.g., persistent memory with `group` visibility), the groupId comes from the `GroupConversation` context — not from `AgentConfiguration`. The group is a runtime concern, not a static configuration.
 
@@ -413,8 +425,8 @@ public void execute(IConversationMemory memory, Object component) {
 ```java
 @Inject PrePostUtils prePostUtils;
 
-// Before main logic — returns the template data rebuilt with the new properties; keep it
-templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
+// Before main logic — updates templateDataObjects in place (refreshed {properties}, vaulted secrets scrubbed); the return value is that same map
+prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 // After main logic
 prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, httpCode, validationError);
 ```
@@ -530,7 +542,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
 | `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
+| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |
@@ -558,10 +570,10 @@ Writing or editing agent JSON — `behavior`, `property`, `output`, `httpcalls`,
 The five mistakes it exists to prevent:
 
 1. **`{properties.x}` is a raw value.** `{properties.x.valueString}` fails at runtime. Templates are Qute `{…}`, not Thymeleaf `[[${…}]]`.
-2. **Every behavior rule needs an `actionmatcher` on `lastStep`.** A rule with only an `inputmatcher` fires on any step of the conversation. And within a group only the **first** matching rule fires by default (`executeUntilFirstSuccess`) — put independent rules in separate groups.
-3. **A comma list in `actionmatcher` means AND** (a contiguous sublist), not OR. Use a shared action or an `OR` connector.
-4. **Any `{…}` placeholder in output or a prompt needs `eddi://ai.labs.templating` as the last workflow step**, or users see the raw template.
-5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)) and `CONTINUE_CONVERSATION` (self-continuation; see [`docs/long-jobs.md`](docs/long-jobs.md)).
+2. **Rules that belong to a multi-step flow need an `actionmatcher` on `lastStep`.** A flow rule with only an `inputmatcher` fires on any step of the conversation; global rules (small talk, "cancel") deliberately have no gate. And within a group only the **first** matching rule fires by default (`executeUntilFirstSuccess`) — put independent rules in separate groups.
+3. **A comma list in `actionmatcher` means AND** (an ordered, adjacent sublist), not OR. Use a shared action or an `OR` connector.
+4. **Any `{…}` placeholder in output texts or quick replies needs `eddi://ai.labs.templating` after the steps that produce that output**, or users see the raw template. Prompts, HTTP call bodies and property values do not: `LlmTask`, `ApiCallsTask` and `PropertySetterTask` render their own.
+5. **Reserved actions are not quick-reply expressions** — `CATCH_ANY_INPUT_AS_PROPERTY` (stores the next raw input as `user_input`), `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)) and `CONTINUE_CONVERSATION` (self-continuation; see [`docs/long-jobs.md`](docs/long-jobs.md)).
 
 ---
 

@@ -187,16 +187,26 @@ public class PdfTextExtractor implements DocumentTextExtractor {
                 try (InputStream decoded = stream.createInputStream()) {
                     decoded.transferTo(OutputStream.nullOutputStream());
                 }
-            } else if (stream.getFilters() == null) {
+            } else if (isUnfiltered(stream)) {
                 PdfDecodeBudget.charge(stream.getLength());
             }
         } else if (contents instanceof COSArray array) {
             for (int i = 0; i < array.size(); i++) {
-                if (array.getObject(i) instanceof COSStream stream && stream.getFilters() == null) {
+                if (array.getObject(i) instanceof COSStream stream && isUnfiltered(stream)) {
                     PdfDecodeBudget.charge(stream.getLength());
                 }
             }
         }
+    }
+
+    /**
+     * Whether PDFBox reads the stream as it is stored: it takes a {@code /Filter}
+     * that is neither a name nor a non-empty array ({@code []}, a number, a string,
+     * a dictionary) as zero filters.
+     */
+    private static boolean isUnfiltered(COSStream stream) {
+        COSBase filters = stream.getFilters();
+        return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
     }
 
     /** Stops a page that runs too long or lays out too much. */

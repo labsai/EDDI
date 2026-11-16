@@ -16,7 +16,6 @@ import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
@@ -82,8 +81,8 @@ class ApiCallExecutorPathEncodingTest {
 
         // Real templating: the point of these tests.
         var realEngine = Engine.builder().addDefaults().strictRendering(false).build();
-        var prePostUtils = new PrePostUtils(jsonSerialization, mock(IMemoryItemConverter.class),
-                new TemplatingEngine(realEngine), mock(IDataFactory.class), mock(SecretPropertyVault.class));
+        var prePostUtils = new PrePostUtils(jsonSerialization, new TemplatingEngine(realEngine), mock(IDataFactory.class),
+                mock(SecretPropertyVault.class));
 
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, callerIdentityContext, new RequestRedactor(callerIdentityResolver),
