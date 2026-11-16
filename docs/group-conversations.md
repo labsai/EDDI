@@ -648,7 +648,12 @@ if the node died — the claim, or the parked run, keeps its tasks `IN_PROGRESS`
 so no later run picks them up while it is still working on them. When the lease
 store cannot be read the leg counts as running, and a cadence run never runs
 without its lease: where NATS is unreachable at the start of a leg, the leg fails
-(its tasks return, a later fire retries) rather than run invisibly to this check.
+(its tasks return, a later fire retries) rather than run invisibly to this check,
+and a leg whose lease is lost while it runs is cancelled at once — the holder
+declares the lease lost before it expires for the other nodes. A member call
+already in flight is cancelled; a tool call it already sent cannot be taken back.
+A run paused before this rule existed is marked the first time a fire (or a
+workspace read) sees it paused, so its resume needs the lease too.
 A discussion that completed
 normally may therefore be written back one fire later than before, while its
 leg finishes releasing the lease.

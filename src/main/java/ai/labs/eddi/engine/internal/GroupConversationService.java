@@ -2911,6 +2911,13 @@ public class GroupConversationService implements IGroupConversationService, User
             }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
+                if (required) {
+                    // The lease is declared lost locally (ttl - 2 heartbeats after the last
+                    // confirmed renewal, NATS reachable or not) before the server expires it
+                    // and another node can see it gone. Stopping the leg then keeps
+                    // "no lease" meaning "no leg" for a discussion that requires its lease.
+                    lease.get().onLost(() -> stopLegOnLeaseLoss(groupConversationId));
+                }
                 return;
             }
             // A11: the lease is exclusive. A lease of a node that died or restarted is
@@ -2943,6 +2950,23 @@ public class GroupConversationService implements IGroupConversationService, User
         if (lease != null) {
             leaseManager.release(lease);
         }
+    }
+
+    /**
+     * Cancels, immediately, the leg of a discussion that requires its group lease
+     * once that lease is lost: the same thing a conversation turn does on lease
+     * loss ({@code ConversationStepRunner}). The leg stops at its next control
+     * check and its in-flight member call is cancelled.
+     */
+    void stopLegOnLeaseLoss(String groupConversationId) {
+        var token = discussionControls.get(groupConversationId);
+        if (token == null) {
+            return; // the leg has already ended
+        }
+        LOGGER.warnf("Group discussion %s lost its group lease while running — cancelling the leg",
+                LogSanitizer.sanitize(groupConversationId));
+        token.setSignal(ControlSignal.CANCEL_IMMEDIATE, "system:lease-lost");
+        token.cancelActiveFuture();
     }
 
     /**

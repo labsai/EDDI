@@ -56,6 +56,11 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   `holdGroupLease` refuses such a leg instead of running it in degraded mode: while NATS is
   unreachable, cadence legs fail (tasks return, a later fire retries). Other discussions keep the
   degraded-mode behaviour. `docs/clustering.md` lists it in the degraded-mode table.
+  Such a leg also registers `LeaseHandle.onLost` and is cancelled immediately
+  (`stopLegOnLeaseLoss`, `CANCEL_IMMEDIATE`) when its lease is declared lost, which the holder does
+  before the lease expires for other nodes. A paused cadence discussion stored before the flag
+  existed is marked by `TeamCadenceService.settleIfEnded` (state-and-pause CAS, best effort), so
+  its resume needs the lease too.
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).

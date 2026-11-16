@@ -232,6 +232,43 @@ class GroupConversationServiceClusterLeaseTest {
     }
 
     @Test
+    @DisplayName("a leg that requires its lease is cancelled at once when the lease is lost")
+    @SuppressWarnings("unchecked")
+    void requiredLeaseLossCancelsTheLeg() throws Exception {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+        running(GC_ID);
+
+        service.holdGroupLease(GC_ID, true);
+        ArgumentCaptor<Runnable> onLost = ArgumentCaptor.forClass(Runnable.class);
+        verify(lease).onLost(onLost.capture());
+        onLost.getValue().run();
+
+        Field field = GroupConversationService.class.getDeclaredField("discussionControls");
+        field.setAccessible(true);
+        var token = ((Map<String, DiscussionControlToken>) field.get(service)).get(GC_ID);
+        assertTrue(token.isCancelled(), "a leg whose lease is gone must stop before another node sees no lease");
+        assertEquals(ControlSignal.CANCEL_IMMEDIATE, token.getSignal());
+    }
+
+    @Test
+    @DisplayName("a leg that does not require its lease keeps today's behaviour on lease loss")
+    void unrequiredLeaseRegistersNoLossStop() {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(lease));
+
+        service.holdGroupLease(GC_ID, false);
+
+        verify(lease, never()).onLost(any());
+    }
+
+    @Test
+    @DisplayName("a lease lost after its leg ended stops nothing")
+    void leaseLossAfterTheLegIsANoOp() {
+        assertDoesNotThrow(() -> service.stopLegOnLeaseLoss("gc-ended"));
+    }
+
+    @Test
     @DisplayName("a team cadence discussion is created requiring its group lease")
     void cadenceDiscussionRequiresItsLease() throws Exception {
         IAgentGroupStore groupStore = mock(IAgentGroupStore.class);

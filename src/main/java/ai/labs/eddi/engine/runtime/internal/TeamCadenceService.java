@@ -446,11 +446,14 @@ public class TeamCadenceService {
     private boolean isPaused(String discussionId) {
         try {
             GroupConversation gc = conversationStore.read(discussionId);
-            return gc != null && (gc.getState() == GroupConversationState.AWAITING_APPROVAL
-                    || gc.getState() == GroupConversationState.AWAITING_HUMAN_INPUT);
+            return gc != null && isPausedState(gc.getState());
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private static boolean isPausedState(GroupConversationState state) {
+        return state == GroupConversationState.AWAITING_APPROVAL || state == GroupConversationState.AWAITING_HUMAN_INPUT;
     }
 
     private static boolean isIdle(GroupWorkspace workspace) {
@@ -559,6 +562,7 @@ public class TeamCadenceService {
         if (isEnded(gc.getState()) && legStillRunning(run.discussionId())) {
             return Settled.IN_FLIGHT;
         }
+        requireGroupLeaseIfPaused(gc);
         return switch (gc.getState()) {
             // A lost settle race means another reconciler (or a fresh claim) got
             // there first — this caller must treat the workspace as busy and let
@@ -665,6 +669,27 @@ public class TeamCadenceService {
             return false;
         }
         return !Instant.now().isBefore(run.claimedAt().plus(claimTtl));
+    }
+
+    /**
+     * Marks a paused cadence discussion stored before
+     * {@link GroupConversation#isRequiresGroupLease()} existed, so the leg its
+     * resume starts cannot run without its lease either. Only while paused -- no
+     * leg runs then -- and by the same compare-and-set on state and pause a cancel
+     * uses, so a resume that won the race is never overwritten. Best effort: a lost
+     * race or a store error leaves it for the next fire.
+     */
+    private void requireGroupLeaseIfPaused(GroupConversation gc) {
+        if (gc.isRequiresGroupLease() || !isPausedState(gc.getState())) {
+            return;
+        }
+        gc.setRequiresGroupLease(true);
+        try {
+            conversationStore.updateIfStateAndPause(gc, gc.getState(), gc.getPauseId());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not mark paused cadence discussion %s as requiring its group lease (%s) — retried next fire",
+                    gc.getId(), e.getClass().getSimpleName());
+        }
     }
 
     /**
