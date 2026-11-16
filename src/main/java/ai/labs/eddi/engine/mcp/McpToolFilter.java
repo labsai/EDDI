@@ -51,6 +51,12 @@ public class McpToolFilter implements ToolFilter {
             // Model price catalog (McpPricingTools) — read only; prices are a budget
             // lever an administrator changes in the Manager
             "read_model_prices",
+            // Spending controls (McpSpendControlTools) — admin-only; a stricter write
+            // applies, a looser one is filed for an administrator's approval
+            "read_tenant_quota", "update_model_prices", "update_tenant_quota", "list_spend_control_changes",
+            "withdraw_spend_control_change",
+            // Vault key names and grants (McpVaultTools) — admin-only, never a value
+            "list_vault_keys",
             // Admin tools
             "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent", "delete_agent",
             "update_agent",
@@ -70,6 +76,10 @@ public class McpToolFilter implements ToolFilter {
             "add_team_task", "list_team_backlog",
             // Cross-team handoff intake (McpTeamHandoffTools) — VIEW/EDIT on the group
             "list_team_handoffs", "accept_team_handoff", "decline_team_handoff",
+            // Team cadences and lesson consolidation (McpTeamCadenceTools) — VIEW/EDIT on
+            // the group
+            "list_team_cadences", "create_team_cadence", "delete_team_cadence", "read_lesson_consolidation",
+            "schedule_lesson_consolidation", "unschedule_lesson_consolidation",
             // Team budgets (McpTeamBudgetTools) — reads as REST, writes admin-only
             "read_team_budget", "list_team_budgets", "adjust_team_budget", "transfer_team_budget",
             "list_group_templates", "create_group_from_template",
