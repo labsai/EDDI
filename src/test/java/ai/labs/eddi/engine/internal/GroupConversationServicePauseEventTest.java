@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -46,7 +45,7 @@ class GroupConversationServicePauseEventTest {
     void setUp() {
         service = new GroupConversationService(mock(IAgentGroupStore.class), mock(IGroupConversationStore.class), mock(IConversationService.class),
                 mock(IAgentFactory.class), mock(ITemplatingEngine.class), mock(IJsonSerialization.class), new SimpleMeterRegistry(),
-                mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), mock(NonceCacheService.class), null,
+                mock(AgentSigningService.class), mock(IAgentStore.class), mock(IScheduleStore.class), null,
                 new CallerIdentityContext(null, null), "default", 3);
         event = mock(Event.class);
         service.groupHitlPauseCommittedEvent = event;
