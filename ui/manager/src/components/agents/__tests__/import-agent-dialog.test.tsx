@@ -86,6 +86,10 @@ const PREVIEW_RESPONSE = {
   ],
 };
 
+/** What EDDI says when it wrote `signInterAgentMessages` off (X-Agent-Signing-Turned-Off). */
+const SIGNING_OFF =
+  "signInterAgentMessages was turned off: the imported agent is new and has no signing key yet.";
+
 async function navigateToPreview(user: ReturnType<typeof userEvent.setup>) {
   await uploadFile(user);
   mockPreviewMutate.mockImplementation(
@@ -174,12 +178,33 @@ describe("ImportAgentDialog", () => {
     await uploadFile(user);
 
     mockImportMutate.mockImplementation(
-      (_file: File, opts: { onSuccess?: () => void }) => {
-        opts.onSuccess?.();
+      (_file: File, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "/agentstore/agents/new-1?version=1", signingTurnedOff: null });
       }
     );
     await user.click(screen.getByTestId("import-confirm-strategy"));
     expect(onSuccess).toHaveBeenCalled();
+    expect(screen.queryByTestId("import-outcome")).not.toBeInTheDocument();
+  });
+
+  // An archive with signing on lands with it off (the new agent has no key yet),
+  // and the response header is the only place that is said. Closing on success
+  // hid it, so the agent ran unsigned behind a plain success.
+  it("stays open after a create import that turned signing off, and says why", async () => {
+    const { onClose, onSuccess } = renderDialog();
+    const user = userEvent.setup();
+    await uploadFile(user);
+
+    mockImportMutate.mockImplementation(
+      (_file: File, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "/agentstore/agents/new-1?version=1", signingTurnedOff: SIGNING_OFF });
+      }
+    );
+    await user.click(screen.getByTestId("import-confirm-strategy"));
+
+    expect(onSuccess).toHaveBeenCalled();
+    expect(screen.getByTestId("result-warnings")).toHaveTextContent(SIGNING_OFF);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // --- Preview step ---
@@ -249,7 +274,7 @@ describe("ImportAgentDialog", () => {
     // now reports how many of the archive's schedules the selection left out.
     mockMergeMutate.mockImplementation(
       (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
-        opts.onSuccess?.({ location: "", schedulesSkipped: null });
+        opts.onSuccess?.({ location: "", schedulesSkipped: null, signingTurnedOff: null });
       }
     );
     await user.click(screen.getByTestId("import-confirm-merge"));
@@ -313,13 +338,30 @@ describe("ImportAgentDialog", () => {
 
     mockMergeMutate.mockImplementation(
       (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
-        opts.onSuccess?.({ location: "", schedulesSkipped: 2 });
+        opts.onSuccess?.({ location: "", schedulesSkipped: 2, signingTurnedOff: null });
       }
     );
     await user.click(screen.getByTestId("import-confirm-merge"));
 
     expect(screen.getByTestId("import-outcome")).toBeInTheDocument();
     expect(screen.getByTestId("import-schedules-skipped")).toHaveTextContent("2");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("stays open after a merge that turned signing off, and says why", async () => {
+    const { onClose } = renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    mockMergeMutate.mockImplementation(
+      (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
+        opts.onSuccess?.({ location: "", schedulesSkipped: null, signingTurnedOff: SIGNING_OFF });
+      }
+    );
+    await user.click(screen.getByTestId("import-confirm-merge"));
+
+    expect(screen.getByTestId("result-warnings")).toHaveTextContent(SIGNING_OFF);
+    expect(screen.queryByTestId("import-schedules-skipped")).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -332,7 +374,7 @@ describe("ImportAgentDialog", () => {
 
     mockMergeMutate.mockImplementation(
       (_args: unknown, opts: { onSuccess?: (r: unknown) => void }) => {
-        opts.onSuccess?.({ location: "", schedulesSkipped: null });
+        opts.onSuccess?.({ location: "", schedulesSkipped: null, signingTurnedOff: null });
       }
     );
     await user.click(screen.getByTestId("import-confirm-merge"));
