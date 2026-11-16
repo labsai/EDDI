@@ -14,7 +14,7 @@ import {
   TOKEN_WAIT_MS,
   type EmbedAuth,
 } from "./embed-auth";
-import { getAuthToken, request, setAuthToken, setBaseUrl, ApiError } from "./http";
+import { getAuthToken, request, setAuthToken, setBaseUrl, ApiError } from "@eddi/core";
 
 const HOST = "https://portal.example";
 

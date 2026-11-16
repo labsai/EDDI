@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Wallet } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useGroupDescriptors } from "@/hooks/use-groups";
 import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useTeamBudgets } from "@/hooks/use-team-budget";

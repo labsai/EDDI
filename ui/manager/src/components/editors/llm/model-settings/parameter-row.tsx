@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ExternalLink, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   evaluateParameter,
   type ParameterCatalog,

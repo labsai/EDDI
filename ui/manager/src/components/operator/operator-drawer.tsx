@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, Link } from "react-router-dom";
 import { Sparkles, X, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { OperatorChat } from "@/components/operator/operator-chat";
 import { useOperatorConfig, useOperatorTrust, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
 import { OperatorUntrusted } from "@/components/operator/operator-untrusted";

@@ -10,13 +10,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CONVERSATION_STEP,
-  ratingErrorMessage,
   type RatingClient,
   type RatingInput,
   type RatingProfile,
   type StoredRating,
-} from "@/api/rating-api";
-import { agentReplyCount } from "@/rating-steps";
+} from "@eddi/core";
+import { ratingErrorMessage } from "@/api/rating-api";
+import { agentReplyCount } from "@eddi/core";
 import type { ChatMessage, ConversationState } from "@/types";
 
 /** How long a refused rating's notice stays up. */

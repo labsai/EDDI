@@ -177,6 +177,13 @@ export interface UpgradeResult {
   compatible?: boolean | null;
   /** The compatibility generation the written agent version carries, when known. */
   compatibilityGeneration?: number | null;
+  /**
+   * What the run wrote differently from the source, and why — for example
+   * `signInterAgentMessages` turned off because this instance holds no usable
+   * signing key for the agent. Not failures: everything listed was written.
+   * Absent when there is nothing to say (and on older backends).
+   */
+  warnings?: string[];
 }
 
 /**
@@ -409,11 +416,28 @@ export function importSpaceHeader(): Record<string, string> {
 }
 
 /**
+ * `X-Agent-Signing-Turned-Off`: the import wrote `signInterAgentMessages` off,
+ * and why. A created agent has no signing key yet, and a merged one may have
+ * none this instance holds, so an archive with signing on lands with it off.
+ * The header is the only place the import says so.
+ */
+function signingTurnedOffOf(res: Response): string | null {
+  return res.headers.get("X-Agent-Signing-Turned-Off") || null;
+}
+
+/** What a create import wrote. */
+export interface ImportResult {
+  /** The `Location` of the newly created agent. */
+  location: string;
+  /** Why signing was turned off for it, or null when it was not. */
+  signingTurnedOff: string | null;
+}
+
+/**
  * Import a agent from a zip file (create new — default strategy).
  * POST /backup/import with Content-Type: application/zip
- * Returns the Location of the newly created agent.
  */
-export async function importAgent(file: File): Promise<string> {
+export async function importAgent(file: File): Promise<ImportResult> {
   const res = await fetch(`${api.getBaseUrl()}/backup/import`, {
     method: "POST",
     headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
@@ -424,8 +448,7 @@ export async function importAgent(file: File): Promise<string> {
     throw await failureOf(res, "Import failed");
   }
 
-  const location = res.headers.get("Location");
-  return location || "";
+  return { location: res.headers.get("Location") || "", signingTurnedOff: signingTurnedOffOf(res) };
 }
 
 /**
@@ -461,6 +484,8 @@ export interface MergeImportResult {
    * this header is the only thing that says so.
    */
   schedulesSkipped: number | null;
+  /** Why signing was turned off for the merged agent, or null when it was not. */
+  signingTurnedOff: string | null;
 }
 
 export async function importAgentMerge(
@@ -490,6 +515,7 @@ export async function importAgentMerge(
     location: res.headers.get("Location") || "",
     schedulesSkipped:
       Number.isInteger(parsed) && parsed > 0 ? parsed : null,
+    signingTurnedOff: signingTurnedOffOf(res),
   };
 }
 

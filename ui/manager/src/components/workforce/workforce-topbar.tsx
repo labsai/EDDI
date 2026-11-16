@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, Menu, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { cn } from "@/lib/utils";
 
