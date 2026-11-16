@@ -8,7 +8,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { TierBadge } from "@/components/oversight/approval-analytics";
 import { percent } from "@/components/oversight/format";
+import { useMayUse } from "@/hooks/use-auth";
 import { oversightErrorCode, useApplyRecommendation, useDismissRecommendation, useLiftSuspension } from "@/hooks/use-hitl-oversight";
+import { ROLE_ADMIN, ROLE_EDITOR } from "@/lib/roles";
 import { OVERSIGHT_LIMITS, type CategoryView } from "@/lib/api/hitl-oversight";
 import type { UseQueryResult } from "@tanstack/react-query";
 
@@ -56,6 +58,9 @@ function CategoryCard({ view }: { view: CategoryView }) {
   const apply = useApplyRecommendation();
   const dismiss = useDismissRecommendation();
   const lift = useLiftSuspension();
+  // Apply, dismiss and lift take a gate away: the backend admits eddi-admin and
+  // eddi-editor only (an approver alone gets 403), so they are not offered to anyone else.
+  const mayChange = useMayUse()([ROLE_ADMIN, ROLE_EDITOR]);
   const [note, setNote] = useState("");
   const [confirmNoGate, setConfirmNoGate] = useState(false);
   const recommendation = view.state.recommendation?.status === "OPEN" ? view.state.recommendation : null;
@@ -173,17 +178,17 @@ function CategoryCard({ view }: { view: CategoryView }) {
         data-testid={`${testId}-note`}
       />
       <div className="flex flex-wrap gap-2">
-        {recommendation?.applicable && (
+        {mayChange && recommendation?.applicable && (
           <Button size="sm" disabled={apply.isPending} onClick={() => void doApply()} data-testid={`${testId}-apply`}>
             {t("oversight.apply", { version: (recommendation.basedOnAgentVersion ?? 0) + 1, defaultValue: "Apply → version {{version}}" })}
           </Button>
         )}
-        {recommendation && (
+        {mayChange && recommendation && (
           <Button size="sm" variant="outline" disabled={!note.trim() || dismiss.isPending} onClick={() => void withNote("dismiss")} data-testid={`${testId}-dismiss`}>
             {t("oversight.dismiss", "Dismiss")}
           </Button>
         )}
-        {suspension && (
+        {mayChange && suspension && (
           <Button size="sm" variant="outline" disabled={!note.trim() || lift.isPending} onClick={() => void withNote("lift")} data-testid={`${testId}-lift`}>
             {t("oversight.lift", "Lift suspension")}
           </Button>

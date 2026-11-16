@@ -587,6 +587,19 @@ public class UserDirectory {
 
     // --- GDPR ---------------------------------------------------------------
 
+    /**
+     * The stored entry for one principal, read through to the store — for a caller
+     * that decides access on it. Unlike {@link #lookup}, which serves cosmetic
+     * labels and treats a store failure as "unknown", a failure here propagates: an
+     * access decision must not read an outage as "no record".
+     */
+    public Optional<DirectoryUser> findForAccessCheck(String principal) {
+        if (!isActive() || principal == null || principal.isBlank()) {
+            return Optional.empty();
+        }
+        return store.find(principal);
+    }
+
     /** The stored entry for a principal, for a data export. */
     public Optional<DirectoryUser> export(String principal) {
         return store.find(principal);

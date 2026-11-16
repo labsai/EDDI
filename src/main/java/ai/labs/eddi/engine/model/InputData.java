@@ -59,7 +59,25 @@ public class InputData {
     @JsonIgnore
     private Integer continuationNumber;
 
+    /**
+     * Set only with {@link #continuationNumber}: whether the continuation's chain
+     * was booked by an administrator, as its schedule recorded it ({@code null} for
+     * a chain booked before that was recorded). Engine-only, like the number.
+     */
+    @JsonIgnore
+    private Boolean continuationBookedByAdmin;
+
     public InputData() {
+    }
+
+    @JsonIgnore
+    public Boolean getContinuationBookedByAdmin() {
+        return continuationBookedByAdmin;
+    }
+
+    @JsonIgnore
+    public void setContinuationBookedByAdmin(Boolean continuationBookedByAdmin) {
+        this.continuationBookedByAdmin = continuationBookedByAdmin;
     }
 
     @JsonIgnore

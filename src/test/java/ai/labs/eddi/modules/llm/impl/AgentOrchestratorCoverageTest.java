@@ -55,6 +55,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.List;
@@ -1593,6 +1594,41 @@ class AgentOrchestratorCoverageTest {
         var call = batch.getCalls().get(0);
         assertTrue(call.isArgsTruncated());
         assertTrue(call.getArgumentsRaw().getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= PendingToolCallBatch.ARGS_RAW_MAX_BYTES);
+    }
+
+    @Test
+    void buildPendingBatch_argsTruncatedWhenTheApproverCopyIsCutToTheDisplayCap() {
+        // Benign leading field, ~40 KB of filler, then the field that matters: under
+        // the raw cap, over the display cap. The approver would only see the first 32
+        // KB.
+        String args = "{\"amount\":\"1\",\"pad\":\"" + "x".repeat(40_000) + "\",\"to\":\"attacker\"}";
+        var gated = ToolExecutionRequest.builder().id("c1").name("calculate").arguments(args).build();
+        var gr = new ToolApprovalGate.GateResult(List.of(gated), List.of(), Map.of("c1", "calculate"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(gated)));
+
+        var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("calculate", "builtin"), gateCalculate());
+
+        var call = batch.getCalls().get(0);
+        assertTrue(call.isArgsTruncated(), "arguments the approver cannot see in full must be marked truncated");
+        assertFalse(call.getArgumentsRedacted().contains("attacker"));
+        assertTrue(call.getArgumentsRedacted().getBytes(StandardCharsets.UTF_8).length <= PendingToolCallBatch.ARGS_REDACTED_MAX_BYTES);
+    }
+
+    @Test
+    void buildPendingBatch_argsUnderTheDisplayCapAreNotTruncated() {
+        String args = "{\"amount\":\"1\",\"pad\":\"" + "x".repeat(10_000) + "\",\"to\":\"payee\"}";
+        var gated = ToolExecutionRequest.builder().id("c1").name("calculate").arguments(args).build();
+        var gr = new ToolApprovalGate.GateResult(List.of(gated), List.of(), Map.of("c1", "calculate"));
+        List<ChatMessage> msgs = List.of(UserMessage.from("hi"), AiMessage.from(List.of(gated)));
+
+        var batch = orchestrator.buildPendingBatch(msgs, gr, twoToolTask(), memory, 0,
+                List.of(), new ArrayList<>(), 1, 0, Map.of("calculate", "builtin"), gateCalculate());
+
+        var call = batch.getCalls().get(0);
+        assertFalse(call.isArgsTruncated());
+        assertEquals(args, call.getArgumentsRaw());
+        assertEquals(args, call.getArgumentsRedacted());
     }
 
     @Test

@@ -5,11 +5,17 @@
 package ai.labs.eddi.engine.hitl;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -193,6 +199,57 @@ class HitlAccessGuardTest {
 
         assertEquals("owner1", guard.requireConversationResumeAccess("c1"));
         verify(turnGuard, never()).requireConversationTurnAccess(anyString());
+    }
+
+    // ---- toolApprovals.deciders ---------------------------------------------
+
+    private void pausedOnToolCall(ToolApprovalsConfig.Deciders deciders) throws Exception {
+        var effective = new ToolApprovalsConfig();
+        effective.setDeciders(deciders);
+        var batch = new PendingToolCallBatch();
+        batch.setEffectiveToolApprovals(effective);
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPauseType("TOOL_CALL");
+        snapshot.setHitlPendingToolCalls(batch);
+        when(conversationService.getConversationMemoryTail("c1")).thenReturn(ConversationMemoryTail.ofFullSnapshot(snapshot));
+    }
+
+    @Test
+    void requireConversationResumeAccess_roleOnly_refusesTheOwner() throws Exception {
+        var turnGuard = withTurnGuard();
+        pausedOnToolCall(ToolApprovalsConfig.Deciders.ROLE_ONLY);
+
+        assertThrows(ForbiddenException.class, () -> guard.requireConversationResumeAccess("c1"));
+        verify(turnGuard, never()).requireConversationTurnAccess(anyString());
+        // The owner still sees the pause: reading it is the plain HITL access.
+        assertEquals("owner1", guard.requireConversationHitlAccess("c1"));
+    }
+
+    @Test
+    void requireConversationResumeAccess_roleOnly_admitsTheApprover() throws Exception {
+        withTurnGuard();
+        pausedOnToolCall(ToolApprovalsConfig.Deciders.ROLE_ONLY);
+        when(ownershipValidator.isApprover(identity)).thenReturn(true);
+
+        assertEquals("owner1", guard.requireConversationResumeAccess("c1"));
+    }
+
+    @Test
+    void requireConversationResumeAccess_ownerOrRole_admitsTheOwnerAsBefore() throws Exception {
+        var turnGuard = withTurnGuard();
+        pausedOnToolCall(ToolApprovalsConfig.Deciders.OWNER_OR_ROLE);
+
+        assertEquals("owner1", guard.requireConversationResumeAccess("c1"));
+        verify(turnGuard).requireConversationTurnAccess("c1");
+    }
+
+    @Test
+    void requireConversationResumeAccess_unreadablePause_failsClosedForTheOwner() throws Exception {
+        withTurnGuard();
+        when(conversationService.getConversationMemoryTail("c1")).thenThrow(new ResourceStoreException("down"));
+
+        assertThrows(ForbiddenException.class, () -> guard.requireConversationResumeAccess("c1"));
     }
 
     // ---- group surface -----------------------------------------------------

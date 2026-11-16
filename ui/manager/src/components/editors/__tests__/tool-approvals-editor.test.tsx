@@ -13,6 +13,23 @@ function renderEditor(value: ToolApprovalsConfig = {}, agentTimeoutPolicy?: stri
 }
 
 describe("ToolApprovalsEditor", () => {
+  it("commits only the field it edited, so fields it does not show (deciders, …) survive the parent's merge", () => {
+    const value: ToolApprovalsConfig = {
+      requireApproval: ["transfer_funds"],
+      deciders: "ROLE_ONLY",
+      allowArgumentAmendments: false,
+      requirePauseId: true,
+    };
+    const { onChange } = renderEditor(value);
+    const require = screen.getByTestId("hitl-tool-require");
+    fireEvent.change(require, { target: { value: "transfer_funds\nhttp.post:*" } });
+    fireEvent.blur(require);
+    const updates = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
+    expect(updates).toEqual({ requireApproval: ["transfer_funds", "http.post:*"] });
+    // Both parents merge `{ ...current, ...updates }`.
+    expect({ ...value, ...updates }).toMatchObject({ deciders: "ROLE_ONLY", allowArgumentAmendments: false, requirePauseId: true });
+  });
+
   it("commits the requireApproval list (one pattern per line) on blur", () => {
     const { onChange } = renderEditor();
     const require = screen.getByTestId("hitl-tool-require");

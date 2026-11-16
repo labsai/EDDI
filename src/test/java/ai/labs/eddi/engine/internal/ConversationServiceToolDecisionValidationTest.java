@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -473,6 +474,113 @@ class ConversationServiceToolDecisionValidationTest {
             assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+        }
+    }
+
+    @Nested
+    @DisplayName("toolApprovals.allowArgumentAmendments")
+    class ArgumentAmendmentsSwitch {
+
+        private ConversationMemorySnapshot amendmentsOff() {
+            var snapshot = toolCallPauseSnapshot();
+            var effective = new ToolApprovalsConfig();
+            effective.setAllowArgumentAmendments(false);
+            snapshot.getHitlPendingToolCalls().setEffectiveToolApprovals(effective);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("false: an amendment is refused with 400 before the pause is consumed")
+        void amendmentRefusedWhenSwitchedOff() throws Exception {
+            doReturn(amendmentsOff()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setToolDecisions(Map.of(CALL_ABC, toolDecision(HitlVerdict.APPROVED, null, "{\"amount\":5000}")));
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertTrue(ex.getMessage().contains("allowArgumentAmendments is false"), ex.getMessage());
+            verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), any());
+        }
+
+        @Test
+        @DisplayName("false: approving as shown still works")
+        void approveAsShownStillWorks() throws Exception {
+            stubSuccessfulResumeMachinery(amendmentsOff());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setToolDecisions(Map.of(CALL_ABC, toolDecision(HitlVerdict.APPROVED, null, null)));
+
+            assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+        }
+    }
+
+    @Nested
+    @DisplayName("toolApprovals.requirePauseId")
+    class RequirePauseId {
+
+        private ConversationMemorySnapshot pauseIdRequired() {
+            var snapshot = toolCallPauseSnapshot();
+            var effective = new ToolApprovalsConfig();
+            effective.setRequirePauseId(true);
+            snapshot.getHitlPendingToolCalls().setEffectiveToolApprovals(effective);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("a person's decision without pauseId is refused with 400 and nothing runs")
+        void decisionWithoutPauseIdRefused() throws Exception {
+            stubSuccessfulResumeMachinery(pauseIdRequired());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("owner-1");
+
+            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertTrue(ex.getMessage().contains("must name the pause"), ex.getMessage());
+            verify(agentFactory, never()).getAgent(any(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a decision naming the current pause runs")
+        void decisionNamingThePauseRuns() throws Exception {
+            var snapshot = pauseIdRequired();
+            stubSuccessfulResumeMachinery(snapshot);
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("owner-1");
+            decision.setPauseId(HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()));
+
+            assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            verify(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+        }
+
+        @Test
+        @DisplayName("an engine decision (system:*) is exempt")
+        void engineDecisionExempt() throws Exception {
+            stubSuccessfulResumeMachinery(pauseIdRequired());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.REJECTED);
+            decision.setDecidedBy("system:group");
+
+            assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+        }
+
+        @Test
+        @DisplayName("off (the default): a decision without pauseId runs as before")
+        void defaultUnchanged() throws Exception {
+            stubSuccessfulResumeMachinery(toolCallPauseSnapshot());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("owner-1");
+
+            assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
         }
     }
 

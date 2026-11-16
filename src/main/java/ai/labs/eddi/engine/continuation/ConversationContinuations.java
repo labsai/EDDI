@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -95,6 +96,11 @@ public class ConversationContinuations {
     public static final String STEP_NEXT = "continuation:next";
     /** Step key: why this turn's {@code CONTINUE_CONVERSATION} was ignored. */
     public static final String STEP_REFUSED = "continuation:refused";
+    /**
+     * Step key of a continuation turn: whether its chain was booked by an
+     * administrator — see {@link #bookedByAdmin}.
+     */
+    public static final String STEP_BOOKED_BY_ADMIN = "continuation:bookedByAdmin";
 
     /** Context key of a continuation turn, reserved for the engine. */
     public static final String CONTEXT_KEY = ClientContextGuard.KEY_SELF_CONTINUATION;
@@ -109,6 +115,13 @@ public class ConversationContinuations {
     public static final String METADATA_NUMBER_KEY = "continuationNumber";
     /** Metadata key: the agent's {@code maxContinuations} when it was armed. */
     public static final String METADATA_MAX_KEY = "maxContinuations";
+    /**
+     * Metadata key: whether the chain was booked by an administrator acting in
+     * their own conversation ({@link #bookedByAdmin}). Absent on a chain booked
+     * before it existed. Engine-written only: a schedule write from outside that
+     * carries the continuation marker is refused.
+     */
+    public static final String METADATA_BOOKED_BY_ADMIN_KEY = "bookedByAdmin";
 
     private static final String NAME_PREFIX = "continuation-";
 
@@ -150,6 +163,12 @@ public class ConversationContinuations {
     public static final String REASON_OWNER_MISMATCH = "owner_mismatch";
     /** At fire time: this continuation already ran (re-delivered schedule). */
     public static final String REASON_DUPLICATE = "duplicate";
+    /**
+     * At fire time, under enforced workspaces: the conversation's owner may no
+     * longer {@code USE} its agent (the grant or share was withdrawn). The same
+     * re-check every other scheduled fire gets; the chain stops.
+     */
+    public static final String REASON_ACCESS_REVOKED = "access_revoked";
 
     private final IScheduleStore scheduleStore;
     private final MeterRegistry meterRegistry;
@@ -184,6 +203,11 @@ public class ConversationContinuations {
         var marker = new Data<Object>(STEP_NUMBER, inputData.getContinuationNumber());
         marker.setPublic(false);
         step.storeData(marker);
+        if (inputData.getContinuationBookedByAdmin() != null) {
+            var booked = new Data<Object>(STEP_BOOKED_BY_ADMIN, inputData.getContinuationBookedByAdmin());
+            booked.setPublic(false);
+            step.storeData(booked);
+        }
     }
 
     // --- step 2: decide, before the persist
@@ -351,7 +375,12 @@ public class ConversationContinuations {
             schedule.setNextFire(now);
             schedule.setEnabled(true);
             schedule.setCreatedAt(now);
-            schedule.setMetadata(metadata(conversationId, number.intValue(), policy.maxContinuations()));
+            Map<String, Object> metadata = metadata(conversationId, number.intValue(), policy.maxContinuations());
+            Boolean bookedByAdmin = bookedByAdmin(step);
+            if (bookedByAdmin != null) {
+                metadata.put(METADATA_BOOKED_BY_ADMIN_KEY, bookedByAdmin);
+            }
+            schedule.setMetadata(metadata);
             createWithRetry(schedule);
             if (memory.isCancelled()) {
                 // The cancel landed while the schedule was being written: its disarm
@@ -406,6 +435,48 @@ public class ConversationContinuations {
                 }
             }
         }
+    }
+
+    /**
+     * Records on the turn's step that an administrator acting in their own
+     * conversation drove it — read later by {@link #bookedByAdmin} when the turn's
+     * continuation is armed.
+     * <p>
+     * Called while the turn's caller is still bound: the arm runs from the
+     * pipeline's completion callback, after {@code CallerIdentityContext} has
+     * restored the previous binding (or on another thread), so reading the live
+     * caller there recorded every administrator's booking as an ordinary one. A
+     * {@code null} or non-admin caller records nothing.
+     */
+    public static void recordBookingCaller(IConversationMemory memory, CallerIdentity caller) {
+        IWritableConversationStep step = memory != null ? memory.getCurrentStep() : null;
+        if (step == null || caller == null || !caller.isAdminActingAs(memory.getUserId())) {
+            return;
+        }
+        var marker = new Data<Object>(STEP_BOOKED_BY_ADMIN, Boolean.TRUE);
+        marker.setPublic(false);
+        step.storeData(marker);
+    }
+
+    /**
+     * Whether the chain this continuation belongs to was booked by an administrator
+     * acting in their own conversation — the continuation's equivalent of a
+     * schedule's {@code creatorAdmin}, which the fire-time {@code USE} re-check
+     * honours ({@code ContinuationFireHandler}).
+     * <p>
+     * Read from the step, never from the live caller: a turn a person drove carries
+     * {@value #STEP_BOOKED_BY_ADMIN} when {@link #recordBookingCaller} saw an
+     * administrator, and a continuation turn carries what the schedule that started
+     * it recorded (set from the schedule by the fire). {@code null} — no marker is
+     * written — for a continuation of a chain booked before the marker existed,
+     * which is therefore not re-checked, as before.
+     */
+    static Boolean bookedByAdmin(IConversationStep step) {
+        IData<Object> recorded = step.getData(STEP_BOOKED_BY_ADMIN);
+        if (recorded != null && recorded.getResult() instanceof Boolean b) {
+            return b;
+        }
+        return step.getData(STEP_NUMBER) != null ? null : Boolean.FALSE;
     }
 
     public static Map<String, Object> metadata(String conversationId, int number, int max) {

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.security.spaces;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.descriptors.model.ResourceGrant;
 import ai.labs.eddi.configs.descriptors.model.ResourceVisibility;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -446,6 +447,48 @@ public class ResourceAccessGuard {
         CallerSpaces caller = new CallerSpaces(Set.of(principal.trim()), subjects, subjects);
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, caller, settings.admitsLegacy());
         return granted != null && granted.includes(AccessLevel.USE) ? UseCheck.ALLOWED : UseCheck.DENIED;
+    }
+
+    /**
+     * Whether some team could hold {@code USE} on the resource: it lives in a team
+     * space, or a team subject was granted {@code USE} or more on it.
+     * <p>
+     * For engine work done later on a principal's behalf when nobody knows which
+     * teams that principal is in (no user directory, or no record of them): a
+     * {@link #checkPrincipalUse} denial asked without teams is then definitive only
+     * when no team could have admitted them. Ignores the enforcement switch;
+     * callers ask only after {@code checkPrincipalUse} denied.
+     *
+     * @throws IllegalStateException
+     *             when the descriptor store cannot answer — a caller must not read
+     *             an outage as "no team"
+     */
+    public boolean someTeamMayUse(String resourceId) {
+        DocumentDescriptor descriptor;
+        try {
+            descriptor = documentDescriptorStore.readCurrentDescriptor(resourceId);
+        } catch (ResourceNotFoundException e) {
+            return false;
+        } catch (ResourceStoreException e) {
+            throw new IllegalStateException("Could not load the descriptor of " + sanitize(resourceId), e);
+        }
+        if (descriptor == null) {
+            return false;
+        }
+        ResourceVisibility visibility = descriptor.resourceVisibility() != null ? descriptor.resourceVisibility() : ResourceVisibility.space;
+        String spaceId = descriptor.getSpaceId();
+        if (visibility == ResourceVisibility.space && spaceId != null && spaceId.startsWith(Subjects.TEAM_PREFIX)) {
+            return true;
+        }
+        if (descriptor.getGrants() != null) {
+            for (ResourceGrant grant : descriptor.getGrants()) {
+                if (grant != null && grant.getSubject() != null && grant.getSubject().startsWith(Subjects.TEAM_PREFIX)
+                        && grant.accessLevel() != null && grant.accessLevel().includes(AccessLevel.USE)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
