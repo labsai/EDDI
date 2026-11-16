@@ -67,7 +67,30 @@ export function ShortcutsDialog() {
 
   if (!open) return null;
 
+  const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
   const shortcuts = [
+    {
+      key: `${mod}K`,
+      label: t("Workforce.shortcuts.quickSwitcher", "Go to a conversation or agent"),
+    },
+    {
+      key: `${mod}${mod === "⌘" ? "⇧" : "Shift+"}O`,
+      label: t("Workforce.shortcuts.newChat", "New chat"),
+    },
+    {
+      key: "Enter",
+      label: t("Workforce.shortcuts.send", "Send the message"),
+      context: t("Workforce.shortcuts.shiftEnter", "Shift+Enter for a new line"),
+    },
+    {
+      key: "↑",
+      label: t("Workforce.shortcuts.editLast", "Edit your last message"),
+      context: t("Workforce.shortcuts.inEmptyComposer", "In an empty message box"),
+    },
+    {
+      key: "Esc",
+      label: t("Workforce.shortcuts.stop", "Stop the reply being written"),
+    },
     {
       key: "N",
       label: t("Workforce.shortcuts.newBoard", "Assemble Task Force"),
@@ -90,7 +113,7 @@ export function ShortcutsDialog() {
         onClick={() => setOpen(false)}
         aria-hidden="true"
       />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
         <div
           ref={dialogRef}
           role="dialog"
@@ -98,7 +121,8 @@ export function ShortcutsDialog() {
           aria-label={t("Workforce.shortcuts.title", "Keyboard Shortcuts")}
           onKeyDown={handleKeyDown}
           className={cn(
-            "pointer-events-auto w-full max-w-sm",
+            // A short landscape screen: the dialog scrolls rather than lose its close button.
+            "pointer-events-auto w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto",
             "bg-card rounded-xl shadow-2xl border border-border",
             "animate-[br-message-in_200ms_ease-out]"
           )}
@@ -118,7 +142,7 @@ export function ShortcutsDialog() {
           </div>
           <div className="ps-5 pe-5 pt-3 pb-5 space-y-3">
             {shortcuts.map((s) => (
-              <div key={s.key} className="flex items-center justify-between">
+              <div key={`${s.key}-${s.label}`} className="flex items-center justify-between">
                 <div className="flex flex-col">
                   <span className="text-sm font-medium">{s.label}</span>
                   {s.context && (

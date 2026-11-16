@@ -14,6 +14,8 @@
     "./team": "./src/team/index.ts",
     "./team/locales/*": "./src/team/i18n/locales/*",
     "./i18next": "./src/i18next/index.ts",
+    "./paused-card": "./src/components/PausedCard.tsx",
+    "./rating-card": "./src/components/RatingCard.tsx",
     "./markdown.css": "./src/styles/markdown.css"
   },
   "scripts": {
@@ -29,6 +31,7 @@
     "katex": "^0.19.1",
     "lucide-react": "^1.59.0",
     "mdast-util-gfm": "^3.1.0",
+    "mermaid": "~12.2.0",
     "micromark-extension-gfm": "^3.0.0",
     "react-i18next": "^17.0.21",
     "react-markdown": "^10.1.0",

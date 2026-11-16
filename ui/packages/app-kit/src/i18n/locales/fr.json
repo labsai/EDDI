@@ -190,7 +190,17 @@
     "toolArgs": "Arguments",
     "toolResult": "Résultat",
     "toolArgsShowFields": "Champs",
-    "toolArgsShowJson": "JSON"
+    "toolArgsShowJson": "JSON",
+    "stop": "Arrêter",
+    "stopWithKey": "Arrêter (Échap)",
+    "editLast": "Modifier",
+    "editLastHint": "Modifier et renvoyer (↑)",
+    "regenerate": "Régénérer",
+    "regenerateHint": "Demander une nouvelle réponse",
+    "attachUploadingPercent": "Envoi… {{percent}} %",
+    "attachProgress": "Envoi de {{name}}",
+    "attachRetry": "Réessayer",
+    "attachHint": "Joindre des fichiers — ou les coller ou les déposer ici"
   },
   "editor": {
     "deployFailed": "Échec du déploiement",

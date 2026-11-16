@@ -106,6 +106,12 @@ export interface AgentConversationState {
    * with isProcessing.
    */
   historyBusy: boolean;
+  /**
+   * The connection to a streamed turn dropped after the turn was accepted, and
+   * the conversation is being re-read until that turn settles on the server
+   * (`reconnectDelaysMs`). The turn is still the user's: Stop still stops it.
+   */
+  reconnecting: boolean;
   undoAvailable: boolean;
   redoAvailable: boolean;
   /** Set when the backend requests a specific input field (e.g. password). */
@@ -149,6 +155,7 @@ export const initialConversationState: AgentConversationState = {
   isEscalating: false,
   activeTool: null,
   historyBusy: false,
+  reconnecting: false,
   undoAvailable: false,
   redoAvailable: false,
   activeInputField: null,
@@ -179,6 +186,7 @@ export type ConversationAction =
   | { type: "SET_QUICK_REPLIES"; replies: QuickReply[] }
   | { type: "SET_PROCESSING"; value: boolean }
   | { type: "SET_HISTORY_BUSY" }
+  | { type: "SET_RECONNECTING"; value: boolean }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
   | { type: "SET_ACTIVE_TOOL"; tool: ToolActivity | null }
@@ -220,6 +228,7 @@ const ACTION_TYPES: ReadonlySet<string> = new Set<ConversationAction["type"]>([
   "SET_QUICK_REPLIES",
   "SET_PROCESSING",
   "SET_HISTORY_BUSY",
+  "SET_RECONNECTING",
   "SET_THINKING",
   "SET_ESCALATING",
   "SET_ACTIVE_TOOL",
@@ -382,6 +391,7 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
         messages: msgs,
         isProcessing: false,
         historyBusy: false,
+        reconnecting: false,
         isThinking: false,
         isEscalating: false,
         activeTool: null,
@@ -394,10 +404,13 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
     case "SET_PROCESSING":
       return action.value
         ? { ...state, isProcessing: true }
-        : { ...state, isProcessing: false, historyBusy: false };
+        : { ...state, isProcessing: false, historyBusy: false, reconnecting: false };
 
     case "SET_HISTORY_BUSY":
       return { ...state, historyBusy: true };
+
+    case "SET_RECONNECTING":
+      return state.reconnecting === action.value ? state : { ...state, reconnecting: action.value };
 
     // Both are dispatched unconditionally on every token, so bail out when the
     // value is unchanged rather than allocating a new state object (and
@@ -436,6 +449,7 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
         // key and a Stop button for a turn that was not running.
         isProcessing: false,
         historyBusy: false,
+        reconnecting: false,
         isThinking: false,
         isEscalating: false,
         activeTool: null,

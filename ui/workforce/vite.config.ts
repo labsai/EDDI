@@ -24,6 +24,30 @@ export default defineConfig({
     brandDefaults({
       assets: { logo: LOGO, "logo-dark": LOGO, "og-image": LOGO, icon: LOGO },
     }),
+    // The shells link the manifest EDDI renders in the brand
+    // (RestWorkforceResource#manifest); the dev server answers with the default
+    // brand's, so `npm run dev` installs and audits like the jar does.
+    {
+      name: "workforce-dev-manifest",
+      configureServer(server) {
+        server.middlewares.use("/workforce/manifest.webmanifest", (_req, res) => {
+          res.setHeader("Content-Type", "application/manifest+json");
+          res.end(
+            JSON.stringify({
+              id: "/workforce",
+              name: "EDDI Workforce",
+              short_name: "EDDI",
+              start_url: "/workforce",
+              scope: "/workforce",
+              display: "standalone",
+              background_color: "#111113",
+              theme_color: "#111113",
+              icons: [{ src: "/branding/icon", type: "image/png", sizes: "any", purpose: "any" }],
+            }),
+          );
+        });
+      },
+    },
   ],
   define: {
     // Which app this bundle is, for the code it shares with the Manager

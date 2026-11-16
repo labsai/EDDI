@@ -188,7 +188,17 @@
     "toolArgs": "Argumente",
     "toolResult": "Ergebnis",
     "toolArgsShowFields": "Felder",
-    "toolArgsShowJson": "JSON"
+    "toolArgsShowJson": "JSON",
+    "stop": "Anhalten",
+    "stopWithKey": "Anhalten (Esc)",
+    "editLast": "Bearbeiten",
+    "editLastHint": "Bearbeiten und erneut senden (↑)",
+    "regenerate": "Neu erzeugen",
+    "regenerateHint": "Um eine neue Antwort bitten",
+    "attachUploadingPercent": "Wird hochgeladen… {{percent}} %",
+    "attachProgress": "Hochladen von {{name}}",
+    "attachRetry": "Erneut versuchen",
+    "attachHint": "Dateien anhängen – oder hier einfügen bzw. ablegen"
   },
   "editor": {
     "deployFailed": "Bereitstellung fehlgeschlagen",

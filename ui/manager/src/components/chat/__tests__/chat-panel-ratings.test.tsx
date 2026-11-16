@@ -61,6 +61,31 @@ describe("ChatPanel — ratings", () => {
     await waitFor(() => expect(rated).toBe('conv1/1 {"score":1,"channel":"manager"}'));
   });
 
+  it("thumbs down on a reply takes an optional reason and comment and sends both (T1.14)", async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.get("*/agents/:agentId/profile", () =>
+        HttpResponse.json({ agentId: "agent1", rating: { ...RATING, comment: true, reasonTags: ["Wrong answer", "Too long"] } }),
+      ),
+      http.put("*/agents/:conversationId/steps/:stepIndex/rating", async ({ params, request }) => {
+        const body = (await request.json()) as { score: number; tags?: string[]; comment?: string };
+        bodies.push(body);
+        return HttpResponse.json({ stepIndex: Number(params.stepIndex), score: body.score, tags: body.tags ?? [], comment: body.comment ?? null });
+      }),
+    );
+    renderWithProviders(<ChatPanel />);
+    const step1 = await screen.findByTestId("chat-step-rating-1");
+    fireEvent.click(step1.querySelector("[data-testid=chat-rating-down]")!);
+    await waitFor(() => expect(bodies).toEqual([{ score: 0, channel: "manager" }]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Too long" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Half of it would do" } });
+    fireEvent.click(screen.getByTestId("chat-rating-send"));
+    await waitFor(() =>
+      expect(bodies[1]).toEqual({ score: 0, channel: "manager", tags: ["Too long"], comment: "Half of it would do" }),
+    );
+  });
+
   it("opens the rating card from the header", async () => {
     server.use(http.get("*/agents/:agentId/profile", () => HttpResponse.json({ agentId: "agent1", rating: RATING })));
     renderWithProviders(<ChatPanel />);

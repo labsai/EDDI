@@ -196,7 +196,17 @@
     "toolArgs": "الوسائط",
     "toolResult": "النتيجة",
     "toolArgsShowFields": "الحقول",
-    "toolArgsShowJson": "JSON"
+    "toolArgsShowJson": "JSON",
+    "stop": "إيقاف",
+    "stopWithKey": "إيقاف (Esc)",
+    "editLast": "تعديل",
+    "editLastHint": "تعديل وإرسال مرة أخرى (↑)",
+    "regenerate": "إعادة التوليد",
+    "regenerateHint": "طلب رد جديد",
+    "attachUploadingPercent": "جارٍ الرفع… {{percent}}٪",
+    "attachProgress": "رفع {{name}}",
+    "attachRetry": "حاول مرة أخرى",
+    "attachHint": "إرفاق ملفات — أو الصقها أو أفلتها هنا"
   },
   "editor": {
     "deployFailed": "فشل النشر",

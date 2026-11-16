@@ -30,7 +30,8 @@ export function WorkforceTopbar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex h-14 items-center gap-2 ps-4 pe-4",
+        // The notch / status bar of an installed app sits above the bar, not on it.
+        "sticky top-0 z-30 flex h-[calc(3.5rem+env(safe-area-inset-top))] items-center gap-2 ps-4 pe-4 pt-[env(safe-area-inset-top)]",
         "border-b border-border bg-card/80 backdrop-blur-sm",
       )}
     >

@@ -24,4 +24,5 @@ export { PausedCard } from "./components/PausedCard";
 export { RatingCard } from "./components/RatingCard";
 export { StepRating } from "./components/StepRating";
 export { ScrollToBottom } from "./components/ScrollToBottom";
+export { ReplyAnnouncer, nextAnnouncement, speakable, type AnnouncedMessage, type ReplyAnnouncerProps } from "./components/ReplyAnnouncer";
 export { isImeComposing } from "./components/ime";
