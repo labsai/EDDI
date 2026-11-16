@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
-import { api } from "@/lib/api-client";
-import { createLogEventSource } from "../logs";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { createLogEventSource } from "@eddi/app-kit/lib/api/logs";
 
 /**
  * Review 2026-10-02 (Manager, SSE): both streams were built with

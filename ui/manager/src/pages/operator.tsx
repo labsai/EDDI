@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { EmptyState } from "@/components/shared/empty-state";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { OperatorActivation } from "@/components/operator/operator-activation";
 import { OperatorChat } from "@/components/operator/operator-chat";
 import { OperatorUntrusted } from "@/components/operator/operator-untrusted";
@@ -39,9 +39,9 @@ import {
 } from "@/hooks/use-operator";
 import { RegisteredOperatorHealth, UnregisteredOperators } from "@/components/operator/unregistered-operators";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
-import { useApprovalStatus } from "@/hooks/use-hitl";
-import { shownPauseOf } from "@/lib/hitl-pause-binding";
-import { getErrorMessage } from "@/lib/api-client";
+import { useApprovalStatus } from "@eddi/app-kit/hooks/use-hitl";
+import { shownPauseOf } from "@eddi/app-kit/lib/hitl-pause-binding";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { fetchOpenApiSpec, operatorAgentName, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
@@ -49,7 +49,7 @@ import { RequestPreview } from "@/components/operator/request-preview";
 import { OperatorUpgradeNotice } from "@/components/operator/operator-upgrade";
 import { buildUpgradeRequest, type InstructionsChoice } from "@/lib/operator/operator-revision";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
-import type { PendingToolCallView } from "@/lib/api/hitl";
+import type { PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 
 export function OperatorPage() {
   const { t } = useTranslation();

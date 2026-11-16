@@ -398,6 +398,11 @@ roster like any agent, but their turn **pauses the discussion**
 - **PARALLEL phases**: agents fan out first; humans are then prompted one at a
   time against the *pre-fan-out* snapshot, so an independent round stays
   independent — a human answering after the agents cannot read their answers.
+- **In Workforce** the board shows the pending turn with its rendered prompt and a box to answer
+  ([Workforce guide](workforce-guide.md#a-team)). It says "It's your turn" to the member and whose
+  turn it is to anyone else, and a refused submission (`403`) is explained in those words. The
+  client compares the signed-in username or e-mail with the member's `agentId` only to choose the
+  wording; whether a submission is accepted is the server's check above.
 - **Task forces**: a HUMAN member may execute task-force tasks it is explicitly
   assigned — one pause per task, after the agents' waves — but may not plan or
   verify; see [Group Human Decisions](group-human-decisions.md#humans-as-task-force-executors).
@@ -721,6 +726,16 @@ read) is not given the artifact tools: they would hand it any member's text as
 stored ([Signed contributions](#signed-contributions)). Artifacts are deleted
 with their discussion (close/delete cascade) and by GDPR erasure; the durable
 trace of the work is the transcript.
+
+People read artifacts in Workforce's side panel on the team board, with each
+version the `history` still holds (current first, then up to
+`ARTIFACT_HISTORY_CAP` = 10 earlier ones, each with its editor and time); the
+Manager's discussion view lists them too. Both are read-only, since no REST
+endpoint lets a person write an artifact. Content is rendered by type: MARKDOWN
+through the shared markdown renderer with raw HTML escaped, JSON pretty-printed,
+TEXT as plain text. The panel follows a running discussion through the polled
+status read, which carries `artifacts`; the `artifact_updated` event itself has
+metadata only.
 
 ## Preset Templates (I10)
 
@@ -1382,6 +1397,14 @@ speaker and phase pairs.
 | `cancelled` | The discussion was cancelled |
 | `group_complete` | Terminal — carries the final state and the synthesized answer |
 | `group_error` | Terminal failure, with a curated (never raw) message |
+
+These events belong to the stream of the request that started or continued the
+discussion. To learn about a discussion without holding that stream open — it
+started, it ended, it waits for a human member (`yourTurn: true` for the person
+it waits for), or it paused at an approval gate — the owner and the `HUMAN`
+members can hold the per-user stream [`GET /me/events`](user-events.md) instead:
+`team.started`, `team.waiting_for_human`, `team.ended` and `approval.pending`,
+with ids only.
 
 ## MCP Tools
 

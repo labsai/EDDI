@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { TestSuiteEditor } from "@/components/editors/test-suite-editor";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
 import { RunResultBody } from "@/components/agent-tests/run-result-sheet";
-import { server } from "@/test/mocks/server";
-import { buildMockRuns } from "@/test/mocks/agent-test-fixtures";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { buildMockRuns } from "@eddi/app-kit/test/mocks/agent-test-fixtures";
 import type { AgentTestRun, AgentTestSuite } from "@/lib/api/agent-tests";
 
 const runs = buildMockRuns("agent1") as unknown as AgentTestRun[];

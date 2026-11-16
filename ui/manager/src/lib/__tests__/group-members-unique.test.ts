@@ -7,7 +7,7 @@ import {
   memberSeatKey,
   optionsOfferedTo,
   repeatedMemberIds,
-} from "@/lib/group-config";
+} from "@eddi/app-kit/lib/group-config";
 
 /**
  * EDDI 6.6 (`AgentGroupStore.duplicateMemberProblems`) refuses a group that

@@ -425,7 +425,15 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
             @Override
             public void onToolResult(String toolName, String callId, String status, long durationMs) {
-                stream.sendJson("tool_result", new ToolResultEvent(toolName, callId, status, durationMs));
+                onToolResult(toolName, callId, status, durationMs, "");
+            }
+
+            @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+                // The summary arrives redacted and bounded from the tool loop
+                // (ToolTraceRedaction.summary), the same redaction as toolTrace.
+                stream.sendJson("tool_result", new ToolResultEvent(toolName, callId, status, durationMs,
+                        "ok".equals(status), summary == null ? "" : summary));
             }
 
             @Override
@@ -972,10 +980,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     }
 
     /**
-     * Payload of {@code tool_result}: how the call ended, never what it returned.
+     * Payload of {@code tool_result}: how the call ended (call id, status,
+     * duration), {@code ok} for {@code status == "ok"}, and the start of its
+     * redacted result (B6) — never the raw result.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private record ToolResultEvent(String tool, String callId, String status, long durationMs) {
+    private record ToolResultEvent(String tool, String callId, String status, long durationMs, boolean ok, String summary) {
     }
 
     /** Payload of {@code hitl_resume}. */

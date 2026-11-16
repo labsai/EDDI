@@ -7,7 +7,7 @@ import {
   runConsolidation,
   scheduleConsolidation,
   unscheduleConsolidation,
-} from "@/lib/api/group-lessons";
+} from "@eddi/app-kit/lib/api/group-lessons";
 
 export const LESSONS_KEY = ["group-lessons"] as const;
 

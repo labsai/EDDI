@@ -4,8 +4,8 @@ import {
   parseToolCallEvent,
   toolArgumentFields,
   toolCallActivity,
-} from "@/lib/tool-labels";
-import { parseToolArgumentsForDisplay } from "@/lib/hitl-format-args";
+} from "@eddi/app-kit/lib/tool-labels";
+import { parseToolArgumentsForDisplay } from "@eddi/app-kit/lib/hitl-format-args";
 
 describe("humanizeToolName", () => {
   it.each([

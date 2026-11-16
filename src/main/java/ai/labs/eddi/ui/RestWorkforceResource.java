@@ -5,6 +5,8 @@
 package ai.labs.eddi.ui;
 
 import ai.labs.eddi.configs.branding.BrandRequest;
+import ai.labs.eddi.configs.branding.BrandingService;
+import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -18,10 +20,18 @@ import jakarta.ws.rs.core.Response;
 public class RestWorkforceResource implements IRestWorkforceResource {
 
     private final BrandedShellRenderer shellRenderer;
+    private final BrandingService branding;
 
     @Inject
-    public RestWorkforceResource(BrandedShellRenderer shellRenderer) {
+    public RestWorkforceResource(BrandedShellRenderer shellRenderer, BrandingService branding) {
         this.shellRenderer = shellRenderer;
+        this.branding = branding;
+    }
+
+    @Override
+    public Response manifest() {
+        String manifest = WorkforceManifest.render(branding.current(BrandRequest.NONE), branding.asset(BrandRequest.NONE, BrandAssetSlot.ICON));
+        return Response.ok(manifest, "application/manifest+json").build();
     }
 
     @Override

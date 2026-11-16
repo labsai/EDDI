@@ -2,10 +2,10 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderPage } from "@/test/test-utils";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
-import { server } from "@/test/mocks/server";
-import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useGroupStreamStore } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
 window.HTMLElement.prototype.scrollTo = vi.fn();

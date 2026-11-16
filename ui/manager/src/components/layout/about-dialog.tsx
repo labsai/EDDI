@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { useBrand } from "@/hooks/use-brand";
-import { BrandIcon } from "./brand-logo";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
+import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
 
 /** The license EDDI ships under (LICENSE at the repository root). */
 const LICENSE_URL = "https://www.apache.org/licenses/LICENSE-2.0";

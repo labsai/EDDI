@@ -1,7 +1,7 @@
 import { AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@eddi/ui";
-import { isApiError } from "@/lib/api-client";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 
 interface ErrorStateProps {
   /**

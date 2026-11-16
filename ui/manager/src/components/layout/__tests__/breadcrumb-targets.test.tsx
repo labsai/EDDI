@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderPage } from "@/test/test-utils";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
 import { TopBar } from "../top-bar";
 
 /**

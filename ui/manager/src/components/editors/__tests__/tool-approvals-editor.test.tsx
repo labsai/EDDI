@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ToolApprovalsEditor } from "@/components/editors/tool-approvals-editor";
-import type { ToolApprovalsConfig } from "@/lib/api/hitl";
+import type { ToolApprovalsConfig } from "@eddi/app-kit/lib/api/hitl";
 
 function renderEditor(value: ToolApprovalsConfig = {}, agentTimeoutPolicy?: string) {
   const onChange = vi.fn();

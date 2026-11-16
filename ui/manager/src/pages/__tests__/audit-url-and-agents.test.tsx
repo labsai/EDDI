@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { AuditPage } from "@/pages/audit";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 // Only "agent1" counts as deployed; the descriptor list (MSW) holds more.
-vi.mock("@/hooks/use-chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks/use-chat")>();
+vi.mock("@eddi/app-kit/hooks/use-chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/hooks/use-chat")>();
   return {
     ...actual,
     useDeployedAgents: () => ({

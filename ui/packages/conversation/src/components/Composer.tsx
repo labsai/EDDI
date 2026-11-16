@@ -118,7 +118,14 @@ export function Composer({
     composerConversation,
   } = useConversationContext();
   const t = useConversationText();
+  /** The text draft. It survives a trip into secret mode and back. */
   const [value, setValue] = useState("");
+  /**
+   * The masked value while the lock is on — a separate state, never the text
+   * draft: switching the lock off must not show a secret in the clear textarea
+   * (composer-mode.ts). Dropped whenever the composer leaves secret mode.
+   */
+  const [secretValue, setSecretValue] = useState("");
   /**
    * Files currently uploading, shown as placeholder chips ahead of the staged
    * ones. Without them a large file over a slow link leaves the composer
@@ -149,9 +156,13 @@ export function Composer({
   }, [focusSignal, disabled, isProcessing]);
 
   // Leaving secret mode unmounts the focused password field; without this the
-  // next thing a keyboard user types goes nowhere.
+  // next thing a keyboard user types goes nowhere. However the mode was left —
+  // sent, the lock switched off, a new conversation — the secret goes with it.
   useEffect(() => {
-    if (!isSecretMode && refocusAfterSecretRef.current) {
+    if (isSecretMode) return;
+    setSecretValue("");
+    setSecretVisible(false);
+    if (refocusAfterSecretRef.current) {
       refocusAfterSecretRef.current = false;
       textareaRef.current?.focus();
     }
@@ -159,14 +170,30 @@ export function Composer({
 
   // A turn the server refused (409) was never consumed — put the text back so
   // the user does not have to retype it.
+  // A refused secret comes back with the lock on (the reducer turns it on with
+  // the draft), so it returns to the masked field, never to the text draft.
   useEffect(() => {
     if (restoreDraft === null) return;
-    setValue(restoreDraft);
+    if (isSecretMode) setSecretValue(restoreDraft);
+    else setValue(restoreDraft);
     dispatch({ type: "CLEAR_RESTORE_DRAFT" });
     textareaRef.current?.focus();
+    // isSecretMode is read as it is when the draft arrives, not followed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreDraft, dispatch]);
 
   const handleSend = useCallback(() => {
+    if (disabled || isProcessing || isUploading) return;
+    if (isSecretMode) {
+      // Sent as typed: whitespace is valid in a password or a token. A secret
+      // turn never carries the staged files (the controller keeps them staged).
+      if (!secretValue) return;
+      onSend(secretValue, true);
+      // Leaving secret mode drops the value and the reveal (the effect above).
+      refocusAfterSecretRef.current = true;
+      dispatch({ type: "TOGGLE_SECRET_MODE" });
+      return;
+    }
     const trimmed = value.trim();
     // An attachment on its own is a valid turn — the file is the message.
     const hasAttachments = pendingAttachments.length > 0;
@@ -174,21 +201,15 @@ export function Composer({
     // still empty, CLEAR_ATTACHMENTS then fires, and the upload lands
     // afterwards as a chip for the NEXT turn — leaving the user looking at an
     // attachment they believe they already sent.
-    if ((!trimmed && !hasAttachments) || disabled || isProcessing || isUploading) {
-      return;
-    }
-    onSend(trimmed, isSecretMode);
+    if (!trimmed && !hasAttachments) return;
+    onSend(trimmed, false);
     setValue("");
-    if (isSecretMode) {
-      refocusAfterSecretRef.current = true;
-      dispatch({ type: "TOGGLE_SECRET_MODE" });
-      setSecretVisible(false);
-    }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
   }, [
     value,
+    secretValue,
     disabled,
     isProcessing,
     isUploading,
@@ -225,13 +246,16 @@ export function Composer({
   // or a refused draft put back — before the browser paints.
   useLayoutEffect(handleInput, [value, handleInput]);
 
+  // Switching the lock off drops the masked value and its reveal (the effect
+  // above); the text draft is still there.
   const toggleSecretMode = useCallback(() => {
     dispatch({ type: "TOGGLE_SECRET_MODE" });
-    setSecretVisible(false);
   }, [dispatch]);
 
   const canSend =
-    (value.trim().length > 0 || pendingAttachments.length > 0) &&
+    (isSecretMode
+      ? secretValue.length > 0
+      : value.trim().length > 0 || pendingAttachments.length > 0) &&
     !disabled &&
     !isProcessing &&
     !isUploading;
@@ -577,8 +601,8 @@ export function Composer({
           <input
             type={secretVisible ? "text" : "password"}
             data-testid="chat-input"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={secretValue}
+            onChange={(e) => setSecretValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t("conversation.input.secretPlaceholder")}
             disabled={disabled}

@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { ThemeProvider } from "@eddi/ui";
 import { AgentDetailPage } from "@/pages/agent-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();

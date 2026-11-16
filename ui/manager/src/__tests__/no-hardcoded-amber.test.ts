@@ -29,16 +29,27 @@ import { join, relative, resolve } from "node:path";
  */
 
 const repoRoot = resolve(__dirname, "../..");
-/** The Manager, and the shared UI package it compiles as source. */
-const ROOTS = ["src", "../packages/ui/src"];
-const SHELLS = ["manage.html", "welcome.html", "workforce.html"];
+/**
+ * The Manager, the shared packages it compiles as source, and Workforce — read
+ * as text, so one guard covers every surface a brand must reach (Workforce
+ * shares the tokens, the brand and this rule; the apps still never import each
+ * other).
+ */
+const ROOTS = ["src", "../packages/ui/src", "../packages/app-kit/src", "../workforce/src"];
+const SHELLS = ["manage.html", "welcome.html", "../workforce/workforce.html", "../workforce/index.html"];
 const SOURCE = /\.(?:[cm]?[jt]sx?|css|html)$/;
 /**
  * The files whose custom-property declarations may name amber: the shared token
  * file that maps brand-N / warn-N / ochre-N onto amber, and the Manager's
  * stylesheet, whose Branding preview panels restate the unbranded scale.
  */
-const THEME_FILES = new Set(["../packages/ui/src/styles/theme.css", "src/index.css"]);
+const THEME_FILES = new Set([
+  "../packages/ui/src/styles/theme.css",
+  "src/index.css",
+  // The base stylesheet both apps share (it was this app's index.css): the
+  // prompt editor's template-variable colours are declared there.
+  "../packages/app-kit/src/styles/app.css",
+]);
 
 const AMBER_UTILITY = /amber-\d/;
 /**

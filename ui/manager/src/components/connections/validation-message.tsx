@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { AlertCircle } from "lucide-react";
-import type { ValidationCode } from "@/lib/connection-validation";
+import type { ValidationCode } from "@eddi/app-kit/lib/connection-validation";
 
 interface ValidationMessageProps {
   /** Nothing renders when this is absent, so a caller can pass a lookup result. */

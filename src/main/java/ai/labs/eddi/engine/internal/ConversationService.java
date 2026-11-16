@@ -1451,6 +1451,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+                streamingHandler.onToolResult(toolName, callId, status, durationMs, summary);
+            }
+
+            @Override
             public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                 streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
             }
@@ -2513,6 +2518,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         @Override
         public void onToolResult(String toolName, String callId, String status, long durationMs) {
             delegate.onToolResult(toolName, callId, status, durationMs);
+        }
+
+        @Override
+        public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            delegate.onToolResult(toolName, callId, status, durationMs, summary);
         }
 
         @Override

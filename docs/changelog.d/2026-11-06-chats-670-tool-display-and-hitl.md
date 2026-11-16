@@ -10,7 +10,7 @@ sends with a live tool call: the SSE `tool_call` event now carries the designer'
 (`displayName`) and up to three allow-listed values (`display`), and a `tool_result` event follows each
 call. Amending a gated call's arguments meant retyping the whole object.
 
-- **One helper per app.** [`tool-labels.ts`](../../ui/manager/src/lib/tool-labels.ts) (Manager) and
+- **One helper per app.** [`tool-labels.ts`](../../ui/packages/app-kit/src/lib/tool-labels.ts) (Manager) and
   [`tool-labels.ts`](../../ui/packages/core/src/tool-labels.ts) (Chat UI; since moved into `@eddi/core`) turn an identifier into words
   (`getAgentDescriptors` → "Get agent descriptors", `fetchHTTPStatus` → "Fetch HTTP status") and leave
   text with spaces (a designer label) as written. The Manager's also parses the `tool_call` payload and

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Pin } from "lucide-react";
-import { useDeploymentImpact } from "@/hooks/use-agents";
-import type { DeployedVersionImpact, DeploymentImpact } from "@/lib/api/agents";
+import { useDeploymentImpact } from "@eddi/app-kit/hooks/use-agents";
+import type { DeployedVersionImpact, DeploymentImpact } from "@eddi/app-kit/lib/api/agents";
 
 export interface DeploymentImpactPanelProps {
   agentId: string;

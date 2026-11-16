@@ -43,6 +43,6 @@ become by then.
 **Files:** [`quotas.tsx`](../../ui/manager/src/pages/quotas.tsx),
 [`connection-detail.tsx`](../../ui/manager/src/pages/connection-detail.tsx),
 [`sync-page.tsx`](../../ui/manager/src/pages/sync-page.tsx),
-[`team-budget-dialogs.tsx`](../../ui/manager/src/components/quotas/team-budget-dialogs.tsx),
+[`team-budget-dialogs.tsx`](../../ui/packages/app-kit/src/components/quotas/team-budget-dialogs.tsx),
 [`team-budgets-table.tsx`](../../ui/manager/src/components/quotas/team-budgets-table.tsx),
 [`team-budgets.md`](../team-budgets.md)

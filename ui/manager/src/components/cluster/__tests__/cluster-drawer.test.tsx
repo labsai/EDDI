@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ClusterDrawer } from "@/components/cluster/cluster-drawer";
 
 function Harness({ onClose, startOpen = true }: { onClose: () => void; startOpen?: boolean }) {
