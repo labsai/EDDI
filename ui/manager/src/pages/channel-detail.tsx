@@ -273,6 +273,9 @@ export function ChannelDetailPage() {
    * reseed.
    */
   const seededFor = useRef<string | null>(null);
+  // The latest draft, readable after an await: a save compares it with what it sent.
+  const draftRef = useRef<ChannelIntegrationConfiguration | null>(null);
+  draftRef.current = draft;
   useEffect(() => {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
@@ -316,15 +319,23 @@ export function ChannelDetailPage() {
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
     }
+    const sentDraft = JSON.stringify(draft);
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: toSave });
+      // The fields stay editable during the PUT. Whatever was typed meanwhile
+      // is not part of what was stored: it stays on screen, unsaved against the
+      // new baseline, instead of being reseeded away by the version switch.
+      const editedSinceSent = JSON.stringify(draftRef.current) !== sentDraft;
       // Update URL to new version so subsequent saves don't conflict
       const location = (result as { location?: string })?.location;
       if (location) {
         const { version: newVersion } = parseChannelResourceUri(location);
+        // Following this save's own version is the same document, not another
+        // one: mark it seeded so the effect above leaves the newer edit alone.
+        if (editedSinceSent) seededFor.current = `${id}@${newVersion}`;
         setSearchParams({ version: String(newVersion) }, { replace: true });
       }
-      if (toSave !== draft) setDraft(toSave);
+      if (!editedSinceSent && toSave !== draft) setDraft(toSave);
       setBaseline(JSON.stringify(toSave));
       toast.success(t("channelDetail.saveSuccess", "Channel saved"));
       toastChannelWarnings(result?.warnings ?? [], t);
