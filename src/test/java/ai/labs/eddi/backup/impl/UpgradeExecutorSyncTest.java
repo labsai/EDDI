@@ -333,8 +333,14 @@ class UpgradeExecutorSyncTest {
         var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
         givenPreview(agentRow(DiffAction.UPDATE, mapper.writeValueAsString(adopted)),
                 row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0));
-        // The preview compared against v5; by the write the agent is at v6.
+        // The preview compared against v5; by the write the agent is at v6, which
+        // reads fine, so only the version check can stop the write.
         when(agentStore.getCurrentResourceId(AGENT)).thenReturn(resourceId(AGENT, 6));
+        var rotated = new AgentConfiguration();
+        rotated.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        rotated.setDescription("rotated here at v6");
+        lenient().when(agentStore.readAgent(AGENT, 6)).thenReturn(rotated);
+        lenient().when(agentStore.updateAgent(eq(AGENT), eq(6), any(), any())).thenReturn(Response.ok().build());
 
         UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
 

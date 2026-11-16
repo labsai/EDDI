@@ -135,6 +135,27 @@ class StructuralMatcherSyncTest {
     }
 
     @Test
+    @DisplayName("the agent row's targetVersion is the version its content was read at, even if the agent moves on meanwhile")
+    void agentRowCarriesTheVersionItWasReadAt() throws Exception {
+        // The target is read at v7; a credential rotation lands v8 right after. The
+        // executor writes the adopted settings only over targetVersion, so a row that
+        // paired v7's content with v8's number would let them overwrite the rotation.
+        targetAgent.setDescription("as read at v7");
+        var rotated = new AgentConfiguration();
+        rotated.setWorkflows(targetAgent.getWorkflows());
+        rotated.setDescription("rotated at v8");
+        doReturn(resourceId(TARGET_AGENT, 7)).doReturn(resourceId(TARGET_AGENT, 8)).when(agentStore).getCurrentResourceId(TARGET_AGENT);
+        lenient().when(agentStore.readAgent(TARGET_AGENT, 8)).thenReturn(rotated);
+        var sourceAgent = sourceAgentConfig();
+        sourceAgent.setDescription("promoted from staging");
+
+        ResourceDiff agentRow = row(matcher.buildPreview(source(sourceAgent, LLM_JSON), TARGET_AGENT, true), "agent");
+
+        assertEquals(Integer.valueOf(7), agentRow.targetVersion());
+        assertTrue(agentRow.targetContent().contains("as read at v7"), agentRow.targetContent());
+    }
+
+    @Test
     @DisplayName("a step the source removed is listed as REMOVE, naming the target's resource")
     void removedStepIsListed() throws Exception {
         when(workflowStore.readWorkflow(TARGET_WF, 4)).thenReturn(workflow(

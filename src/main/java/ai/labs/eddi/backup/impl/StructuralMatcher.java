@@ -159,6 +159,7 @@ public class StructuralMatcher {
 
         String targetAgentName = null;
         AgentConfiguration targetConfig = null;
+        Integer targetVersion = null;
         List<ResourceDiff> diffs = new ArrayList<>();
 
         if (targetAgentId != null) {
@@ -167,12 +168,14 @@ public class StructuralMatcher {
             // silent switch to "create everything", which previewed an upgrade as a
             // full duplicate of the agent and gave the operator nothing to
             // distinguish the two. See readTargetAgent for 404 vs 5xx.
-            targetConfig = readTargetAgent(targetAgentId);
+            TargetAgent target = readTargetAgent(targetAgentId);
+            targetConfig = target.config();
+            targetVersion = target.version();
             targetAgentName = readDescriptorName(targetAgentId);
         }
 
         // 1. Agent-level diff
-        diffs.add(buildAgentDiff(sourceAgent, targetAgentId, targetConfig, includeContent));
+        diffs.add(buildAgentDiff(sourceAgent, targetAgentId, targetConfig, targetVersion, includeContent));
 
         // 2. Workflow diffs (matched by position)
         List<URI> targetWorkflowUris = targetConfig != null && targetConfig.getWorkflows() != null
@@ -223,6 +226,7 @@ public class StructuralMatcher {
     private ResourceDiff buildAgentDiff(AgentSourceData sourceAgent,
                                         String targetAgentId,
                                         AgentConfiguration targetConfig,
+                                        Integer targetVersion,
                                         boolean includeContent) {
         if (targetAgentId == null) {
             return new ResourceDiff(
@@ -235,9 +239,11 @@ public class StructuralMatcher {
         String targetJson = serializeSafe(targetConfig);
         String sourceJson = secretNeutral(adoptableAgentJson(sourceAgent.config(), targetConfig), targetJson);
 
-        // The same authority the content was read at, so the row states the version
-        // the operator is actually upgrading from.
-        Integer targetVersion = currentVersionOf(targetAgentId);
+        // The version targetConfig was READ at, not one resolved again here: the
+        // executor refuses to write the adopted settings over any other version, and a
+        // second lookup let a change between the two (a rotated credential) pair the
+        // old content with the new number, which the executor then accepted and
+        // restored the old credential with.
 
         // Agent-level settings are written now, so a hotfix to them here (a HITL
         // gate, a capability) is guarded like any other resource's. The synced
@@ -631,10 +637,11 @@ public class StructuralMatcher {
      * {@link IResourceStore.ResourceNotFoundException} from
      * {@link IResourceStore.ResourceStoreException}.
      */
-    private AgentConfiguration readTargetAgent(String agentId) {
+    private TargetAgent readTargetAgent(String agentId) {
         AgentConfiguration config;
+        Integer version;
         try {
-            Integer version = currentVersionOf(agentId);
+            version = currentVersionOf(agentId);
             if (version == null && !targetAgentExists(agentId)) {
                 // Neither the store nor the descriptor knows the id: a mistyped or
                 // deleted target. That is a 404 the operator can act on — it used to
@@ -673,7 +680,15 @@ public class StructuralMatcher {
         if (config == null) {
             throw new NotFoundException("Target agent " + agentId + " does not exist.");
         }
-        return config;
+        return new TargetAgent(config, version);
+    }
+
+    /**
+     * The target agent and the one version it was read at — resolved once, so the
+     * preview's content and its {@code targetVersion} always describe the same
+     * document.
+     */
+    private record TargetAgent(AgentConfiguration config, int version) {
     }
 
     private String readTargetWorkflowJson(String workflowId, int version) {

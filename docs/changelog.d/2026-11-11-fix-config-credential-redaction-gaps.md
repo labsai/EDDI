@@ -86,7 +86,10 @@ and the bearer rule (open PR #1338) were not touched.
   target's credentials restored into it) against the version resolved at write time, so an agent
   changed in between, for example by a key rotation, was silently overwritten with the older
   values. `UpgradeExecutor.updateAgentConfig` now refuses the write and reports it when the agent
-  is no longer at the version the preview compared against.
+  is no longer at the version the preview compared against. The preview itself resolves that
+  version once (`StructuralMatcher.readTargetAgent`) and records the version the target was read
+  at, so a change between reading the target and labelling the row cannot pair old content with
+  the new version number.
 - The export's vault-reference exemption judged only the words beside a reference, so a
   symbol-only or non-ASCII literal (`!!!${vault:k}`) was exported while the read masked it. It now
   accepts only the scaffolding characters the read accepts.
