@@ -1,3 +1,4 @@
+import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
 import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
@@ -648,6 +649,7 @@ export function AgentDetailPage() {
   const doc = editable ?? agent;
   const modifiedSectionCount = [
     touched("workflows"),
+    touched("listed"),
     touched("a2aEnabled", "description", "a2aSkills"),
     touched("security", "identity"),
     touched("capabilities"),
@@ -1138,6 +1140,14 @@ export function AgentDetailPage() {
         className="contents"
         data-testid="agent-config-sections"
       >
+      {/* End-user catalog listing (opt-in, IRestCatalog) */}
+      <CatalogListingToggle
+        kind="agent"
+        listed={doc.listed}
+        onChange={(listed) => editAgent({ ...doc, listed })}
+        disabled={sectionsDisabled}
+      />
+
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={doc}
