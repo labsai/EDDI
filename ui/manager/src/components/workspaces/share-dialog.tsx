@@ -16,7 +16,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ApiClientError, getErrorMessage } from "@/lib/api-client";

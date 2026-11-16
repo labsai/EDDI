@@ -304,6 +304,7 @@ eddi_group_continue_count_total             # Continuation rounds
 eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
+eddi_group_approved_action_total{outcome}   # phase.onApproved calls: succeeded|failed|outcome_unknown|skipped
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
@@ -419,6 +420,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_conversation_titles_total{outcome}     # Conversation titles: auto / auto_skipped (already titled) / llm / llm_skipped (owner renamed meanwhile) / llm_empty / llm_busy / llm_refused_budget / llm_refused_unpriced / llm_error / error
 eddi_tenant_cost_reservation_total{outcome} # Hard-ceiling reservations (opt-in): reserved / refused / unavailable / release_failed
 eddi_tenant_cost_reservation_usd_total{direction} # USD held (held) and given back (released) by those reservations
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
@@ -1315,6 +1317,23 @@ GET    /llm/tools/costs/conversation/{conversationId}
 GET    /llm/tools/costs/tool/{toolName}
 POST   /llm/tools/costs/reset
 ```
+
+The history endpoint reads the conversation's stored tool-loop trace and answers
+`{"toolCalls": [...], "hasErrors": bool}`. Each call carries `toolName`,
+`callId`, `arguments`, `result`, `success` and `error`. `success` is false for a
+result the tool-outcome classifier (the one the repeat guard uses) reads as a
+failure, such as a non-2xx `httpCode`, an `{"error": ...}` object or an `Error:`
+string; for a call refused before it ran (argument schema, budget, quota,
+repeat guard, call cap, not-yet-activated LAZY tool, a gated call a human
+rejected or the resume refused); and for a result the tool-result guardrail
+blocked. `error` says why: the trace's own error code or message, the
+refusal's trace type (such as `hitl_rejected`), or the result's outcome
+(`failed_retryable`, `failed_terminal`, `not_executed`). Two kinds of call are
+not listed, because the trace cannot identify them: a call a
+`toolCallGuardrails` entry refused, and an approved call replayed from the
+HITL journal. The trace records no per-call timing, cost or cache hits, so the
+history does not report them; a conversation's tool spend comes from
+`/llm/tools/costs/conversation/{conversationId}`.
 
 > The pre-v6 prefix `/langchain/tools` still answers, because
 > `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility

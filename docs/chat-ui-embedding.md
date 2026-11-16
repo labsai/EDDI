@@ -27,6 +27,10 @@ The display parameters (`theme`, `title`, `hideUndo`, the colour parameters) are
 
 These parameters beat the deployment's [brand](white-labeling.md#the-chat-ui): with a brand set, the widget's default title, logo and accent come from it, and a `title` or `accentColor` parameter still overrides them.
 
+Each colour parameter sets one or more `--chat-*` CSS variables (`bgColor` → `--chat-bg`, `accentColor` → `--chat-accent`, the user bubble and the focus ring, …). Those names are stable: since the shared design tokens arrived, the ones with a shared meaning are declared as aliases of them (`--chat-bg` is `var(--color-background)`), and setting the `--chat-*` name still wins, so an existing link renders as it did. The table is `CHAT_TOKEN_ALIASES` in [`ui/packages/ui/src/chat-aliases.ts`](../ui/packages/ui/src/chat-aliases.ts).
+
+`lang` picks the widget's language — any of the eleven the Manager ships (`en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`); without it the browser's languages decide, falling back to English. `lang=ar` lays the widget out right to left. Only the widget's own text is translated, never the agent's.
+
 ## 2. Hand the widget a token (authentication on)
 
 With OIDC enabled, every API call the widget makes needs a bearer token. The widget has no login flow of its own; the host page, which has already signed the user in, passes it an access token by `postMessage`.
@@ -98,3 +102,13 @@ Under the widget's original policy, `img-src 'self' data: blob:`, the browser re
 | `'self'` | None beyond EDDI itself (the old behaviour). An empty value falls back to the default |
 
 **The trade-off.** Markdown images in model-written text are never rendered as `<img>`: the widget turns them into links, so a model cannot make the browser fetch a URL of its choosing, whatever this setting says. What `https:` gives up is `img-src` as a second line of defence. If some other flaw let markup into the page, an injected `<img>` could send data to any https host. If you know where your designers' images live, list those hosts. The setting applies to `/chat` only. The Manager and Swagger UI keep their own `img-src`.
+
+## 4. Agent appearance and controls
+
+What the widget shows for an agent — display name, avatar, accent colour, conversation starters — and which controls it offers (undo, redo, attachments, rating, quick replies, streaming, HTML in replies) are set on the agent, in `appearance` and `conversationControls` ([agent-config-authoring.md](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)). `GET /agents/{agentId}/profile` serves both, for the deployed version, to anyone who may use the agent, so an embedding needs no extra parameters for them. The URL colour parameters and `/branding/brand.css` keep working as before; they style the deployment, `appearance` styles one agent.
+
+## Upgrading: HTML in replies is off by default
+
+`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until now the widget rendered HTML for every agent; the Manager never did.
+
+The profile reports the setting from 6.7.0 on. The widget follows it from the release that ships its side of the change (the frontend unification plan, decision D9), and until then keeps rendering HTML, so nothing changes before agents can opt in. **If an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it now**; otherwise, once the widget follows the setting, its replies show the markup as text. Agents whose replies are plain text or markdown need nothing.

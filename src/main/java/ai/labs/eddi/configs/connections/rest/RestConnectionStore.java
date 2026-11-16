@@ -828,6 +828,7 @@ public class RestConnectionStore implements IRestConnectionStore {
     private void requireVaultBackedCredentials(ConnectionConfiguration connection) {
         if (connection.getOauth() != null) {
             credentialReferenceResolver.requireVaultBacked(connection.getOauth().getClientSecret(), "oauth.clientSecret");
+            credentialReferenceResolver.requireVaultBacked(connection.getOauth().getPrivateKey(), "oauth.privateKey");
         }
         if (connection.getStaticAuth() != null) {
             credentialReferenceResolver.requireVaultBacked(connection.getStaticAuth().getPasswordRef(), "staticAuth.passwordRef");

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MessageBubble } from "./MessageBubble";
-import { looksLikeMath } from "./markdown-plugins";
-import { markdownLink } from "@/api/sse-events";
+import { Message as MessageBubble } from "@eddi/conversation";
+import { looksLikeMath } from "@eddi/conversation";
+import { markdownLink } from "@eddi/core";
 
 describe("looksLikeMath", () => {
   it("is true only for a $$…$$ span", () => {

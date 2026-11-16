@@ -46,11 +46,10 @@ export function parseChatPath(pathname: string): ChatRouteParams | null {
   const trimmed = pathname.replace(/\/+$/, "");
   const segments = trimmed.split("/").slice(1);
   if (trimmed[0] !== "/" || segments.some((s) => s === "")) return null;
-  if (segments[0]?.toLowerCase() !== "chat") return null;
+  if (decodeSegment(segments[0]!).toLowerCase() !== "chat") return null;
   const rest = segments.slice(1).map(decodeSegment);
-  const raw = segments.slice(1);
 
-  if (rest.length === 3 && raw[0]!.toLowerCase() === "managed") {
+  if (rest.length === 3 && rest[0]!.toLowerCase() === "managed") {
     return { intent: rest[1], userId: rest[2] };
   }
   if (rest.length === 3) {

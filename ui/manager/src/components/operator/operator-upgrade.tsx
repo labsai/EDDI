@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowUpCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import type {
   InstructionsChoice,

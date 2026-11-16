@@ -8,7 +8,7 @@ import { useClusterActivity, useClusterOverview } from "@/hooks/use-cluster";
 import { clusterAccess } from "@/lib/cluster-access";
 import { formatDuration } from "@/lib/cluster-labels";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { EmptyState } from "@/components/shared/empty-state";

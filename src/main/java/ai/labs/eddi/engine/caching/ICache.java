@@ -8,6 +8,18 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * A named cache with the {@link ConcurrentMap} contract plus per-entry
+ * lifespans.
+ * <p>
+ * <b>The views are for reading.</b> {@link #keySet()}, {@link #values()} and
+ * {@link #entrySet()} — their iterators and entries included — throw
+ * {@link UnsupportedOperationException} on any change. Entries change through
+ * the map methods only, because in cluster mode those are what tell the other
+ * nodes ({@code ClusterInvalidatingCache}) or reach the shared bucket
+ * ({@code SharedKvCache}); a change through a view reached neither. To remove
+ * the keys a view shows, collect them first and {@link #remove(Object)} each.
+ */
 public interface ICache<K, V> extends ConcurrentMap<K, V> {
 
     String getCacheName();

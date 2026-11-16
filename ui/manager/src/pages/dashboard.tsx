@@ -35,7 +35,7 @@ import { useIsAdminOrUnknown, useMayOpenScreen } from "@/hooks/use-auth";
 import { isApiError } from "@/lib/api-client";
 import { useVaultHealth } from "@/hooks/use-secrets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";

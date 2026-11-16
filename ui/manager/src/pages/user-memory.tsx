@@ -17,7 +17,7 @@ import {
   NotebookPen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useDebounce } from "@/hooks/use-debounce";
 import { getErrorMessage } from "@/lib/api-client";

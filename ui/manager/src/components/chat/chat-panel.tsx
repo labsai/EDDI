@@ -18,6 +18,7 @@ import {
   useUndoConversation,
   useRedoConversation,
   useRerunConversation,
+  clearChatPause,
 } from "@/hooks/use-chat";
 import type { SentAttachment } from "@/hooks/use-chat";
 import {
@@ -31,8 +32,9 @@ import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
 import { ChatRatingCard } from "./chat-rating";
 import { useChatRatings } from "@/hooks/use-chat-ratings";
-import { lastStepIndex, ratableSteps } from "@/lib/chat-rating-steps";
+import { lastStepIndex, ratableSteps } from "@eddi/core";
 import { ChatActivity } from "./chat-activity";
+import { GuardrailActivity } from "./guardrail-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
@@ -813,6 +815,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                 ) : (
                   <InlineThinkingIndicator events={currentTurnEvents} />
                 ))}
+              <GuardrailActivity messages={messages} isProcessing={isProcessing} />
 
               {/* Rerun button — shown when last message is an error */}
               {showRerun && !isProcessing && !stepMovePending && (
@@ -891,7 +894,9 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
             testIdBase="chat-pause"
             // Decided elsewhere (another reviewer, or the timeout policy): unlock
             // the composer instead of leaving it stuck on "awaiting approval".
-            onResolved={() => useChatStore.getState().setPaused(false, null)}
+            // clearChatPause also moves the controller off AWAITING_HUMAN, or the
+            // next turn that pauses again would be taken for a dropped one.
+            onResolved={() => clearChatPause(conversationId)}
           />
         )}
 

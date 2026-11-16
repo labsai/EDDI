@@ -157,6 +157,32 @@ LLM tool result or the log. Error bodies are redacted in full. A success body is
 handled more carefully: a secret of 8 characters or more is removed from its text, a shorter one only
 where a JSON value is exactly the secret, and a number is never rewritten digit by digit.
 
+The search also covers the secret's common **encodings**, because an API that reflects a header does
+not always reflect it verbatim. For a secret of 8 characters or more, wherever its plaintext is
+searched — success body text, string values of a JSON success body, response header values, the
+error body — these forms are removed as well:
+
+| Encoding | Forms |
+| --- | --- |
+| base64 of the UTF-8 bytes | standard and URL-safe alphabet, each with and without `=` padding |
+| percent-encoding | a space as `+` or `%20`; hex digits upper or lower case; `~` escaped or literal |
+| JSON string escaping | `"`, `\` and control characters escaped; `/` escaped or not; non-ASCII literal or as `é` / `é` |
+| HTML entities | `& < > " '`, with `&quot;` or `&#34;` and `&#39;`, `&#x27;`, `&#039;` or a literal `'` |
+| a whole `Basic <base64>` credential | also the decoded `user:password` and the password (each only if 8+ characters); the username alone is not a secret and stays |
+
+A secret shorter than 8 characters (but at least 4) has the same encoded forms removed only where a
+JSON value **is** one of them, never inside other text; below 4 characters only the plaintext itself
+is matched. Every encoded form is at least as long as the value, so the floor bounds the forms too.
+
+**Not covered:** a reversed or otherwise transformed value, other encodings (hex, base32, double
+encoding, `encodeURIComponent`'s unescaped `!'()*`), and a secret whose base64 sits inside a *longer*
+base64 blob — `base64(user:secret)` does not contain `base64(secret)`, because base64 works in
+three-byte groups and everything in front of the secret shifts the alignment. So a `BASIC`
+connection's header is found verbatim, as its base64 token and through its decoded password, but a
+base64 blob that merely *contains* a secret among other data is not. This redaction protects later
+readers of a conversation — team members, exports, logs — from a secret an API echoes back by
+accident. It is not a defence against the target server, which received the secret anyway.
+
 The plaintext EDDI substitutes is redacted by value from everything it records about the request:
 the request record in conversation memory, the HITL approval preview and the request log line. The
 log line is built from the request's raw components and redacted *before* it is shortened, so a
@@ -173,6 +199,19 @@ Vault references are resolved **at runtime** when the task executes, never store
 5. **Plaintext is NOT stored in memory** — only the vault reference persists
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
+
+### When a reference does not resolve
+
+A reference that cannot be resolved is never sent: the LLM task or API call that carries it fails instead. The error names the reference **and the tenant it was looked up in**, because the short form has an implicit one — `${vault:api-key}` always means tenant `default`, so a secret stored under tenant `eddi` is not found by it:
+
+```text
+API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'),
+which could not be resolved: no secret named 'api-key' exists in tenant 'default'. A reference without a
+tenant always looks in tenant 'default'; for a secret stored in another tenant write ${vault:<tenant>/api-key}.
+Refusing to send the unresolved reference.
+```
+
+For an API call the reason is specific: no such secret in that tenant, no vault configured (`EDDI_VAULT_MASTER_KEY`), a reserved name, or the vault could not read the secret. All but the last are configuration problems, and so is a secret sent to a host its [`allowedHosts`](#destination-allow-list-allowedhosts) does not name. When one of them stops an agent's `CONVERSATION_START` turn, `POST /agents/{agentId}/start` answers `422` with `{"error": "agent_misconfigured", "message": "..."}` instead of a bare `500`, so a client can tell "fix the agent" from "the server failed". A vault that could not be read is still a `500`. Messages carry names only, never a value.
 
 ### Editing a configuration that holds a reference: PATCH, not echo
 

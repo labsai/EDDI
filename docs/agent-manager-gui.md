@@ -24,8 +24,9 @@ The Manager talks to the backend that served it; there is nothing to configure i
 For work on the Manager itself, run the Vite dev server instead of rebuilding the jar:
 
 ```bash
-cd ui/manager
-npm ci
+cd ui
+npm ci            # once: ui/ is an npm workspace, one lockfile for the Manager and the Chat UI
+cd manager
 npm run dev
 ```
 
@@ -98,7 +99,7 @@ Search, sort and switch between card and table views. From here you can:
 
 ### Agent detail (`/manage/agentview/:id`)
 
-One agent's configuration: its workflows (add, remove, update to the latest version), version picker, deploy and undeploy per environment (`production` and `test`, with options to end active conversations or undeploy earlier versions), and a chat button for any environment it is live in. It also holds the agent-level settings — human-in-the-loop approval rules for tool calls, persistent user memory and Dream consolidation, memory write guardrails, session forking, A2A exposure and declared capabilities, message signing, channel connectors, and conversation review. See [Deployment Management](deployment-management-of-agents.md), [Human-in-the-Loop](hitl.md), [User Memory](user-memory.md) and [A2A Protocol](a2a-protocol.md).
+One agent's configuration: its workflows (add, remove, update to the latest version), version picker, deploy and undeploy per environment (`production` and `test`, with options to end active conversations or undeploy earlier versions), and a chat button for any environment it is live in. It also holds the agent-level settings — human-in-the-loop approval rules for tool calls, persistent user memory and Dream consolidation, memory write guardrails, session forking, A2A exposure and declared capabilities, message signing, channel connectors, and conversation review. The page opens at the agent's current version and shows nothing until it knows which version that is; if the version list cannot be read it shows an error with *Retry*, never an older version in its place. Shared with you at `VIEW`, the page is read-only: the sections still open, but there is no Save, no deploy or undeploy and no change to the workflow list, while Duplicate, Export and Chat stay available. See [Deployment Management](deployment-management-of-agents.md), [Human-in-the-Loop](hitl.md), [User Memory](user-memory.md) and [A2A Protocol](a2a-protocol.md).
 
 ### Agent Studio (`/manage/studio/:agentId`)
 
