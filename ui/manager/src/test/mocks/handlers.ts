@@ -8,6 +8,9 @@ import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
 import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
+import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
+
+export { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS };
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
 // discovers every handler array this module exports, checks it too.
@@ -129,6 +132,19 @@ const WORKFLOWS_MOCK = [
   },
 ];
 
+/**
+ * Renames and pins (`PATCH /conversationstore/conversations/{id}`) layered over
+ * `CONVERSATIONS_MOCK`, so the fixture itself never changes; `src/test/setup.ts`
+ * clears them after every test.
+ */
+const CONVERSATION_PATCHES = new Map<string, Record<string, unknown>>();
+/** Marks a deleted conversation in `CONVERSATION_PATCHES`; never sent to the client. */
+const DELETED = "__deleted";
+
+export function resetConversationPatches(): void {
+  CONVERSATION_PATCHES.clear();
+}
+
 const CONVERSATIONS_MOCK = [
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
@@ -141,6 +157,10 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 8,
     environment: "production",
     agentName: "Support Agent",
+    // B2: the first user message as title, pinned by its owner.
+    title: "Where is order 1042?",
+    titleSource: "AUTO",
+    pinned: true,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv2",
@@ -165,6 +185,9 @@ const CONVERSATIONS_MOCK = [
     conversationStepSize: 3,
     environment: "production",
     agentName: "Support Agent",
+    title: "Refund for a damaged parcel",
+    titleSource: "USER",
+    pinned: false,
   },
   {
     resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv4",
@@ -763,6 +786,26 @@ export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
  */
 export const TASK_FAILURE_TRIGGER = "trigger a task failure";
 
+/**
+ * A chat message containing this gets a streamed reply with display math and a
+ * fenced code block, so the feature matrix can see the one markdown renderer's
+ * KaTeX and highlight.js at work.
+ */
+export const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** The reply to {@link RICH_MARKDOWN_TRIGGER}. */
+export const MOCK_RICH_MARKDOWN = "Euler: $$e^{i\\pi} + 1 = 0$$\n\n```js\nconst answer = 42;\n```";
+
+/**
+ * A chat message containing this gets a streamed reply with an `image` output
+ * item (the agent designer's, not the model's), so the feature matrix can see
+ * designer images rendered. Same-origin, so the image is the app's own icon.
+ */
+export const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
+/** The image item of the reply to {@link IMAGE_OUTPUT_TRIGGER}. */
+export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "EDDI logo" };
+
 /** The reason the mocked failed turn reports. */
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
@@ -1063,10 +1106,26 @@ export const handlers = [
   }),
 
   // What a chat window shows about an agent, and how much it is used.
-  http.get("*/agents/:agentId/profile", ({ params }) =>
-    HttpResponse.json({ agentId: String(params.agentId), name: null, description: null, reviewNotice: null })
-  ),
+  http.get("*/agents/:agentId/profile", ({ params }) => {
+    // A listed agent answers with its catalog appearance and controls (B4);
+    // any other with none set: no appearance, the default controls.
+    const listed = MOCK_CATALOG_AGENTS.find((a) => a.agentId === String(params.agentId));
+    return HttpResponse.json({
+      agentId: String(params.agentId),
+      name: listed?.name ?? null,
+      description: listed?.description ?? null,
+      reviewNotice: null,
+      appearance: listed?.appearance ?? null,
+      conversationControls: listed?.conversationControls ?? {
+        undo: true, redo: true, attachments: true, rating: true, quickReplies: true, streaming: true, rawHtml: false,
+      },
+    });
+  }),
   http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
+
+  // The end-user catalog (IRestCatalog) — what Workforce reads for an eddi-user.
+  http.get("*/catalog/agents", () => HttpResponse.json(MOCK_CATALOG_AGENTS)),
+  http.get("*/catalog/groups", () => HttpResponse.json(MOCK_CATALOG_GROUPS)),
 
   // Template preview — resolves Qute templates for the LLM editor preview
   http.post("*/administration/preview/template", async ({ request }) => {
@@ -1583,10 +1642,21 @@ export const handlers = [
     const agentId = url.searchParams.get("agentId");
     const conversationId = url.searchParams.get("conversationId");
     const conversationState = url.searchParams.get("conversationState");
-    let result = [...CONVERSATIONS_MOCK];
+    // What the owner renamed or pinned (PATCH below) since the last reset.
+    let result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      return [{ ...c, ...patch }];
+    });
     if (agentId) result = result.filter((c) => c.agentId === agentId);
     if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
     if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
+    // excludeGroupMembers=true: the backend leaves out descriptors that record a
+    // groupConversationId (member threads of a team session). `mine` is not
+    // modelled — the mock has a single user.
+    if (url.searchParams.get("excludeGroupMembers") === "true") {
+      result = result.filter((c) => !(c as { groupConversationId?: string }).groupConversationId);
+    }
     // RestConversationStore.readConversationDescriptors defaults `limit` to 20
     // and CLAMPS it to 100 — a caller asking for 1000 gets 100, and a mock that
     // returned everything hid that the dashboard reported the clamp as a total.
@@ -1675,8 +1745,35 @@ export const handlers = [
     });
   }),
 
-  // Delete conversation
-  http.delete("*/conversationstore/conversations/:id", () => {
+  // Rename / pin (B2) — owner only; mirrors RestConversationStore.patchConversation:
+  // 400 for neither field or a blank / too long title, 404 for an unknown id.
+  http.patch("*/conversationstore/conversations/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { title?: unknown; pinned?: unknown };
+    const hasTitle = body.title !== undefined && body.title !== null;
+    const hasPinned = body.pinned !== undefined && body.pinned !== null;
+    if (!hasTitle && !hasPinned) return HttpResponse.json({ error: "Nothing to change" }, { status: 400 });
+    const title = hasTitle ? String(body.title).replace(/\s+/g, " ").trim() : undefined;
+    if (title !== undefined && (title.length === 0 || title.length > 200)) {
+      return HttpResponse.json({ error: "Invalid title" }, { status: 400 });
+    }
+    const id = String(params.id);
+    const entry = CONVERSATIONS_MOCK.find((c) => c.resource.endsWith(`/${id}`));
+    if (!entry) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const patch = { ...CONVERSATION_PATCHES.get(id) };
+    if (title !== undefined) {
+      patch.title = title;
+      patch.titleSource = "USER";
+    }
+    if (hasPinned) patch.pinned = body.pinned === true;
+    CONVERSATION_PATCHES.set(id, patch);
+    return HttpResponse.json({ ...entry, ...patch });
+  }),
+
+  // Delete conversation — gone from the listing afterwards, as on the backend
+  // (a soft delete drops the descriptor).
+  http.delete("*/conversationstore/conversations/:id", ({ params }) => {
+    const id = String(params.id);
+    CONVERSATION_PATCHES.set(id, { ...CONVERSATION_PATCHES.get(id), [DELETED]: true });
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -1729,8 +1826,14 @@ export const handlers = [
   // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
   http.post("*/agents/:conversationId/stream", async ({ request }) => {
     const body = await request.clone().text();
+    // One `data:` line per payload line: a multi-line token (the rich-markdown
+    // reply) under a single prefix was cut at its first blank line, which ends
+    // the SSE frame, and only `done` delivered the rest.
     const frame = (name: string, data: unknown) =>
-      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+      `event: ${name}\n${(typeof data === "string" ? data : JSON.stringify(data))
+        .split("\n")
+        .map((line) => `data: ${line}`)
+        .join("\n")}\n\n`;
     const frames = body.includes(TASK_FAILURE_TRIGGER)
       ? [
           frame("task_failed", {
@@ -1749,13 +1852,29 @@ export const handlers = [
             ],
           }),
         ]
-      : [
-          frame("token", "Happy to help."),
-          frame("done", {
-            conversationState: "READY",
-            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
-          }),
-        ];
+      : body.includes(RICH_MARKDOWN_TRIGGER)
+        ? [
+            frame("token", MOCK_RICH_MARKDOWN),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: MOCK_RICH_MARKDOWN }] }],
+            }),
+          ]
+        : body.includes(IMAGE_OUTPUT_TRIGGER)
+          ? [
+              frame("token", "Here is the logo."),
+              frame("done", {
+                conversationState: "READY",
+                conversationOutputs: [{ output: [{ type: "text", text: "Here is the logo." }, MOCK_OUTPUT_IMAGE] }],
+              }),
+            ]
+          : [
+            frame("token", "Happy to help."),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+            }),
+          ];
     return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
   }),
 

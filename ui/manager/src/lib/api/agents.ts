@@ -93,6 +93,12 @@ export interface Agent {
   channels?: ChannelConnector[];
   a2aEnabled?: boolean;
   description?: string;
+  /**
+   * Offered in the end-user catalog (`GET /catalog/agents`, what Workforce
+   * lists for an `eddi-user`). Opt-in, default false; whether someone may
+   * actually use the agent is still decided by its sharing.
+   */
+  listed?: boolean;
   a2aSkills?: string[];
   // Phase 15.4 — Security, Identity, Capabilities, Memory
   identity?: AgentIdentity;
@@ -400,6 +406,10 @@ export interface AgentProfile {
    * Absent or null when it asks for none.
    */
   rating?: import("./ratings").RatingProfile | null;
+  /** The deployed version's `appearance` (B4); null when it sets none, absent on an older backend. */
+  appearance?: import("./catalog").AgentAppearanceProfile | null;
+  /** The resolved `conversationControls` (B4); absent on an older backend. */
+  conversationControls?: Partial<import("./catalog").ConversationControlsProfile> | null;
 }
 
 export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {

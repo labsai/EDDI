@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle2, ExternalLink, NotebookPen, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { RatingScore } from "./rating-score";
 import { isRatingChanged, useReviewRating } from "@/hooks/use-ratings";

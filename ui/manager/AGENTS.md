@@ -25,7 +25,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | --- | --- |
 | **Build** | Vite 8 |
 | **UI** | React 19 + TypeScript 5 (strict) |
-| **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
+| **Styling** | Tailwind CSS v4 + CSS variables (black/gold); the tokens are `@eddi/ui/theme.css` |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand for cross-component UI state (chat, debug events, drawers, command palette, onboarding, navigation guard — `src/hooks/`), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
@@ -161,9 +161,9 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 src/
 ├── app.tsx                   # Routes (pages load through lazyPage — Key Patterns 5)
 ├── components/
-│   ├── ui/                   # Low-level primitives (button, badge, dialog, …)
+│   ├── ui/                   # Low-level primitives (badge, dialog, …); Button is @eddi/ui's
 │   ├── shared/               # App-level shared components (empty/error state, pickers, …)
-│   ├── layout/               # AppLayout, Sidebar, TopBar, theme provider
+│   ├── layout/               # AppLayout, Sidebar, TopBar, AppToaster (ThemeProvider is @eddi/ui's)
 │   ├── editors/              # Extension editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
 │   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
@@ -179,7 +179,7 @@ src/
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
-├── i18n/                     # config.ts + locales/ (11 locale JSON files)
+├── i18n/                     # config.ts (setupI18n from @eddi/ui) + locales/ (11 locale JSON files)
 ├── pages/                    # Route pages; pages/workforce/ for the Workforce app
 └── test/
     ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
@@ -189,6 +189,19 @@ src/
 
 Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
 `src/components/` rather than trusting any enumeration here — it grows with every feature.
+
+### Shared packages: `@eddi/core` and `@eddi/ui`
+
+Two packages under [`ui/packages`](../packages/README.md) are compiled into this app as source. `@eddi/core` is the conversation contract (below, API Communication). `@eddi/ui` holds the design tokens (`index.css` imports `@eddi/ui/theme.css`), `ThemeProvider` / `useTheme`, the i18next setup and per-locale fonts, `Button` and `ThemedToaster` — import them from `@eddi/ui`. A change to a token or to `Button` reaches the Chat UI too once it uses them; it stays a pure move unless the change is meant to be visual. Tailwind scans the package (`@source` in `theme.css`), so its classes are generated. `npm run i18n:check` scans `ui/packages/*/src` with this app's locale files, and counts a package's own locale files (`src/i18n/locales`) as this app's.
+
+A third, [`@eddi/conversation`](../packages/conversation/README.md), holds the agent kind of conversation: the `AgentConversation` controller, the shared components and **the one markdown renderer** (`MarkdownContent`). `components/chat/chat-message.tsx` renders replies through it (`conversation-markdown.tsx`, which also hands the shared components this app's `t`); its `conversation.*` strings are merged into this app's bundles in `i18n/config.ts` (`withConversationLocales`) and live in the package, in all eleven locales. Every markdown surface uses `ConversationMarkdown` (options pass through: `escapeRawHtml` for third-party text such as release notes); a test in the package (`markdown/one-renderer.test.ts`) fails on any other `react-markdown` import in the UIs. **`ChatPanel` runs on the controller**: `use-chat.ts` builds `chatConversation` with the package's host hooks (README → Host hooks) — the controller reads and writes `useChatStore` through `chatConversationStore`, follows its `conversationEpoch`, and leaves the Manager's copy (toasts, error bubbles, the pause banner) to `presentChatFailure` and the debug drawer to `recordDebugEvent`. A turn rule (how a turn is sent, refused, streamed, reconciled) is fixed in `agent-conversation.ts`, not here; what stays Manager code is start, load/resume with its secret masking, following an executing turn, undo/redo/rerun and end. The Workforce member thread (`workforce-thread.tsx`) runs an `AgentConversation` of its own per advisor (internal store; its error banner, Retry and pause notice through `presentFailure` / `onTurnSnapshot`). The Operator keeps its own loop until phase 6.
+
+### Workforce: sidebar, Home and the chat URL (phase 4)
+
+- **The sidebar's conversations** (`components/workforce/session-list.tsx`, data in `hooks/use-workforce-sessions.ts`, shaping in `lib/workforce-sessions.ts`) list the person's chats (`GET /conversationstore/conversations?mine=true&excludeGroupMembers=true` — the backend applies the owner filter for an admin too and leaves out team members' threads, both in its query; never compare owners client-side, the recorded principal need not be `preferred_username`) and team sessions (`GET /groups/{id}/conversations?mine=true` for each team they can see), grouped Pinned / Today / Yesterday / Previous 7 / Previous 30 days / by month. `memberConversationIds` still hides member conversations started before their descriptor recorded `groupConversationId`. Deleting the chat or team session on screen returns to Home and clears the chat store. Rename and pin are `PATCH /conversationstore/conversations/{id}` (B2), delete is the owner `DELETE`; all three update the TanStack cache first and restore it on error (`workforceKeys`). Team sessions have no title or pin on the backend: their question is the title, and they can only be deleted. Every endpoint here is open to `eddi-user` — keep it that way (`e2e/workforce-end-user.spec.ts` fails on any store read).
+- **Home** (`components/workforce/workforce-home.tsx`): `HomeComposer` (agent picker defaulting to the agent of the most recent chat, else the first listed; the picked agent's `appearance.starters` as chips; its review notice), `RecentSessions` (the top five of the sidebar's data), then the catalog with each agent's B4 appearance from `GET /catalog/agents`. Sending hands the text to the chat in **router state** (`lib/workforce-chat-start.ts`), never in the URL, so a link still only preselects an agent.
+- **`ChatPanel urlSync`** (Workforce only) keeps `?agentId=…&conversationId=…` in the address bar so a reload or a second tab returns to the conversation (T1.15); without it the Manager's chat clears the parameters once read, as before. `initialMessage` starts a new conversation and sends Home's text once the agent is selected and its profile has answered.
+- **`conversationControls`** (B4) are read from the profile by `useAgentReviewProfile` and honoured by `ChatPanel` in both apps: undo, redo, attachments, ratings and quick replies disappear when the agent switched them off, and `streaming: false` sends without streaming (`agentStreaming` in the chat store). The Manager still never renders raw HTML.
 
 ### Key Patterns
 
@@ -417,10 +430,12 @@ Consequences worth knowing:
   mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
   `src/test/setup.ts`.
 - **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
-  so it must resolve synchronously); the other ten load through a tiny i18next
-  backend in `src/i18n/config.ts`. Add a locale by adding it to
-  `SUPPORTED_LANGUAGES` **and** `LOCALE_LOADERS` — the types make a missed entry
-  a compile error. `main.tsx` awaits `i18nReady` before the first render so a
+  so it must resolve synchronously); the other ten load through the lazy backend
+  `setupI18n` installs (`@eddi/ui`, [`ui/packages/ui`](../packages/ui/README.md)),
+  from `LOCALE_LOADERS` in `src/i18n/config.ts`. Add a locale by adding it to
+  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to both apps' loader maps (this one and
+  the Chat UI's `src/i18n/index.ts`) — the types make a missed entry a compile error.
+  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `main.tsx` awaits `i18nReady` before the first render so a
   non-English user never sees a flash of English, and `i18n.changeLanguage()` is
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).

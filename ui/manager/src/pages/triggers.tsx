@@ -15,7 +15,7 @@ import {
   AlertCircle,
   Pencil,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ENVIRONMENTS } from "@/lib/constants";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";

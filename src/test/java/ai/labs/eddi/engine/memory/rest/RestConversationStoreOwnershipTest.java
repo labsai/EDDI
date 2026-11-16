@@ -984,4 +984,38 @@ class RestConversationStoreOwnershipTest {
         verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
     }
+
+    // ─── excludeGroupMembers=true (the Workforce sidebar) ───
+
+    @Test
+    @DisplayName("excludeGroupMembers=true filters member threads in the query and per row")
+    @SuppressWarnings("unchecked")
+    void excludeGroupMembers_dropsMemberThreads() throws Exception {
+        var own = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(own, member);
+
+        List<ConversationDescriptor> result = asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null, true,
+                true);
+
+        assertEquals(1, result.size());
+        assertEquals(own.getResource(), result.getFirst().getResource());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        var memberGroup = captor.getValue().stream()
+                .filter(g -> "groupConversationId".equals(g.getQueryFilters().getFirst().getField()))
+                .findFirst().orElseThrow();
+        assertInstanceOf(IResourceFilter.NotMatching.class, memberGroup.getQueryFilters().getFirst().getFilter());
+    }
+
+    @Test
+    @DisplayName("without excludeGroupMembers member threads are still listed, as before")
+    void withoutExcludeGroupMembers_memberThreadsListed() throws Exception {
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(member);
+
+        assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
+    }
 }

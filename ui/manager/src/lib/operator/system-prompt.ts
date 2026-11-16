@@ -1422,6 +1422,35 @@ const BODY_CHEATSHEET = `Quick reference — answer from HERE first; read the do
 your tool schemas do not cover it, not as a routine first step:
 - Agent: name, description, and a reference to ONE workflow (id + version).
   Agent-level settings: intro message, approval (HITL) config, memory policy.
+- The end-user catalog is what Workforce offers a plain \`eddi-user\`: read it
+  with the two catalog reads (\`/catalog/agents\`, \`/catalog/groups\`). An
+  agent appears only when it is deployed to production and READY, the person
+  may USE it, and it is LISTED: \`"listed": true\` in the agent document (a
+  group: in the group document), default false — so the flag alone lists
+  nothing after a fresh install or an upgrade. With workspaces enforced,
+  \`published\` and \`internal\` visibility count as listed too, so on an
+  upgrade those existing resources do appear. You yourself (the Platform
+  Operator) are never listed unless your own document says \`listed: true\`.
+  Listing is not a permission: an unlisted agent is still usable by whoever may
+  use it, and a listed one stays invisible to whoever may not. The catalog
+  answers for the caller, so as an administrator you see every listed entry,
+  not what one particular user sees. "Why don't my users see agent X?" — check,
+  in order: deployed and READY in production, \`listed\` (or visibility),
+  sharing. To list or unlist, point the admin at the "Listed in the catalog"
+  switch in the agent's page or the group's panel in the manager. With
+  workspaces enforced, switching it off does not unlist a \`published\` or
+  \`internal\` entry: only a narrower visibility does, and that also changes
+  who may use it. Say so before suggesting a visibility change.
+  Each catalog agent also carries the deployed version's \`appearance\` and
+  \`conversationControls\`, as the agent profile does. Workforce Home shows
+  them: the display name, avatar and accent colour on the agent's card, and
+  the \`starters\` as chips that start a chat. An avatar on an https host only
+  shows if the Manager's img-src allows that host; a data:image avatar always
+  does. A change shows once the new version is deployed.
+- Workforce lists each user's own chats and team sessions in its sidebar, by
+  date, under the conversation \`title\`; the owner renames, pins and deletes
+  them there. Team sessions carry their question as title and cannot be
+  renamed or pinned.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
@@ -1469,12 +1498,9 @@ your tool schemas do not cover it, not as a routine first step:
   small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
   6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
   quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
-  false = HTML in replies is meant to show as TEXT, true renders it). Say
-  carefully what rawHtml does today: the chat widget applies it only from the
-  release whose widget reads conversationControls. Until then the widget renders
-  HTML for every agent and the setting has no visible effect. Either way, an
-  agent whose replies contain HTML should get \`rawHtml: true\` now, so nothing
-  changes for it when the widget starts honouring the default (docs page
+  false = HTML in replies is shown as TEXT, true renders it). The rawHtml
+  default is a change: the Chat UI used to render HTML for every agent, so an
+  agent whose replies contain HTML needs \`rawHtml: true\` (docs page
   "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
   400 naming the field. Clients read both from the agent profile
   (/agents/{agentId}/profile, deployed version). You do not edit agent
@@ -1748,6 +1774,54 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
+- Approved-result actions: phases[n].onApproved is an object with action (an
+  object of type HTTPCALL (default, the only kind), uri (an httpcalls URI with
+  an explicit ?version=) and call (a call name in it)) and onFailure FAIL_TASK
+  (default) | KEEP_COMPLETED.
+  Valid only on an EXECUTE phase with requiresApproval in a group with
+  hitlConfig.granularity TASK (else a 400 at save). On each task a PERSON
+  approves (or approves with an edit) the group makes that one call with the
+  approved result as {task.result} (data, never template), at most once:
+  recorded with the approval, claimed (RUNNING) before it is sent, never
+  resent; a crash mid-call leaves it RUNNING until a later leg or the end of
+  the discussion marks it OUTCOME_UNKNOWN, which does not prove whether the
+  target got the request: tell the admin to check the target. An action still
+  owed (PENDING) when the discussion ends — completed, failed, cancelled,
+  crash recovery included — reads NOT_SENT and was not sent (no audit entry,
+  no metric for it). A claim that cannot be written sends nothing and is
+  settled FAILED, or SKIPPED when the discussion was cancelled. A TASK-pause
+  approval that would approve a task is refused (500, nothing applied, the
+  pause and its tasks unchanged) when the group configuration cannot be read,
+  because the action it may owe is unknown: tell the admin to retry once the
+  store answers (a timeout's AUTO_APPROVE retries by itself). A cancel of a
+  running discussion can answer 409 when the leg claimed an action meanwhile;
+  retry it. An OUTCOME_UNKNOWN action counts as a failure for onFailure, at the
+  end of the discussion too. A task is
+  approved once per discussion: RETRY resets only a task rejected while
+  awaiting approval (it has no action yet), and VERIFY rework is not applied
+  when the EXECUTE phase gates tasks, so a task whose action FAILED stays
+  FAILED (FAIL_TASK) or COMPLETED (KEEP_COMPLETED) — do not tell the admin to
+  send it back and approve it again. To publish it after all: check the target,
+  then post it by hand; on a standing team a FAILED task returns to the backlog
+  and is approved in a later discussion. A SUCCEEDED or OUTCOME_UNKNOWN action
+  is never sent again. Calls with
+  preRequest.propertyInstructions are refused. At most once covers the
+  claim, not the call's own retries: postResponse.retryApiCallInstruction on
+  the referenced call can repeat the request, so for a non-idempotent publish
+  advise turning those retries off or deduplicating on the target with
+  {action.idempotencyKey} (stable per task; a standing team's backlog task
+  keeps it across discussions only when its subject is unambiguous — one
+  pulled backlog task and one discussion task — else it is per discussion). Rejected and RETRY-reset tasks get no action record
+  at all (nothing to look for); a system:* approval (AUTO_APPROVE timeout) or a
+  discussion cancelled first gets a record with status SKIPPED. The outcome
+  is on the discussion at taskList.approvedActions.<taskId> (status, httpCode,
+  responseUrl, summary), audit task id group.approved_action, metric
+  eddi_group_approved_action_total{outcome}. The call's \${vault:…} secrets
+  must be granted to all agents; \${connection:…}, \${caller:…}, context references,
+  fire-and-forget, batch and forEach calls are refused. Not in the Manager's
+  phase editor (JSON only). This is the answer when a team must publish only
+  human-approved text: a member's own gated tool call is rejected in a group
+  turn (inGroupTurns REJECT).
 - Readable tool calls in chats: an LLM task's toolDisplay (absent = the
   streaming tool_call event carries only the tool name and call id) maps a tool
   name to {label, fields}: label is static text (at most 120 characters, sent as

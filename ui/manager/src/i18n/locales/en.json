@@ -589,7 +589,7 @@
         "streaming": "Streaming",
         "rawHtml": "Render HTML in replies"
       },
-      "rawHtmlNote": "Off by default. The chat widget applies this setting only from the release whose widget reads conversation controls; until then it renders HTML for every agent. Turn it on now for an agent whose replies are meant to contain HTML.",
+      "rawHtmlNote": "Off by default: HTML in replies is shown as text. Turn it on only for an agent whose replies are meant to contain HTML.",
       "titles": "Conversation titles",
       "titlesEnable": "Let a model write conversation titles",
       "titlesNote": "Otherwise a conversation is titled with its first message. The model runs once per conversation, in the background, and is charged to the cost budget. A title the user set is never replaced.",
@@ -5595,7 +5595,48 @@
       "useStarterPrompt": "Insert a starter prompt",
       "yourAdvisors": "Your Advisors"
     },
-    "workforce": "Workforce"
+    "workforce": "Workforce",
+    "operatorLink": "Platform Operator",
+    "catalog": {
+      "emptyTitle": "Nothing to show here yet",
+      "emptyAuthorHint": "End users only see agents and teams that are listed. Open an agent or a group in the Manager and switch on \"Listed in the catalog\" — or, with workspaces on, make it published or internal. People still need access to use it.",
+      "openAgents": "Open agents in the Manager",
+      "emptyUserHint": "No agents or teams have been made available to you yet. Check back later.",
+      "agents": "Agents",
+      "teams": "Teams",
+      "previewTitle": "What end users see",
+      "previewCounts": "{{agents}} listed agents and {{teams}} listed teams are offered to the people allowed to use them."
+    },
+    "sessions": {
+      "title": "Your conversations",
+      "loading": "Loading…",
+      "loadError": "Couldn't load your conversations. Retry",
+      "empty": "No conversations yet. Start one from Home.",
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "previous7": "Previous 7 days",
+      "previous30": "Previous 30 days",
+      "rename": "Rename",
+      "renameLabel": "Conversation title",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "delete": "Delete",
+      "deleteTitle": "Delete this conversation?",
+      "deleteDescription": "“{{title}}” disappears from your list. This cannot be undone here.",
+      "renameFailed": "Couldn't rename: {{error}}",
+      "pinFailed": "Couldn't change the pin: {{error}}",
+      "deleteFailed": "Couldn't delete: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Start a conversation",
+      "placeholder": "Ask {{agent}}…",
+      "messageLabel": "Your message",
+      "agentLabel": "Agent",
+      "send": "Send",
+      "starters": "Suggestions",
+      "recent": "Recent"
+    }
   },
   "operator": {
     "title": "Platform Operator",
@@ -7750,6 +7791,13 @@
       "lte": "is at most",
       "contains": "contains"
     }
+  },
+  "catalogListing": {
+    "label": "Listed in the catalog",
+    "agentDescription": "Offer this agent to end users in Workforce. Only people who may use it see it, and only once it is deployed. With workspaces on, published and internal agents are listed anyway.",
+    "groupDescription": "Offer this team to end users in Workforce. Only people who may use it see it. With workspaces on, published and internal teams are listed anyway.",
+    "listedToast": "Listed in the catalog",
+    "unlistedToast": "Removed from the catalog"
   },
   "groupLearning": {
     "betToggle": "File as a bet",

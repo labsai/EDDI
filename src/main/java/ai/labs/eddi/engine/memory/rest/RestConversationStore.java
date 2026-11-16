@@ -122,6 +122,7 @@ public class RestConversationStore implements IRestConversationStore {
     private static final String FIELD_AGENT_RESOURCE = "agentResource";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_VIEW_STATE = "viewState";
+    private static final String FIELD_GROUP_CONVERSATION_ID = "groupConversationId";
 
     /**
      * Matches a field holding anything but whitespace — so a {@link NotMatching} of
@@ -260,7 +261,8 @@ public class RestConversationStore implements IRestConversationStore {
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
                                                                     String agentId, Integer agentVersion, ConversationState conversationState,
-                                                                    ConversationDescriptor.ViewState viewState, Boolean mine) {
+                                                                    ConversationDescriptor.ViewState viewState, Boolean mine,
+                                                                    Boolean excludeGroupMembers) {
         // A negative index or a limit above the deployment-wide page ceiling is
         // refused, not normalised (this used to clamp the limit silently at 100 and
         // turn a negative index into 0): a client that asked for more than a page can
@@ -313,13 +315,16 @@ public class RestConversationStore implements IRestConversationStore {
         // `mine` narrows any caller, an admin included, to the conversations they own:
         // a client choosing one to continue must not be handed somebody else's.
         // Without a named caller, or with authorization disabled, there is no owner
-        // to narrow to, and it does nothing.
+        // to narrow to, and it does nothing. excludeGroupMembers=true leaves out the
+        // member threads a group discussion started (their descriptor records a
+        // groupConversationId).
+        final boolean withoutMembers = Boolean.TRUE.equals(excludeGroupMembers);
         final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
         final String onlyOwner = Boolean.TRUE.equals(mine) ? conversationAccessGuard.ownConversationsOwner() : null;
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
-        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, agentId, viewState);
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, onlyOwner, withoutMembers, agentId, viewState);
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -369,8 +374,8 @@ public class RestConversationStore implements IRestConversationStore {
                     // after rows nobody examined. A batch may therefore run past the
                     // budget by its own size; its foreign rows cost no conversation read.
                     scannedDescriptors++;
-                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, onlyOwner, agentId,
-                            reviewable);
+                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, onlyOwner, withoutMembers,
+                            agentId, reviewable);
                     if (candidateId != null) {
                         candidates.add(conversationDescriptor);
                         candidateIds.add(candidateId);
@@ -465,12 +470,16 @@ public class RestConversationStore implements IRestConversationStore {
      * @return the conversation's id, or {@code null} when the row is not listed
      */
     private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, String onlyOwner,
-                                       String agentId, Map<URI, Boolean> reviewable) {
+                                       boolean withoutMembers, String agentId, Map<URI, Boolean> reviewable) {
         try {
             URI resourceUri = conversationDescriptor.getResource();
             var conversationResourceId = extractResourceId(resourceUri);
             if (conversationResourceId == null || conversationResourceId.getId() == null) {
                 log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
+                return null;
+            }
+
+            if (withoutMembers && !isNullOrEmpty(conversationDescriptor.getGroupConversationId())) {
                 return null;
             }
 
@@ -626,14 +635,16 @@ public class RestConversationStore implements IRestConversationStore {
      * review conversations they do not own (see {@link #mayReview}), and the agent
      * group narrows the query instead. With {@code onlyOwner} ({@code mine}) it is
      * that owner exactly, for every caller and with or without an agent.</li>
+     * <li><b>Group members</b> ({@code excludeGroupMembers}) — no recorded
+     * {@code groupConversationId}.</li>
      * <li><b>View state</b> — equality; a descriptor without one never
      * matched.</li>
      * </ul>
      * The conversation state is not here: it is read from the conversation memory,
      * not from the descriptor.
      */
-    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String onlyOwner, String agentId,
-                                                   ConversationDescriptor.ViewState viewState) {
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String onlyOwner, boolean withoutMembers,
+                                                   String agentId, ConversationDescriptor.ViewState viewState) {
         List<QueryFilters> restrictions = new LinkedList<>();
         if (!isNullOrEmpty(agentId)) {
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
@@ -650,6 +661,9 @@ public class RestConversationStore implements IRestConversationStore {
             // matching nobody's fell back to the unfiltered listing — an existence
             // oracle over other users' ids and conversation ids.
             restrictions.addAll(ownerScope(false, null));
+        }
+        if (withoutMembers) {
+            restrictions.add(new QueryFilters(List.of(new QueryFilter(FIELD_GROUP_CONVERSATION_ID, new NotMatching(NOT_BLANK)))));
         }
         if (viewState != null) {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));

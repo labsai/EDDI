@@ -83,6 +83,11 @@ public interface IRestConversationStore {
      * listing returned without it. For every other caller a search that matches
      * nothing they may be listed returns an empty page: whether other users'
      * conversations match must not change what they are shown.
+     * <p>
+     * {@code excludeGroupMembers=true} leaves out the private conversations a group
+     * discussion started for its members (those whose descriptor records a
+     * {@code groupConversationId}; member conversations started before 6.7.0 record
+     * none and are still listed).
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -98,7 +103,23 @@ public interface IRestConversationStore {
                                                              @Parameter(name = "mine", required = false, example = "true",
                                                                         description = "Only the caller's own conversations, an administrator's included")
                                                              @QueryParam("mine")
-                                                             @DefaultValue("false") Boolean mine);
+                                                             @DefaultValue("false") Boolean mine,
+                                                             @Parameter(name = "excludeGroupMembers", required = false, example = "true",
+                                                                        description = "Leave out group members' private conversations (since 6.7.0)")
+                                                             @QueryParam("excludeGroupMembers")
+                                                             @DefaultValue("false") Boolean excludeGroupMembers);
+
+    /**
+     * The listing with {@code mine} only, member threads included. Not a resource
+     * method.
+     */
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     String conversationId, String agentId, Integer agentVersion,
+                                                                     ConversationState conversationState,
+                                                                     ConversationDescriptor.ViewState viewState, Boolean mine) {
+        return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
+                mine, false);
+    }
 
     /**
      * The listing as the caller is entitled to see it ({@code mine=false}): every
@@ -110,7 +131,7 @@ public interface IRestConversationStore {
                                                                      ConversationState conversationState,
                                                                      ConversationDescriptor.ViewState viewState) {
         return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
-                false);
+                false, false);
     }
 
     @GET

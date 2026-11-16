@@ -31,7 +31,7 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
 import { useDeployWithGrants, isGrantFailure, type DeployWithGrantsOutcome } from "@/hooks/use-deploy-with-grants";
 import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";

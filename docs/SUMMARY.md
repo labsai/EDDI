@@ -48,6 +48,7 @@
 - [Group Conversations](group-conversations.md)
   - [Group Human Decisions: Tie-Breaks and Tasks](group-human-decisions.md)
   - [Group Convergence Judge: SERVICE](group-service-judge.md)
+  - [Group Approved-Result Actions](group-approved-result-actions.md)
   - [Cross-Team Handoff](team-handoff.md)
   - [Team Learning Loop](team-learning-loop.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
@@ -76,12 +77,14 @@
 - [Email Integration](email-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
+- [Workforce for End Users](workforce-guide.md)
 
 ## Security & Compliance
 
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
+- [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
