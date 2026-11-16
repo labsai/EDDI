@@ -354,6 +354,30 @@
       "text": "\\\\}",
       "kind": "inert",
       "escaped": "{|\\\\}|}"
+    },
+    {
+      "name": "final single backslash",
+      "text": "Use C:\\",
+      "kind": "expression",
+      "escaped": "Use C:{|\\|}"
+    },
+    {
+      "name": "final double backslash",
+      "text": "Use C:\\\\",
+      "kind": "inert",
+      "escaped": "Use C:{|\\\\|}"
+    },
+    {
+      "name": "backslashes before other characters, mid-text",
+      "text": "C:\\Users\\x and \\n, \\\\ and \\| stay as typed",
+      "kind": "inert",
+      "escaped": "C:\\Users\\x and \\n, \\\\ and \\| stay as typed"
+    },
+    {
+      "name": "final backslash after an escaped brace",
+      "text": "a {b} \\",
+      "kind": "expression",
+      "escaped": "a {|{|}b} {|\\|}"
     }
   ]
 }

@@ -102,28 +102,43 @@ function segments(text: string): Segment[] {
   return out;
 }
 
+/** A run of backslashes at the very end of the text. */
+const TRAILING_BACKSLASHES = /\\+$/;
+
 /**
  * Every brace of `text` the engine would still read as syntax: each `{` (with
  * its backslashes) and each backslash-escaped `}` outside the places the
- * escape leaves alone. Empty means the text renders exactly as written, apart
- * from the context block. Fed `escapeQuteLiterals`' output, it is empty.
+ * escape leaves alone, and a bare run of backslashes at the very end. Empty
+ * means the text renders exactly as written, apart from the context block. Fed
+ * `escapeQuteLiterals`' output, it is empty.
  */
 export function findUnescapedBraces(text: string): string[] {
   const found: string[] = [];
-  for (const segment of segments(text)) {
-    if (segment.kept) continue;
+  const parts = segments(text);
+  parts.forEach((segment, index) => {
+    if (segment.kept) return;
     for (const match of segment.text.matchAll(BRACE)) found.push(match[0]);
-  }
+    // The engine rejects a template that ends in an escape (`Use C:\`), and the whole prompt goes out unrendered.
+    const trailing = index === parts.length - 1 ? TRAILING_BACKSLASHES.exec(segment.text) : null;
+    if (trailing) found.push(trailing[0]);
+  });
   return found;
 }
 
 /**
  * `text` with every brace outside the three exceptions wrapped in an unparsed
- * block, so the engine outputs it unchanged. Idempotent: what it wrote is an
+ * block, so the engine outputs it unchanged. A run of backslashes at the very
+ * end is wrapped too: Qute reads a trailing backslash as the start of an escape,
+ * finds none and rejects the template (`Use C:\`). Idempotent: what it wrote is an
  * unparsed block, which is left alone.
  */
 export function escapeQuteLiterals(text: string): string {
-  return segments(text)
-    .map((segment) => (segment.kept ? segment.text : segment.text.replace(BRACE, (brace) => `{|${brace}|}`)))
+  const parts = segments(text);
+  return parts
+    .map((segment, index) => {
+      if (segment.kept) return segment.text;
+      const wrapped = segment.text.replace(BRACE, (brace) => `{|${brace}|}`);
+      return index === parts.length - 1 ? wrapped.replace(TRAILING_BACKSLASHES, (run) => `{|${run}|}`) : wrapped;
+    })
     .join("");
 }

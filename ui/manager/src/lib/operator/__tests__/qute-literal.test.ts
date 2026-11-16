@@ -112,6 +112,15 @@ describe("the operator system prompt", () => {
     expect(prompt).toContain("{|{|}context.screen}");
   });
 
+  it("an edited body ending in a backslash cannot leave the prompt ending in one", () => {
+    // Qute reads a trailing backslash as an unfinished escape and rejects the template.
+    for (const body of ["Use C:\\", "Use C:\\\\", "Use C:\\\\\\"]) {
+      const prompt = buildOperatorSystemPrompt(body, "read_only");
+      expect(prompt.endsWith("\\")).toBe(false);
+      expect(findUnescapedBraces(prompt)).toEqual([]);
+    }
+  });
+
   it("an edited body with a stray opener cannot break the render", () => {
     const prompt = buildOperatorSystemPrompt("Use the {forEach object", "read_only");
     expect(findUnescapedBraces(prompt)).toEqual([]);
