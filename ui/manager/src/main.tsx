@@ -15,10 +15,10 @@ import "@/index.css";
 
 // ── Self-hosted fonts (no external CDN requests) ────────────────────
 // Only the default family is eager. The Arabic, Thai, Devanagari and CJK
-// families load with their locale (`@/i18n/locale-fonts`): their @font-face
+// families load with their locale (`installLocaleFonts`, @eddi/ui): their @font-face
 // rules were most of the main stylesheet, for every user in every language.
 import "@fontsource-variable/noto-sans";
-import { installLocaleFonts } from "@/i18n/locale-fonts";
+import { installLocaleFonts } from "@eddi/ui/fonts";
 
 /** How long the first paint waits for a locale's font CSS before going ahead. */
 const LOCALE_FONT_WAIT_MS = 3000;

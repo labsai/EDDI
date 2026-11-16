@@ -1,0 +1,71 @@
+/* ──────────────────────────────────────────────
+   The markdown renderer's own pieces, for an app without the Chat UI's
+   stylesheet (the Manager): the code block's copy button, wide tables,
+   highlight.js tokens and display math. Scoped to `.eddi-markdown`, the
+   wrapper such an app puts around `MarkdownContent`, and coloured from the
+   shared tokens (@eddi/ui), so it follows dark and light and the brand.
+   The Chat UI styles the same class names in its chat.css.
+   ────────────────────────────────────────────── */
+
+.eddi-markdown .code-block {
+  position: relative;
+}
+
+.eddi-markdown .code-block__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.eddi-markdown .code-block__copy:hover,
+.eddi-markdown .code-block__copy:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.eddi-markdown .table-scroll {
+  overflow-x: auto;
+}
+
+.eddi-markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.eddi-markdown .hljs-keyword,
+.eddi-markdown .hljs-built_in,
+.eddi-markdown .hljs-selector-tag,
+.eddi-markdown .hljs-literal {
+  color: var(--color-primary);
+}
+
+.eddi-markdown .hljs-string,
+.eddi-markdown .hljs-attr,
+.eddi-markdown .hljs-regexp {
+  color: color-mix(in srgb, var(--color-warning) 70%, var(--color-foreground));
+}
+
+.eddi-markdown .hljs-comment,
+.eddi-markdown .hljs-quote {
+  color: var(--color-muted-foreground);
+  font-style: italic;
+}
+
+.eddi-markdown .hljs-number,
+.eddi-markdown .hljs-title,
+.eddi-markdown .hljs-type {
+  color: var(--color-warning);
+}
