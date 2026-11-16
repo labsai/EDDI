@@ -1094,7 +1094,7 @@ export function AgentDetailPage() {
         kind="agent"
         listed={doc.listed}
         onChange={(listed) => editAgent({ ...doc, listed })}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
       />
 
       {/* A2A Protocol (collapsible, hidden by default) */}
