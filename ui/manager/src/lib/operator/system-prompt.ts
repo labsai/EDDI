@@ -1519,6 +1519,16 @@ your tool schemas do not cover it, not as a routine first step:
   workspaces enforced, switching it off does not unlist a \`published\` or
   \`internal\` entry: only a narrower visibility does, and that also changes
   who may use it. Say so before suggesting a visibility change.
+  Each catalog agent also carries the deployed version's \`appearance\` and
+  \`conversationControls\`, as the agent profile does. Workforce Home shows
+  them: the display name, avatar and accent colour on the agent's card, and
+  the \`starters\` as chips that start a chat. An avatar on an https host only
+  shows if the Manager's img-src allows that host; a data:image avatar always
+  does. A change shows once the new version is deployed.
+- Workforce lists each user's own chats and team sessions in its sidebar, by
+  date, under the conversation \`title\`; the owner renames, pins and deletes
+  them there. Team sessions carry their question as title and cannot be
+  renamed or pinned.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
@@ -1566,12 +1576,9 @@ your tool schemas do not cover it, not as a routine first step:
   small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
   6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
   quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
-  false = HTML in replies is meant to show as TEXT, true renders it). Say
-  carefully what rawHtml does today: the chat widget applies it only from the
-  release whose widget reads conversationControls. Until then the widget renders
-  HTML for every agent and the setting has no visible effect. Either way, an
-  agent whose replies contain HTML should get \`rawHtml: true\` now, so nothing
-  changes for it when the widget starts honouring the default (docs page
+  false = HTML in replies is shown as TEXT, true renders it). The rawHtml
+  default is a change: the Chat UI used to render HTML for every agent, so an
+  agent whose replies contain HTML needs \`rawHtml: true\` (docs page
   "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
   400 naming the field. Clients read both from the agent profile
   (/agents/{agentId}/profile, deployed version). You do not edit agent
