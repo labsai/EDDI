@@ -18,7 +18,7 @@ import { getGroup, type AgentGroupConfiguration } from "@/lib/api/groups";
 import { getErrorMessage } from "@/lib/api-client";
 import { describeGroupDeleteError } from "@/lib/group-delete-errors";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";

@@ -62,7 +62,7 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTemplates } from "@/hooks/use-templates";

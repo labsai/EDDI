@@ -8,7 +8,7 @@ import { diagnosisVerdictLabel, findingActionLabel, findingText, formatDuration 
 import { useDiagnosis, useReleaseLease } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";

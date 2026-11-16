@@ -14,7 +14,7 @@ import {
   MessagesSquare,
   Target,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { AgentPicker } from "@/components/shared/agent-picker";

@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { formatMarkdownText } from "@/components/groups/group-utils";
 import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
 import { ApprovalCard } from "@/components/hitl/approval-card";

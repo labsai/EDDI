@@ -8,7 +8,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
-import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@/api/rating-api";
+import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@eddi/core";
 import { t } from "@/i18n";
 
 interface StepRatingProps {

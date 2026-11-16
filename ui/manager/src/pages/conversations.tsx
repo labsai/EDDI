@@ -30,7 +30,7 @@ import {
 import { useAgentDescriptors, groupAgentsByName, useAgentVersions } from "@/hooks/use-agents";
 import { parseConversationUri, MAX_CONVERSATION_LIMIT, type ConversationState } from "@/lib/api/conversations";
 import { AgentPicker } from "@/components/shared/agent-picker";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
