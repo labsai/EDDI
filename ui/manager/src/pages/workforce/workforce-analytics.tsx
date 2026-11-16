@@ -9,7 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useWorkforceAnalytics } from "@/hooks/use-workforce-analytics";
 import { StatCard } from "@/components/workforce/analytics/stat-card";
 import { ActivityHeatmap } from "@/components/workforce/analytics/activity-heatmap";

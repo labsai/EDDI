@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, ChevronDown, Loader2, Plug, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useConnectionDescriptors } from "@/hooks/use-connections";
 import { isApiError } from "@/lib/api-client";
 import { bindingLabel } from "@/lib/connection-labels";

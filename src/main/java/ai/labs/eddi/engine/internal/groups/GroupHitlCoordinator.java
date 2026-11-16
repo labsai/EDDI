@@ -50,9 +50,11 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
 
 /**
  * HITL (human-in-the-loop) lifecycle for group discussions: pause commit,
@@ -106,6 +108,7 @@ public class GroupHitlCoordinator {
     private final Counter counterGroupHitlResume;
     private final Counter counterGroupFailure;
     private GroupTieBreakPauses tieBreakPauses;
+    private GroupApprovedResultActions approvedResultActions;
 
     public GroupHitlCoordinator(IAgentGroupStore groupStore, IGroupConversationStore conversationStore,
             IScheduleStore scheduleStore, AuditLedgerService auditLedgerService, GroupSigningGuard signingGuard,
@@ -134,6 +137,31 @@ public class GroupHitlCoordinator {
      */
     public void setTieBreakPauses(GroupTieBreakPauses tieBreakPauses) {
         this.tieBreakPauses = tieBreakPauses;
+    }
+
+    /**
+     * Wires approved-result actions ({@code phase.onApproved}). A setter for the
+     * same reason as {@link #setTieBreakPauses}; without it an approved task runs
+     * nothing.
+     */
+    public void setApprovedResultActions(GroupApprovedResultActions approvedResultActions) {
+        this.approvedResultActions = approvedResultActions;
+    }
+
+    /**
+     * Settles the approved-result actions the discussion owes (see
+     * {@link GroupApprovedResultActions#runOwed}) — called on a resumed leg before
+     * the phase loop re-enters, so a dependent task never starts before the action
+     * of the task it depends on has run (or failed it).
+     */
+    private void runOwedApprovedResultActions(GroupConversation gc) {
+        if (approvedResultActions == null) {
+            return;
+        }
+        approvedResultActions.runOwed(gc, conversationStore, () -> {
+            DiscussionControlToken token = discussionControls.get(gc.getId());
+            return token != null && token.isCancelled();
+        });
     }
 
     /**
@@ -692,6 +720,14 @@ public class GroupHitlCoordinator {
         // approve-all shortcut) — otherwise {} approves nothing and the resumed
         // phase instantly re-pauses.
         boolean hasTaskApprovals = request.getTaskApprovals() != null && !request.getTaskApprovals().isEmpty();
+        // The tasks this decision can approve — the ones still COMPLETED after it are
+        // the approved ones, whose approved-result actions (phase.onApproved) it owes.
+        final Set<String> awaitingBeforeDecision = gc.getTaskList() == null
+                ? Set.of()
+                : gc.getTaskList().all().stream()
+                        .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                        .map(SharedTaskList.TaskItem::id)
+                        .collect(Collectors.toSet());
         // #30: a task-level body against a PHASE-paused (or task-list-less)
         // conversation must fail 400 — not be silently ignored and treated as a
         // plain phase approve. Reject before the CAS so the operator sees the error
@@ -704,6 +740,32 @@ public class GroupHitlCoordinator {
                                     ? "paused at PHASE granularity"
                                     : "paused without a task list")
                             + "); omit taskApprovals to approve the phase");
+        }
+        // A task approval may owe an approved-result action (phase.onApproved), which
+        // only the group configuration names. When it could not be read, applying the
+        // approval would complete the task and persist the decision with no action
+        // record — the action would silently never run. Refuse before anything is
+        // mutated: the pause and its awaiting tasks stay as they are, and the caller
+        // (or the timeout schedule, which retries) decides again once the store
+        // answers.
+        if (groupConfigReadFailed && approvesAwaitingTasks(gc, request, hasTaskApprovals, awaitingBeforeDecision)) {
+            throw new IResourceStore.ResourceStoreException("The group configuration of " + LogSanitizer.sanitize(groupConversationId)
+                    + " could not be read, so the approved-result actions this approval may owe are unknown — the approval was "
+                    + "not applied; retry it");
+        }
+        // The same holds when the configuration was read but the paused phase is no
+        // longer at its bookmark (renamed, moved or removed while paused): the action
+        // record would be skipped, while the task completion persists with the resume
+        // CAS — and the resumed leg's drift guard restores the pause but not the tasks,
+        // so a retry after the config is fixed finds nothing awaiting and the action
+        // never runs. Refuse before anything is mutated, like the unreadable config.
+        if (phasesConfig != null && approvesAwaitingTasks(gc, request, hasTaskApprovals, awaitingBeforeDecision)) {
+            String drift = bookmarkedPhaseDrift(gc, groupConversationService.effectivePhases(gc, phasesConfig));
+            if (drift != null) {
+                throw new IResourceStore.ResourceStoreException("The group configuration of " + LogSanitizer.sanitize(groupConversationId)
+                        + " changed while paused (" + drift + "), so the approved-result actions this approval may owe are unknown — "
+                        + "the approval was not applied; fix the config and retry it, or cancel");
+            }
         }
         if (hasTaskApprovals && gc.getTaskList() != null) {
             // #13: validate the WHOLE map up front — unknown taskIds, tasks not
@@ -810,6 +872,11 @@ public class GroupHitlCoordinator {
             cleanupAfterTerminalState(gc);
             return gc;
         }
+
+        // Approved-result actions are recorded here, before the resume CAS below, so
+        // the records are persisted by the same pause-bound write as the approval —
+        // or not at all (a retried or concurrent approval of this pause loses it).
+        recordApprovedResultActions(gc, phasesConfig, awaitingBeforeDecision, decision);
 
         // Save resume point and pause type before clearing
         int resumePhaseIndex = gc.getPausedAtPhaseIndex();
@@ -1042,6 +1109,7 @@ public class GroupHitlCoordinator {
                 return;
             }
 
+            runOwedApprovedResultActions(gc);
             try {
                 groupConversationService.executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
             } catch (Exception e) {
@@ -1089,6 +1157,78 @@ public class GroupHitlCoordinator {
             LOGGER.debugf("Could not re-read group conversation %s for the response: %s",
                     groupConversationId, e.getMessage());
             return gc;
+        }
+    }
+
+    /**
+     * Whether this decision would complete at least one task now awaiting approval
+     * on a TASK pause — an explicit {@code APPROVED} entry, or an approve verdict
+     * without task approvals (the approve-all shortcut and a timeout's
+     * AUTO_APPROVE).
+     */
+    static boolean approvesAwaitingTasks(GroupConversation gc, GroupApprovalRequest request, boolean hasTaskApprovals,
+                                         Set<String> awaiting) {
+        if (gc.getTaskList() == null || gc.getHitlPauseType() != HitlPauseType.TASK || awaiting.isEmpty()) {
+            return false;
+        }
+        if (hasTaskApprovals) {
+            return request.getTaskApprovals().entrySet().stream()
+                    .anyMatch(e -> awaiting.contains(e.getKey()) && "APPROVED".equalsIgnoreCase(e.getValue()));
+        }
+        return request.getDecision() != null && request.getDecision().getVerdict() == HitlDecision.HitlVerdict.APPROVED;
+    }
+
+    /**
+     * Why the pause's bookmarked phase is no longer at its bookmark in
+     * {@code phases} — no phase at that index, or one with another name than the
+     * one paused — or {@code null} when it still is. A pause without a phase name
+     * is checked by index only.
+     */
+    static String bookmarkedPhaseDrift(GroupConversation gc, List<DiscussionPhase> phases) {
+        int phaseIdx = gc.getPausedAtPhaseIndex();
+        if (phaseIdx < 0 || phaseIdx >= phases.size()) {
+            return "no phase at index " + phaseIdx;
+        }
+        String actual = phases.get(phaseIdx).name();
+        String paused = gc.getPausedPhaseName();
+        if (paused != null && !paused.equals(actual)) {
+            return "expected phase '" + LogSanitizer.sanitize(paused) + "' at index " + phaseIdx + " but found '"
+                    + LogSanitizer.sanitize(actual) + "'";
+        }
+        return null;
+    }
+
+    /**
+     * Records the approved-result action each task approved by this decision owes,
+     * when the paused phase configures one. A TASK pause is mid-phase, so the
+     * approved tasks belong to the bookmarked phase; a phase list that no longer
+     * has it there (config drift — the resume restores the pause) records nothing.
+     */
+    private void recordApprovedResultActions(GroupConversation gc, AgentGroupConfiguration config, Set<String> candidates,
+                                             HitlDecision decision) {
+        if (approvedResultActions == null || config == null || candidates.isEmpty() || gc.getHitlPauseType() != HitlPauseType.TASK) {
+            return;
+        }
+        List<DiscussionPhase> phases = groupConversationService.effectivePhases(gc, config);
+        if (bookmarkedPhaseDrift(gc, phases) != null) {
+            // Unreachable for an approval — resumeDiscussion refused it before any task
+            // was completed; kept so this method never records against the wrong phase.
+            return;
+        }
+        int phaseIdx = gc.getPausedAtPhaseIndex();
+        DiscussionPhase phase = phases.get(phaseIdx);
+        if (phase.onApproved() == null) {
+            return;
+        }
+        String approvedBy = decision != null ? decision.getDecidedBy() : null;
+        if (approvedBy == null) {
+            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+            approvedBy = caller != null ? caller.userId() : null;
+        }
+        int added = approvedResultActions.recordApprovals(gc, phase, phaseIdx, candidates, approvedBy);
+        if (added > 0) {
+            LOGGER.infof("Group conversation %s: %d approved task(s) owe phase '%s''s onApproved action", LogSanitizer.sanitize(gc.getId()),
+                    added, LogSanitizer.sanitize(phase.name()));
         }
     }
 
@@ -1510,6 +1650,7 @@ public class GroupHitlCoordinator {
         final int startFromPhase = pending.phaseIdx();
         var question = gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
         Runnable resumeWork = () -> {
+            runOwedApprovedResultActions(gc);
             try {
                 groupConversationService.executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
             } catch (Exception e) {

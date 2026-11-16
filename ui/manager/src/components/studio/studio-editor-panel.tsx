@@ -30,7 +30,7 @@ import {
   getResourceSlugForStep,
 } from "@/lib/api/extensions";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ErrorState } from "@/components/shared/error-state";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Link } from "react-router-dom";

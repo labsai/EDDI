@@ -50,7 +50,7 @@ import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   useAgent,
   useDeploymentStatus,

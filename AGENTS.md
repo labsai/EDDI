@@ -4,7 +4,7 @@
 >
 > **New here?** Read the [README](README.md) first — it has setup, the quick start, and a feature tour. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
 >
-> **Working under `ui/`?** This file still applies (branching, pushing, commits, changelog). Also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md) or [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md).
+> **Working under `ui/`?** This file still applies (branching, pushing, commits, changelog). Also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md) or [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md), and [`ui/packages/README.md`](ui/packages/README.md) for the shared packages both apps compile as source (`@eddi/core`, `@eddi/ui`).
 
 **Contents:** [1. Project Context](#1-project-context) · [2. Workflow Protocol](#2-mandatory-workflow-protocol) · [3. Roadmap](#3-development-roadmap) · [4. Backend Java Guidelines](#4-backend-java-guidelines) · [5. Agent Config Authoring](#5-agent-config-authoring) · [6. Session Protocol](#6-session-protocol)
 

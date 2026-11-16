@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/api-client";
 import {

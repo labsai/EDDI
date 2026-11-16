@@ -12,7 +12,7 @@ import {
   Bot, Users, ChevronDown, ChevronUp, Hash,
   ExternalLink, Star, AlertTriangle, ShieldCheck,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AlertDialog } from "@/components/ui/alert-dialog";
