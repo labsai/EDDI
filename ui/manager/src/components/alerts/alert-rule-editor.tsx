@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { OutputMatchBuilder } from "./output-match-builder";

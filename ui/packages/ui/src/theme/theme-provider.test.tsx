@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ThemeProvider, useTheme } from "@/components/layout/theme-provider";
-import { userEvent } from "@/test/test-utils";
+import { ThemeProvider } from "./theme-provider";
+import { useTheme } from "./theme-context";
 
 function ThemeConsumer() {
   const { theme, resolvedTheme, setTheme } = useTheme();
@@ -53,7 +53,6 @@ describe("ThemeProvider", () => {
   });
 
   it("changes theme when setTheme is called", async () => {
-    const user = userEvent.setup();
     render(
       <ThemeProvider defaultTheme="light">
         <ThemeConsumer />
@@ -61,20 +60,19 @@ describe("ThemeProvider", () => {
     );
 
     expect(screen.getByTestId("theme").textContent).toBe("light");
-    await user.click(screen.getByTestId("set-dark"));
+    fireEvent.click(screen.getByTestId("set-dark"));
     expect(screen.getByTestId("theme").textContent).toBe("dark");
     expect(screen.getByTestId("resolved").textContent).toBe("dark");
   });
 
   it("persists theme to localStorage", async () => {
-    const user = userEvent.setup();
     render(
       <ThemeProvider storageKey="test-theme">
         <ThemeConsumer />
       </ThemeProvider>
     );
 
-    await user.click(screen.getByTestId("set-dark"));
+    fireEvent.click(screen.getByTestId("set-dark"));
     expect(localStorage.getItem("test-theme")).toBe("dark");
   });
 
@@ -98,7 +96,6 @@ describe("ThemeProvider", () => {
   });
 
   it("removes old theme class when switching", async () => {
-    const user = userEvent.setup();
     render(
       <ThemeProvider defaultTheme="dark">
         <ThemeConsumer />
@@ -106,7 +103,7 @@ describe("ThemeProvider", () => {
     );
 
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    await user.click(screen.getByTestId("set-light"));
+    fireEvent.click(screen.getByTestId("set-light"));
     expect(document.documentElement.classList.contains("light")).toBe(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });

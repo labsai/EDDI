@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversations } from "@/hooks/use-groups";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { GroupConversationState } from "@/lib/api/groups";
 

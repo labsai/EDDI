@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import "@/lib/monaco-setup";
 import { DiffEditor } from "@monaco-editor/react";
 import { RefreshCw, ChevronDown } from "lucide-react";
-import { useTheme } from "@/components/layout/theme-provider";
+import { useTheme } from "@eddi/ui";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 
 export interface VersionDiffDialogProps {

@@ -48,7 +48,7 @@ import { ApprovalContextEditor } from "./approval-context-editor";
 import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { toast } from "sonner";
 
 /** What every agent-detail section takes from the page. */

@@ -50,18 +50,38 @@ export function reactApp({ ecmaVersion }) {
  * Apps may import packages; a package never imports an app, and a package that
  * declares itself framework-free (`frameworkFree: true`, as `@eddi/core` does)
  * imports neither React nor `@eddi/ui` and touches no DOM global beyond fetch.
- * `src/__tests__/boundaries.test.ts` in `@eddi/core` checks the same rules and
- * the absence of import cycles across every package.
+ * `src/boundaries.test.ts` in `@eddi/core` checks the same rules and the
+ * absence of import cycles across every package.
  *
- * @param {{ frameworkFree: boolean }} options
+ * A React package (`react: true`, as `@eddi/ui` is) lints `.tsx` with the rules
+ * of hooks. With `noApi: true` (also `@eddi/ui`) it may not call the backend:
+ * no `@eddi/core` import, no `fetch`/`XMLHttpRequest`/`EventSource`/`WebSocket`,
+ * and no `window.__EDDI_*__` — what the server says reaches it as props or
+ * options from the app.
+ *
+ * @param {{ frameworkFree: boolean, react?: boolean, noApi?: boolean }} options
  */
-export function sharedPackage({ frameworkFree }) {
+export function sharedPackage({ frameworkFree, react = false, noApi = false }) {
   const appImports = [
     {
       group: ["@/*", "**/manager/**", "**/chat/**", "**/workforce/**"],
       message: "A shared package never imports an app. Move the code into the package, or pass it in from the app.",
     },
   ];
+  const apiImports = noApi
+    ? [
+        {
+          group: ["@eddi/core", "@eddi/core/*", "@eddi/conversation", "@eddi/conversation/*"],
+          message: "@eddi/ui makes no API calls and sits below @eddi/conversation. Take the data as a prop or option from the app.",
+        },
+      ]
+    : [];
+  const apiGlobals = noApi
+    ? ["fetch", "XMLHttpRequest", "EventSource", "WebSocket"].map((name) => ({
+        name,
+        message: `@eddi/ui makes no API calls ('${name}'). The app fetches and passes the result in.`,
+      }))
+    : [];
   const frameworkImports = frameworkFree
     ? [
         {
@@ -80,19 +100,38 @@ export function sharedPackage({ frameworkFree }) {
     { ignores: ["dist"] },
     {
       extends: [js.configs.recommended, ...tseslint.configs.recommended],
-      files: ["**/*.ts"],
+      files: react ? ["**/*.{ts,tsx}"] : ["**/*.ts"],
       languageOptions: {
         ecmaVersion: 2022,
         globals: globals.browser,
       },
+      plugins: react ? { "react-hooks": reactHooks } : {},
       rules: {
         "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports] }],
-        "no-restricted-globals": ["error", ...domGlobals],
+        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports, ...apiImports] }],
+        "no-restricted-globals": ["error", ...domGlobals, ...apiGlobals],
+        ...(noApi ? { "no-restricted-syntax": ["error", NO_EDDI_GLOBAL, NO_ALWAYS_TRUE_LENGTH] } : {}),
+        ...(react
+          ? {
+              "react-hooks/rules-of-hooks": "error",
+              "react-hooks/exhaustive-deps": "warn",
+            }
+          : {}),
       },
     },
   ];
 }
+
+/**
+ * `window.__EDDI_BRAND__`, `window.__EDDI_CHAT__` and the rest are what the
+ * server injects into an app's page. A shared package never reads them: the app
+ * does, and passes the value in. A `no-restricted-syntax` entry (see
+ * NO_ALWAYS_TRUE_LENGTH on why every block setting that rule lists all of its).
+ */
+export const NO_EDDI_GLOBAL = {
+  selector: "MemberExpression[property.name=/^__EDDI_/]",
+  message: "A shared package never reads window.__EDDI_*__. The app reads it and passes the value in.",
+};
 
 /**
  * `expect(xs.length).toBeGreaterThanOrEqual(0)` asserts nothing: it holds for
