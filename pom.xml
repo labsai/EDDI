@@ -15,7 +15,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1.2</quarkus.platform.version>
         <!-- langchain4j ships two release lines from the same reactor. Every
              dev.langchain4j artifact below is pinned to ONE of these two, and
              they must be bumped together: a split leaves modules resolving
@@ -27,7 +27,7 @@
              half-finished bump the likely outcome of any upgrade. -->
         <langchain4j.version>1.23.0</langchain4j.version>
         <langchain4j-beta.version>1.23.0-beta33</langchain4j-beta.version>
-        <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
+        <jandex-maven-plugin.version>3.6.1</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
         <failsafe-plugin.version>3.6.1</failsafe-plugin.version>
@@ -103,7 +103,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -117,7 +117,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -126,12 +126,12 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
                  Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
@@ -501,7 +501,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.21.0</version>
+            <version>3.22.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -1103,14 +1103,17 @@
                         <phase>prepare-package</phase>
                     </execution>
                     <execution>
-                        <id>manager-install</id>
+                        <!-- One install for both UIs: ui/ is an npm workspaces root with a
+                             single package-lock.json (ui/package.json), and the per-app
+                             builds below resolve their dependencies from ui/node_modules. -->
+                        <id>ui-install</id>
                         <goals>
                             <goal>npm</goal>
                         </goals>
                         <phase>prepare-package</phase>
                         <configuration>
                             <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
+                            <workingDirectory>${project.basedir}/ui</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1126,17 +1129,6 @@
                                 <!-- keeps the sidebar version in lockstep with this pom -->
                                 <EDDI_VERSION>${project.version}</EDDI_VERSION>
                             </environmentVariables>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>chat-install</id>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <phase>prepare-package</phase>
-                        <configuration>
-                            <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1320,7 +1312,7 @@
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>license-maven-plugin</artifactId>
-                        <version>2.8.0</version>
+                        <version>2.9.0</version>
                         <executions>
                             <!-- Generate THIRD-PARTY.txt listing all deps + their licenses -->
                             <execution>

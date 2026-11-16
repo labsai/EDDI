@@ -6,6 +6,9 @@ export type ConversationState = "READY" | "IN_PROGRESS" | "ENDED" | "EXECUTION_I
 
 export type ViewState = "UNSEEN" | "SEEN";
 
+/** Where a conversation's title came from (backend `ConversationDescriptor.TitleSource`). */
+export type ConversationTitleSource = "AUTO" | "LLM" | "USER";
+
 /** Raw shape returned by the backend GET /conversationstore/conversations */
 export interface ConversationDescriptorRaw {
   resource: string;
@@ -20,6 +23,15 @@ export interface ConversationDescriptorRaw {
   environment?: string;
   conversationState: ConversationState;
   viewState?: ViewState;
+  /**
+   * The conversation's title (B2): the first non-secret user message, a
+   * model-written one (`titleGeneration`), or what the owner renamed it to.
+   * Absent until the first turn, and on a backend older than the field.
+   */
+  title?: string | null;
+  titleSource?: ConversationTitleSource | null;
+  /** Pinned to the top of the owner's list. Absent on an older backend. */
+  pinned?: boolean;
   // Legacy fields (older backend versions)
   name?: string;
   description?: string;
@@ -41,6 +53,11 @@ export interface ConversationDescriptor {
   conversationStepSize?: number;
   environment?: string;
   userId?: string;
+  /** The agent's display name as the descriptor recorded it. */
+  agentName?: string;
+  title?: string | null;
+  titleSource?: ConversationTitleSource | null;
+  pinned?: boolean;
 }
 
 /** Parse an agentResource URI into { agentId, agentVersion }.
@@ -77,6 +94,10 @@ function normalizeDescriptor(raw: ConversationDescriptorRaw): ConversationDescri
     conversationStepSize: raw.conversationStepSize,
     environment: raw.environment,
     userId: raw.userId,
+    agentName: raw.agentName,
+    title: raw.title ?? null,
+    titleSource: raw.titleSource ?? null,
+    pinned: raw.pinned === true,
   };
 }
 
@@ -409,6 +430,26 @@ export async function getConversationDescriptors(
   return items.map(normalizeDescriptor);
 }
 
+/**
+ * The caller's own chats, newest first: `mine=true` keeps the owner filter for
+ * an admin too (in the database query, so everyone else's conversations cannot
+ * page them out), and `excludeGroupMembers=true` leaves out the conversations a
+ * team session holds for its members.
+ */
+export async function getMyChatDescriptors(limit = 20, index = 0): Promise<ConversationDescriptor[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    index: String(index),
+    mine: "true",
+    excludeGroupMembers: "true",
+  });
+  const raw = await api.get<ConversationDescriptorRaw[] | { value: ConversationDescriptorRaw[]; Count?: number }>(
+    `/conversationstore/conversations?${params.toString()}`
+  );
+  const items = Array.isArray(raw) ? raw : (raw?.value ?? []);
+  return items.map(normalizeDescriptor);
+}
+
 /** Highest page size the backend will honour (it clamps `limit` to this). */
 export const MAX_CONVERSATION_LIMIT = 100;
 
@@ -479,6 +520,32 @@ export function deleteConversation(
   return api.delete(
     `/conversationstore/conversations/${seg(conversationId)}?deletePermanently=${deletePermanently}`
   );
+}
+
+/** What the owner may change on a conversation's list entry. */
+export interface ConversationPatch {
+  /** Not blank, at most 200 characters; a renamed conversation keeps the name. */
+  title?: string;
+  pinned?: boolean;
+}
+
+/** The longest title the backend accepts (`ConversationTitles`). */
+export const MAX_CONVERSATION_TITLE_LENGTH = 200;
+
+/**
+ * Rename or (un)pin one of the caller's conversations —
+ * `PATCH /conversationstore/conversations/{id}`, owner or `eddi-admin` only.
+ * Answers the updated descriptor.
+ */
+export async function patchConversation(
+  conversationId: string,
+  patch: ConversationPatch,
+): Promise<ConversationDescriptor> {
+  const raw = await api.patch<ConversationDescriptorRaw>(
+    `/conversationstore/conversations/${seg(conversationId)}`,
+    patch,
+  );
+  return normalizeDescriptor(raw);
 }
 
 // ─── Detailed conversation (debug memory inspector) ─────────────

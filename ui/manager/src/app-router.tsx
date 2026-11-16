@@ -1,7 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { ThemedToaster } from "@/components/layout/themed-toaster";
+import { ThemeProvider } from "@eddi/ui";
+import { AppToaster } from "@/components/layout/app-toaster";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
 import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
@@ -25,7 +25,7 @@ export function createAppRouter(queryClient: QueryClient) {
           <QueryClientProvider client={queryClient}>
             <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
               <App />
-              <ThemedToaster />
+              <AppToaster />
               {/* The one vault-grant dialog every deploy flow asks through. */}
               <GrantRequiredDialogHost />
             </ThemeProvider>

@@ -89,7 +89,7 @@ class McpScheduleParityTest {
         accessGuard = mock(ResourceAccessGuard.class);
         lenient().when(accessGuard.seesEverything()).thenReturn(true);
         lenient().when(accessGuard.hasAccess(any(), any())).thenReturn(true);
-        lenient().when(accessGuard.callerIsAdmin()).thenReturn(true);
+        lenient().when(accessGuard.isAdmin()).thenReturn(true);
         lenient().when(accessGuard.currentTeamSubjects()).thenReturn(List.of("team:ops"));
 
         SecurityIdentity admin = caller("admin-alice", true);

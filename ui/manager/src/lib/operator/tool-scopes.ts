@@ -155,6 +155,9 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /workflowstore/workflows/{id}",
   "GET /groupstore/groups/descriptors",
   "GET /groupstore/groups/{id}",
+  // The end-user catalog — "what do my users see in Workforce?" (IRestCatalog).
+  "GET /catalog/agents",
+  "GET /catalog/groups",
   // Workflow extensions — the by-id read half of every authoring pair below.
   // Each is reached by navigating agent -> workflow -> the exact id+version a
   // step's resourceUri names, never by browsing a store's full contents, so no
@@ -261,7 +264,8 @@ export const READ_ENDPOINTS: readonly string[] = [
   // `${vault:...}` references resolved at runtime (`VaultGrantChecker` reads
   // this store for exactly that reason), not plaintext the read hands back.
   //
-  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, a source's `run`
+  // Ingestion: reads only. `POST /ragstore/rags/{id}/ingest`, the matching
+  // `DELETE /ragstore/rags/{id}/documents`, a source's `run`
   // and `preview`, file upload and delete, and the state purge all stay
   // excluded, as `planning/operator-write-scope-plan.md` §5 requires — but
   // "did the documents actually land?" is the question an admin asks about a
@@ -528,7 +532,11 @@ export const READ_ENDPOINTS: readonly string[] = [
  * this pair different. `POST /groupstore/groups/{id}` (duplicate) stays out
  * for the same document-integrity reason as `PUT`. Also excluded: any
  * schedule verb but disable (creating one is attacker persistence — see
- * above), and every `DELETE` (no undo exists in any of these stores).
+ * above), every `DELETE` (no undo exists in any of these stores), and
+ * `POST /agentstore/agents/{id}/signing-keys` and its `/{keyVersion}/revoke`:
+ * both are eddi-admin only on the backend because whoever mints or retires an
+ * agent's signing key decides what signs as that agent, and the system prompt
+ * sends the administrator to the Manager instead.
  *
  * Because `buildToolApprovals` gates every `http.{post,put,patch,delete}:*`
  * unconditionally, anything added here is gated the moment it is added — the
@@ -999,7 +1007,7 @@ export function grantsIngestionFileReads(endpoints: readonly string[]): boolean 
 
 /**
  * Whether the granted endpoints can change a knowledge base — create or edit a
- * configuration, or ingest a document into one.
+ * configuration, or ingest a document into one or delete one from it.
  *
  * Currently always `false`; it exists so the prompt's "you cannot author one"
  * sentence is derived rather than asserted. If a RAG write is ever allow-listed,
@@ -1014,7 +1022,8 @@ export function grantsKnowledgeBaseAuthoring(endpoints: readonly string[]): bool
     // so an operator holding this can create one — omitting it would leave the
     // prompt appending "you cannot create a knowledge base" to an agent that can.
     set.has("POST /ragstore/rags/{id}") ||
-    set.has("POST /ragstore/rags/{id}/ingest")
+    set.has("POST /ragstore/rags/{id}/ingest") ||
+    set.has("DELETE /ragstore/rags/{id}/documents")
   );
 }
 

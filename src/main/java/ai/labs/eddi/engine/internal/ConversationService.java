@@ -148,6 +148,11 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     public static final Duration CONVERSATION_STATE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String USER_ID = "userId";
+    /**
+     * The context key a group discussion starts a member's conversation with
+     * ({@code MemberTurnExecutor}); recorded on the descriptor as a listing hint.
+     */
+    private static final String GROUP_CONVERSATION_ID = "groupConversationId";
 
     private final IAgentFactory agentFactory;
     private final IConversationMemoryStore conversationMemoryStore;
@@ -229,6 +234,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     AgentConfigurationCache agentConfigurationCache;
+
+    /**
+     * Titles each conversation from its first usable message (see
+     * {@link ConversationTitleService}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} means no titles are written.
+     */
+    @Inject
+    ConversationTitleService conversationTitleService;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
@@ -649,6 +662,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
+
     /**
      * Rejects new work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
@@ -661,12 +680,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
      */
-    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    final ConversationHitlService conversationHitlService;
-
-    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
-    private final ConversationStepRunner conversationStepRunner;
-
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(
@@ -784,7 +797,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
+            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri,
+                    groupConversationIdOf(context));
             armContinuation(conversationId, conversationMemory, environment);
             // Announced only once the conversation is final: a failed descriptor write
             // discards it again, and an observer (the email notifier) must not have
@@ -818,10 +832,12 @@ public class ConversationService implements IConversationService, UserErasurePar
      * {@code ConversationAccessGuard} relies on to deny everyone but admins access
      * to a conversation without one.
      */
-    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri,
+                                           String groupConversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         try {
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri,
+                    groupConversationId);
         } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
             LOGGER.errorf("Could not write the descriptor of new conversation %s — discarding its memory: %s",
                     sanitize(conversationId), e.getMessage());
@@ -836,6 +852,20 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
             throw e;
         }
+    }
+
+    /**
+     * The group conversation a member's conversation is started for, from its start
+     * context; {@code null} for a conversation of its own. Only a listing hint (the
+     * owner's own chats leave member threads out), so a caller who sets the key on
+     * a conversation of their own only hides it from their own sidebar.
+     */
+    static String groupConversationIdOf(Map<String, Context> context) {
+        Context value = context == null ? null : context.get(GROUP_CONVERSATION_ID);
+        if (value == null || !(value.getValue() instanceof String id) || id.isBlank()) {
+            return null;
+        }
+        return id;
     }
 
     /**
@@ -1649,6 +1679,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                             reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            // Titles the conversation on the turn of its first usable message;
+                            // a model-written title is generated in the background. Never throws.
+                            if (conversationTitleService != null) {
+                                conversationTitleService.afterTurn(returnConversationMemory, rerunOnly);
+                            }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
