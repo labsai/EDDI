@@ -118,7 +118,8 @@ function exportTarget(exports: Record<string, string>, subpath: string): string[
   const best = patterns[0];
   if (!best) return [];
   const star = key.slice(best.prefix.length, key.length - best.suffix.length);
-  return [exports[best.k]!.replace("*", star)];
+  // Every "*" in the target takes the match, as in Node — not just the first.
+  return [exports[best.k]!.split("*").join(star)];
 }
 
 /** A network call from source: fetch(), sendBeacon(), an XHR, EventSource or WebSocket. */

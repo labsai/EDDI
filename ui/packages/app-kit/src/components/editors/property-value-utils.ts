@@ -86,7 +86,10 @@ export function withValue<T extends TypedPropertyValue>(p: T, kind: PropertyValu
 }
 
 const DECIMAL_INTEGER = /^[+-]?\d+$/;
-const DECIMAL_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+// The fraction's digits follow only a literal ".", so no run of digits can be
+// split between two quantifiers (the old `\d+\.?\d*` could, which backtracks
+// polynomially on a long digit string that fails at its end).
+const DECIMAL_NUMBER = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 /**
  * The value carried over when the author switches the type, so "42" typed as
