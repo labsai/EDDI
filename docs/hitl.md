@@ -276,6 +276,7 @@ re-evaluated against a newer version's configuration.
 | `onTaskRejection` | `FAIL` \| `RETRY` | `FAIL` | `FAIL`: rejected task is terminal. `RETRY`: task is re-queued (ASSIGNED) with the reviewer's note as feedback — the agent re-executes it addressing the rejection reason. |
 | `approvalCompletesBacklogTask` | boolean | `false` | Standing teams only: a backlog task a person approved at a `TASK` gate stays done at cadence writeback (`COMPLETED`, counted in `tasksApproved`) instead of returning to `PENDING` and running again. Timeout auto-approvals (`system:timeout`) do not count. See [Standing Teams](group-conversations.md#standing-teams-i13) |
 | `phases[n].requiresApproval` | boolean | `false` | Per-phase approval gate |
+| `phases[n].onApproved` | object | `null` | `TASK` granularity, EXECUTE phase: one httpcalls call per approved task, with the approved result — see [Group Approved-Result Actions](group-approved-result-actions.md) |
 | `review` | object | absent | Result and synthesis edits on approval, reason codes, phase categories — see [HITL Review & Audit](hitl-review-and-audit.md#groups--hitlconfigreview) |
 | `approvalContext` | list of context blocks, at most 8 | absent | What the approval card shows — see [HITL Approval Card Context](hitl-approval-context.md) |
 | `requirePlanHash` | boolean | `false` | Strict [plan binding](#plan-binding-planhash) for the group's approvals |
@@ -562,6 +563,8 @@ The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a 
 ### Group members
 
 A group has no per-member human reviewer, so a member agent's gated tool call inside a group turn is resolved **gracefully, not stranded**: the framework issues a `system:group` **REJECTED** decision through the normal resume path (note: *"tool approval is not available during group discussions in this version"*), the member's LLM receives the rejection tool-result and produces a coherent tool-less contribution, and that becomes the turn's output. If the resume cannot complete in the member-turn budget (or the member re-pauses), it falls back to the existing member-pause handling (turn recorded SKIPPED, stranded pause auto-cancelled as `system:group`). The `inGroupTurns: "INBOX"` mode (routing member tool pauses to a human inbox instead) is reserved and rejected at save time in v1.
+
+To have a group *act* on human-approved work — post an approved comment, publish an approved draft — gate the draft task instead (`granularity: TASK`, `requiresApproval` on the EXECUTE phase) and give that phase an `onApproved` action: on each approval the group makes one configured httpcalls call with the approved, possibly edited result, at most once. See [Group Approved-Result Actions](group-approved-result-actions.md).
 
 ### Frozen-transcript semantics
 

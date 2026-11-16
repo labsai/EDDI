@@ -16,7 +16,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { ResizeHandle } from "@/components/ui/resize-handle";
 import { ErrorState } from "@/components/shared/error-state";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   ArrowLeft,
   Bot,

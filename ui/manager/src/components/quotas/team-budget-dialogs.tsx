@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { formatUsd } from "@/lib/utils";
 import { useSetCurrentMonthCap, useTransferTeamBudget } from "@/hooks/use-team-budget";

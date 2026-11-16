@@ -7,7 +7,7 @@ import { formatDuration, nodeStateLabel } from "@/lib/cluster-labels";
 import { useDrainNode } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 
 interface NodeGridProps {

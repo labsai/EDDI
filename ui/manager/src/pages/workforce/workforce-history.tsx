@@ -19,7 +19,7 @@ import {
 } from "@/hooks/use-groups";
 import { ConversationViewer } from "@/components/workforce/conversation-viewer";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { GroupConversation, GroupConversationState } from "@/lib/api/groups";

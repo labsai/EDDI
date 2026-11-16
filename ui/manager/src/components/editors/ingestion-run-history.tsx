@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { IngestionRun } from "@/lib/api/ingestion-sources";
 
 /** How many runs the history shows before "Show more". */
