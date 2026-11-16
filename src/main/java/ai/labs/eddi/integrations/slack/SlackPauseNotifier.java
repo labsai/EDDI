@@ -186,7 +186,9 @@ public class SlackPauseNotifier {
             // The event is observed asynchronously: by now the conversation may be in a
             // NEWER pause (whose card must stay live) or may even have left that one too.
             // Only cards whose own pause has ended are finalized, and the decision's
-            // outcome is shown only on the card of the pause it decided.
+            // outcome is shown only on the card of the pause it decided (neutral text when
+            // the
+            // event names no pause).
             List<SlackApprovalRecord> ended = new ArrayList<>();
             for (SlackApprovalRecord record : approvalRecords.findBySubject(integrationName, event.conversationId())) {
                 if (record.messageTs() != null && resolutionText(record) != null) {
@@ -194,7 +196,8 @@ public class SlackPauseNotifier {
                 }
             }
             for (SlackApprovalRecord record : ended) {
-                boolean itsDecision = event.pauseId() != null ? event.pauseId().equals(record.pauseEpoch()) : ended.size() == 1;
+                // Without a pause id the event cannot say which pause it decided: neutral text.
+                boolean itsDecision = event.pauseId() != null && event.pauseId().equals(record.pauseEpoch());
                 finalizeCard(record, itsDecision ? text : RESOLVED_TEXT);
             }
         } catch (RuntimeException e) {

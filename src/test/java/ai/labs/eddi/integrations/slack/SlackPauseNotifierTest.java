@@ -557,7 +557,7 @@ class SlackPauseNotifierTest {
             notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
 
             when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY); // the pause has ended
-            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.REJECTED, "admin", resumed()));
+            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.REJECTED, "admin", resumed(), PAUSE_ID));
 
             ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);
             verify(slackApi).updateMessage(eq("Bearer xoxb-ops"), eq("C_APPROVALS"), eq(TS), text.capture(), any());
@@ -607,6 +607,19 @@ class SlackPauseNotifierTest {
         }
 
         @Test
+        @DisplayName("an event that names no pause puts no decision on any card")
+        void resumeWithoutPauseIdIsNeutral() {
+            var notifier = notifier();
+            notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
+            when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY);
+
+            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.APPROVED, "admin", resumed()));
+
+            verify(slackApi).updateMessage(anyString(), anyString(), eq(TS), eq(SlackPauseNotifier.RESOLVED_TEXT), any());
+            assertEquals(0, records.size());
+        }
+
+        @Test
         @DisplayName("50 older pending cards do not hide a newer resolved one from the sweep")
         void sweepReachesPastPendingPage() throws Exception {
             when(memoryStore.getConversationState(anyString())).thenReturn(ConversationState.AWAITING_HUMAN);
@@ -635,7 +648,7 @@ class SlackPauseNotifierTest {
             notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
 
             when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY); // the pause has ended
-            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, null, "system:timeout", resumed()));
+            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, null, "system:timeout", resumed(), PAUSE_ID));
 
             ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);
             verify(slackApi).updateMessage(anyString(), anyString(), eq(TS), text.capture(), any());

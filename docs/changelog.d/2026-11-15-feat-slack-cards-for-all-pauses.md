@@ -36,8 +36,8 @@ announces its pauses, and every committed pause gets the same card.
   subjects wait for the next sweep. The sweep pages through the tracked cards (`findPosted(limit, offset)`, oldest
   first, past the ones kept) so 50 pending cards cannot starve a newer resolved one, and a late resume event
   finalizes only cards whose own pause ended, never a newer pause's, and shows its decision only on the card of the
-  pause it decided (`HitlResumeCompletedEvent` gained an optional `pauseId`; without one the outcome is shown only
-  when a single card ended, else a neutral text). Cards from the Slack thread path
+  pause it decided (`HitlResumeCompletedEvent` gained an optional `pauseId`; without one the cards get the neutral
+  resolved text). Cards from the Slack thread path
   (`SlackEventHandler.notifyApprovers`) store their `ts` too; older ones carry none and behave as before.
 - **Metric** `eddi_slack_hitl_notify_total{outcome}`.
 - **Manager.** A shared `SlackNotifyField` on the agent's and the group's Human-in-the-Loop settings, validation
