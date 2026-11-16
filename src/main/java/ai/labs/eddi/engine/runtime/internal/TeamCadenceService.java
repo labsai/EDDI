@@ -539,18 +539,22 @@ public class TeamCadenceService {
         } catch (Exception e) {
             // Unreadable is not gone: the discussion may still be running, and
             // returning its tasks to PENDING would let another run execute them
-            // alongside it. Keep the run and retry at the next fire -- unless the
-            // claim is past its TTL, so a document that never reads again cannot
-            // wedge the team.
-            if (!pastTtl(run)) {
+            // alongside it. The run keeps its claim -- past the TTL as well, because
+            // releasing needs a read that shows the run has ended. Past the TTL it is
+            // cancelled, so a live run stops; once it reads again it is CANCELLED and
+            // written back the ordinary way. A document that never reads again is
+            // released by deleting it (the not-found arm above).
+            if (pastTtl(run)) {
+                LOGGER.warnf("Cadence discussion %s for group %s is unreadable (%s) past the %s claim TTL — cancelling it "
+                        + "and keeping the claim until it reads as ended; delete the discussion to release it",
+                        run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName(),
+                        claimTtl);
+                cancelQuietly(run.discussionId());
+            } else {
                 LOGGER.warnf("Could not read cadence discussion %s for group %s (%s) — keeping the claim",
                         run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName());
-                return Settled.IN_FLIGHT;
             }
-            LOGGER.warnf("Cadence discussion %s for group %s is unreadable (%s) past the %s claim TTL — releasing the claim",
-                    run.discussionId(), LogSanitizer.sanitize(workspace.getGroupId()), e.getClass().getSimpleName(),
-                    claimTtl);
-            return written(writebackFailure(workspace, run, null, 0));
+            return Settled.IN_FLIGHT;
         }
         return switch (gc.getState()) {
             // A lost settle race means another reconciler (or a fresh claim) got

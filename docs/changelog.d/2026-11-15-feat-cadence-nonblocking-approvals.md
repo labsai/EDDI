@@ -41,8 +41,10 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   `stoppedRunKeepsFinishedTasks`). `eddi_team_cadence_claims_reclaimed_total` now counts only
   claims actually released.
 - A cadence discussion that cannot be read is no longer treated as deleted: only
-  `ResourceNotFoundException` releases its run at once. Any other read failure keeps the run until
-  its claim TTL, so a transient store error cannot hand its tasks to a second run.
+  `ResourceNotFoundException` releases its run. Any other read failure keeps the run and its tasks,
+  so a transient store error cannot hand them to a second run; past the claim TTL the discussion is
+  also cancelled, and it is written back once it reads as ended (a document that never reads again
+  is released by deleting it).
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).

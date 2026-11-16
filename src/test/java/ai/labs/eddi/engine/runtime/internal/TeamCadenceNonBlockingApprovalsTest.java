@@ -508,14 +508,26 @@ class TeamCadenceNonBlockingApprovalsTest {
         }
 
         @Test
-        @DisplayName("past the claim TTL it is released, so a document that never reads again cannot wedge the team")
-        void releasedPastTheTtl() throws Exception {
+        @DisplayName("past the claim TTL it is cancelled but keeps its claim — releasing needs a read that shows it ended")
+        void cancelledPastTheTtlButKept() throws Exception {
             claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), task);
 
-            assertTrue(service.reconcile(workspace));
+            assertFalse(service.reconcile(workspace));
 
-            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
-            assertEquals(TaskStatus.PENDING, workspace.getBacklog().findById(task.id()).status());
+            verify(groupConversationService).cancelDiscussion(PAUSED_ID, ControlSignal.CANCEL_GRACEFUL);
+            assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.IN_PROGRESS, workspace.getBacklog().findById(task.id()).status());
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+        }
+
+        @Test
+        @DisplayName("within the TTL it is not cancelled")
+        void notCancelledWithinTheTtl() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
+
+            service.reconcile(workspace);
+
+            verify(groupConversationService, never()).cancelDiscussion(anyString(), any());
         }
     }
 
