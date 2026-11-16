@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
 import { EmailPlatformFields } from "./email-settings";

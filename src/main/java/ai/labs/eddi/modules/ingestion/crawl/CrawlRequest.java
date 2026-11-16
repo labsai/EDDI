@@ -134,7 +134,7 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
      */
     public record Politeness(Duration requestDelay, String userAgent, boolean respectRobots) {
 
-        public static final String DEFAULT_USER_AGENT = "EDDI-Crawler/1.0 (+https://eddi.labs.ai)";
+        public static final String DEFAULT_USER_AGENT = "EDDI-Crawler/1.0 (+https://eddi.technology)";
 
         public Politeness {
             requestDelay = requestDelay == null || requestDelay.isNegative() ? Duration.ofMillis(500) : requestDelay;

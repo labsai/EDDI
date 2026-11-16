@@ -27,7 +27,9 @@ public interface IApiCallExecutor {
      *            The template data objects for variable substitution
      * @param targetServerUrl
      *            The target server URL
-     * @return The response object (parsed JSON or raw string)
+     * @return the call's outcome as a map: {@code httpCode}, plus {@code body}
+     *         (parsed JSON or text) and {@code headers} when they are kept; empty
+     *         for a fire-and-forget call
      * @throws LifecycleException
      *             if execution fails
      */

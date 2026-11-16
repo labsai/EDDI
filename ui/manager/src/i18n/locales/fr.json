@@ -400,23 +400,28 @@
     "openWorkflow": "Ouvrir",
     "outdated": "obsolète",
     "publicKey": "Clé publique",
-    "publicKeyHint": "Généré automatiquement à la première signature",
+    "publicKeyHint": "Clé héritée ; les clés générées sont listées ci-dessous",
     "publicKeys": "Clés publiques",
     "recallOrder": "Ordre de rappel",
     "requirePeer": "Exiger la vérification des pairs",
-    "requirePeerDesc": "Rejeter les tâches A2A entrantes des agents incapables de prouver leur identité",
-    "securityFlagConfirmBtn": "Activer quand même",
-    "securityFlagConfirmDesc": "La signature cryptographique n'est pas encore disponible dans cette version. Activer ce drapeau entraînera le rejet des enregistrements par le backend avec une erreur HTTP 400. Voulez-vous vraiment continuer ?",
-    "securityFlagConfirmTitle": "Activer le drapeau de sécurité ?",
-    "securityFlagWarning": "La signature cryptographique n'est pas encore disponible dans cette version. Le backend rejettera les enregistrements si ces drapeaux sont activés (HTTP 400).",
+    "requirePeerDesc": "Vérifie les signatures des messages des intervenants précédents avant que cet agent ne réponde dans une conversation de groupe. Les échecs sont journalisés, pas bloqués",
     "securityFlags": "Signature et vérification",
     "securityIdentity": "Sécurité et identité",
     "sessionManagement": "Gestion de session",
     "sessionManagementDesc": "Les points de contrôle de mémoire capturent l'état de la conversation avant les opérations risquées, permettant une annulation propre en cas d'échec.",
-    "signA2A": "Signer les messages inter-agents (A2A)",
-    "signA2ADesc": "Signer cryptographiquement les messages A2A sortants pour les protéger contre la falsification",
-    "signMcp": "Signer les invocations MCP",
-    "signMcpDesc": "Joindre des signatures aux appels d'outils MCP pour une vérification sécurisée du serveur",
+    "signA2A": "Signer les messages des conversations de groupe",
+    "signA2ADesc": "Signe les messages de cet agent dans les conversations de groupe avec sa clé de signature la plus récente",
+    "generateSigningKey": "Générer une clé de signature",
+    "generateSigningKeyHint": "Crée une nouvelle paire de clés Ed25519 et l'enregistre comme nouvelle version de l'agent. La clé privée reste dans le coffre de secrets ; l'agent signe avec la clé la plus récente.",
+    "generateSigningKeySaveFirst": "Enregistrez ou annulez d'abord vos modifications : la clé est enregistrée comme nouvelle version de l'agent.",
+    "generateSigningKeyLatestOnly": "Ouvrez la dernière version pour générer une clé.",
+    "signingKeyGenerated": "Clé de signature v{{version}} générée et enregistrée comme nouvelle version de l'agent.",
+    "revokeSigningKey": "Révoquer",
+    "keyRevoked": "Révoquée",
+    "revokeSigningKeyConfirm": "Révoquer la clé de signature v{{version}} ?",
+    "revokeSigningKeyDesc": "Sa clé privée est supprimée du coffre (dans la mesure du possible : si la suppression échoue, révoquer à nouveau la relance). Cette action est irréversible. Révoquer l'ancienne clé v0 la supprime, si bien que les autres agents ne font plus confiance aux messages signés avec elle. Une clé versionnée révoquée reste listée et la vérification par les autres agents ne la refuse pas encore : un message signé avec elle, par quiconque détient une copie de sa clé privée, peut toujours être vérifié. S'il s'agit de la clé la plus récente, l'agent cesse de signer et chaque enregistrement avec la signature activée est refusé, jusqu'à ce que vous en génériez une nouvelle ou désactiviez la signature.",
+    "signingKeyRevoked": "Clé de signature v{{version}} révoquée.",
+    "signingNeedsKey": "Cet agent n'a pas de clé de signature utilisable (aucune n'est déclarée, ou la plus récente est révoquée) : un enregistrement avec la signature activée est donc refusé. Un administrateur peut en générer une ci-dessus.",
     "skillAlreadyExists": "Cette compétence est déjà déclarée",
     "switchToLatest": "Passer à la dernière version",
     "toggleAttributes": "Basculer les attributs",
@@ -538,6 +543,32 @@
       "notice": "Ce que le chat indique aux utilisateurs (laisser vide pour le texte standard)",
       "noticePlaceholder": "Les conversations avec cet agent peuvent être lues par les personnes qui le maintiennent, afin de l'améliorer.",
       "versionNote": "S'applique aux conversations sur la version créée par cette modification et les suivantes — jamais à ce qui a été dit auparavant. Slack, Teams et les clients API ne peuvent pas afficher l'avis ; si des personnes utilisent cet agent par ces canaux, mentionnez-le dans le message d'accueil."
+    },
+    "presentation": {
+      "title": "Présentation et titres",
+      "description": "Comment les fenêtres de chat affichent cet agent. Tout est facultatif ; les champs vides gardent les valeurs par défaut.",
+      "displayName": "Nom affiché",
+      "accentColor": "Couleur d'accent (#rrggbb)",
+      "avatar": "Avatar (URL https ou petite URI data:image)",
+      "starters": "Amorces de conversation (une par ligne, jusqu'à {{count}})",
+      "controls": "Commandes du chat",
+      "control": {
+        "undo": "Annuler",
+        "redo": "Rétablir",
+        "attachments": "Pièces jointes",
+        "rating": "Évaluation",
+        "quickReplies": "Réponses rapides",
+        "streaming": "Streaming",
+        "rawHtml": "Afficher le HTML des réponses"
+      },
+      "rawHtmlNote": "Désactivé par défaut : le HTML des réponses est affiché comme du texte. À activer uniquement pour un agent dont les réponses doivent contenir du HTML.",
+      "titles": "Titres des conversations",
+      "titlesEnable": "Laisser un modèle écrire les titres des conversations",
+      "titlesNote": "Sinon, une conversation prend son premier message pour titre. Le modèle s'exécute une fois par conversation, en arrière-plan, et est imputé au budget de coûts. Un titre défini par l'utilisateur n'est jamais remplacé.",
+      "titlesProvider": "Fournisseur",
+      "titlesModel": "Modèle",
+      "titlesMaxLength": "Titre le plus long",
+      "titlesCredentials": "Les identifiants vont dans titleGeneration.parameters du document de l'agent (par exemple une apiKey qui référence un secret du coffre) ; voir la documentation de configuration de l'agent."
     },
     "copyUrl": "Copier l'URL",
     "liveElsewhere": "Actif : v{{live}} · Affichage de v{{viewing}} (non déployée)",
@@ -1000,7 +1031,11 @@
       "errDisabled": "Cette version de l'agent ne demande pas d'évaluation.",
       "errOwner": "Seule la personne qui a eu cette conversation peut l'évaluer.",
       "errGeneric": "La note n'a pas pu être enregistrée."
-    }
+    },
+    "toolArgs": "Arguments",
+    "toolResult": "Résultat",
+    "toolArgsShowFields": "Champs",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -1776,9 +1811,18 @@
     "grModeReplace": "Utiliser uniquement les motifs supplémentaires",
     "grPiiKinds": "Types à détecter",
     "grPiiEmail": "Adresses e-mail",
-    "grPiiSsn": "Numéros de sécurité sociale américains",
     "grPiiCard": "Numéros de carte de paiement (validés par Luhn)",
     "grPiiPhone": "Numéros de téléphone",
+    "grPiiIban": "IBAN (somme de contrôle vérifiée)",
+    "grPiiDateOfBirth": "Dates de naissance (à côté d'un mot-clé comme « né le »)",
+    "grPiiIpAddress": "Adresses IP (IPv4 et IPv6)",
+    "grPiiPassportMrz": "Zones de lecture automatique des passeports (tous pays)",
+    "grPiiCountries": "Identifiants nationaux",
+    "grPiiCountriesHint": "Cochez un pays pour trouver tous ses identifiants, ou cochez des identifiants isolés. Chacun est vérifié selon son propre format et sa clé de contrôle ; certains exigent aussi un mot-clé comme « PESEL » ou « NHS » juste avant le numéro.",
+    "grPiiRegionEurope": "Europe",
+    "grPiiRegionAmericas": "Amériques",
+    "grPiiRegionAsiaPacific": "Asie-Pacifique",
+    "grPiiRegionAfrica": "Afrique",
     "grReplacement": "Remplacement",
     "grPiiReplacementHint": "Par défaut [REDACTED:<kind>]. Une valeur personnalisée peut contenir {kind}, remplacé par le type détecté.",
     "grPatterns": "Motifs",
@@ -3500,6 +3544,8 @@
     "hitlSection": "Approbation humaine",
     "hitlApprovalPoints": "Approbation à",
     "hitlOnTaskRejection": "En cas de rejet",
+    "hitlApprovalCompletesBacklogTask": "Une approbation vaut achèvement dans le backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Équipes permanentes : une tâche approuvée par une personne reste terminée lors de la réécriture du cycle, au lieu de revenir dans le backlog et d'être exécutée à nouveau. Les approbations automatiques après délai ne comptent pas.",
     "hitlEdit": "Modifier",
     "hitlSaved": "Paramètres d'approbation enregistrés",
     "hitlEnable": "Exiger une approbation humaine",
@@ -4111,6 +4157,7 @@
     "schedulesSkipped_one": "{{count}} planification de l’archive n’a pas été importée, car la sélection ne l’incluait pas.",
     "schedulesSkipped_other": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas.",
     "schedulesSkipped_many": "{{count}} planifications de l’archive n’ont pas été importées, car la sélection ne les incluait pas.",
+    "writtenDifferently": "Écrit, mais pas exactement comme dans la source :",
     "mergeScopeDefaultSpace": "votre espace par défaut",
     "mergeScope": "Cette fusion ne met à jour que les ressources que vous pouvez modifier dans {{space}}. Une copie de cet agent dans un autre espace de travail n'est jamais modifiée — l'import crée votre propre copie à la place. Changez d'abord d'espace pour mettre à jour la copie qui s'y trouve.",
     "moveUp": "Monter",
@@ -4626,7 +4673,12 @@
     "regularTruncated": "Affichage des {{limit}} premières approbations de conversation — d'autres sont en attente. Traitez-en quelques-unes pour voir les suivantes.",
     "conversationColumn": "Conversation",
     "groupReviewLoadError": "La discussion n'a pas pu être chargée.",
-    "groupReviewNoEntries": "Rien n'a encore été dit."
+    "groupReviewNoEntries": "Rien n'a encore été dit.",
+    "argsViewLabel": "Afficher les arguments comme",
+    "argsViewFields": "Champs",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Brut",
+    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle."
   },
   "hitlReview": {
     "approveEdited": "Approuver avec modifications",
@@ -4770,6 +4822,22 @@
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend {{productName}} pour des données réelles."
   },
+  "spendControl": {
+    "title": "Modifications en attente",
+    "description": "Proposées via MCP et non appliquées : chacune assouplirait le contrôle des dépenses. L'approbation l'applique en votre nom.",
+    "proposedBy": "Proposée par {{who}} le {{when}}",
+    "loosening": "Assouplit le contrôle des dépenses",
+    "allChanges": "Toutes les modifications",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "approveTitle": "Approuver cette modification ?",
+    "rejectTitle": "Rejeter cette modification ?",
+    "approveDesc": "Elle est appliquée maintenant, avec vous comme auteur, et assouplit le contrôle des dépenses : {{loosening}}",
+    "rejectDesc": "Rien n'est appliqué. L'auteur de la proposition peut la soumettre à nouveau.",
+    "approved": "Modification approuvée et appliquée",
+    "rejected": "Modification rejetée ; rien n'a été appliqué",
+    "approveBlockedDirty": "Enregistrez d'abord vos modifications du quota, ou rechargez la page pour les abandonner : les enregistrer après une approbation écraserait le quota approuvé."
+  },
   "modelPrices": {
     "nav": "Prix des modèles",
     "title": "Prix des modèles",
@@ -4859,6 +4927,8 @@
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",
+    "editsDiscardedAfterRefresh": "Le quota a été rechargé et vos modifications non enregistrées ont été annulées, afin qu'elles n'écrasent pas les limites actuelles.",
+    "refreshFailedSaveBlocked":"Impossible d'actualiser le quota, l'enregistrement est donc suspendu. Réessayez pour charger d'abord les limites actuelles.",
     "configuration": "Configuration",
     "conversationsToday": "Conversations aujourd'hui",
     "description": "Configurez les limites de débit, les plafonds d'usage et les budgets de coût par locataire.",
@@ -5598,7 +5668,48 @@
       "useStarterPrompt": "Insérer une invite de départ",
       "yourAdvisors": "Vos conseillers"
     },
-    "workforce": "Effectif"
+    "workforce": "Effectif",
+    "operatorLink": "Opérateur de plateforme",
+    "catalog": {
+      "emptyTitle": "Rien à afficher pour l'instant",
+      "emptyAuthorHint": "Les utilisateurs finaux ne voient que les agents et équipes répertoriés. Ouvrez un agent ou un groupe dans le Manager et activez « Répertorié dans le catalogue » — ou, avec les espaces de travail activés, rendez-le publié ou interne. Il faut toujours un accès pour l'utiliser.",
+      "openAgents": "Ouvrir les agents dans le Manager",
+      "emptyUserHint": "Aucun agent ni aucune équipe ne vous a encore été proposé. Revenez plus tard.",
+      "agents": "Agents",
+      "teams": "Équipes",
+      "previewTitle": "Ce que voient les utilisateurs finaux",
+      "previewCounts": "{{agents}} agents répertoriés et {{teams}} équipes répertoriées sont proposés aux personnes autorisées à les utiliser."
+    },
+    "sessions": {
+      "title": "Vos conversations",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger vos conversations. Réessayer",
+      "empty": "Aucune conversation pour l’instant. Commencez-en une depuis l’accueil.",
+      "pinned": "Épinglées",
+      "today": "Aujourd’hui",
+      "yesterday": "Hier",
+      "previous7": "7 derniers jours",
+      "previous30": "30 derniers jours",
+      "rename": "Renommer",
+      "renameLabel": "Titre de la conversation",
+      "pin": "Épingler",
+      "unpin": "Désépingler",
+      "delete": "Supprimer",
+      "deleteTitle": "Supprimer cette conversation ?",
+      "deleteDescription": "« {{title}} » disparaît de votre liste. Cette action est irréversible ici.",
+      "renameFailed": "Impossible de renommer : {{error}}",
+      "pinFailed": "Impossible de modifier l’épingle : {{error}}",
+      "deleteFailed": "Impossible de supprimer : {{error}}"
+    },
+    "home": {
+      "composerLabel": "Démarrer une conversation",
+      "placeholder": "Demandez à {{agent}}…",
+      "messageLabel": "Votre message",
+      "agentLabel": "Agent",
+      "send": "Envoyer",
+      "starters": "Suggestions",
+      "recent": "Récent"
+    }
   },
   "operator": {
     "title": "Opérateur de plateforme",
@@ -6177,13 +6288,15 @@
       "static": "Clé d'API",
       "basic": "Identifiant & mot de passe",
       "clientCredentials": "Compte de service OAuth",
-      "authorizationCode": "Connexion utilisateur OAuth"
+      "authorizationCode": "Connexion utilisateur OAuth",
+      "jwtBearer": "Compte de service à clé de signature"
     },
     "choice": {
       "staticBody": "Un en-tête fixe, identique pour tout le monde — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se charge de l'encodage : le mot de passe reste une entrée distincte du coffre, que vous pouvez renouveler seule.",
       "clientCredentialsBody": "L'agent se connecte en son propre nom. Un jeton d'accès partagé par tous, renouvelé automatiquement.",
-      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre."
+      "authorizationCodeBody": "Chaque personne lie son propre compte et l'agent agit en son nom. Nécessite l'authentification activée et un coffre.",
+      "jwtBearerBody": "L'agent se connecte en son propre nom avec une clé privée au lieu d'un secret — un compte de service Google, par exemple. Un seul jeton d'accès partagé par tous."
     },
     "binding": {
       "perUser": "Par personne",
@@ -6217,7 +6330,7 @@
     "clientId": "Identifiant client",
     "clientSecret": "Secret client",
     "clientAuthMethod": "Authentification du client",
-    "clientAuthMethodHint": "Comment le secret client parvient au point de jeton. Une mauvaise supposition ressemble exactement à un mauvais secret : c'est donc un réglage, pas une devinette.",
+    "clientAuthMethodHint": "Comment le client s'authentifie auprès du point de terminaison de jeton : le secret client en Basic ou dans le corps, ou private_key_jwt — une assertion signée avec une clé privée stockée dans le coffre, pour une application enregistrée avec un certificat. Une erreur ici ressemble exactement à un mauvais secret ; c'est donc un réglage et non un repli automatique.",
     "discoveryUrl": "URL de découverte (facultatif)",
     "pkceAlwaysOn": "PKCE (S256) s'applique toujours à une connexion utilisateur et ne peut pas être désactivé — la cible de redirection est une adresse publique.",
     "scopes": "Portées",
@@ -6303,7 +6416,9 @@
       "paramReserved": "L'un de ces paramètres est défini par {{productName}} lui-même (client_id, redirect_uri, response_type, state, code_challenge…). Le remplacer casserait le flux.",
       "paramValueReference": "Les valeurs de paramètres sont envoyées telles quelles — une référence ${…} n'est pas résolue ici et placerait un pointeur de coffre dans une URL. N'utilisez que des valeurs de protocole simples.",
       "paramValueTooLong": "Une valeur de paramètre fait au plus 512 caractères.",
-      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici."
+      "paramValueCredentialShaped": "L'une de ces valeurs ressemble à une clé ou à un jeton. Cette table est stockée en clair et envoyée dans une URL — seuls des paramètres de protocole non secrets ont leur place ici.",
+      "thumbprintFormat": "Ce n'est pas une empreinte de la bonne longueur : x5t#S256 exige l'empreinte SHA-256, x5t l'empreinte SHA-1 — en hexadécimal ou en base64url.",
+      "thumbprintRequiredEntra": "Microsoft Entra n'identifie la clé que par l'empreinte de son certificat. Collez l'empreinte du certificat que vous avez chargé dans l'inscription de l'application."
     },
     "backToList": "Retour aux connexions",
     "headerSecret": "Secret enregistré",
@@ -6326,7 +6441,30 @@
     "confirmAuthChangeDesc": "Les comptes liés via cette connexion cesseront de se résoudre — une autorisation appartient au flux qui l'a produite. {{productName}} refuse le changement tant qu'un compte reste lié et indique combien ; déliez-les d'abord, ou créez une nouvelle connexion et laissez les gens lier celle-ci.",
     "confirmAuthChangeAccept": "Changer",
     "deleted": "Connexion \"{{name}}\" supprimée",
-    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?"
+    "confirmDeleteNamed": "Supprimer la connexion \"{{name}}\" ?",
+    "privateKey": "Clé privée",
+    "privateKeyHint": "Une entrée du coffre contenant une clé RSA PKCS#8 PEM non chiffrée (BEGIN PRIVATE KEY), ou le fichier de clé JSON complet d'un compte de service Google. La clé ne quitte jamais {{productName}} ; seule une assertion signée de courte durée est envoyée.",
+    "certificateThumbprint": "Empreinte du certificat",
+    "certificateThumbprintHint": "Celle du certificat téléversé chez le fournisseur d'identité — en hexadécimal tel que le portail l'affiche, ou en base64url. Publique, ce n'est pas un secret.",
+    "certificateThumbprintHeader": "En-tête d'empreinte",
+    "thumbprintS256": "x5t#S256 — SHA-256 (par défaut pour Entra)",
+    "thumbprintSha1": "x5t — empreinte SHA-1",
+    "serviceAccountEmail": "Compte de service (émetteur)",
+    "serviceAccountEmailHint": "p. ex. agent@project.iam.gserviceaccount.com. Facultatif si la clé privée est un fichier de clé JSON, qui nomme son propre compte.",
+    "audience": "Audience de l'assertion (facultatif)",
+    "audienceHint": "La revendication aud de l'assertion signée. Laissez vide pour utiliser l'URL du jeton, ce qu'attend Google.",
+    "preset": "Partir d'un modèle",
+    "presetNone": "Aucun — remplir tous les champs",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Application Microsoft Entra avec certificat",
+        "description": "Une inscription d'application Entra qui s'authentifie avec un certificat au lieu d'un secret client (private_key_jwt). Remplacez <tenant-id> dans l'URL du jeton, renseignez l'ID d'application (client) et l'empreinte du certificat, et stockez la clé privée du certificat dans le coffre au format PEM PKCS#8 non chiffré. Ajoutez https://login.microsoftonline.com à la liste d'autorisation des points de terminaison d'identifiants."
+      },
+      "google-service-account": {
+        "label": "Compte de service Google (clé JSON)",
+        "description": "Les API Google en tant que compte de service, signées avec sa clé privée (jeton porteur JWT, RFC 7523). Stockez le fichier de clé JSON téléchargé comme UNE seule entrée du coffre et référencez-la comme clé privée ; l'émetteur et l'ID de clé y sont lus. Ajoutez https://oauth2.googleapis.com à la liste d'autorisation des points de terminaison d'identifiants. Sans délégation à l'échelle du domaine, le compte ne voit que ce qui est partagé avec lui."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analyseur d’entrée",
@@ -6334,7 +6472,6 @@
     "rules": "Règles",
     "property": "Définisseur de propriétés",
     "apicalls": "Appels d’API",
-    "httpcallsLegacy": "Appels d’API (hérités)",
     "llm": "LLM",
     "output": "Sortie",
     "templating": "Gabarits",
@@ -7743,6 +7880,13 @@
       "lte": "est au plus",
       "contains": "contient"
     }
+  },
+  "catalogListing": {
+    "label": "Répertorié dans le catalogue",
+    "agentDescription": "Propose cet agent aux utilisateurs finaux dans Workforce. Seules les personnes autorisées à l'utiliser le voient, et seulement une fois déployé. Avec les espaces de travail activés, les agents publiés et internes sont répertoriés de toute façon.",
+    "groupDescription": "Propose cette équipe aux utilisateurs finaux dans Workforce. Seules les personnes autorisées à l'utiliser la voient. Avec les espaces de travail activés, les équipes publiées et internes sont répertoriées de toute façon.",
+    "listedToast": "Répertorié dans le catalogue",
+    "unlistedToast": "Retiré du catalogue"
   },
   "groupLearning": {
     "betToggle": "Enregistrer comme pari",

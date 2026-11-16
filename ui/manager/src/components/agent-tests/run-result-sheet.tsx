@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, Loader2, XCircle } from "lucide-react";
 import { ClusterDrawer } from "@/components/cluster/cluster-drawer";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useAgentTestRun, useCancelAgentTestRun } from "@/hooks/use-agent-tests";
 import { getErrorMessage } from "@/lib/api-client";
 import { formatDuration, formatUsd } from "@/lib/utils";

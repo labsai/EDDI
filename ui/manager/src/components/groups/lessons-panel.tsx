@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { BookOpenCheck } from "lucide-react";
 import { ErrorState } from "@/components/shared/error-state";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   useConsolidationState,
   useGroupLessons,

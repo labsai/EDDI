@@ -102,7 +102,7 @@ can reach EDDI.
 | `eddi_coordinator_active_conversations` | Gauge | Number of active conversation queues |
 | `eddi_coordinator_queue_depth` | Gauge | Total queued callables across all conversations |
 | `eddi_coordinator_total_processed` | Counter | Monotonic count of completed conversation tasks |
-| `eddi_coordinator_dead_lettered` | Counter | Turns the in-memory coordinator dead-lettered (cumulative) |
+| `eddi_coordinator_dead_lettered` | Counter | Turns the coordinator dead-lettered (cumulative; in-memory and cluster mode) |
 | `eddi_coordinator_dead_letters_retained` | Gauge | Dead letters held for inspection right now |
 | `eddi_runtime_executor_queued` / `_active` | Gauge | Conversation work waiting for / running on a worker thread (tag `pool`) |
 
@@ -201,7 +201,7 @@ Every tool call the model makes gets an `execute_tool {tool}` span (kind
 `eddi.tool.cache_hit=true`, a rate-limited call `error.type=rate_limited`, a
 timed-out one `error.type=timeout`, and a failing one `error.type=<exception class>`,
 each with status ERROR except the cache hit. `eddi.tool.source` is one of `builtin`,
-`http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`. Tools run by an `mcpcalls`
+`http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team` (the team-handoff tool). Tools run by an `mcpcalls`
 workflow step get the span too, without a source or call id.
 
 **Finding a slow tool:** open the turn's trace in your backend and sort its
@@ -329,10 +329,11 @@ Notes and caveats:
 ## Alerting Rules
 
 The rules ship with EDDI: [`eddi-alerts.yml`](eddi-alerts.yml) (25 rules, nine
-groups), which is the file provisioned below. The cluster rules (`EddiClusterDegraded`, `EddiClusterFenceRejected`,
-`EddiClusterLeaseTimeouts`, `EddiDeadLetters`) live in
+groups), which is the file provisioned below. The 14 cluster rules (`EddiClusterDegraded`, `EddiClusterFenceRejected`,
+`EddiClusterLeaseTimeouts`, `EddiDeadLetters`, …, in two groups) live in
 [`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) and are runbooked in
-[Clustering](../clustering.md#runbook); they are not loaded by the paths below and must be added to `rule_files` yourself when cluster mode is enabled. Where `eddi-alerts.yml` is loaded:
+[Clustering](../clustering.md#runbook). Only the Helm `PrometheusRule` includes them, and only in cluster mode;
+for compose and the Kubernetes component, add the file to `rule_files` yourself when cluster mode is enabled. Where `eddi-alerts.yml` is loaded:
 
 | Delivery path | How |
 |---|---|
@@ -352,7 +353,7 @@ Conventions:
 - **The first event of a new series is invisible to `increase()`.** A counter
   Micrometer creates on its first increment is first scraped at 1, which Prometheus
   cannot tell from "always 1". The counters the one-shot alerts read exist at 0
-  from boot: audit drops and collisions, vault errors, schedule and NATS dead
+  from boot: audit drops and collisions, vault errors, schedule dead
   letters, coordinator dead letters, every operator canary outcome, and the
   quota-store failure counter for the default tenant. A quota-store failure for any
   other tenant, and the first error of a new tool, task type or LLM provider, start
@@ -629,7 +630,7 @@ source.
 | File | Dashboard | Shape |
 |------|-----------|-------|
 | `eddi-operations-dashboard.json` | Operations Command Center (`eddi-ops`) | KPI strip + 9 rows, 58 panels |
-| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 26 rows, 212 panels — **every** meter EDDI registers, enforced by `MetricsDashboardCoverageTest` |
+| `eddi-full-metrics-dashboard.json` | Full Metrics Reference (`eddi-metrics-all`) | 28 rows, 240 panels — **every** meter EDDI registers, enforced by `MetricsDashboardCoverageTest` |
 | `eddi-grafana-dashboard.json` | EDDI Observability (`eddi-observability`) | The original dashboard, 6 groups: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM |
 
 Start at **Operations Command Center** — it answers "is the platform healthy".

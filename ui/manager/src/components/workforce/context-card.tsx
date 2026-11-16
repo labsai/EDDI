@@ -1,10 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { cn } from "@/lib/utils";
 import { entryBodyToMarkdown, readEntryBody, readMessageBody } from "@/lib/group-entry-body";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -115,7 +113,7 @@ function ContextCard({ boardName, question, response, className }: ContextCardPr
                 </p>
                 <div className="prose prose-sm dark:prose-invert mt-1 max-h-32 max-w-none overflow-y-auto text-foreground/80">
                   {/* No rehypeRaw: agent output is untrusted, so raw HTML stays escaped. */}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{readableResponse}</ReactMarkdown>
+                  <ConversationMarkdown escapeRawHtml>{readableResponse}</ConversationMarkdown>
                 </div>
               </div>
             )}

@@ -24,8 +24,10 @@ import java.util.regex.Pattern;
  * Refuses an oversight write or a HITL decision that an agent's own tool call
  * makes: any non-read request carrying {@link AgentCallMarker#HEADER} to
  * {@code /hitl/samples/**}, {@code /hitl/autonomy/**},
- * {@code /hitl/analytics/rebuild}, a paused conversation's
- * {@code /agents/{id}/resume} (and {@code /resume/stream}), or a group's
+ * {@code /hitl/analytics/rebuild},
+ * {@code /administration/spend-control-changes/**} (approving a looser price or
+ * quota), a paused conversation's {@code /agents/{id}/resume} (and
+ * {@code /resume/stream}), or a group's
  * {@code /groups/{id}/conversations/{id}/approve} (and {@code /approve/stream})
  * and {@code /human-input} answers 403 {@code AGENT_ORIGINATED}. Sample
  * verdicts, every change to earned autonomy and every approval decision are
@@ -46,7 +48,9 @@ import java.util.regex.Pattern;
 public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
 
     private static final Set<String> READ_METHODS = Set.of("GET", "HEAD", "OPTIONS");
-    private static final Pattern GUARDED = Pattern.compile("^/?hitl/(?:samples|autonomy|analytics/rebuild)(?:/.*)?$");
+    private static final Pattern GUARDED = Pattern
+            .compile("^/?(?:hitl/(?:samples|autonomy|analytics/rebuild)|administration/spend-control-changes)(?:/.*)?$");
+
     @Override
     public void filter(ContainerRequestContext request) {
         String marker = request.getHeaderString(AgentCallMarker.HEADER);
@@ -61,7 +65,8 @@ public class AgentOriginatedRequestFilter implements ContainerRequestFilter {
         if (refused(method, path, rawPath, marker)) {
             String message = isDecision(path, rawPath)
                     ? AgentOriginatedRequests.DECISION_REFUSAL
-                    : "This request was made by an agent's tool call; reviewing samples and changing earned autonomy are human actions";
+                    : "This request was made by an agent's tool call; reviewing samples, changing earned autonomy and deciding "
+                            + "spend-control changes are human actions";
             request.abortWith(OversightErrors.response(Response.Status.FORBIDDEN, OversightErrors.AGENT_ORIGINATED, message));
         }
     }

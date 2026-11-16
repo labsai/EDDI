@@ -14,6 +14,7 @@ licenses/** linguist-generated
 # Lockfiles are LF in the index already; pin it so a Windows checkout with
 # core.autocrlf cannot churn them. CRLF normalisation at commit time is what made
 # a committed chat bundle differ byte-for-byte from a fresh build of the same name.
+ui/package-lock.json text eol=lf
 ui/*/package-lock.json text eol=lf
 
 # Mail fixtures are RFC 5322 messages: CRLF line endings and, in places, 8-bit
