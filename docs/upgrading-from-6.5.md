@@ -160,6 +160,16 @@ What to check:
   and connect with `authSource=eddi`. If you changed `mongodb.database`, use that name instead
   of `eddi` throughout.
 
+## NATS: cluster mode replaces the build-profile coordinator
+
+Only for a 6.5 deployment that ran `eddi.messaging.type=nats` on an image built with the `nats`
+Quarkus build profile (the 6.5 NATS coordinator existed only in such a build). 6.6 removes that
+coordinator; the published image selects cluster mode at runtime. The old
+`eddi.nats.stream-name`, `eddi.nats.max-retries`, `eddi.nats.ack-wait-seconds` and
+`eddi.nats.stream-max-*` settings no longer do anything (a WARN names each one that is still set),
+and the `EDDI_CONVERSATIONS` stream is unused. See
+[Upgrading from the build-profile NATS coordinator](clustering.md#upgrading-from-the-build-profile-nats-coordinator).
+
 ## Newly reserved names
 
 - **`CONTINUE_CONVERSATION` is a reserved action** ([self-continuation](long-jobs.md)). A behaviour
@@ -366,6 +376,31 @@ To keep the old price, set `eddi.tools.websearch.price-per-call=0.001` (or
 `EDDI_TOOLS_WEBSEARCH_PRICE_PER_CALL=0.001`); it replaces the provider default for whichever provider
 is configured, and also lets a plan that differs from list price be recorded as it is. See
 [Web Search Tool](langchain.md#web-search-tool).
+
+### API-call steps named `ai.labs.apicalls` are now offered to the LLM as tools
+
+`eddi://ai.labs.apicalls` is an alias of `eddi://ai.labs.httpcalls`: both names run the same API-call
+task in the pipeline. Tool discovery used to match the step type literally, so a workflow whose API-call
+step was typed `eddi://ai.labs.apicalls` ran that step but never offered its calls to the model as tools.
+Discovery now treats both names alike. An existing agent in agent mode whose workflow uses the
+`ai.labs.apicalls` name, with `enableHttpCallTools` left at its default of `true`, therefore exposes those
+calls to the model as tools from the first turn after the upgrade, and the model may start calling them.
+To keep the old behaviour, set `enableHttpCallTools: false` in the agent's `langchain.json`, or remove the
+calls you do not want the model to use from the step's httpcalls configuration. The same alias rule applies to
+`eddi://ai.labs.langchain` (an alias of `eddi://ai.labs.llm`) wherever the turn budget is checked. See
+[Custom HTTP Tools](langchain.md#custom-http-tools).
+
+### The tool-history response lost its totals and per-call timing
+
+`GET /llm/tools/history/{conversationId}` now answers `{"toolCalls": [...], "hasErrors": bool}`, each call
+`{toolName, callId, arguments, result, success, error}`. The fields `totalCost`, `totalExecutionTimeMs`,
+`cacheHits`, `cacheMisses` and `toolMetrics` are gone from the body, and so are `executionTimeMs`, `cost`,
+`fromCache` and `timestamp` on each call: the stored trace never recorded them, so they were always zero or
+empty. A client that reads one of them now gets `undefined` or `null`; remove it. A conversation's tool spend
+is served by `GET /llm/tools/costs/conversation/{conversationId}`. `success` and `hasErrors` are no longer
+always `true` and `false`: a failed or refused call now shows with `success: false` and the reason in `error`,
+and a refused call that never ran appears as a call of its own. The Manager and the Platform Operator do not
+call this endpoint.
 
 ### An httpcall whose literal target is refused now fails at deploy
 

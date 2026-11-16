@@ -133,4 +133,52 @@ class RegularDictionaryTest {
         var phrases = dict.getPhrases();
         assertThrows(UnsupportedOperationException.class, () -> phrases.add(null));
     }
+
+    /**
+     * The same phrase word used to come back once per phrase containing it, plus a
+     * 0.9 case-insensitive copy of every exact hit — each copy one more branch for
+     * the parser to enumerate, all of them the same word to the phrase matcher.
+     */
+    @Test
+    void phraseWordSharedByPhrasesIsFoundOnce() {
+        dict.addPhrase("good morning", new Expressions(new Expression("gm")));
+        dict.addPhrase("good night", new Expressions(new Expression("gn")));
+
+        var found = dict.lookupTerm("good");
+
+        assertEquals(1, found.size());
+        assertEquals(1.0, ((FoundDictionaryEntry) found.getFirst()).getMatchingAccuracy());
+    }
+
+    @Test
+    void phraseWordInAnotherCaseIsFoundOnceAtReducedAccuracy() {
+        dict.addPhrase("good morning", new Expressions(new Expression("gm")));
+
+        var found = dict.lookupTerm("GOOD");
+
+        assertEquals(1, found.size());
+        assertEquals(0.9, ((FoundDictionaryEntry) found.getFirst()).getMatchingAccuracy());
+    }
+
+    @Test
+    void phraseAddedAfterALookupIsFound() {
+        dict.addPhrase("good morning", new Expressions(new Expression("gm")));
+        dict.lookupTerm("good");
+        dict.addPhrase("thank you", new Expressions(new Expression("thanks")));
+
+        assertEquals(1, dict.lookupTerm("thank").size());
+    }
+
+    /**
+     * The phrase index was keyed by ROOT lower-casing, which is not the
+     * case-insensitive equivalence the words map (and the old equalsIgnoreCase
+     * scan) uses: "IŞIK" lower-cases to "işik", while the dotless spelling "ışık"
+     * is equal to it ignoring case.
+     */
+    @Test
+    void phraseWordWithTurkishDotlessIIsFoundIgnoringCase() {
+        dict.addPhrase("IŞIK AÇ", new Expressions(new Expression("light_on")));
+
+        assertEquals(1, dict.lookupTerm("ışık").size());
+    }
 }

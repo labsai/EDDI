@@ -293,7 +293,7 @@ class AlertSendClaimTest {
     @DisplayName("a webhook timeout at or above the base lease still sends: the lease is derived from it")
     void longTimeoutStillSends() throws Exception {
         AlertSettings slow = new AlertSettings(true, 1000, Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2),
-                Duration.ofDays(90), Duration.ofSeconds(45), Optional.empty());
+                Duration.ofDays(90), Duration.ofSeconds(45), Optional.empty(), 50);
         delivery = new AlertDeliveryService(store, senders, slow, new AlertMetrics(new SimpleMeterRegistry()), clock);
 
         delivery.deliver(pendingRatingEvent(), rule);
@@ -306,9 +306,9 @@ class AlertSendClaimTest {
     @DisplayName("a timeout beyond a minute is clamped to a minute, and below a second to a second")
     void timeoutIsClamped() {
         AlertSettings huge = new AlertSettings(true, 1000, Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2),
-                Duration.ofDays(90), Duration.ofHours(1), Optional.empty());
+                Duration.ofDays(90), Duration.ofHours(1), Optional.empty(), 50);
         AlertSettings tiny = new AlertSettings(true, 1000, Duration.ofSeconds(60), 5, Duration.ofSeconds(30), Duration.ofMinutes(2),
-                Duration.ofDays(90), Duration.ZERO, Optional.empty());
+                Duration.ofDays(90), Duration.ZERO, Optional.empty(), 50);
         assertEquals(Duration.ofSeconds(60), huge.webhookTimeout());
         assertEquals(Duration.ofSeconds(1), tiny.webhookTimeout());
     }

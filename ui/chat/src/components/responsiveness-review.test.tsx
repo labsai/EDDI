@@ -9,7 +9,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { indicatorStatusText } from "./Indicators";
 import { ChatProvider, useChatDispatch } from "@/store/chat-store";
-import { stepsToMessages } from "@/api/snapshot";
+import { stepsToMessages } from "@eddi/core";
 import { setLocale } from "@/i18n";
 
 afterEach(() => {
@@ -74,7 +74,7 @@ describe("indicator status text", () => {
   it("is translated", () => {
     setLocale("de");
     expect(indicatorStatusText(false, null)).toBe("Denke nach…");
-    expect(indicatorStatusText(false, "calculator")).toBe("Verwende calculator…");
+    expect(indicatorStatusText(false, { text: "calculator", phrase: false })).toBe("Verwende Calculator…");
   });
 });
 

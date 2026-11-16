@@ -38,6 +38,22 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCALES_DIR = path.join(ROOT, "src/i18n/locales");
 const SRC_DIR = path.join(ROOT, "src");
+/**
+ * The shared packages (`ui/packages/*`) are compiled into the Manager as source,
+ * so a `t()` call in one of them draws on these same locale files and is checked
+ * with the Manager's own. (`@eddi/core` has no i18n and contributes none today.)
+ */
+const PACKAGES_DIR = path.join(ROOT, "../packages");
+
+/** The `src/` directory of every shared package. */
+function packageSourceDirs(packagesDir = PACKAGES_DIR) {
+  if (!fs.existsSync(packagesDir)) return [];
+  return fs
+    .readdirSync(packagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(packagesDir, entry.name, "src"))
+    .filter((dir) => fs.existsSync(dir));
+}
 
 /** i18next plural suffixes — `key_one` satisfies a `t("key")` reference. */
 const PLURAL_SUFFIX = /_(zero|one|two|few|many|other)$/;
@@ -231,7 +247,8 @@ export function collectDefaults(files, read = (f) => fs.readFileSync(f, "utf8"))
   return byKey;
 }
 
-export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR } = {}) {
+export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR, packageDirs = packageSourceDirs() } = {}) {
+  const sources = [srcDir, ...packageDirs].flatMap((dir) => walk(dir));
   const files = fs.readdirSync(localesDir).filter((f) => f.endsWith(".json"));
   const locales = new Map(
     files.map((f) => [
@@ -244,7 +261,7 @@ export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR } = {}) {
   if (!en) throw new Error("en.json not found");
   const enKeys = new Set(Object.keys(en));
 
-  const used = collectUsedKeys(walk(srcDir));
+  const used = collectUsedKeys(sources);
 
   const missing = [...used]
     .filter(([key]) => !isSatisfied(key, enKeys))
@@ -265,7 +282,7 @@ export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR } = {}) {
     }
   }
 
-  const collisions = [...collectDefaults(walk(srcDir))]
+  const collisions = [...collectDefaults(sources)]
     .filter(([key, defaults]) => defaults.size > 1 && !KNOWN_COLLISIONS.has(key))
     .map(([key, defaults]) => ({ key, defaults: [...defaults] }));
 

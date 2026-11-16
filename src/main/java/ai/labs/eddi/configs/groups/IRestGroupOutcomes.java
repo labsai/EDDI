@@ -69,6 +69,7 @@ public interface IRestGroupOutcomes {
     Response record(@PathParam("groupId") String groupId, OutcomeRequest request);
 
     @GET
-    @Operation(description = "A team's outcomes, newest first: those of one subject when subjectId is given, otherwise the most recent.")
+    @Operation(operationId = "listGroupOutcomes",
+               description = "A team's outcomes, newest first: those of one subject when subjectId is given, otherwise the most recent.")
     Response list(@PathParam("groupId") String groupId, @QueryParam("subjectId") String subjectId, @QueryParam("limit") Integer limit);
 }

@@ -235,8 +235,8 @@ public class WebSearchTool {
         String q = fitBraveQuery(query);
         String url = BRAVE_ENDPOINT + "?q=" + URLEncoder.encode(q, StandardCharsets.UTF_8) + "&count=" + maxResults;
 
-        // The key travels in X-Subscription-Token, one of OutboundHttp's
-        // SENSITIVE_HEADERS, so a cross-origin redirect never carries it on.
+        // The key travels in X-Subscription-Token, which is not in OutboundHttp's
+        // CROSS_ORIGIN_SAFE_HEADERS, so a cross-origin redirect never carries it on.
         String body = fetch(get(url).header("Accept", "application/json").header("X-Subscription-Token", key).build(), "Brave search");
 
         return formatBraveResults(body, query, maxResults);

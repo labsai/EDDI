@@ -531,7 +531,18 @@ const BODY_TEST_DRIVE = `Testing an agent by talking to it:
   gate works. Report which call it stopped on. You cannot approve on another
   agent's behalf — say so and let the admin decide.
 - If the reply is empty or an error, report it verbatim with the conversation id
-  rather than re-sending. A failing agent is a finding, not something to retry.`;
+  rather than re-sending. A failing agent is a finding, not something to retry.
+- If the START itself answers HTTP 422 with \`"error": "agent_misconfigured"\`,
+  no conversation was created: the agent's own CONVERSATION_START turn hit a
+  configuration it cannot run. Quote the \`message\` — it names the call and the
+  cause, e.g. a \${vault:…} reference that names no secret in the tenant it was
+  looked up in (\${vault:name} always means tenant \`default\`; another tenant
+  needs \${vault:tenant/name}), or a secret sent to a host its allowedHosts does
+  not list. That is the agent's configuration to fix, not a server fault. A 500
+  is not classified by this: an unresolved LLM parameter or a runtime host
+  refusal can also answer 500, so read the available diagnostic (the log line,
+  the error text) before deciding whether it is the agent's configuration or
+  the server.`;
 
 /**
  * Groups, gated on their OWN endpoint rather than bundled with the agent
@@ -657,9 +668,9 @@ const BODY_KNOWLEDGE_BASES_INGESTION = `- An ingestion id (from a direct ingest 
  * write later cannot leave the prompt claiming the opposite.
  */
 const BODY_KNOWLEDGE_BASES_READ_ONLY = `- You CANNOT create or edit a knowledge base, and you cannot ingest a document
-  into one or start a source's run — you have no tool for any of it. Point the
-  user at the knowledge base under Resources in the manager, and offer to read
-  the current configuration for them first.`;
+  into one, delete a document from one or start a source's run — you have no
+  tool for any of it. Point the user at the knowledge base under Resources in
+  the manager, and offer to read the current configuration for them first.`;
 
 /**
  * Shown INSTEAD of the section above when the reads are not granted.
@@ -772,6 +783,13 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   the target with the same \`targetId\` only, and a masked URL without a
   known \`targetId\` is refused with INVALID_RULE (re-open the rule in the
   editor, or enter the URL again).
+- At most \`eddi.alerts.max-rules-per-agent\` (default 50) rules, enabled or
+  not, may list one agent, and at most the same number may watch every agent.
+  A save that adds a scope to a full pool is refused with 409
+  RULE_LIMIT_REACHED; a per-agent error names the agent, an every-agent error
+  reports the every-agent count. Only scopes the save adds count, so rules
+  already over a lowered limit stay editable. To make room, delete rules from
+  the full pool, or raise the property.
 - You cannot acknowledge alerts, retry a delivery, send a test alert or change
   a rule: the admin does that on the Alerts page in the manager
   (/manage/alerts).`;
@@ -1396,13 +1414,52 @@ your tool schemas do not cover it, not as a routine first step:
   eddi.connections.public-base-url) and approves nothing. There is no "notify
   all approvers" switch — approver roles live in the identity provider, so name
   a shared mailbox. Docs: "hitl" (section "Email notifications"); metrics
-  eddi_email_outbound_total{outcome: sent, retry, failed, suppressed,
-  not_allowed, rate_limited} and eddi_email_ledger_pending.
+  eddi_email_outbound_total (label outcome: sent, retry, failed, suppressed,
+  not_allowed or rate_limited) and eddi_email_ledger_pending.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;
   both resolve to the same step, so leave a stored one as it is. (A \`rag\` step
   is covered in its own section, which states what can be done with one.)
+- Parser step: dictionaries map words and phrases to expressions. Per turn it
+  writes expressions:parsed, expressions:matches (which word gave which
+  expression, with accuracy and "corrected" for typo fixes) and
+  expressions:confidence (0..1). Config: minMatchingAccuracy drops matches less
+  accurate than it (e.g. typo corrections); maxAlternatives (0-10) also stores
+  expressions:alternatives; matchPartialPhrases (off by default) lets a fragment
+  of a phrase match. An optional semanticFallback block (embeddingProvider and
+  embeddingParameters as for a knowledge base, minScore, examples) maps input
+  the dictionaries did not understand to the closest example: one embedding call
+  per such turn (metric eddi_parser_semantic_fallback_total, tagged outcome=match
+  or no_match); a provider failure only means no match, a malformed block fails
+  the deployment. Docs: "semantic-parser".
+- How chat windows show an agent is set in the agent document, all optional:
+  \`appearance\` (\`displayName\` up to 80 characters, \`avatar\` an https URL or a
+  small data:image URI — no http, no SVG —, \`accentColor\` #rgb or #rrggbb, up to
+  6 \`starters\`) and \`conversationControls\` (undo, redo, attachments, rating,
+  quickReplies, streaming: absent = shown, false hides it; \`rawHtml\`: absent or
+  false = HTML in replies is meant to show as TEXT, true renders it). Say
+  carefully what rawHtml does today: the chat widget applies it only from the
+  release whose widget reads conversationControls. Until then the widget renders
+  HTML for every agent and the setting has no visible effect. Either way, an
+  agent whose replies contain HTML should get \`rawHtml: true\` now, so nothing
+  changes for it when the widget starts honouring the default (docs page
+  "chat-ui-embedding", section "Upgrading"). An invalid value fails the save with
+  400 naming the field. Clients read both from the agent profile
+  (/agents/{agentId}/profile, deployed version). You do not edit agent
+  documents: point the admin at the agent's "Presentation & titles" section.
+- Conversations carry \`title\`, \`titleSource\` (AUTO, LLM or USER) and \`pinned\`
+  on the conversation listing. The default title is the first user message that
+  was not secret (never a secretInput turn, a vaulted input or a guardrail-
+  withheld one), cut to eddi.conversations.title-max-length (default 80). An
+  agent's \`titleGeneration\` (\`enabled\`, default false; \`llmProvider\`,
+  \`llmModel\` required when on; \`parameters\` for credentials as vault
+  references; \`maxLength\` default 60) asks a model once per conversation, in
+  the background, charged to the tenant cost budget (spend kind
+  CONVERSATION_TITLE); a failure leaves the default title. Renaming and pinning
+  belong to the conversation's owner (PATCH on the conversation, not one of your
+  tools), and a title the owner set is never replaced. Metric:
+  eddi_conversation_titles_total{outcome}.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.
@@ -1459,8 +1516,16 @@ your tool schemas do not cover it, not as a routine first step:
   logs a warning for deliver-best on a classifier (a safety check should not
   deliver what it flagged). block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
-  strings, never templates: pii-redaction takes patterns
-  ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
+  strings, never templates: pii-redaction takes patterns, a comma list of
+  kinds (absent = the standard set email, ssn, creditcard, phone, iban; also
+  ip_address, passport_mrz, date_of_birth and national identifiers named
+  <country>_<id> in lower case, e.g. de_tax_id, fr_nir, gb_nhs, in_aadhaar),
+  and countries, a comma list of ISO codes whose identifiers are all added
+  (US CA BR MX GB IE FR IT ES PT NL BE DE AT CH PL SE DK FI IN CN JP KR SG AU
+  NZ ZA). National identifiers are opt-in; several (e.g. pl_pesel, gb_nhs,
+  nl_bsn, de_id_card, date_of_birth) also need a keyword just before the
+  value. An unknown kind or country only logs a deploy warning and selects
+  nothing; no names or addresses. regex-filter and prompt-injection take
   patterns one regular expression per line, max-length takes maxChars. A
   guardrail that errors fails closed for block/reprompt (the turn is blocked,
   reason guardrail_error) and open for redact/warn; parameter failMode
@@ -1613,6 +1678,16 @@ your tool schemas do not cover it, not as a routine first step:
   eddi.groups.cadence.claim-ttl (default PT24H). You never answer a tie-break or
   a human task: that would be speaking as the person — send the admin to the
   decider or the member.
+- Standing-team writeback keeps a pulled backlog task done only when its
+  discussion task is VERIFIED; anything else returns to PENDING and runs again
+  on the next fire. A task a person approved at a TASK gate is COMPLETED, not
+  VERIFIED, so a team gated by approval instead of a VERIFY phase re-runs its
+  approved work (posting the same thing twice) — unless the group sets
+  hitlConfig.approvalCompletesBacklogTask true (default false). Then a
+  person-approved task lands COMPLETED on the backlog with the approved (or
+  edited) result, counted in metrics.tasksApproved, not tasksVerified. A timeout
+  auto-approval (decidedBy system:timeout) never counts, nor does a task
+  completed in an ungated phase.
 - Tool-call guardrails (an LLM task's toolCallGuardrails, next to toolApprovals;
   absent = nothing runs): each entry is a guardrail (type, action, maxRetries,
   blockMessage, parameters) plus tools (required, approval patterns such as
@@ -1642,6 +1717,27 @@ your tool schemas do not cover it, not as a routine first step:
   toolCallGuardrails (a write naming it is refused, like toolApprovals): editing
   them is a person's job in the manager's LLM editor. Docs
   "tool-call-guardrails".
+- Readable tool calls in chats: an LLM task's toolDisplay (absent = the
+  streaming tool_call event carries only the tool name and call id) maps a tool
+  name to {label, fields}: label is static text (at most 120 characters, sent as
+  displayName), fields allow-lists at most 3 top-level argument names whose
+  string/number/boolean values are shown redacted and cut to 80 characters
+  (sent as display). A field named like a credential (password, apiKey, token,
+  secret) is a 400 at save and never shown. It changes the tool_call event only;
+  the Manager and the Chat UI show "label: values" while the tool runs and
+  otherwise turn the name into words (getAgentDescriptors becomes "Get agent
+  descriptors"). Docs "langchain".
+- Argument schemas for httpcall tools: an ApiCall's argumentSchema (JSON
+  Schema of the tool arguments; generated per operation for OpenAPI tools) and
+  unknownFields (reject default, drop, allow). A call that violates it is
+  refused before the approval gate with NOT_EXECUTED and one line per
+  violation (tool trace error argument_schema), so no approver ever sees it.
+  Docs "httpcalls".
+- Structured answers through a reply tool: an LLM task's answerMode "tool"
+  (needs convertToObject "true" and an object-root responseSchema) adds a
+  synthetic reply tool (answerToolName, default reply; answerToolChoice,
+  default required) the model answers through; it is never gated, counted or
+  shown as a tool call. Docs "langchain".
 - Edit-on-approve: an agent's hitlConfig.review (allowAnswerEdits, default
   false), screenEdits (OUTPUT_GUARDRAILS default, or NONE), maxEditChars
   (default 16000), approvalCategory (default rule:<agentId>), reasonCodes (code
@@ -1730,11 +1826,12 @@ your tool schemas do not cover it, not as a routine first step:
   config an author wrote, not in a body you send. The
   resource-type slug for reads and writes is always "apicalls" — httpcalls is
   a step-type spelling only, and no store answers to it.
-- An apicalls entry's forEach {pathToTargetArray (a plain dot path such as
-  properties.orderIds, required), iterationObjectName (default "item", bound
-  to the element itself), templateFilterExpression, maxItems (default 100,
-  ceiling 1000), maxConcurrency (default 1, 1..16), onItemFailure ("continue"
-  default, or "fail"), maxTotalResponseSizeInBytes} sends the call once per
+- An apicalls entry's forEach object — fields pathToTargetArray (a plain dot
+  path such as properties.orderIds, required), iterationObjectName (default
+  "item", bound to the element itself), templateFilterExpression, maxItems
+  (default 100, ceiling 1000), maxConcurrency (default 1, 1..16),
+  onItemFailure ("continue" default, or "fail") and
+  maxTotalResponseSizeInBytes — sends the call once per
   element and stores one array under responseObjectName: per item index, ok,
   httpCode, body, error, timedOut, sent, attempts, bodyDropped, in source
   order. postResponse runs with 200 when every item succeeded and 207 when any

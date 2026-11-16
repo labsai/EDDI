@@ -100,6 +100,7 @@ Two rules hold at every step:
 | --- | --- | --- |
 | `retry.maxAttempts` | Total attempts of one model call, including the first. Clamped to 1..10. **An LLM task with no `retry` block still retries**; `1` turns it off | `3` |
 | `retry.backoffDelayMs` / `backoffMultiplier` / `maxBackoffDelayMs` | Exponential backoff between attempts | `1000` / `2.0` / `10000` |
+| `retry.jitterRatio` | Shortens each backoff at random by up to this fraction (never lengthens it, never touches a provider-requested wait), so conversations hit by one outage do not retry in one burst; `0` turns it off, clamped to 0..1 | `0.2` |
 | `retry.honorRetryAfter` | Sleep the delay the provider asked for instead of the backoff | `true` |
 | `retry.maxRetryAfterMs` | Longest provider-requested wait accepted; a longer one stops retrying **without sleeping** so a cascade escalates at once (engine ceiling 30000) | `10000` |
 | `responseValidation.enabled` | Master switch of the `responseValidation` policies below (`retry` and the validation `fallback` need it) | `false` |
@@ -258,7 +259,10 @@ Notes on the choices:
 ### In the conversation step
 
 These keys are written to the turn's step. They are **not** part of the public conversation snapshot (the
-`llm:` prefix keeps them out); `returnDetailed=true` shows them, and so does the conversation log.
+`llm:` prefix keeps them out); `returnDetailed=true` shows the `llm:` keys. The `langchain:cascade:trace:*` and
+`audit:*` keys are withheld from that view too; read them from the raw conversation
+(`GET /conversationstore/conversations/{conversationId}`, the conversation's owner or an admin) or, for
+`audit:model_name`, from the audit ledger's `llmDetail.modelName`.
 
 | Key | Meaning |
 | --- | --- |

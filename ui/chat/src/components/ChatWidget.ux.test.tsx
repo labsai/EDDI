@@ -7,7 +7,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { ChatWidget } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
-import { setAuthToken } from "@/api/http";
+import { setAuthToken } from "@eddi/core";
 import { setLocale } from "@/i18n";
 
 const originalFetch = globalThis.fetch;
