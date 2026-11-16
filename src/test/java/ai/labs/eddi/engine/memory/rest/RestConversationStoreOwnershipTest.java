@@ -572,4 +572,84 @@ class RestConversationStoreOwnershipTest {
         verify(conversationDescriptorStore).readDescriptors(anyString(), eq("term"), eq(0), eq(1), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
     }
+
+    // ─── mine=true / excludeGroupMembers=true (the Workforce sidebar) ───
+
+    @Test
+    @DisplayName("mine=true pushes the owner filter into an admin's query, so their own chats are not paged out by everyone else's")
+    @SuppressWarnings("unchecked")
+    void mine_pushesOwnerScopeForAdmin() throws Exception {
+        firstPage();
+
+        storeAs("admin-user", "eddi-admin").readConversationDescriptors(0, 20, null, null, null, null, null, null, true, false);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertEquals(1, captor.getValue().size());
+        var owner = captor.getValue().getFirst().getQueryFilters().get(0);
+        assertEquals("userId", owner.getField());
+        assertEquals("admin-user", owner.getFilter());
+    }
+
+    @Test
+    @DisplayName("mine=true lists an admin only the rows they own — no admin bypass, and no ownerless row")
+    void mine_admitsOnlyTheCallersRowsForAdmin() throws Exception {
+        // The query is mocked, so the store hands back foreign rows too: the per-row
+        // check is the authority.
+        firstPage(descriptor("0a0a0a0a0a0a0a0a0a0a0a01", "admin-user"), descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER),
+                descriptor("0a0a0a0a0a0a0a0a0a0a0a03", null));
+
+        List<ConversationDescriptor> result = asAdmin().readConversationDescriptors(0, 20, null, null, null, null, null, null, true,
+                false);
+
+        assertEquals(1, result.size());
+        assertEquals("admin-user", result.getFirst().getUserId());
+    }
+
+    @Test
+    @DisplayName("mine=true drops the reviewer exception of an agent-filtered listing and keeps the owner filter in the query")
+    @SuppressWarnings("unchecked")
+    void mine_withAgentFilter_keepsOwnerScope() throws Exception {
+        firstPage();
+
+        asOwner().readConversationDescriptors(0, 20, null, null, "0000000000000000000000a1", null, null, null, true, false);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        assertEquals(2, captor.getValue().size(), "the agent group and the owner group");
+        assertEquals("agentResource", captor.getValue().get(0).getQueryFilters().getFirst().getField());
+        assertEquals("userId", captor.getValue().get(1).getQueryFilters().getFirst().getField());
+    }
+
+    @Test
+    @DisplayName("excludeGroupMembers=true filters member threads in the query and per row")
+    @SuppressWarnings("unchecked")
+    void excludeGroupMembers_dropsMemberThreads() throws Exception {
+        var own = descriptor("0a0a0a0a0a0a0a0a0a0a0a01", OWNER);
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(own, member);
+
+        List<ConversationDescriptor> result = asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null, true,
+                true);
+
+        assertEquals(1, result.size());
+        assertEquals(own.getResource(), result.getFirst().getResource());
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
+        var memberGroup = captor.getValue().stream()
+                .filter(g -> "groupConversationId".equals(g.getQueryFilters().getFirst().getField()))
+                .findFirst().orElseThrow();
+        assertInstanceOf(IResourceFilter.NotMatching.class, memberGroup.getQueryFilters().getFirst().getFilter());
+    }
+
+    @Test
+    @DisplayName("without excludeGroupMembers member threads are still listed, as before")
+    void withoutExcludeGroupMembers_memberThreadsListed() throws Exception {
+        var member = descriptor("0a0a0a0a0a0a0a0a0a0a0a02", OWNER);
+        member.setGroupConversationId("gc-1");
+        firstPage(member);
+
+        assertEquals(1, asOwner().readConversationDescriptors(0, 20, null, null, null, null, null, null).size());
+    }
 }

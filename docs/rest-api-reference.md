@@ -455,8 +455,13 @@ owner's (`USER`); absent until the first such message.
 | `conversationId` | One conversation |
 | `viewState` | `UNSEEN`, `SEEN`, … |
 | `filter` | Free-text filter |
+| `mine` | `true`: only the caller's own conversations, for an admin too, and without the reviewer exception of an `agentId` listing. The owner filter is part of the database query, so an admin's own chats are not paged out by everyone else's (since 6.7.0) |
+| `excludeGroupMembers` | `true`: leave out the private conversations a group discussion started for its members — those whose descriptor records `groupConversationId`. Member conversations started before 6.7.0 record none and are still listed (since 6.7.0) |
 
-Results are newest first. A non-admin sees only their own conversations.
+Results are newest first. A non-admin sees only their own conversations; an
+admin sees everyone's unless the listing asks for `mine=true`. A member
+conversation of a group discussion carries `groupConversationId` on its
+descriptor.
 
 | Call | Notes |
 | --- | --- |

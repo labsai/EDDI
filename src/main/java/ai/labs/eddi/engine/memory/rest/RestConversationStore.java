@@ -122,6 +122,7 @@ public class RestConversationStore implements IRestConversationStore {
     private static final String FIELD_AGENT_RESOURCE = "agentResource";
     private static final String FIELD_USER_ID = "userId";
     private static final String FIELD_VIEW_STATE = "viewState";
+    private static final String FIELD_GROUP_CONVERSATION_ID = "groupConversationId";
 
     /**
      * Matches a field holding anything but whitespace — so a {@link NotMatching} of
@@ -260,7 +261,8 @@ public class RestConversationStore implements IRestConversationStore {
     @Override
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
                                                                     String agentId, Integer agentVersion, ConversationState conversationState,
-                                                                    ConversationDescriptor.ViewState viewState) {
+                                                                    ConversationDescriptor.ViewState viewState, Boolean mine,
+                                                                    Boolean excludeGroupMembers) {
         // A negative index or a limit above the deployment-wide page ceiling is
         // refused, not normalised (this used to clamp the limit silently at 100 and
         // turn a negative index into 0): a client that asked for more than a page can
@@ -309,11 +311,19 @@ public class RestConversationStore implements IRestConversationStore {
         // budget counts the descriptors this page examined, not the matches it
         // counted off for earlier pages: those are the caller's own conversations,
         // and charging them would put a caller's older conversations out of reach.
-        final boolean seesAllConversations = conversationAccessGuard.seesAllConversations();
+        //
+        // mine=true asks for the caller's own conversations only — an admin's too, so
+        // the owner filter is pushed into the query for them as well, and a row is
+        // admitted only if the caller IS its owner (no admin bypass, no reviewer
+        // exception). excludeGroupMembers=true leaves out the member threads a group
+        // discussion started (their descriptor records a groupConversationId).
+        final boolean ownOnly = Boolean.TRUE.equals(mine);
+        final boolean withoutMembers = Boolean.TRUE.equals(excludeGroupMembers);
+        final boolean seesAllConversations = !ownOnly && conversationAccessGuard.seesAllConversations();
         // Review decisions per agent version, made once per listing rather than once
         // per row: the answer depends only on the version and on the caller.
         final Map<URI, Boolean> reviewable = new HashMap<>();
-        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, agentId, viewState);
+        final List<QueryFilters> restrictions = listingRestrictions(seesAllConversations, ownOnly, withoutMembers, agentId, viewState);
         final long matchesToSkip = (long) index * limit;
         // Descriptors are read in pages of `limit` for the first result page, the one
         // almost every request asks for. A later page has earlier pages' rows to count
@@ -362,7 +372,8 @@ public class RestConversationStore implements IRestConversationStore {
                     // after rows nobody examined. A batch may therefore run past the
                     // budget by its own size; its foreign rows cost no conversation read.
                     scannedDescriptors++;
-                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, agentId, reviewable);
+                    String candidateId = recordedOwnerAdmits(conversationDescriptor, seesAllConversations, ownOnly, withoutMembers, agentId,
+                            reviewable);
                     if (candidateId != null) {
                         candidates.add(conversationDescriptor);
                         candidateIds.add(candidateId);
@@ -389,7 +400,7 @@ public class RestConversationStore implements IRestConversationStore {
                         orphanedDescriptors++;
                         continue;
                     }
-                    if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, agentId, agentVersion,
+                    if (!conversationAdmits(conversationDescriptor, summary, seesAllConversations, ownOnly, agentId, agentVersion,
                             conversationState, viewState)) {
                         continue;
                     }
@@ -455,8 +466,8 @@ public class RestConversationStore implements IRestConversationStore {
      *
      * @return the conversation's id, or {@code null} when the row is not listed
      */
-    private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, String agentId,
-                                       Map<URI, Boolean> reviewable) {
+    private String recordedOwnerAdmits(ConversationDescriptor conversationDescriptor, boolean seesAllConversations, boolean ownOnly,
+                                       boolean withoutMembers, String agentId, Map<URI, Boolean> reviewable) {
         try {
             URI resourceUri = conversationDescriptor.getResource();
             var conversationResourceId = extractResourceId(resourceUri);
@@ -465,10 +476,14 @@ public class RestConversationStore implements IRestConversationStore {
                 return null;
             }
 
+            if (withoutMembers && !isNullOrEmpty(conversationDescriptor.getGroupConversationId())) {
+                return null;
+            }
+
             String recordedOwner = conversationDescriptor.getUserId();
             if (!seesAllConversations && !isNullOrEmpty(recordedOwner)
-                    && !conversationAccessGuard.canAccessConversation(recordedOwner)
-                    && !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable)) {
+                    && !admitsOwner(recordedOwner, ownOnly)
+                    && (ownOnly || !mayReview(conversationDescriptor.getAgentResource(), agentId, reviewable))) {
                 return null;
             }
             return conversationResourceId.getId();
@@ -514,7 +529,7 @@ public class RestConversationStore implements IRestConversationStore {
      * to; they stay the authority.
      */
     private boolean conversationAdmits(ConversationDescriptor conversationDescriptor, ConversationListingSummary summary,
-                                       boolean seesAllConversations, String agentId, Integer agentVersion,
+                                       boolean seesAllConversations, boolean ownOnly, String agentId, Integer agentVersion,
                                        ConversationState conversationState, ConversationDescriptor.ViewState viewState) {
         try {
             boolean ownerRecorded = !isNullOrEmpty(conversationDescriptor.getUserId());
@@ -538,7 +553,7 @@ public class RestConversationStore implements IRestConversationStore {
             // Legacy safety net: the descriptor recorded no owner; the conversation
             // has now supplied it (pre-v5.1.6 fallback), so check it.
             if (!seesAllConversations && !ownerRecorded
-                    && !conversationAccessGuard.canAccessConversation(conversationDescriptor.getUserId())) {
+                    && !admitsOwner(conversationDescriptor.getUserId(), ownOnly)) {
                 return false;
             }
 
@@ -615,20 +630,34 @@ public class RestConversationStore implements IRestConversationStore {
      * The conversation state is not here: it is read from the conversation memory,
      * not from the descriptor.
      */
-    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, String agentId,
-                                                   ConversationDescriptor.ViewState viewState) {
+    private List<QueryFilters> listingRestrictions(boolean seesAllConversations, boolean ownOnly, boolean withoutMembers,
+                                                   String agentId, ConversationDescriptor.ViewState viewState) {
         List<QueryFilters> restrictions = new LinkedList<>();
         if (!isNullOrEmpty(agentId)) {
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
                     new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
                     new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
-        } else {
+        }
+        if (isNullOrEmpty(agentId) || ownOnly) {
+            // mine=true has no reviewer exception, so the owner group is pushed even
+            // when an agent is named.
             restrictions.addAll(ownerScope(seesAllConversations));
+        }
+        if (withoutMembers) {
+            restrictions.add(new QueryFilters(List.of(new QueryFilter(FIELD_GROUP_CONVERSATION_ID, new NotMatching(NOT_BLANK)))));
         }
         if (viewState != null) {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
         }
         return restrictions;
+    }
+
+    /**
+     * Whether the owner a row records admits the caller: as its owner, or (without
+     * {@code mine}) by the guard's usual rule, which also admits an admin.
+     */
+    private boolean admitsOwner(String ownerId, boolean ownOnly) {
+        return ownOnly ? conversationAccessGuard.ownsConversation(ownerId) : conversationAccessGuard.canAccessConversation(ownerId);
     }
 
     /**

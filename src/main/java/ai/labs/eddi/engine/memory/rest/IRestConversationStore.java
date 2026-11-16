@@ -67,6 +67,15 @@ public interface IRestConversationStore {
      * stops on the owner-scan budget. {@code index * limit} above 10,000 is refused
      * with a 400 — each page counts off the matches before it, so the ceiling
      * bounds what one request can read; narrow the listing with a filter instead.
+     * <p>
+     * {@code mine=true} lists only the caller's own conversations, for an admin too
+     * (who otherwise sees everyone's) and without the reviewer exception of an
+     * agent-filtered listing — the owner filter is part of the query on both
+     * MongoDB and PostgreSQL, so a busy deployment does not push the caller's own
+     * conversations off the page. {@code excludeGroupMembers=true} leaves out the
+     * private conversations a group discussion started for its members (those whose
+     * descriptor records a {@code groupConversationId}; member conversations
+     * started before 6.7.0 record none and are still listed).
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -78,7 +87,25 @@ public interface IRestConversationStore {
                                                              @QueryParam("agentId") String agentId,
                                                              @QueryParam("agentVersion") Integer agentVersion,
                                                              @QueryParam("conversationState") ConversationState conversationState,
-                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState);
+                                                             @QueryParam("viewState") ConversationDescriptor.ViewState viewState,
+                                                             @Parameter(description = "Only the caller's own conversations, for an admin too (since 6.7.0)")
+                                                             @QueryParam("mine")
+                                                             @DefaultValue("false") Boolean mine,
+                                                             @Parameter(description = "Leave out group members' private conversations (since 6.7.0)")
+                                                             @QueryParam("excludeGroupMembers")
+                                                             @DefaultValue("false") Boolean excludeGroupMembers);
+
+    /**
+     * The listing without the {@code mine} and {@code excludeGroupMembers} filters,
+     * for in-process callers (the MCP tools). Not a resource method.
+     */
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
+                                                                     String agentId, Integer agentVersion,
+                                                                     ConversationState conversationState,
+                                                                     ConversationDescriptor.ViewState viewState) {
+        return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
+                false, false);
+    }
 
     @GET
     @Path("/simple/{conversationId}")
