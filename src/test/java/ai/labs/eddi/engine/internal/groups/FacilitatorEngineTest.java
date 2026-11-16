@@ -601,6 +601,35 @@ class FacilitatorEngineTest {
 
             assertTrue(gc.getRecruitedAgentIds().contains("specialist"));
         }
+
+        @Test
+        void recruit_anAgentThisDiscussionCreated_isRejected() {
+            stubDeployed("sub-agent-1");
+            gc.getCreatedAgentIds().add("sub-agent-1");
+            stubReply("{\"move\": \"RECRUIT\", \"args\": {\"agentId\": \"sub-agent-1\"}}");
+
+            assertEquals(FacilitatorAction.Kind.NONE, checkpoint(boundaryCtx()).kind());
+            assertTrue(gc.getRecruitedAgentIds().isEmpty(), "a created agent must not become a voter");
+            assertTrue(facilitationEntries().get(0).content().contains("was created during a discussion"));
+        }
+
+        @Test
+        void recruit_anAgentWithADynamicOrigin_isRejected_andACheckThatThrowsRefusesToo() {
+            stubDeployed("sub-agent-2");
+            stubReply("{\"move\": \"RECRUIT\", \"args\": {\"agentId\": \"sub-agent-2\"}}");
+            engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry, null,
+                    agentId -> true);
+
+            checkpoint(boundaryCtx());
+            assertTrue(gc.getRecruitedAgentIds().isEmpty());
+
+            engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry, null,
+                    agentId -> {
+                        throw new IllegalStateException("agent store unavailable");
+                    });
+            checkpoint(boundaryCtx());
+            assertTrue(gc.getRecruitedAgentIds().isEmpty(), "an unverifiable origin is a refusal");
+        }
     }
 
     // =================================================================

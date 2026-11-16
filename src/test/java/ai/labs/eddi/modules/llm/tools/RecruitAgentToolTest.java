@@ -361,4 +361,45 @@ class RecruitAgentToolTest {
         assertEquals(TARGET, gc.getMemberDisplayNames().get(TARGET),
                 "a real recruit has no configured name, so its id is the best available label");
     }
+
+    // =================================================================
+    // Created agents are never recruits (vote stuffing)
+    // =================================================================
+
+    @Test
+    void recruit_refusedForAnAgentThisDiscussionCreated() {
+        gc.getCreatedAgentIds().add(TARGET);
+
+        String reply = tool().recruitAgent(TARGET, "Voter", "one more voice");
+
+        assertTrue(reply.contains("was created during a discussion"), reply);
+        assertTrue(gc.getDynamicMembers().isEmpty(), "a created agent must not join the roster and vote");
+        assertTrue(gc.getRecruitedAgentIds().isEmpty());
+    }
+
+    @Test
+    void recruit_refusedForAnAgentWithADynamicOrigin() {
+        // Created and recruited in the same turn: the creation has not been folded
+        // into createdAgentIds yet, so only the agent's own dynamicOrigin tells.
+        List<String> asked = new ArrayList<>();
+        var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds, null,
+                agentId -> {
+                    asked.add(agentId);
+                    return true;
+                });
+
+        String reply = guarded.recruitAgent(TARGET, "Voter", "one more voice");
+
+        assertEquals(List.of(TARGET), asked);
+        assertTrue(reply.contains("was created during a discussion"), reply);
+        assertTrue(gc.getDynamicMembers().isEmpty());
+    }
+
+    @Test
+    void recruit_allowedForAnIndependentlyDeployedAgent() {
+        var guarded = new RecruitAgentTool(registry, GC_ID, RECRUITER, config(10), deploymentStore, configuredMemberIds, null,
+                agentId -> false);
+
+        assertTrue(guarded.recruitAgent(TARGET, "Reviewer", "needed").startsWith("Recruited"));
+    }
 }

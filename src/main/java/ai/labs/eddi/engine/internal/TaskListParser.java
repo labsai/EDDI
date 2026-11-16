@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
+import ai.labs.eddi.engine.agenttests.BoundedRegex;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -15,7 +16,7 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
+import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 
 /**
@@ -36,15 +37,25 @@ public final class TaskListParser {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     // Matches: 1. Title: description OR - Title: description OR * Title:
-    // description
+    // description — one line at a time; the title/description split is done in
+    // Java (splitTitle). The planner's output is model text of any length, and
+    // the former whole-text form, (.+?)(?:\s*[:—–-]\s+(.+))?$ under MULTILINE,
+    // backtracked polynomially over long whitespace runs.
     private static final Pattern MARKDOWN_ITEM = Pattern.compile(
-            "^\\s*(?:\\d+[.)\\]]|[-*+])\\s+(.+?)(?:\\s*[:—–-]\\s+(.+))?$",
-            Pattern.MULTILINE);
+            "^[ \\t\\x0B\\f]*(?:\\d+[.)\\]]|[-*+])[ \\t\\x0B\\f]+(.*)$");
 
-    // Matches: (assigned to AgentName) or (assignedTo: agent-id)
+    // Matches: (assigned to AgentName) or (assignedTo: agent-id). Everything up
+    // to the first ')' is captured greedily and the separator stripped in Java:
+    // the former (.+?)\s*\) let three whitespace runs split one long run of
+    // spaces every possible way when no ')' followed.
     private static final Pattern ASSIGNMENT = Pattern.compile(
-            "\\(\\s*(?:assigned\\s+to|assignedTo)\\s*[:=]?\\s*(.+?)\\s*\\)",
+            "\\(\\s*(?:assigned\\s+to|assignedTo)([^)]*)\\)",
             Pattern.CASE_INSENSITIVE);
+
+    /** The markdown tier reads at most this much of the planner's output. */
+    static final int MAX_MARKDOWN_TEXT_LENGTH = 100_000;
+    /** Wall-clock budget of one line match — a second line of defence. */
+    private static final long LINE_MATCH_TIMEOUT_MS = 50;
 
     private TaskListParser() {
     }
@@ -196,20 +207,28 @@ public final class TaskListParser {
     // --- Tier 2: Markdown parsing ---
 
     private static List<ParsedTask> tryParseMarkdown(String text) {
-        Matcher matcher = MARKDOWN_ITEM.matcher(text);
+        String capped = text.length() > MAX_MARKDOWN_TEXT_LENGTH ? text.substring(0, MAX_MARKDOWN_TEXT_LENGTH) : text;
         List<ParsedTask> tasks = new ArrayList<>();
         int index = 0;
 
-        while (matcher.find()) {
-            String titlePart = matcher.group(1).trim();
-            String descPart = matcher.group(2);
+        for (String line : (Iterable<String>) capped.lines()::iterator) {
+            MatchResult item = BoundedRegex.firstMatch(MARKDOWN_ITEM, line, LINE_MATCH_TIMEOUT_MS).orElse(null);
+            if (item == null) {
+                continue;
+            }
+            String[] split = splitTitle(item.group(1));
+            String titlePart = split[0];
+            String descPart = split[1];
+            if (titlePart.isEmpty()) {
+                continue;
+            }
 
             // Check for inline assignment
             String assignedTo = null;
-            Matcher assignMatcher = ASSIGNMENT.matcher(titlePart);
-            if (assignMatcher.find()) {
-                assignedTo = assignMatcher.group(1).trim();
-                titlePart = titlePart.substring(0, assignMatcher.start()).trim();
+            MatchResult assignment = BoundedRegex.firstMatch(ASSIGNMENT, titlePart, LINE_MATCH_TIMEOUT_MS).orElse(null);
+            if (assignment != null) {
+                assignedTo = stripAssignmentSeparator(assignment.group(1));
+                titlePart = titlePart.substring(0, assignment.start()).trim();
             }
 
             String subject = titlePart;
@@ -220,6 +239,46 @@ public final class TaskListParser {
         }
 
         return tasks.isEmpty() ? null : tasks;
+    }
+
+    /**
+     * Splits a list item's text at the first separator ({@code : — – -}) that has
+     * at least one character of title before it and whitespace plus at least one
+     * more character after it — what the former lazy pattern matched. Returns
+     * {@code [title, description]}, the description {@code null} when there is no
+     * separator.
+     * <p>
+     * A separator inside a closed parenthesis does not count, so
+     * {@code Research (assignedTo: agent-2) — find references} splits at the dash
+     * and keeps its assignment annotation in the title, where it is read. (The
+     * former pattern split at that colon, so the task lost its assignee.) An
+     * unclosed parenthesis hides nothing. Linear: each closing parenthesis is
+     * searched for once and the scan resumes after it.
+     */
+    static String[] splitTitle(String item) {
+        int lastClose = item.lastIndexOf(')');
+        for (int k = 0; k + 2 < item.length(); k++) {
+            char c = item.charAt(k);
+            if (c == '(' && k < lastClose) {
+                k = item.indexOf(')', k);
+                continue;
+            }
+            char after = item.charAt(k + 1);
+            if (k >= 1 && (c == ':' || c == '—' || c == '–' || c == '-')
+                    && (after == ' ' || after == '\t' || after == '\u000B' || after == '\f')) {
+                return new String[]{item.substring(0, k).trim(), item.substring(k + 1).trim()};
+            }
+        }
+        return new String[]{item.trim(), null};
+    }
+
+    /** {@code ": Bob"} / {@code "=agent-1"} / {@code " to Bob"} → the assignee. */
+    private static String stripAssignmentSeparator(String captured) {
+        String value = captured.strip();
+        if (!value.isEmpty() && (value.charAt(0) == ':' || value.charAt(0) == '=')) {
+            value = value.substring(1);
+        }
+        return value.trim();
     }
 
     // --- Tier 3: Single task fallback ---

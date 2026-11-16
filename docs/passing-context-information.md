@@ -115,11 +115,13 @@ behalf, and the engine trusts them to decide what a turn may do:
 | `dynamicCreatedAgentIds` | Group conversations | The agents the discussion has created (and may tear down) |
 | `delegationDepth` | `converse_with_agent` | How many delegation hops led to this conversation |
 | `selfContinuation` | [Self-continuation](long-jobs.md) | Marks a turn the agent started itself with `CONTINUE_CONVERSATION`, with its `number` and `max` |
+| `scheduleFireId` | [Schedules](scheduling.md) | The run a scheduled fire belongs to, which [`toolQuotas`](langchain.md) rules with `window: "RUN"` count per |
+| `scheduleMaxCostPerFire` | [Schedules](scheduling.md) | The fire's `maxCostPerFire` allowance |
 
 A client cannot set them. EDDI drops these keys from the context of every externally
 supplied request — `POST /agents/{agentId}/start`, `POST /agents/{conversationId}`
-(plain and streaming), managed conversations, and a trigger's initial context — before
-the conversation sees it. The request still succeeds; only the reserved entries are
+(plain and streaming), managed conversations, a trigger's initial context, and the
+context of an [agent test](agent-testing.md) case — before the conversation sees it. The request still succeeds; only the reserved entries are
 removed, so `{context.groupId}` in a template renders empty for a client-started turn.
 Group members, delegated sub-agent conversations and schedules still receive the values
 EDDI sets. Matching is case-sensitive and anchored at the start of the name:

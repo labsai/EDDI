@@ -85,6 +85,9 @@ public final class ConvergenceDetector {
             {"agreementScore": <number between 0 and 1>, "converged": <true|false>, "summary": "<one sentence>"}
             """;
 
+    private static final String PLACEHOLDER_PREVIOUS = "{previousRound}";
+    private static final String PLACEHOLDER_CURRENT = "{currentRound}";
+
     /**
      * The VERDICT-mode judge's instruction (E2): a review of the current repeat's
      * result against the question, not a comparison of rounds. Assembled by
@@ -118,8 +121,9 @@ public final class ConvergenceDetector {
 
     /** The VERDICT-mode judge input for one repeat. */
     public static String buildVerdictInput(String question, List<TranscriptEntry> currentRound) {
-        return VERDICT_JUDGE_PREFIX + (question != null && !question.isBlank() ? question : "(no question recorded)") + VERDICT_JUDGE_MIDDLE
-                + renderRound(currentRound) + VERDICT_JUDGE_SUFFIX;
+        return PeerContentGuard
+                .withQuotedNotice(VERDICT_JUDGE_PREFIX + (question != null && !question.isBlank() ? question : "(no question recorded)")
+                        + VERDICT_JUDGE_MIDDLE + renderRound(currentRound) + VERDICT_JUDGE_SUFFIX);
     }
 
     /**
@@ -213,9 +217,14 @@ public final class ConvergenceDetector {
      * template syntax.
      */
     public static String buildJudgeInput(List<TranscriptEntry> previousRound, List<TranscriptEntry> currentRound) {
-        return TEMPLATE_CONVERGENCE_JUDGE
-                .replace("{previousRound}", renderRound(previousRound))
-                .replace("{currentRound}", renderRound(currentRound));
+        // One pass over the template: chained replace() calls re-scanned the
+        // previous round's member text for "{currentRound}" and substituted the
+        // current round into it.
+        int previousAt = TEMPLATE_CONVERGENCE_JUDGE.indexOf(PLACEHOLDER_PREVIOUS);
+        int currentAt = TEMPLATE_CONVERGENCE_JUDGE.indexOf(PLACEHOLDER_CURRENT);
+        return PeerContentGuard.withQuotedNotice(TEMPLATE_CONVERGENCE_JUDGE.substring(0, previousAt) + renderRound(previousRound)
+                + TEMPLATE_CONVERGENCE_JUDGE.substring(previousAt + PLACEHOLDER_PREVIOUS.length(), currentAt)
+                + renderRound(currentRound) + TEMPLATE_CONVERGENCE_JUDGE.substring(currentAt + PLACEHOLDER_CURRENT.length()));
     }
 
     private static String renderRound(List<TranscriptEntry> entries) {
@@ -227,8 +236,8 @@ public final class ConvergenceDetector {
             if (e == null || e.content() == null || e.content().isBlank()) {
                 continue;
             }
-            sb.append(e.speakerDisplayName() != null ? e.speakerDisplayName() : e.speakerAgentId())
-                    .append(": ").append(e.content()).append("\n\n");
+            sb.append(PeerContentGuard.speaker(e.speakerDisplayName() != null ? e.speakerDisplayName() : e.speakerAgentId()))
+                    .append(":\n").append(PeerContentGuard.fenced(e.content())).append("\n\n");
         }
         return sb.isEmpty() ? "(no contributions)" : sb.toString().stripTrailing();
     }

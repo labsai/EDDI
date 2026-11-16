@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.internal.TaskListParser.ParsedTask;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -508,5 +509,91 @@ class TaskListParserTest {
         assertEquals("agent-2", TaskListParser.resolveAgent("Writer", membersWithNullName));
         // Should return null for unmatched
         assertNull(TaskListParser.resolveAgent("unknown", membersWithNullName));
+    }
+
+    @Test
+    @DisplayName("Markdown assignment with surrounding spaces is trimmed")
+    void markdownAssignment_spacedFormat() {
+        var result = TaskListParser.parse("- Research (assigned to   Analyst  ) — find references", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Research", result.getFirst().subject());
+        assertEquals("Analyst", result.getFirst().assignedTo());
+        assertEquals("find references", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("a colon inside an (assignedTo: …) annotation does not split the title")
+    void markdownAssignment_colonInsideAnnotation() {
+        // Split at the colon, the title became "Research (assignedTo", no assignee was
+        // found and the task went round-robin. (main behaved the same way.)
+        var result = TaskListParser.parse("1. Research (assignedTo: agent-2) — find references", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Research", result.getFirst().subject());
+        assertEquals("agent-2", result.getFirst().assignedTo());
+        assertEquals("find references", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("the other annotation shapes parse as they always did")
+    void markdownAssignment_neighbourShapes() {
+        var spaced = TaskListParser.parse("1. Research (assigned to agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", spaced.subject());
+        assertEquals("agent-2", spaced.assignedTo());
+        assertEquals("Research", spaced.description());
+
+        var equals = TaskListParser.parse("1. Research (assignedTo=agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", equals.subject());
+        assertEquals("agent-2", equals.assignedTo());
+
+        // After the description it was never read as an assignment, and still is not.
+        var trailing = TaskListParser.parse("1. Research — find references (assigned to agent-2)", MEMBERS).getFirst();
+        assertEquals("Research", trailing.subject());
+        assertNull(trailing.assignedTo());
+        assertEquals("find references (assigned to agent-2)", trailing.description());
+
+        // An unclosed parenthesis does not hide the separator after it.
+        var unclosed = TaskListParser.parse("1. Draft (notes: later", MEMBERS).getFirst();
+        assertEquals("Draft (notes", unclosed.subject());
+        assertEquals("later", unclosed.description());
+    }
+
+    @Test
+    @DisplayName("a separator glued to the next word does not split the title")
+    void markdownSeparatorNeedsWhitespace() {
+        var result = TaskListParser.parse("1. Build well-known parts: then test", MEMBERS);
+
+        assertEquals("Build well-known parts", result.getFirst().subject());
+        assertEquals("then test", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("adversarial planner output parses in linear time, not by polynomial backtracking")
+    void adversarialWhitespace_completesQuickly() {
+        String pad = " ".repeat(5_000);
+        String unclosedAssignment = "1. Task (assigned to" + pad + "x\n";
+        String spacedItem = "- " + "a" + pad + "b\n";
+        String bulk = ("- x" + " ".repeat(200) + "y\n").repeat(400);
+
+        // Generous for any loaded CI runner: the former patterns grew ~N^3.4 —
+        // 1.5 s for 200 spaces — so 5,000 spaces would take hours.
+        List<List<ParsedTask>> results = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> List.of(
+                TaskListParser.parse(unclosedAssignment, MEMBERS),
+                TaskListParser.parse(spacedItem, MEMBERS),
+                TaskListParser.parse(bulk + " ".repeat(200_000), MEMBERS)));
+
+        var first = results.get(0);
+        assertEquals(1, first.size());
+        assertEquals("Task (assigned to" + pad + "x", first.getFirst().subject(), "the item is still read, whole");
+        assertNull(first.getFirst().assignedTo(), "an unclosed assignment is not an assignment");
+        var second = results.get(1);
+        assertEquals(1, second.size());
+        assertEquals("a" + pad + "b", second.getFirst().subject());
+        assertEquals("a" + pad + "b", second.getFirst().description());
+        var third = results.get(2);
+        assertEquals(400, third.size());
+        assertTrue(third.stream().allMatch(t -> t.subject().equals("x" + " ".repeat(200) + "y")), "every bulk item parses alike");
+        assertEquals(399, third.getLast().priority(), "items keep their order");
     }
 }

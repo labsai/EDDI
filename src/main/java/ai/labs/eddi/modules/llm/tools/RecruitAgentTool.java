@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.engine.internal.groups.CreatedAgentRecruitGuard;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import dev.langchain4j.agent.tool.P;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -95,6 +97,10 @@ public class RecruitAgentTool {
      * asked for the discussion's owner. {@code null} skips the check (tests).
      */
     private final BiPredicate<String, String> useCheck;
+    /**
+     * {@code agentId -> created by the engine at runtime}; {@code null} skips it.
+     */
+    private final Predicate<String> dynamicAgentCheck;
 
     public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
             DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds) {
@@ -113,6 +119,22 @@ public class RecruitAgentTool {
     public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
             DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds,
             BiPredicate<String, String> useCheck) {
+        this(registry, groupConversationId, recruiterAgentId, config, deploymentStore, configuredMemberIds, useCheck, null);
+    }
+
+    /**
+     * @param dynamicAgentCheck
+     *            {@code agentId -> boolean}: whether the agent was created by the
+     *            engine at runtime (its configuration carries a
+     *            {@code dynamicOrigin}). Such an agent is refused, as is any id on
+     *            the discussion's {@code createdAgentIds}: a member could otherwise
+     *            create a sub-agent with a system prompt it wrote and recruit it as
+     *            an extra voter. {@code null} checks {@code createdAgentIds} only.
+     */
+    public RecruitAgentTool(LiveDiscussionRegistry registry, String groupConversationId, String recruiterAgentId,
+            DynamicAgentConfig config, IDeploymentStore deploymentStore, Set<String> configuredMemberIds,
+            BiPredicate<String, String> useCheck, Predicate<String> dynamicAgentCheck) {
+        this.dynamicAgentCheck = dynamicAgentCheck;
         this.useCheck = useCheck;
         this.registry = registry;
         this.groupConversationId = groupConversationId;
@@ -161,6 +183,16 @@ public class RecruitAgentTool {
                     sanitize(wanted), sanitize(groupConversationId));
             return "Agent '%s' is not available to this discussion's owner, so it cannot join. Pick an agent they can use."
                     .formatted(wanted);
+        }
+        // An agent the engine created at runtime — in this discussion or any other —
+        // is never a recruit: create_sub_agent deploys one with a system prompt the
+        // creating member wrote, and a recruit votes with full weight and counts
+        // toward quorum. After the USE check, so the refusal reveals nothing about
+        // an agent the owner may not touch.
+        if (gc.getCreatedAgentIds().contains(wanted) || (dynamicAgentCheck != null && dynamicAgentCheck.test(wanted))) {
+            LOGGER.warnf("Recruitment of '%s' into group conversation %s refused: it is a dynamically created agent",
+                    sanitize(wanted), sanitize(groupConversationId));
+            return CreatedAgentRecruitGuard.REFUSAL.formatted(wanted);
         }
         if (!isDeployedAndReady(wanted)) {
             return "Agent '%s' is not deployed and ready, so it cannot join. Use findAgentsByCapability to find one that is."

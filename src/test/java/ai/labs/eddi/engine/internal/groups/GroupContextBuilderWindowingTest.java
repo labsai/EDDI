@@ -194,6 +194,8 @@ class GroupContextBuilderWindowingTest {
         verify(summarizationService, times(2)).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"));
         String secondContent = content.getValue();
         assertTrue(secondContent.contains("SUMMARY-1"), "the previous summary is the compressed form of the old slice");
+        assertTrue(secondContent.contains(":\n```\nSUMMARY-1\n```\n\n## New entries:"),
+                "the re-fed summary is earlier model output, so it is quoted like the entries: " + secondContent);
         assertTrue(secondContent.contains("ccc-3") && secondContent.contains("ddd-4"), "only the new slice rides along verbatim");
         assertFalse(secondContent.contains("aaa-1"), "already-summarized entries must not be re-fed — that is the incremental contract");
         assertEquals("SUMMARY-2", gc.getTranscriptSummary());

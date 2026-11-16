@@ -37,6 +37,20 @@ class BoundedRegexTest {
                 () -> assertEquals(Result.TIMED_OUT, BoundedRegex.find(Pattern.compile("(.*a){12}x"), "a".repeat(40) + "b", 100)));
     }
 
+    @Test
+    @DisplayName("firstMatch returns the groups, and nothing for a miss, a timeout or a refused pattern")
+    void firstMatchCarriesGroups() {
+        var match = BoundedRegex.firstMatch(Pattern.compile("Option ([A-Z]): (.*)"), "Option B: Stay", 100);
+        assertTrue(match.isPresent());
+        assertEquals("B", match.get().group(1));
+        assertEquals("Stay", match.get().group(2));
+
+        assertTrue(BoundedRegex.firstMatch(Pattern.compile("Option"), "nothing here", 100).isEmpty());
+        assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> assertTrue(BoundedRegex.firstMatch(Pattern.compile("(.*a){12}x"), "a".repeat(40) + "b", 100).isEmpty()));
+        assertTrue(BoundedRegex.firstMatch(Pattern.compile("(?:(?:){99999}){99999}"), "abc", 100).isEmpty());
+    }
+
     /**
      * These spin without one {@code charAt}, so the deadline never fires: the first
      * took about 25 seconds and the others over a second each on a short text

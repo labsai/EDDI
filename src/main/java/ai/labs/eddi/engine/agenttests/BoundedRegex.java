@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.agenttests;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Optional;
+import java.util.regex.MatchResult;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -85,6 +87,31 @@ public final class BoundedRegex {
                     : Result.NO_MATCH;
         } catch (MatchTimedOut e) {
             return Result.TIMED_OUT;
+        }
+    }
+
+    /**
+     * The first match of {@code pattern} in {@code text}, with its groups, under
+     * the same bounds as {@link #find(Pattern, String, long)}. Empty when there is
+     * no match <em>and</em> when the match was refused or ran out of time — a
+     * parser reading model output treats all three as "not found", never as a
+     * guess.
+     *
+     * @since 6.7.0
+     */
+    public static Optional<MatchResult> firstMatch(Pattern pattern, String text, long timeoutMs) {
+        if ((pattern.flags() & Pattern.COMMENTS) != 0 || excessiveRepetition(pattern.pattern()).isPresent()) {
+            return Optional.empty();
+        }
+        String input = text == null ? "" : text;
+        if (input.length() > MAX_TEXT_LENGTH) {
+            input = input.substring(0, MAX_TEXT_LENGTH);
+        }
+        try {
+            Matcher matcher = pattern.matcher(new DeadlineCharSequence(input, System.nanoTime() + timeoutMs * 1_000_000L));
+            return matcher.find() ? Optional.of(matcher.toMatchResult()) : Optional.empty();
+        } catch (MatchTimedOut e) {
+            return Optional.empty();
         }
     }
 

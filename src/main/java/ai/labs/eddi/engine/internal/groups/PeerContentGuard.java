@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +54,8 @@ final class PeerContentGuard {
     static final String FENCE = "```";
     /** {@link #FENCE} with a zero-width space (U+200B) after its first backtick. */
     static final String BROKEN_FENCE = "`​``";
+    /** The character {@link #BROKEN_FENCE} carries after its first backtick. */
+    private static final char ZERO_WIDTH_SPACE = BROKEN_FENCE.charAt(1);
 
     private static final String ENTRY_CUT_NOTE = "\n[... %d more characters not shown]";
     private static final String DIGEST_CUT_NOTE = "[%d earlier entries not shown: the quoted discussion is over %d characters]";
@@ -101,7 +106,7 @@ final class PeerContentGuard {
         if (text == null) {
             return null;
         }
-        String safe = text.replace(FENCE, BROKEN_FENCE);
+        String safe = breakFences(text);
         if (safe.length() <= MAX_ENTRY_CHARS) {
             return safe;
         }
@@ -113,22 +118,94 @@ final class PeerContentGuard {
     }
 
     /**
+     * {@code text} as a {@code ```} block with every fence inside it broken, for
+     * the engine's own prompts (verifier, executor, bidder, judge, facilitator,
+     * dissent, summarizer) that quote member-authored text. Not cut: those prompts
+     * quote a task result or a synthesis that the reader must see whole, and they
+     * have their own bounds where they need one.
+     */
+    static String fenced(String text) {
+        return FENCE + "\n" + (text == null ? "" : breakFences(text)) + "\n" + FENCE;
+    }
+
+    /**
+     * {@code text} with no three backticks in a row: every run of three or more is
+     * broken with zero-width spaces ({@code ```} becomes {@link #BROKEN_FENCE}; a
+     * longer run gets a zero-width space after its first backtick and after every
+     * second one from there). {@code String.replace(FENCE, …)} was not enough — it
+     * left a fence behind in a run of four or more, which then closed the quoted
+     * block early. One linear pass, and idempotent: applied twice, the text does
+     * not change, so a value broken once can be shown and matched again.
+     */
+    static String breakFences(String text) {
+        if (text == null || !text.contains(FENCE)) {
+            return text;
+        }
+        var sb = new StringBuilder(text.length() + 8);
+        int i = 0;
+        int length = text.length();
+        while (i < length) {
+            if (text.charAt(i) != '`') {
+                sb.append(text.charAt(i++));
+                continue;
+            }
+            int end = i;
+            while (end < length && text.charAt(end) == '`') {
+                end++;
+            }
+            int run = end - i;
+            sb.append('`');
+            for (int k = 1; k < run; k++) {
+                if (run >= 3 && k % 2 == 1) {
+                    sb.append(ZERO_WIDTH_SPACE);
+                }
+                sb.append('`');
+            }
+            i = end;
+        }
+        return sb.toString();
+    }
+
+    /**
+     * {@code prompt} opened by {@link DiscussionStylePresets#QUOTED_CONTENT_NOTICE}
+     * — what tells the reader that {@link #fenced} text is quoted, not
+     * instructions.
+     */
+    static String withQuotedNotice(String prompt) {
+        return DiscussionStylePresets.QUOTED_CONTENT_NOTICE + "\n\n" + prompt;
+    }
+
+    /**
      * {@code name} on one line: line breaks and other control characters become
      * spaces, fences are broken, and it is cut at {@link #MAX_SPEAKER_CHARS}.
+     * <p>
+     * A name ending in {@link AgentGroupStore#NOT_AN_AGENT_SUFFIX} — how
+     * {@code GroupSigningGuard} marks an entry no agent wrote for a member that
+     * requires peer verification — keeps that suffix: the cut and the strip apply
+     * to the part before it. Otherwise a long or blank-padded name would lose the
+     * mark and read like a verified agent's.
      */
     static String speaker(String name) {
         if (name == null) {
             return null;
         }
-        StringBuilder sb = new StringBuilder(Math.min(name.length(), MAX_SPEAKER_CHARS));
-        for (int i = 0; i < name.length() && sb.length() < MAX_SPEAKER_CHARS; i++) {
+        String suffix = AgentGroupStore.NOT_AN_AGENT_SUFFIX;
+        if (name.endsWith(suffix)) {
+            return (oneLine(name.substring(0, name.length() - suffix.length()), MAX_SPEAKER_CHARS - suffix.length()) + suffix).strip();
+        }
+        return oneLine(name, MAX_SPEAKER_CHARS);
+    }
+
+    private static String oneLine(String name, int maxChars) {
+        StringBuilder sb = new StringBuilder(Math.min(name.length(), maxChars));
+        for (int i = 0; i < name.length() && sb.length() < maxChars; i++) {
             char c = name.charAt(i);
             sb.append(Character.isISOControl(c) || c == ' ' || c == ' ' ? ' ' : c);
         }
         if (!sb.isEmpty() && Character.isHighSurrogate(sb.charAt(sb.length() - 1))) {
             sb.setLength(sb.length() - 1);
         }
-        return sb.toString().replace(FENCE, BROKEN_FENCE).strip();
+        return breakFences(sb.toString()).strip();
     }
 
     private static boolean isEntryList(List<?> list) {
