@@ -164,6 +164,11 @@ class TeamCadenceNonBlockingApprovalsTest {
         gc.setGroupId(GROUP_ID);
         gc.setState(state);
         when(conversationStore.read(id)).thenReturn(gc);
+        // The real cancel of a discussion no leg is running: CAS to CANCELLED.
+        when(groupConversationService.cancelDiscussion(eq(id), any())).thenAnswer(inv -> {
+            gc.setState(GroupConversationState.CANCELLED);
+            return true;
+        });
         return gc;
     }
 
@@ -354,6 +359,59 @@ class TeamCadenceNonBlockingApprovalsTest {
     }
 
     // ------------------------------------------------- reconciling parked runs
+
+    @Nested
+    @DisplayName("a stale-claim reclaim racing an approval")
+    class ReclaimRace {
+
+        private TaskItem task;
+        private GroupWorkspace workspace;
+        private GroupConversation gc;
+
+        @BeforeEach
+        void stale() throws Exception {
+            task = new TaskItem("Draft the post", "", 5);
+            workspace = workspace(task);
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), task);
+            gc = discussion(PAUSED_ID, GroupConversationState.AWAITING_APPROVAL);
+            // An approval landed between the reclaim's read and its cancel: the run is
+            // IN_PROGRESS again, so the cancel only signals the live leg and the stored
+            // discussion is not ended.
+            when(groupConversationService.cancelDiscussion(eq(PAUSED_ID), any())).thenAnswer(inv -> {
+                gc.setState(GroupConversationState.IN_PROGRESS);
+                return true;
+            });
+        }
+
+        @Test
+        @DisplayName("a run an approval resumed keeps its claim and its tasks — nothing is written from the pre-cancel snapshot")
+        void resumedRunKeepsTheClaim() throws Exception {
+            assertFalse(service.reconcile(workspace));
+
+            verify(groupConversationService).cancelDiscussion(PAUSED_ID, ControlSignal.CANCEL_GRACEFUL);
+            assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.IN_PROGRESS, workspace.getBacklog().findById(task.id()).status());
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+            assertEquals(0, meters.counter("eddi_team_cadence_claims_reclaimed_total").count(),
+                    "no claim was released");
+        }
+
+        @Test
+        @DisplayName("once the resumed leg ends, the run is settled from its final task list")
+        void resumedRunIsSettledFromItsFinalState() throws Exception {
+            service.reconcile(workspace);
+
+            gc.setState(GroupConversationState.COMPLETED);
+            var tasks = new SharedTaskList();
+            verified(tasks, "Draft the post");
+            gc.setTaskList(tasks);
+
+            assertTrue(service.reconcile(workspace));
+            assertEquals(TaskStatus.VERIFIED, workspace.getBacklog().findById(task.id()).status(),
+                    "the task the resumed leg finished is not run again");
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+        }
+    }
 
     @Nested
     @DisplayName("reconciling parked runs")

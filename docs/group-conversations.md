@@ -629,7 +629,10 @@ A claim older than `eddi.groups.cadence.claim-ttl` (default `PT24H`) is
 reclaimed — the stranded discussion is cancelled and put through the *ordinary*
 failure writeback, so pulled tasks return to `PENDING` and the claim clears.
 Cancel happens before release, so a reclaimed run cannot keep spending against a
-budget nobody is tracking. Set the TTL non-positive to disable reclaiming, for
+budget nobody is tracking. The writeback reads the discussion *after* the cancel:
+if an approval resumed it in the meantime, the cancel only signals the running
+leg, so the claim stays held until that leg ends and the run is settled from its
+final task list — tasks it finished are not returned to `PENDING`. Set the TTL non-positive to disable reclaiming, for
 an operator who would rather wedge than risk abandoning a pause; the counter is
 `eddi_team_cadence_claims_reclaimed_total`. Creating a cadence on a group that
 combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —

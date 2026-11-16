@@ -597,11 +597,42 @@ public class TeamCadenceService {
                 LogSanitizer.sanitize(workspace.getGroupId()), claimedAt, claimTtl, run.parked() ? "parked " : "",
                 gc.getId(), gc.getState());
         cancelQuietly(gc.getId());
+        // Write back from what the discussion is AFTER the cancel, never from the
+        // snapshot read before it. A cancel only ends a discussion no leg is running:
+        // the stored state is compare-and-set to CANCELLED. If an approval resumed the
+        // pause between that read and the cancel, the cancel merely signals the live
+        // leg, which goes on finishing tasks in its own copy -- a writeback from the
+        // stale snapshot would return those tasks to PENDING and the next fire would
+        // run them again. So the claim stays held until the discussion has really
+        // ended, and the run is then settled from its final task list.
+        GroupConversation after;
+        try {
+            after = conversationStore.read(gc.getId());
+        } catch (Exception e) {
+            // Retried at the next fire: a discussion that is really gone takes the
+            // vanished-discussion path in settleIfEnded then.
+            LOGGER.warnf("Could not re-read cadence discussion %s after cancelling it (%s) — keeping the claim",
+                    gc.getId(), e.getClass().getSimpleName());
+            return Settled.IN_FLIGHT;
+        }
+        if (!isEnded(after.getState())) {
+            LOGGER.infof("Cadence discussion %s is still running after the cancel (state %s) — keeping the claim "
+                    + "until it ends, so its writeback sees the tasks it finished", gc.getId(), after.getState());
+            return Settled.IN_FLIGHT;
+        }
         cadenceClaimsReclaimed.increment();
-        // The ordinary failure writeback: returns the pulled tasks to PENDING and
-        // clears the claim, exactly as a FAILED/CANCELLED discussion would. The
-        // discussion's state is the pre-cancel one; the reclaim is a stop.
-        return written(writebackFailure(workspace, run, gc, 0, true));
+        // The ordinary writeback for the state the run ended in. A graceful cancel
+        // lets the current phase finish, so a run can still end COMPLETED; anything
+        // else is a stop (reclaimed = true), whatever the pre-cancel state was.
+        return after.getState() == GroupConversationState.COMPLETED
+                ? written(writebackCompleted(workspace, run, after, 0))
+                : written(writebackFailure(workspace, run, after, 0, true));
+    }
+
+    /** States a discussion does not leave: no leg runs, and none will. */
+    private static boolean isEnded(GroupConversationState state) {
+        return state == GroupConversationState.COMPLETED || state == GroupConversationState.FAILED
+                || state == GroupConversationState.REJECTED || state == GroupConversationState.CANCELLED;
     }
 
     /**

@@ -33,6 +33,11 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   `claim` persists the park in the same revision-checked write as the new claim and re-parks on a
   fresh copy when it loses to an unrelated write; the verified/approved writeback is shared by
   `writebackCompleted` and `writebackFailure`; the group's `hitlConfig` is read by one helper.
+- Stale-claim reclaim (review fix, also present before this branch): the writeback now reads the
+  discussion after the cancel instead of the snapshot taken before it. If an approval resumed the
+  run in between, the cancel only signals the live leg, so the claim stays held and the run is
+  settled from its final task list once the leg ends; before, the tasks it finished went back to
+  `PENDING`. `eddi_team_cadence_claims_reclaimed_total` now counts only claims actually released.
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).
