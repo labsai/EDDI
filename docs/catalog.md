@@ -49,14 +49,28 @@ An **anonymous** caller depends on `authorization.enabled`:
     "description": "Answers questions about orders and returns",
     "reviewNotice": null,
     "rating": null,
-    "callerLevel": "USE"
+    "callerLevel": "USE",
+    "appearance": {
+      "displayName": "Ada from Support",
+      "avatar": "https://cdn.example.com/ada.png",
+      "accentColor": "#0a7d55",
+      "starters": ["Where is my order?", "I want to return an item"]
+    },
+    "conversationControls": {
+      "undo": true, "redo": true, "attachments": true, "rating": true,
+      "quickReplies": true, "streaming": true, "rawHtml": false
+    }
   }
 ]
 ```
 
 The agent fields are the ones `GET /agents/{agentId}/profile` returns: name, description, review
-notice and rating controls. `callerLevel` is what the caller holds on the agent (`USE`, `VIEW`,
-`EDIT` or `OWN`) and is always at least `USE`.
+notice, rating controls, and the deployed version's `appearance` and `conversationControls`
+([agent presentation](agent-config-authoring.md#agent-presentation-appearance-conversationcontrols)).
+`appearance` is `null` when the agent sets none; `conversationControls` is always present, with
+every default applied (`rawHtml` is `false` unless the agent enables it). Workforce Home draws its
+cards and starter chips from these, so it needs no profile call per agent. `callerLevel` is what
+the caller holds on the agent (`USE`, `VIEW`, `EDIT` or `OWN`) and is always at least `USE`.
 
 ```json
 [
@@ -124,7 +138,7 @@ export/import and [agent sync](agent-sync-guide.md) carry it like any other fiel
 
 | Role | What Workforce shows |
 | --- | --- |
-| `eddi-user` | The catalog: listed agents (opens a chat) and listed teams (opens the board), their discussions and threads. No team builder, team settings or analytics. `/` and `/welcome` go straight to `/workforce` |
+| `eddi-user` | Home: a composer with an agent picker and the agent's starters, the recent conversations, then the catalog — listed agents (opens a chat) and listed teams (opens the board). The sidebar lists their chats and team sessions by date ([Workforce guide](workforce-guide.md)). No team builder, team settings or analytics. `/` and `/welcome` go straight to `/workforce` |
 | `eddi-editor` | The building dashboard, read from the stores, plus a **What end users see** section that counts the listed entries, or explains how to list one when there are none |
 | `eddi-admin` | As an editor, plus a link to the Platform Operator at `/manage/operator`. Workforce does not mount the Operator's drawer |
 

@@ -85,6 +85,28 @@ test.describe("Workforce for an eddi-user", () => {
     await expect(page.getByTestId("workforce-layout")).toBeVisible();
   });
 
+  test("Home and the sidebar's conversations (phase 4) read nothing an eddi-user is refused", async ({ page }) => {
+    await page.goto("/workforce");
+    await waitForApp(page);
+    await expect(page.getByTestId("home-composer")).toBeVisible();
+    await expect(page.getByTestId("workforce-sessions")).toBeVisible();
+    await expect(page.getByTestId("session-chat-conv1")).toBeVisible();
+
+    // Rename and pin go to the owner endpoint, open to every role.
+    await page.getByTestId("session-chat-conv3").hover();
+    await page.getByTestId("session-chat-conv3-pin").click();
+    await expect(page.getByTestId("session-group-pinned").getByTestId("session-chat-conv3")).toBeVisible();
+
+    // Opening a chat from the sidebar, and a starter from Home.
+    await page.getByTestId("session-chat-conv1").click();
+    await waitForApp(page);
+    await expect(page).toHaveURL(/conversationId=conv1/);
+    await page.goto("/workforce");
+    await waitForApp(page);
+    await page.getByTestId("home-starter-0").click();
+    await expect(page).toHaveURL(/\/workforce\/chat\?agentId=/);
+  });
+
   test("chat with a listed agent opens without store reads", async ({ page }) => {
     await page.goto(`/workforce/chat?agentId=${AGENT.agentId}&agentName=${encodeURIComponent(AGENT.name)}`);
     await waitForApp(page);
