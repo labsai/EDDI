@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { server } from "@eddi/app-kit/test/mocks/server";
@@ -7,6 +7,8 @@ import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
 import { PendingAttachmentChip } from "@eddi/app-kit/components/chat/attachment-chip";
 import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
+import { useAttachmentStaging } from "@eddi/app-kit/hooks/use-attachment-staging";
+import { toast } from "sonner";
 import { AttachmentError, PROGRESS_MIN_BYTES, uploadAttachment } from "@eddi/app-kit/lib/api/attachments";
 
 /** T1.8 — per-file progress and errors, and a way to try a failed file again. */
@@ -150,5 +152,132 @@ describe("ChatPanel — a failed attachment, tried again", () => {
     await waitFor(() => expect(screen.queryByTestId("attachment-retry")).not.toBeInTheDocument());
     expect(screen.getByTestId("attachment-chip")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("an upload the user walks away from", () => {
+  let sent: AbortableXhr[];
+  const big = (name: string) => new File([new Uint8Array(PROGRESS_MIN_BYTES)], name, { type: "text/plain" });
+
+  class AbortableXhr {
+    status = 0;
+    statusText = "";
+    responseText = "";
+    aborted = false;
+    upload: { onprogress: ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null } = {
+      onprogress: null,
+    };
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    open() {}
+    setRequestHeader() {}
+    getResponseHeader() {
+      return "application/json";
+    }
+    send() {
+      sent.push(this);
+    }
+    abort() {
+      this.aborted = true;
+      this.onabort?.();
+    }
+    respond(status: number, body: unknown) {
+      this.status = status;
+      this.responseText = JSON.stringify(body);
+      this.onload?.();
+    }
+  }
+
+  beforeEach(() => {
+    sent = [];
+    vi.stubGlobal("XMLHttpRequest", AbortableXhr);
+    vi.spyOn(toast, "error").mockImplementation(() => "");
+    vi.spyOn(toast, "warning").mockImplementation(() => "");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("aborts the request from the signal and rejects as cancelled", async () => {
+    const controller = new AbortController();
+    const upload = uploadAttachment("conv1", big("a.txt"), vi.fn(), controller.signal);
+    controller.abort();
+    expect(sent[0]!.aborted).toBe(true);
+    await expect(upload).rejects.toMatchObject({ code: "UPLOAD_CANCELLED" });
+  });
+
+  it("removing the chip aborts the upload, with no error and no chip left", async () => {
+    const { result } = renderHook(() => useAttachmentStaging("conv1"));
+    await act(async () => {
+      void result.current.stageFiles([big("a.txt")]);
+    });
+    expect(result.current.pendingAttachments).toHaveLength(1);
+    await act(async () => {
+      result.current.removeAttachment(result.current.pendingAttachments[0]!.id);
+    });
+    expect(sent[0]!.aborted).toBe(true);
+    expect(result.current.pendingAttachments).toHaveLength(0);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("unmounting aborts the upload without an error", async () => {
+    const { result, unmount } = renderHook(() => useAttachmentStaging("conv1"));
+    await act(async () => {
+      void result.current.stageFiles([big("a.txt")]);
+    });
+    unmount();
+    expect(sent[0]!.aborted).toBe(true);
+    await Promise.resolve();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("switching conversation aborts the upload", async () => {
+    const { result, rerender } = renderHook(({ id }) => useAttachmentStaging(id), { initialProps: { id: "conv1" } });
+    await act(async () => {
+      void result.current.stageFiles([big("a.txt")]);
+    });
+    rerender({ id: "conv2" });
+    expect(sent[0]!.aborted).toBe(true);
+    expect(result.current.pendingAttachments).toHaveLength(0);
+  });
+
+  it("deletes a file whose reply arrives after its chip was discarded, and shows nothing", async () => {
+    const deletes: string[] = [];
+    server.use(
+      http.delete("*/conversations/conv1/attachments/:ref", ({ params }) => {
+        deletes.push(String(params.ref));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const { result } = renderHook(() => useAttachmentStaging("conv1"));
+    await act(async () => {
+      void result.current.stageFiles([big("a.txt")]);
+    });
+    const xhr = sent[0]!;
+    // An XHR whose abort() does not stop a response already on the wire.
+    xhr.abort = () => {
+      xhr.aborted = true;
+    };
+    await act(async () => {
+      result.current.removeAttachment(result.current.pendingAttachments[0]!.id);
+      xhr.respond(201, { storageRef: "late", fileName: "a.txt", sizeBytes: 1, forwardableInline: false });
+    });
+    await waitFor(() => expect(deletes).toEqual(["late"]));
+    expect(result.current.pendingAttachments).toHaveLength(0);
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("still completes a normal upload", async () => {
+    const { result } = renderHook(() => useAttachmentStaging("conv1"));
+    await act(async () => {
+      void result.current.stageFiles([big("a.txt")]);
+    });
+    await act(async () => {
+      sent[0]!.respond(201, { storageRef: "r1", fileName: "a.txt", sizeBytes: 1 });
+    });
+    expect(result.current.pendingAttachments[0]).toMatchObject({ status: "ready", result: { storageRef: "r1" } });
+    expect(sent[0]!.aborted).toBe(false);
   });
 });

@@ -643,9 +643,13 @@ export function ChatPanel({
     // Read before the undo takes the turn off the screen: once the question
     // is back in the composer, the notice beside Edit is gone with it.
     const ranTools = toolNames(toolTurns.get(lastStepIndex(messages) ?? -1));
+    // The conversation the Edit belongs to: one opened while the undo was in
+    // flight must not get this conversation's message in its composer.
+    const editedConversation = conversationId;
     undoConversation.mutate(undefined, {
       onSuccess: (moved) => {
         if (moved === false) return;
+        if (useChatStore.getState().conversationId !== editedConversation) return;
         setDraft({ text, nonce: Date.now() });
         if (ranTools.length > 0) {
           const tools = formatToolList(ranTools, i18n.language, (n) =>
@@ -660,7 +664,7 @@ export function ChatPanel({
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
-  }, [canEditLast, lastUser, undoConversation, toolTurns, messages, i18n.language, t]);
+  }, [canEditLast, lastUser, undoConversation, conversationId, toolTurns, messages, i18n.language, t]);
 
   /** By default: which tools the turn ran, when it ran any (T1.6). */
   const turnNotice = (context: TurnNoticeContext): ReactNode => {
@@ -1162,7 +1166,13 @@ export function ChatPanel({
           )}
           </div>
 
-          <ReplyAnnouncer messages={messages as AnnouncedMessage[]} speaker={speaker} className="sr-only" />
+          <ReplyAnnouncer
+            messages={messages as AnnouncedMessage[]}
+            speaker={speaker}
+            // A conversation opened (or its history finishing loading) is history, not news.
+            historyKey={`${conversationId ?? ""}${isLoadingConversation ? ":loading" : ""}`}
+            className="sr-only"
+          />
 
           {/* Scroll-to-bottom FAB with new content pulse */}
           {showScrollFab && (
@@ -1360,11 +1370,15 @@ function ChatInputWithSecretToggle({
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   }, []);
 
-  // An edited message comes back into the composer, caret at its end.
+  // An edited message comes back into the composer, caret at its end. A
+  // message the person had typed and not sent (before the Edit, or while its
+  // undo ran) is kept below it rather than overwritten.
   const draftNonce = draft?.nonce;
   useEffect(() => {
     if (!draft) return;
-    setValue(draft.text);
+    setValue((unsent) => (unsent.trim() && unsent !== draft.text ? `${draft.text}
+
+${unsent}` : draft.text));
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;

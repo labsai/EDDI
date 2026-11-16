@@ -113,7 +113,7 @@ export function ShortcutsDialog() {
         onClick={() => setOpen(false)}
         aria-hidden="true"
       />
-      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
         <div
           ref={dialogRef}
           role="dialog"
@@ -121,7 +121,8 @@ export function ShortcutsDialog() {
           aria-label={t("Workforce.shortcuts.title", "Keyboard Shortcuts")}
           onKeyDown={handleKeyDown}
           className={cn(
-            "pointer-events-auto w-full max-w-sm",
+            // A short landscape screen: the dialog scrolls rather than lose its close button.
+            "pointer-events-auto w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto",
             "bg-card rounded-xl shadow-2xl border border-border",
             "animate-[br-message-in_200ms_ease-out]"
           )}
