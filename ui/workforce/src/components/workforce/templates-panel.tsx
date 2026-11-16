@@ -4,8 +4,8 @@ import { Bookmark, Users, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { useTemplates, type DiscussionTemplate } from "@/hooks/use-templates";
-import { styleLabel } from "@eddi/app-kit/lib/discussion-styles";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { styleLabel } from "@eddi/conversation/team";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 

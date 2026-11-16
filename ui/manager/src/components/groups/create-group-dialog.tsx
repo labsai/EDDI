@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw, ChevronDown, ChevronUp, Info, Settings } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { cn } from "@eddi/app-kit/lib/utils";
 import {
   useCreateGroup,
@@ -19,7 +19,7 @@ import {
   type MemberFailurePolicy,
   type MemberUnavailablePolicy,
 } from "@eddi/app-kit/lib/api/groups";
-import { styleInfo, styleLabel, styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleInfo, styleLabel, styleDisplay } from "@eddi/conversation/team";
 import {
   groupSaveProblems,
   idsTakenByOtherMembers,

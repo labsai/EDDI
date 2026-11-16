@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@eddi/app-kit/lib/utils";
 import type { StyleCount } from "@/hooks/use-workforce-analytics";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import type { DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
 
 interface StyleBreakdownProps {

@@ -18,7 +18,7 @@ import {
 import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { ApiClientError, getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 import {

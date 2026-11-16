@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Check, ExternalLink, RefreshCw } from "lucide-react";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { useAcknowledgeAlert, useRetryAlert } from "@/hooks/use-alerts";
 import type { AlertEvent, DeliveryStatus, EventState } from "@eddi/app-kit/lib/api/alerts";

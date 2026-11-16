@@ -7,7 +7,7 @@ import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 import { useClusterActivity, useClusterOverview } from "@/hooks/use-cluster";
 import { clusterAccess } from "@/lib/cluster-access";
 import { formatDuration } from "@/lib/cluster-labels";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { StreamBadge } from "@/components/ui/stream-badge";

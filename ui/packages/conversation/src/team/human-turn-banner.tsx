@@ -1,0 +1,231 @@
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Clock, AlertTriangle, UserCheck, Send } from "lucide-react";
+import { cn } from "@eddi/ui";
+import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "./duration";
+
+interface HumanTurnBannerProps {
+  /** The pending member's display name. */
+  displayName: string;
+  /** The phase's rendered prompt — what the human is actually being asked. */
+  renderedPrompt: string;
+  pausedPhaseName?: string | null;
+  /** ISO timestamp the turn became pending (`PendingHumanInput.requestedAt`). */
+  requestedAt?: string | null;
+  /** The group's `humanMemberConfig.turnTimeout` (ISO-8601 duration), if set. */
+  turnTimeout?: string | null;
+  /**
+   * The tied options when the pending input is a tie-break (`tiePolicy:
+   * HUMAN_DECIDES`). The banner then asks for one choice, with an optional
+   * rationale, instead of a free-text turn.
+   */
+  options?: string[];
+  /**
+   * The task-force task the pending input is about (a HUMAN executor's task). The
+   * banner then names the task and asks for its result.
+   */
+  task?: { subject: string; description?: string | null };
+  onSubmit: (content: string, choice?: string) => void;
+  isSubmitting?: boolean;
+  /**
+   * Identifies the pause being answered (conversation id + pause). When it
+   * changes the banner starts over: a choice or rationale typed for one pause
+   * must never be submitted for another.
+   */
+  pauseKey?: string;
+}
+
+function isValidDate(iso?: string | null): boolean {
+  return !!iso && !Number.isNaN(new Date(iso).getTime());
+}
+
+/**
+ * A HUMAN group member's turn is up (I6) — "you're up", not "approve/reject".
+ * Deliberately a separate component from `ApprovalBanner`: that one decides
+ * whether someone else's contribution proceeds, this one collects the human's
+ * OWN contribution, so the interaction (compose + submit) has nothing in common
+ * with approve/reject/amend.
+ */
+export function HumanTurnBanner({ pauseKey, ...props }: HumanTurnBannerProps) {
+  return <HumanTurnBannerBody key={pauseKey ?? ""} {...props} />;
+}
+
+function HumanTurnBannerBody({
+  displayName,
+  renderedPrompt,
+  pausedPhaseName,
+  requestedAt,
+  turnTimeout,
+  options,
+  task,
+  onSubmit,
+  isSubmitting,
+}: Omit<HumanTurnBannerProps, "pauseKey">) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState("");
+  const [choice, setChoice] = useState<string | null>(null);
+  const tieBreak = options !== undefined;
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!requestedAt || !turnTimeout) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [requestedAt, turnTimeout]);
+
+  const timeRemaining = (() => {
+    if (!isValidDate(requestedAt) || !turnTimeout) return null;
+    const durationMs = parseIsoDurationMs(turnTimeout);
+    if (durationMs == null) return null;
+    const deadline = new Date(requestedAt!).getTime() + durationMs;
+    const remaining = deadline - nowMs;
+    return { overdue: remaining <= 0, ms: Math.max(0, remaining) };
+  })();
+
+  const trimmed = content.trim();
+  // A tie-break is answered by its choice; the rationale is optional.
+  const canSubmit = (tieBreak ? choice !== null : trimmed.length > 0) && !isSubmitting;
+
+  function handleSubmit() {
+    if (!canSubmit) return;
+    if (tieBreak) onSubmit(trimmed, choice!);
+    else onSubmit(trimmed);
+  }
+
+  return (
+    <div
+      data-testid="human-turn-banner"
+      className="rounded-xl border border-primary/30 bg-primary/5 p-4 backdrop-blur-sm"
+    >
+      <div className="mb-3 flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2">
+          <UserCheck className="h-5 w-5 text-primary" aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-semibold text-foreground">
+            {tieBreak
+              ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
+              : task
+                ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
+                : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
+          </h3>
+          {task && (
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="human-turn-task">
+              <span className="font-medium text-foreground">{task.subject}</span>
+              {task.description ? ` — ${task.description}` : ""}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-2 text-xs">
+        {pausedPhaseName && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+            {t("hitl.phase", "Phase")}: {pausedPhaseName}
+          </span>
+        )}
+        {isValidDate(requestedAt) && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            {t("groups.humanTurnRequestedAt", "Requested")}:{" "}
+            {new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" }).format(
+              new Date(requestedAt!),
+            )}
+          </span>
+        )}
+        {turnTimeout && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+            {t("groups.humanTurnTimeout", "Timeout")}: {formatIsoDuration(turnTimeout)}
+          </span>
+        )}
+        {timeRemaining && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium",
+              timeRemaining.overdue
+                ? "bg-destructive/10 text-destructive"
+                : "bg-primary/10 text-primary",
+            )}
+          >
+            <Clock className="h-3 w-3" aria-hidden="true" />
+            {timeRemaining.overdue
+              ? t("hitl.overdue", "Overdue")
+              : `${t("hitl.timeRemaining", "Remaining")}: ${formatDurationMs(timeRemaining.ms)}`}
+          </span>
+        )}
+      </div>
+
+      {renderedPrompt && (
+        <div
+          className="mb-3 whitespace-pre-wrap rounded-lg border border-border bg-background/60 p-3 text-sm text-foreground"
+          data-testid="human-turn-prompt"
+        >
+          {renderedPrompt}
+        </div>
+      )}
+
+      {tieBreak && (
+        <fieldset className="mb-3 space-y-1.5" data-testid="human-turn-options">
+          <legend className="mb-1 text-xs font-medium text-foreground">
+            {t("groupTieBreak.chooseOne", "Choose one option")}
+          </legend>
+          {options!.map((option, i) => (
+            <label key={option} className="flex items-start gap-2 text-sm text-foreground">
+              <input
+                type="radio"
+                name="tie-break-choice"
+                value={option}
+                checked={choice === option}
+                onChange={() => setChoice(option)}
+                disabled={isSubmitting}
+                className="mt-0.5 accent-primary"
+                data-testid={`human-turn-option-${i}`}
+              />
+              <span>{option}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        aria-label={
+          tieBreak
+            ? t("groupTieBreak.rationalePlaceholder", "Why (optional)")
+            : t("groups.humanTurnResponsePlaceholder", "Your response")
+        }
+        placeholder={
+          tieBreak
+            ? t("groupTieBreak.rationalePlaceholder", "Why (optional)")
+            : task
+              ? t("groupHumanTasks.resultPlaceholder", "Your result for this task")
+              : t("groups.humanTurnResponsePlaceholder", "Your response")
+        }
+        className="mb-3 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        rows={tieBreak ? 2 : 4}
+        disabled={isSubmitting}
+        data-testid="human-turn-input"
+        onKeyDown={(e) => {
+          // Mod+Enter submits — matches the chat input convention elsewhere in the app.
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
+      />
+
+      <button
+        type="button"
+        disabled={!canSubmit}
+        onClick={handleSubmit}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        data-testid="human-turn-submit"
+      >
+        <Send className="h-4 w-4" aria-hidden="true" />
+        {isSubmitting ? t("groups.humanTurnSubmitting", "Submitting…") : t("groups.humanTurnSubmit", "Submit")}
+      </button>
+    </div>
+  );
+}

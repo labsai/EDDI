@@ -3,7 +3,7 @@ import { isImeComposing } from "../../lib/ime";
 import { Plus, X, type LucideIcon } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
+import { Badge } from "@eddi/ui";
 import { splitChipEntries } from "../../lib/chip-values";
 
 /**

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Building2, Copy, KeyRound, Lock, Plus, Save, Trash2, User, Users, Variable } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";

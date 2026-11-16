@@ -94,6 +94,11 @@ The component tests still live here (`ChatInput.test.tsx`, `MessageBubble.test.t
 and import from `@eddi/conversation`: they render the components inside `ChatProvider`,
 as the widget does.
 
+Import only the package's main entry. `@eddi/conversation/team` (group discussions,
+phase 6) and `@eddi/conversation/i18next` (the react-i18next binding) are the signed-in
+apps'; importing either here would put React-i18next and the team components into a
+first load that sits on its budget.
+
 ### What comes from `@eddi/ui`
 
 [`ui/packages/ui`](../packages/ui/README.md) holds the foundations both apps share: the

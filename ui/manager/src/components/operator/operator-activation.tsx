@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, Loader2, Sparkles, ShieldCheck, ShieldAlert, Lock, Unlock } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { ModelCombobox } from "@/components/shared/model-combobox";

@@ -18,7 +18,7 @@ import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { useStreamingGroupIds } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import { type DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import { getInitials } from "@eddi/app-kit/lib/utils";
 import { ModeSwitcher } from "@eddi/app-kit/components/shared/mode-switcher";
 import { BrandIcon, BrandWordmark } from "@eddi/app-kit/components/layout/brand-logo";

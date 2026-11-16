@@ -12,7 +12,7 @@ import {
   useDuplicateGroup,
 } from "@eddi/app-kit/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
 import { getGroup, type AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";

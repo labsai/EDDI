@@ -69,10 +69,17 @@ fail on either. What both apps need lives in a package:
   primitives, the group, chat and editor components both render, the base stylesheet, the
   boot (`startApp`) and providers (`AppProviders`), and the mock API with the test helpers.
   Imported by path: `@eddi/app-kit/components/chat/chat-panel`.
-- **`@eddi/core`, `@eddi/ui`, `@eddi/conversation`** — as in the Manager.
+- **`@eddi/core`, `@eddi/ui`, `@eddi/conversation`** — as in the Manager. A team's
+  discussion is `@eddi/conversation/team`: the `GroupDiscussion` controller (which the
+  board drives through `@eddi/app-kit`'s `useGroupDiscussionStream`) and the team
+  components — task board, decision card, structured turns, the human-turn banner, the
+  overview. The board and the history viewer render a discussion through ONE transcript,
+  `components/workforce/board-transcript.tsx`: the viewer passes the stored conversation
+  (read-only, opened at the top), the board the live stream.
 
 Code only Workforce uses stays here. When the Manager comes to need it too, move it to
-`@eddi/app-kit` (with `git mv`), not into a copy.
+`@eddi/app-kit` (with `git mv`), not into a copy — or to `@eddi/conversation/team` if it
+is part of rendering a discussion and needs no router.
 
 ### Moving between the apps
 

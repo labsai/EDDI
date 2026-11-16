@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
 import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import { getGroupTemplates, type GroupTemplate } from "@eddi/app-kit/lib/group-templates";
 import { useAvailableStyles } from "@eddi/app-kit/hooks/use-groups";
-import { styleInfo as localizedStyleInfo } from "@eddi/app-kit/lib/discussion-styles";
+import { styleInfo as localizedStyleInfo } from "@eddi/conversation/team";
 
 // ─── How It Works Step ───────────────────────────────────────────
 

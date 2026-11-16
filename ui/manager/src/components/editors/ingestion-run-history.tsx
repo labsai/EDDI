@@ -11,7 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import type { IngestionRun } from "@/lib/api/ingestion-sources";
 

@@ -45,11 +45,16 @@ describe("wave-3 parity across group-discussion surfaces", () => {
 
   // The wave-3 phase/entry types must have an icon on every surface that keys a
   // phase marker off them, or a vote/negotiation round renders as a bare pin.
+  // The history viewer renders through the board transcript (phase 6), so its
+  // phase markers are the board's icons.
   const iconMaps: [label: string, file: string][] = [
     ["Manager phase header", "components/groups/phase-header.tsx"],
     ["Workforce board transcript", "components/workforce/board-transcript.tsx"],
-    ["Workforce history viewer", "components/workforce/conversation-viewer.tsx"],
   ];
+
+  it("the history viewer renders through the board transcript", () => {
+    expect(read("components/workforce/conversation-viewer.tsx")).toMatch(/<BoardTranscript[\s>]/);
+  });
 
   for (const [label, file] of iconMaps) {
     it(`${label} has icons for the wave-3 phase types`, () => {

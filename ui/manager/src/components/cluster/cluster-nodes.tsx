@@ -6,7 +6,7 @@ import type { ClusterNode } from "@eddi/app-kit/lib/api/cluster";
 import { formatDuration, nodeStateLabel } from "@/lib/cluster-labels";
 import { useDrainNode } from "@/hooks/use-cluster";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { cn } from "@eddi/app-kit/lib/utils";
 

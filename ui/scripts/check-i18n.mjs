@@ -258,9 +258,22 @@ export function collectDefaults(files, read = (f) => fs.readFileSync(f, "utf8"))
  * `conversation.*`, in `src/i18n/locales/<lng>.json`) has them merged into this
  * app's bundles at runtime (`withConversationLocales`), so they count here as
  * if they were in this app's files — for MISSING, PARITY and ORPHAN alike.
+ * Every `i18n/locales` directory of a package counts, not only the one under
+ * `src/`: the team components' strings live in `src/team/i18n/locales`
+ * (`withTeamLocales`).
  */
 function packageLocaleDirs(packageDirs) {
-  return packageDirs.map((dir) => path.join(dir, "i18n", "locales")).filter((dir) => fs.existsSync(dir));
+  const found = [];
+  const visit = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "node_modules") continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name === "locales" && path.basename(dir) === "i18n") found.push(full);
+      else visit(full);
+    }
+  };
+  packageDirs.filter((dir) => fs.existsSync(dir)).forEach(visit);
+  return found;
 }
 
 export function check({ localesDir = LOCALES_DIR, srcDir = SRC_DIR, packageDirs = packageSourceDirs() } = {}) {

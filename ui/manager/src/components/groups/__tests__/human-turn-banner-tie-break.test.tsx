@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
-import { HumanTurnBanner } from "@eddi/app-kit/components/groups/human-turn-banner";
+import { HumanTurnBanner } from "@eddi/conversation/team";
 import { pendingTurnTimeout, tieBreakOptions, type PendingHumanInput } from "@eddi/app-kit/lib/api/groups";
 
 const OPTIONS = ["Double down on SEO", "Launch the paid pilot"];

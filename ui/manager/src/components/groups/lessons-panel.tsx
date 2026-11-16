@@ -3,8 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BookOpenCheck } from "lucide-react";
 import { ErrorState } from "@/components/shared/error-state";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
-import { Button } from "@eddi/ui";
+import { Badge, Button } from "@eddi/ui";
 import {
   useConsolidationState,
   useGroupLessons,

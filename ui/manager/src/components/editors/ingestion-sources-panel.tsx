@@ -16,7 +16,7 @@ import {
 import { cn } from "@eddi/app-kit/lib/utils";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
 import {

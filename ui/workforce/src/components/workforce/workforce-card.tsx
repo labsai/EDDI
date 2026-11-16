@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { MoreVertical, Settings, History, Copy, Trash2, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cn, getInitials, formatRelativeTime } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +20,7 @@ import {
   type DiscussionStyle,
   type GroupMember,
 } from "@eddi/app-kit/lib/api/groups";
-import { styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 
 // ─── Style color map ─────────────────────────────────────────────
 

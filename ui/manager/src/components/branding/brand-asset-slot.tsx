@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageUp, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { cn } from "@eddi/app-kit/lib/utils";
 import type { BrandAssetSlot } from "@eddi/app-kit/lib/brand";
 

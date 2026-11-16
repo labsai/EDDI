@@ -12,6 +12,17 @@ import kitJa from "../i18n/locales/ja.json";
 import kitKo from "../i18n/locales/ko.json";
 import kitPt from "../i18n/locales/pt.json";
 import kitHi from "../i18n/locales/hi.json";
+import teamEn from "@eddi/conversation/team/locales/en.json";
+import teamDe from "@eddi/conversation/team/locales/de.json";
+import teamFr from "@eddi/conversation/team/locales/fr.json";
+import teamEs from "@eddi/conversation/team/locales/es.json";
+import teamAr from "@eddi/conversation/team/locales/ar.json";
+import teamZh from "@eddi/conversation/team/locales/zh.json";
+import teamTh from "@eddi/conversation/team/locales/th.json";
+import teamJa from "@eddi/conversation/team/locales/ja.json";
+import teamKo from "@eddi/conversation/team/locales/ko.json";
+import teamPt from "@eddi/conversation/team/locales/pt.json";
+import teamHi from "@eddi/conversation/team/locales/hi.json";
 
 /**
  * The translation-quality suite both signed-in apps run over the bundle they
@@ -31,18 +42,19 @@ import kitHi from "../i18n/locales/hi.json";
 export type Json = Record<string, unknown>;
 export type LocaleCode = "en" | "de" | "fr" | "es" | "ar" | "zh" | "th" | "ja" | "ko" | "pt" | "hi";
 
+/** This package's strings over the team components' (@eddi/conversation/team), as `setupAppI18n` merges them. */
 const KIT: Record<LocaleCode, Json> = {
-  en: kitEn,
-  de: kitDe,
-  fr: kitFr,
-  es: kitEs,
-  ar: kitAr,
-  zh: kitZh,
-  th: kitTh,
-  ja: kitJa,
-  ko: kitKo,
-  pt: kitPt,
-  hi: kitHi,
+  en: mergeBundles(teamEn, kitEn),
+  de: mergeBundles(teamDe, kitDe),
+  fr: mergeBundles(teamFr, kitFr),
+  es: mergeBundles(teamEs, kitEs),
+  ar: mergeBundles(teamAr, kitAr),
+  zh: mergeBundles(teamZh, kitZh),
+  th: mergeBundles(teamTh, kitTh),
+  ja: mergeBundles(teamJa, kitJa),
+  ko: mergeBundles(teamKo, kitKo),
+  pt: mergeBundles(teamPt, kitPt),
+  hi: mergeBundles(teamHi, kitHi),
 };
 
 /** An app's files merged over this package's, as the app loads them. */

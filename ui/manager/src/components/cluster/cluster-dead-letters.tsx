@@ -8,7 +8,7 @@ import { deadLetterReasonHelp, deadLetterReasonLabel, KNOWN_DEAD_LETTER_REASONS,
 import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useClusterDeadLetters, useDeadLetterSummary, useDiscardDeadLetters, useReplayDeadLetters } from "@/hooks/use-cluster";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";

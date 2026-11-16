@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { useGroupConversations } from "@eddi/app-kit/hooks/use-groups";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import type { GroupConversationState } from "@eddi/app-kit/lib/api/groups";

@@ -3,10 +3,10 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { AgentResponseCard } from "@/components/groups/agent-response-card";
-import { DecisionRecordCard } from "@eddi/app-kit/components/groups/decision-record-card";
+import { DecisionRecordCard } from "@eddi/conversation/team";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { PhaseHeader } from "@/components/groups/phase-header";
-import { TaskBoard } from "@eddi/app-kit/components/groups/task-board";
+import { TaskBoard } from "@eddi/conversation/team";
 import { MAX_GROUP_QUESTION_CHARS } from "@eddi/app-kit/lib/api/groups";
 import type { DecisionRecord, TranscriptEntry, TranscriptEntryType } from "@eddi/app-kit/lib/api/groups";
 

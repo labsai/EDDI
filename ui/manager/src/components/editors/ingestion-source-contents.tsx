@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ExternalLink, FileText, Library, Search } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { useDocumentChunks, useSourceDocuments } from "@/hooks/use-ingestion-sources";

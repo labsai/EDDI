@@ -28,7 +28,7 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@eddi/app-kit/lib/utils";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
@@ -36,7 +36,7 @@ import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select"
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@eddi/app-kit/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
-import { styleLabel, styleDisplay } from "@eddi/app-kit/lib/discussion-styles";
+import { styleLabel, styleDisplay } from "@eddi/conversation/team";
 import {
   groupSaveProblems,
   idsTakenByOtherMembers,

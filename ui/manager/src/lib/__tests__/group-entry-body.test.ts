@@ -4,9 +4,9 @@ import {
   interpolateFallback,
   readEntryBody,
   readMessageBody,
-} from "@eddi/app-kit/lib/group-entry-body";
-import { parseBargainPayload } from "@eddi/app-kit/lib/group-payloads";
-import { parseTranscriptContent, splitVerdictOutcome } from "@eddi/app-kit/components/groups/group-utils";
+} from "@eddi/conversation/team";
+import { parseBargainPayload } from "@eddi/conversation/team";
+import { parseTranscriptContent, splitVerdictOutcome } from "@eddi/conversation/team";
 
 /**
  * The fixtures are what EDDI's engines actually store — copied from the prompt

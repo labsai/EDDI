@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { BellRing, Bot, CheckCheck, Pencil, Plus, Trash2 } from "lucide-react";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";

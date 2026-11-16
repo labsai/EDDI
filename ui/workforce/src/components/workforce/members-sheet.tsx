@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 
 // ─── Types ───────────────────────────────────────────────────────

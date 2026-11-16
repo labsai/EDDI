@@ -9,7 +9,7 @@ import { getWorkflow } from "@eddi/app-kit/lib/api/workflows";
 import { useDeployedAgents, useChatStore } from "@eddi/app-kit/hooks/use-chat";
 import { AdvisorAvatar } from "@eddi/app-kit/components/workforce/advisor-avatar";
 import { ActiveToolsList } from "@/components/workforce/active-tools-list";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { toast } from "sonner";

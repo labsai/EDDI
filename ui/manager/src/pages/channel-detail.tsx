@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
-import { Badge } from "@eddi/app-kit/components/ui/badge";
+import { Badge } from "@eddi/ui";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-secrets";

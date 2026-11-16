@@ -6,7 +6,7 @@ import {
   parseRetroPayload,
   parseStructuredPayload,
   parseVotePayload,
-} from "@eddi/app-kit/lib/group-payloads";
+} from "@eddi/conversation/team";
 
 /**
  * The fixtures here are the contracts EDDI's own engines write, copied from the

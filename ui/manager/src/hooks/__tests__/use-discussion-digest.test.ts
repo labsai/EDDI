@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDigest } from "@eddi/app-kit/hooks/use-discussion-digest";
+import { buildDigest } from "@eddi/conversation/team";
 import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 import type {
   DiscussionPhase,

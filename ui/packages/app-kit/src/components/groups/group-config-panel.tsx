@@ -2,12 +2,12 @@ import { AppLink } from "../shared/app-link";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, Pencil, MessagesSquare, GitMerge, UserCheck, Gavel, Info, Hand } from "lucide-react";
-import { Badge } from "../ui/badge";
+import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import { cn, hashColor, getInitials, formatUsd } from "../../lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "../../lib/api/groups";
 import { normalizeLifecyclePolicy } from "../../lib/api/groups";
-import { styleDisplay } from "../../lib/discussion-styles";
+import { styleDisplay } from "@eddi/conversation/team";
 import {
   effectiveDelegationDepth,
   effectiveDelegationTimeout,
