@@ -18,6 +18,8 @@ export function SlackNotifyField({
   value,
   onChange,
   onInvalidChange,
+  restoreDraft = null,
+  onDraftChange,
   disabled = false,
   subject,
 }: {
@@ -26,18 +28,28 @@ export function SlackNotifyField({
   /** A valid, trimmed name, or null to remove the override (the deployment default, if any, then applies). */
   onChange: (integration: string | null) => void;
   onInvalidChange?: (invalid: boolean) => void;
+  /**
+   * An unsavable draft the owner kept from an earlier mount (the section was
+   * collapsed while it was typed): shown again instead of the saved name.
+   */
+  restoreDraft?: string | null;
+  /** The unsavable draft being typed, or null once it is valid or discarded. */
+  onDraftChange?: (draft: string | null) => void;
   disabled?: boolean;
   /** Only changes the wording. */
   subject: "agent" | "group";
 }) {
   const { t } = useTranslation();
   const inputId = useId();
-  const [on, setOn] = useState(!!value);
-  const [draft, setDraft] = useState(value ?? "");
+  const [on, setOn] = useState(!!value || restoreDraft !== null);
+  const [draft, setDraft] = useState(restoreDraft ?? value ?? "");
+  const lastValue = useRef(value);
   // A switch-off by the user keeps the typed name, so switching back on restores it.
   const switchedOffByUser = useRef(false);
 
   useEffect(() => {
+    if (value === lastValue.current) return; // mount: nothing changed, keep a restored draft
+    lastValue.current = value;
     if (value) {
       switchedOffByUser.current = false;
       setOn(true);
@@ -53,11 +65,11 @@ export function SlackNotifyField({
   const problem = on ? slackIntegrationProblem(draft) : null;
   useEffect(() => {
     onInvalidChange?.(problem !== null);
-    // No cleanup: when a collapsing section unmounts this field its typed draft is
-    // lost but the owner still holds the earlier name, so the owner keeps the
-    // "unsavable" flag (and drops it itself when HITL is switched off) instead of
-    // letting the save persist that earlier name unannounced.
-  }, [problem, onInvalidChange]);
+    onDraftChange?.(problem !== null ? draft : null);
+    // No cleanup: when a collapsing section unmounts this field the owner keeps the
+    // unsavable draft (and its flag) and hands it back on the next mount, so neither
+    // the typed name nor the save block disappears without an explicit discard.
+  }, [problem, draft, onInvalidChange, onDraftChange]);
 
   function commit(next: string) {
     setDraft(next);
@@ -103,6 +115,14 @@ export function SlackNotifyField({
           ? t("hitl.slackNotifyEnableGroup", "Use a specific Slack integration for this group's approval cards")
           : t("hitl.slackNotifyEnableAgent", "Use a specific Slack integration for this agent's approval cards")}
       </label>
+      {!on && (
+        <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground" data-testid="hitl-notify-slack-off-hint">
+          {t(
+            "hitl.slackNotifyOffHint",
+            "With this off, the deployment default integration (eddi.slack.hitl.notify.default-integration) applies; without one, no card is posted.",
+          )}
+        </p>
+      )}
       {on && (
         <div className="mt-3">
           <label htmlFor={inputId} className="mb-1 block text-[10px] text-muted-foreground">

@@ -4638,6 +4638,7 @@
     "slackNotifyEnableAgent": "इस एजेंट के अनुमोदन कार्ड के लिए कोई विशेष Slack इंटीग्रेशन इस्तेमाल करें",
     "slackNotifyIntegration": "Slack इंटीग्रेशन का नाम",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "बंद होने पर डिप्लॉयमेंट का डिफ़ॉल्ट इंटीग्रेशन (eddi.slack.hitl.notify.default-integration) लागू होता है; वह न हो तो कोई कार्ड पोस्ट नहीं होता।",
     "slackNotifyHint": "बताया गया Slack चैनल इंटीग्रेशन वही अनुमोदन कार्ड पोस्ट करता है जो Slack से शुरू हुए विराम को मिलता है — शेड्यूल किए गए रन, टीम कैडेंस, वेबहुक, REST और MCP के लिए भी। चैनल (hitlApprovalChannel), बटन कौन दबा सकता है (hitlApproverUserIds) और अनुमोदन संदर्भ दिखेगा या नहीं, यह उसी इंटीग्रेशन की सेटिंग तय करती है। अनुरोध पर कहीं और निर्णय होने पर कार्ड अपडेट हो जाता है। बंद होने पर डिप्लॉयमेंट का डिफ़ॉल्ट इंटीग्रेशन (eddi.slack.hitl.notify.default-integration) लागू होता है; वह न हो तो कोई कार्ड पोस्ट नहीं होता।"
   },
   "hitlReview": {

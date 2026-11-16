@@ -4638,6 +4638,7 @@
     "slackNotifyEnableAgent": "ใช้การเชื่อมต่อ Slack ที่ระบุสำหรับการ์ดอนุมัติของเอเจนต์นี้",
     "slackNotifyIntegration": "ชื่อการเชื่อมต่อ Slack",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "เมื่อปิด จะใช้การเชื่อมต่อเริ่มต้นของการปรับใช้ (eddi.slack.hitl.notify.default-integration) หากไม่มีจะไม่โพสต์การ์ด",
     "slackNotifyHint": "การเชื่อมต่อช่อง Slack ที่ระบุจะโพสต์การ์ดอนุมัติแบบเดียวกับการหยุดชั่วคราวที่เริ่มจาก Slack — รวมถึงการทำงานตามกำหนดเวลา รอบการทำงานของทีม เว็บฮุก REST และ MCP การตั้งค่าของการเชื่อมต่อนั้นเป็นตัวกำหนดช่อง (hitlApprovalChannel) ผู้ที่กดปุ่มได้ (hitlApproverUserIds) และการแสดงบริบทการอนุมัติ การ์ดจะได้รับการอัปเดตเมื่อคำขอถูกตัดสินที่อื่น เมื่อปิด จะใช้การเชื่อมต่อเริ่มต้นของการปรับใช้ (eddi.slack.hitl.notify.default-integration) หากไม่มีจะไม่โพสต์การ์ด"
   },
   "hitlReview": {

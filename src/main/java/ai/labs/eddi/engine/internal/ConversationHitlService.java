@@ -1831,7 +1831,8 @@ class ConversationHitlService {
                     conversationId,
                     decision != null ? decision.getVerdict() : null,
                     decision != null ? decision.getDecidedBy() : null,
-                    snapshot));
+                    snapshot,
+                    decision != null ? decision.getPauseId() : null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to fire HITL resume-completed event for %s: %s", conversationId, e.getMessage());
         }

@@ -1459,6 +1459,11 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   // The Slack integration name: an unsavable one is never written either.
   const [slackInvalidState, setSlackInvalid] = useState(false);
   const slackInvalid = enabled && slackInvalidState;
+  // The unsavable name being typed, kept here so collapsing the section does not lose it.
+  const [slackDraft, setSlackDraft] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) setSlackDraft(null);
+  }, [enabled]);
   useEffect(() => {
     onValidityChange?.(recipientsInvalid || contextInvalid || slackInvalid);
     return () => onValidityChange?.(false);
@@ -1723,6 +1728,8 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   patchHitl({ notify: mergeNotify(hitl.notify, { slack: integration ? { integration } : null }) })
                 }
                 onInvalidChange={setSlackInvalid}
+                restoreDraft={slackDraft}
+                onDraftChange={setSlackDraft}
                 disabled={disabled}
                 subject="agent"
               />

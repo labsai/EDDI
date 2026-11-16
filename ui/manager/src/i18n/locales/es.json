@@ -4686,6 +4686,7 @@
     "slackNotifyEnableAgent": "Usar una integración de Slack concreta para las tarjetas de aprobación de este agente",
     "slackNotifyIntegration": "Nombre de la integración de Slack",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "Si está desactivada, se aplica la integración predeterminada del despliegue (eddi.slack.hitl.notify.default-integration); sin ella no se publica ninguna tarjeta.",
     "slackNotifyHint": "La integración de canal de Slack indicada publica la misma tarjeta de aprobación que una pausa iniciada desde Slack, también para ejecuciones programadas, cadencias de equipo, webhooks, REST y MCP. Su propia configuración decide el canal (hitlApprovalChannel), quién puede pulsar los botones (hitlApproverUserIds) y si se muestra el contexto de aprobación. La tarjeta se actualiza cuando la solicitud se decide en otro lugar. Si está desactivada, se aplica la integración predeterminada del despliegue (eddi.slack.hitl.notify.default-integration); sin ella no se publica ninguna tarjeta."
   },
   "hitlReview": {

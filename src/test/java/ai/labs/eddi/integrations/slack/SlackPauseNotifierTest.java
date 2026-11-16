@@ -585,6 +585,28 @@ class SlackPauseNotifierTest {
         }
 
         @Test
+        @DisplayName("a late event never puts one pause's outcome on the card of another pause that also ended")
+        void lateResumeKeepsOutcomeOfItsOwnPause() throws Exception {
+            var notifier = notifier();
+            notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
+            Instant later = PAUSED_AT.plusSeconds(600);
+            String laterId = HitlDecision.pauseIdOf(later);
+            conversationPaused(later);
+            notifier.onPauseCommitted(new HitlPauseCommittedEvent(CONV, laterId));
+            // both pauses are over by the time the first one's event is observed
+            when(memoryStore.getConversationState(CONV)).thenReturn(ConversationState.READY);
+
+            notifier.onResumeCompleted(new HitlResumeCompletedEvent(CONV, HitlVerdict.APPROVED, "admin", resumed(), PAUSE_ID));
+
+            ArgumentCaptor<String> text = ArgumentCaptor.forClass(String.class);
+            verify(slackApi, times(2)).updateMessage(anyString(), anyString(), anyString(), text.capture(), any());
+            assertEquals(1, text.getAllValues().stream().filter(x -> x.startsWith("✅")).count(), text.getAllValues().toString());
+            assertEquals(1, text.getAllValues().stream().filter(SlackPauseNotifier.RESOLVED_TEXT::equals).count(),
+                    text.getAllValues().toString());
+            assertEquals(0, records.size());
+        }
+
+        @Test
         @DisplayName("50 older pending cards do not hide a newer resolved one from the sweep")
         void sweepReachesPastPendingPage() throws Exception {
             when(memoryStore.getConversationState(anyString())).thenReturn(ConversationState.AWAITING_HUMAN);

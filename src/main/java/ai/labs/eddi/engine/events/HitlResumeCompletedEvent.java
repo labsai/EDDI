@@ -36,10 +36,23 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
  *            the post-resume conversation snapshot (state is NOT
  *            {@code AWAITING_HUMAN}); observers extract the continuation output
  *            from it
+ * @param pauseId
+ *            the identity of the pause this decision ended, or {@code null}
+ *            when the resolution did not come from a decision on one pause (a
+ *            cancel). The event is observed asynchronously and the conversation
+ *            may be paused again by then, so an observer that shows the outcome
+ *            must not attribute it to any other pause
  */
 public record HitlResumeCompletedEvent(
         String conversationId,
         HitlVerdict verdict,
         String decidedBy,
-        SimpleConversationMemorySnapshot snapshot) {
+        SimpleConversationMemorySnapshot snapshot,
+        String pauseId) {
+
+    /** An event that does not say which pause it ended. */
+    public HitlResumeCompletedEvent(String conversationId, HitlVerdict verdict, String decidedBy,
+            SimpleConversationMemorySnapshot snapshot) {
+        this(conversationId, verdict, decidedBy, snapshot, null);
+    }
 }

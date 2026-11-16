@@ -4638,6 +4638,7 @@
     "slackNotifyEnableAgent": "이 에이전트의 승인 카드에 특정 Slack 연동 사용",
     "slackNotifyIntegration": "Slack 연동 이름",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "끄면 배포 기본 연동(eddi.slack.hitl.notify.default-integration)이 적용되며, 없으면 카드가 게시되지 않습니다.",
     "slackNotifyHint": "지정한 Slack 채널 연동이 Slack에서 시작된 일시 중지와 동일한 승인 카드를 게시합니다. 예약 실행, 팀 주기, 웹훅, REST, MCP에서도 마찬가지입니다. 채널(hitlApprovalChannel), 버튼을 누를 수 있는 사람(hitlApproverUserIds), 승인 컨텍스트 표시 여부는 해당 연동의 설정이 결정합니다. 요청이 다른 곳에서 결정되면 카드가 업데이트됩니다. 끄면 배포 기본 연동(eddi.slack.hitl.notify.default-integration)이 적용되며, 없으면 카드가 게시되지 않습니다."
   },
   "hitlReview": {

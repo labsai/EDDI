@@ -4638,6 +4638,7 @@
     "slackNotifyEnableAgent": "このエージェントの承認カードに特定の Slack 連携を使用する",
     "slackNotifyIntegration": "Slack 連携の名前",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "オフの場合はデプロイのデフォルト連携（eddi.slack.hitl.notify.default-integration）が適用され、設定がなければカードは投稿されません。",
     "slackNotifyHint": "指定した Slack チャネル連携が、Slack から始まった一時停止と同じ承認カードを投稿します。スケジュール実行、チームのケイデンス、Webhook、REST、MCP でも同様です。チャネル (hitlApprovalChannel)、ボタンを押せる人 (hitlApproverUserIds)、承認コンテキストを表示するかどうかは、その連携自身の設定で決まります。リクエストが他の場所で決定されると、カードは更新されます。オフの場合はデプロイのデフォルト連携（eddi.slack.hitl.notify.default-integration）が適用され、設定がなければカードは投稿されません。"
   },
   "hitlReview": {

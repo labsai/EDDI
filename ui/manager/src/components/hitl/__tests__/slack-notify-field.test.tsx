@@ -71,6 +71,11 @@ describe("SlackNotifyField — owner changes", () => {
     expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
   });
 
+  it("explains the deployment default while the checkbox is off", () => {
+    renderWithProviders(<SlackNotifyField value={null} onChange={vi.fn()} subject="group" />);
+    expect(screen.getByTestId("hitl-notify-slack-off-hint").textContent).toContain("eddi.slack.hitl.notify.default-integration");
+  });
+
   it("says that switching it off falls back to the deployment default", () => {
     renderWithProviders(<SlackNotifyField value="ops-slack" onChange={vi.fn()} subject="agent" />);
     expect(screen.getByTestId("hitl-notify-slack-hint").textContent).toContain("eddi.slack.hitl.notify.default-integration");
@@ -88,6 +93,11 @@ describe("HitlConfigSection — notify.slack beside notify.email", () => {
     fireEvent.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
 
     expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+    // reopening shows the unsavable draft again, still blocking the save
+    fireEvent.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
+    expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops|slack");
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
   });
 

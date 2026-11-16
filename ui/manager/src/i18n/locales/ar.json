@@ -4830,6 +4830,7 @@
     "slackNotifyEnableAgent": "استخدم تكامل Slack محددًا لبطاقات الموافقة لهذا الوكيل",
     "slackNotifyIntegration": "اسم تكامل Slack",
     "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "عند الإيقاف يُطبَّق تكامل النشر الافتراضي (eddi.slack.hitl.notify.default-integration)؛ وبدونه لا تُنشر أي بطاقة.",
     "slackNotifyHint": "ينشر تكامل قناة Slack المحدد بطاقة الموافقة نفسها التي يحصل عليها توقف بدأ من Slack — وكذلك للتشغيلات المجدولة وإيقاعات الفرق وخطافات الويب وREST وMCP. تحدد إعداداته الخاصة القناة (hitlApprovalChannel) ومن يمكنه الضغط على الأزرار (hitlApproverUserIds) وما إذا كان سياق الموافقة يظهر. تُحدَّث البطاقة عندما يُبتّ في الطلب في مكان آخر. عند الإيقاف يُطبَّق تكامل النشر الافتراضي (eddi.slack.hitl.notify.default-integration)؛ وبدونه لا تُنشر أي بطاقة."
   },
   "hitlReview": {

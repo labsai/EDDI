@@ -36,6 +36,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -182,13 +183,19 @@ public class SlackPauseNotifier {
                 return;
             }
             String text = SlackHitlResumeObserver.decisionSummary(event.verdict(), event.decidedBy(), snapshot);
+            // The event is observed asynchronously: by now the conversation may be in a
+            // NEWER pause (whose card must stay live) or may even have left that one too.
+            // Only cards whose own pause has ended are finalized, and the decision's
+            // outcome is shown only on the card of the pause it decided.
+            List<SlackApprovalRecord> ended = new ArrayList<>();
             for (SlackApprovalRecord record : approvalRecords.findBySubject(integrationName, event.conversationId())) {
-                // The event is observed asynchronously: by now the conversation may be in a
-                // NEWER pause, whose card must stay live. Only a card whose own pause has
-                // ended is finalized.
                 if (record.messageTs() != null && resolutionText(record) != null) {
-                    finalizeCard(record, text);
+                    ended.add(record);
                 }
+            }
+            for (SlackApprovalRecord record : ended) {
+                boolean itsDecision = event.pauseId() != null ? event.pauseId().equals(record.pauseEpoch()) : ended.size() == 1;
+                finalizeCard(record, itsDecision ? text : RESOLVED_TEXT);
             }
         } catch (RuntimeException e) {
             LOGGER.debugf("Slack approval card for conversation %s not updated on resume (the sweep will): %s",
