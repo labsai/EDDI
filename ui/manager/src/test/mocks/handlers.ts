@@ -763,6 +763,26 @@ export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
  */
 export const TASK_FAILURE_TRIGGER = "trigger a task failure";
 
+/**
+ * A chat message containing this gets a streamed reply with display math and a
+ * fenced code block, so the feature matrix can see the one markdown renderer's
+ * KaTeX and highlight.js at work.
+ */
+export const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** The reply to {@link RICH_MARKDOWN_TRIGGER}. */
+export const MOCK_RICH_MARKDOWN = "Euler: $$e^{i\\pi} + 1 = 0$$\n\n```js\nconst answer = 42;\n```";
+
+/**
+ * A chat message containing this gets a streamed reply with an `image` output
+ * item (the agent designer's, not the model's), so the feature matrix can see
+ * designer images rendered. Same-origin, so the image is the app's own icon.
+ */
+export const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
+/** The image item of the reply to {@link IMAGE_OUTPUT_TRIGGER}. */
+export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "EDDI logo" };
+
 /** The reason the mocked failed turn reports. */
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
@@ -1729,8 +1749,14 @@ export const handlers = [
   // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
   http.post("*/agents/:conversationId/stream", async ({ request }) => {
     const body = await request.clone().text();
+    // One `data:` line per payload line: a multi-line token (the rich-markdown
+    // reply) under a single prefix was cut at its first blank line, which ends
+    // the SSE frame, and only `done` delivered the rest.
     const frame = (name: string, data: unknown) =>
-      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+      `event: ${name}\n${(typeof data === "string" ? data : JSON.stringify(data))
+        .split("\n")
+        .map((line) => `data: ${line}`)
+        .join("\n")}\n\n`;
     const frames = body.includes(TASK_FAILURE_TRIGGER)
       ? [
           frame("task_failed", {
@@ -1749,13 +1775,29 @@ export const handlers = [
             ],
           }),
         ]
-      : [
-          frame("token", "Happy to help."),
-          frame("done", {
-            conversationState: "READY",
-            conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
-          }),
-        ];
+      : body.includes(RICH_MARKDOWN_TRIGGER)
+        ? [
+            frame("token", MOCK_RICH_MARKDOWN),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: MOCK_RICH_MARKDOWN }] }],
+            }),
+          ]
+        : body.includes(IMAGE_OUTPUT_TRIGGER)
+          ? [
+              frame("token", "Here is the logo."),
+              frame("done", {
+                conversationState: "READY",
+                conversationOutputs: [{ output: [{ type: "text", text: "Here is the logo." }, MOCK_OUTPUT_IMAGE] }],
+              }),
+            ]
+          : [
+            frame("token", "Happy to help."),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+            }),
+          ];
     return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
   }),
 

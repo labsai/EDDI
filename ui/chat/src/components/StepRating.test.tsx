@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { StepRating } from "./StepRating";
+import { StepRating } from "@eddi/conversation";
 import { parseRatingProfile, type RatingProfile } from "@eddi/core";
 
 const profile = (extra: Record<string, unknown> = {}): RatingProfile =>
