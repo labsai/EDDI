@@ -553,3 +553,260 @@ describe("pause, cancel, stop", () => {
     expect(c.getSnapshot().conversationState).toBe("READY");
   });
 });
+
+/* ─── CodeRabbit on #1280 ───────────────────── */
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const imageOutput = (uri: string) => ({ output: [{ type: "image", uri }] });
+
+describe("snapshot re-reads keep new images", () => {
+  it("the refresh after a pause shows an image-only reply produced after approval", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    c.dispatch({ type: "ADD_MESSAGE", message: { id: "a", role: "agent", content: "Awaiting approval", timestamp: 0 } });
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      conversationOutputs: [output("Awaiting approval"), imageOutput("https://example.com/chart.png")],
+    });
+    await c.refreshAfterPause(() => false);
+    const images = () => c.getSnapshot().messages.flatMap((m) => m.images ?? []).map((i) => i.uri);
+    expect(images()).toEqual(["https://example.com/chart.png"]);
+    // Read again: the image is already shown, so it is not added twice.
+    await c.refreshAfterPause(() => false);
+    expect(images()).toEqual(["https://example.com/chart.png"]);
+  });
+
+  it("retry adds only the images not on screen yet", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    c.dispatch({
+      type: "ADD_MESSAGE",
+      message: { id: "a", role: "agent", content: "", timestamp: 0, images: [{ uri: "https://example.com/a.png" }] },
+    });
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      conversationOutputs: [
+        {
+          output: [
+            { type: "image", uri: "https://example.com/a.png" },
+            { type: "image", uri: "https://example.com/b.png" },
+          ],
+        },
+      ],
+    });
+    await c.retry();
+    const added = c.getSnapshot().messages.slice(1);
+    expect(added.map((m) => m.images?.map((i) => i.uri))).toEqual([["https://example.com/b.png"]]);
+  });
+});
+
+describe("snapshot re-reads match whole entries", () => {
+  it("an entry that holds a blank line is not appended again after a refresh", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    // The streamed bubble: `done` joins the step's entries with blank lines.
+    c.dispatch({
+      type: "ADD_MESSAGE",
+      message: { id: "a", role: "agent", content: "First\n\nSecond\n\nThird", timestamp: 0 },
+    });
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      conversationOutputs: [{ output: [{ type: "text", text: "First\n\nSecond" }, { type: "text", text: "Third" }] }],
+    });
+    await c.refreshAfterPause(() => false);
+    expect(texts(c)).toEqual(["First\n\nSecond\n\nThird"]);
+  });
+
+  it("still adds an entry whose paragraphs are not consecutive in the bubble", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    c.dispatch({ type: "ADD_MESSAGE", message: { id: "a", role: "agent", content: "First\n\nMiddle\n\nSecond", timestamp: 0 } });
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      conversationOutputs: [output("First\n\nSecond")],
+    });
+    await c.refreshAfterPause(() => false);
+    expect(texts(c)).toEqual(["First\n\nMiddle\n\nSecond", "First\n\nSecond"]);
+  });
+});
+
+describe("undo applies the restored step's state", () => {
+  it("undoing an ERROR turn back to a READY step is READY", async () => {
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    c.dispatch({ type: "SET_CONVERSATION_STATE", state: "ERROR" });
+    transport.read.mockResolvedValue({
+      conversationState: "READY",
+      undoAvailable: false,
+      redoAvailable: true,
+      conversationSteps: [{ conversationStep: [{ key: "output:text:0", value: "Welcome" }] }],
+      conversationOutputs: [output("Welcome")],
+    });
+    await c.undo();
+    expect(c.getSnapshot().conversationState).toBe("READY");
+  });
+});
+
+describe("resume takes over from whatever ran before it", () => {
+  it("a slower earlier resume does not replace a newer one", async () => {
+    const first = deferred<ConversationSnapshot>();
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    transport.read.mockImplementation((id: string) =>
+      id === "A"
+        ? first.promise
+        : Promise.resolve({ conversationState: "READY", conversationOutputs: [output("from B")] }),
+    );
+    const a = c.resume("A");
+    expect(await c.resume("B")).toBe(true);
+    first.resolve({ conversationState: "READY", conversationOutputs: [output("from A")] } as never);
+    expect(await a).toBe(false);
+    expect(c.getSnapshot().conversationId).toBe("B");
+    expect(texts(c)).toEqual(["from B"]);
+  });
+
+  it("a turn still streaming does not write into the resumed transcript", async () => {
+    const release = deferred<void>();
+    const transport = fakeTransport({
+      stream: vi.fn(() =>
+        (async function* () {
+          await release.promise;
+          yield ev("token", "stale");
+          yield done({ conversationState: "READY", conversationOutputs: [output("stale")] });
+        })(),
+      ),
+    });
+    const c = await opened(transport);
+    const turn = c.send("hi");
+    await Promise.resolve();
+    transport.read.mockResolvedValue({ conversationState: "READY", conversationOutputs: [output("resumed")] });
+    expect(await c.resume("B")).toBe(true);
+    release.resolve();
+    await turn;
+    expect(texts(c)).toEqual(["resumed"]);
+    expect(c.getSnapshot().isProcessing).toBe(false);
+  });
+
+  it("an in-flight turn's busy state is released even when the resume read fails", async () => {
+    const transport = fakeTransport({
+      stream: vi.fn(() =>
+        (async function* () {
+          await new Promise(() => {});
+          yield ev("token", "never");
+        })(),
+      ),
+    });
+    const c = await opened(transport);
+    void c.send("hi");
+    await Promise.resolve();
+    transport.read.mockRejectedValue(new Error("down"));
+    expect(await c.resume("B")).toBe(false);
+    expect(texts(c)).toEqual(["hi"]);
+    expect(c.getSnapshot().isProcessing).toBe(false);
+  });
+});
+
+describe("a turn's late re-read does not overwrite a newer turn's", () => {
+  it("history flags from turn A's refresh, landing after turn B's, are dropped", async () => {
+    const reads: Array<{ resolve: (s: ConversationSnapshot) => void }> = [];
+    const transport = fakeTransport();
+    const c = await opened(transport);
+    transport.read.mockImplementation(() => {
+      const d = deferred<ConversationSnapshot>();
+      reads.push(d);
+      return d.promise;
+    });
+    const a = c.send("A");
+    await vi.waitFor(() => expect(reads).toHaveLength(1));
+    // `done` released the composer before A's re-read, so B can go.
+    const b = c.send("B");
+    await vi.waitFor(() => expect(reads).toHaveLength(2));
+    reads[1]!.resolve({ conversationState: "READY", undoAvailable: true, redoAvailable: false } as never);
+    await b;
+    reads[0]!.resolve({ conversationState: "READY", undoAvailable: false, redoAvailable: true } as never);
+    await a;
+    expect(c.getSnapshot().undoAvailable).toBe(true);
+    expect(c.getSnapshot().redoAvailable).toBe(false);
+  });
+});
+
+describe("the cancel Stop sends, landing late", () => {
+  it("does not mark a turn sent after Stop as interrupted", async () => {
+    const cancel = deferred<void>();
+    const transport = fakeTransport({
+      cancel: vi.fn(() => cancel.promise),
+      read: vi.fn(async () => ({ conversationState: "READY", conversationOutputs: [] })) as never,
+    });
+    const c = await opened(transport);
+    const stopping = c.stop();
+    // The composer is free again; the next turn runs and finishes READY.
+    await c.send("next");
+    expect(c.getSnapshot().conversationState).toBe("READY");
+    cancel.resolve();
+    await stopping;
+    expect(c.getSnapshot().conversationState).toBe("READY");
+  });
+
+  it("still marks the stopped turn interrupted when nothing was sent meanwhile", async () => {
+    const cancel = deferred<void>();
+    const c = await opened(fakeTransport({ cancel: vi.fn(() => cancel.promise) }));
+    const stopping = c.stop();
+    cancel.resolve();
+    await stopping;
+    expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+  });
+});
+
+describe("local transport (the demo)", () => {
+  function localTransport(release: Promise<void>) {
+    return fakeTransport({
+      mode: "local",
+      welcome: vi.fn(async () => ({
+        conversationId: "demo",
+        message: { id: "w", role: "agent" as const, content: "Welcome", timestamp: 0 },
+        quickReplies: [],
+      })),
+      // Deliberately ignores the signal: the controller must not rely on it.
+      stream: vi.fn(() =>
+        (async function* () {
+          await release;
+          yield ev("token", "late");
+          yield ev("done", "");
+        })(),
+      ),
+      quickRepliesAfter: vi.fn(() => [{ value: "stale" }]),
+    });
+  }
+
+  it("drops a stopped turn's events and quick replies", async () => {
+    const release = deferred<void>();
+    const c = await opened(localTransport(release.promise));
+    const turn = c.send("hi");
+    await Promise.resolve();
+    await c.stop();
+    release.resolve();
+    await turn;
+    expect(texts(c)).toEqual(["Welcome", "hi"]);
+    expect(c.getSnapshot().quickReplies).toEqual([]);
+  });
+
+  it("drops an abandoned turn's events after New conversation", async () => {
+    const release = deferred<void>();
+    const c = await opened(localTransport(release.promise));
+    const turn = c.send("hi");
+    await Promise.resolve();
+    await c.restart();
+    release.resolve();
+    await turn;
+    expect(texts(c)).toEqual(["Welcome"]);
+  });
+});

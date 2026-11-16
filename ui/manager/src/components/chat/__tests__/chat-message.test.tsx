@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
@@ -33,7 +33,7 @@ const agentNoContent: ChatMessageType = {
 };
 
 describe("ChatMessage — untrusted HTML", () => {
-  it("never turns raw HTML in bot output into live frames or images", () => {
+  it("never turns raw HTML in bot output into live frames or images", async () => {
     // Bot/LLM output is untrusted; a live <iframe srcdoc> would execute script
     // with full app-origin access (no CSP). The one markdown renderer
     // (@eddi/conversation) passes HTML only through rehype-sanitize, and turns
@@ -43,10 +43,14 @@ describe("ChatMessage — untrusted HTML", () => {
         message={{
           ...agentMessage,
           content:
-            '**hi**\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
+            '**hi** <kbd>parsed</kbd>\n\n<iframe srcdoc="<script>window.__pwn=1</script>"></iframe>\n\n<img src="https://evil.example/leak.png">',
         }}
       />
     );
+    // The raw-HTML parser is a lazy chunk; until it is in, no HTML renders at
+    // all and the negative checks below would pass without testing anything.
+    // An allowed tag appearing is the sign the sanitised HTML is on screen.
+    await waitFor(() => expect(container.querySelector("kbd")).not.toBeNull());
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
   });

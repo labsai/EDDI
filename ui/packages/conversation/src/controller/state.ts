@@ -272,6 +272,23 @@ function patchAt(messages: ConversationMessage[], index: number, patch: Partial<
   return next;
 }
 
+/** A text's `\n\n`-delimited segments (how `done` joins a step's entries), trimmed, blanks dropped. */
+function paragraphs(text: string): string[] {
+  return text
+    .split("\n\n")
+    .map((seg) => seg.trim())
+    .filter(Boolean);
+}
+
+/** Whether `run` occurs in `list` as consecutive items. */
+function containsRun(list: readonly string[], run: readonly string[]): boolean {
+  if (!run.length || run.length > list.length) return false;
+  for (let i = 0; i + run.length <= list.length; i++) {
+    if (run.every((seg, j) => list[i + j] === seg)) return true;
+  }
+  return false;
+}
+
 export function conversationReducer<S extends AgentConversationState>(state: S, action: ConversationAction): S {
   switch (action.type) {
     case "SET_CONVERSATION_ID":
@@ -304,7 +321,8 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
       // transcript swallowed legitimate repeats (a fallback said twice, a
       // re-asked prompt).
       const incoming = action.message.content.trim();
-      if (!incoming) return state;
+      const incomingImages = action.message.images ?? [];
+      if (!incoming && !incomingImages.length) return state;
 
       // The window is the trailing turn: agent messages after the last user
       // bubble, plus that bubble itself. Including it matters because a
@@ -314,16 +332,31 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
       while (start > 0 && state.messages[start - 1]?.role === "agent") start -= 1;
       if (start > 0 && state.messages[start - 1]?.role === "user") start -= 1;
 
+      // An image-only message (images never stream as text): keep the images
+      // the trailing turn does not show yet. Dropping them all lost an image
+      // first produced after an approval.
+      if (!incoming) {
+        const shown = new Set<string>();
+        for (let i = start; i < state.messages.length; i++) {
+          for (const image of state.messages[i]?.images ?? []) shown.add(image.uri);
+        }
+        const unseen = incomingImages.filter((image) => !shown.has(image.uri));
+        if (!unseen.length) return state;
+        return { ...state, messages: [...state.messages, { ...action.message, images: unseen }] };
+      }
+
+      const incomingSegments = paragraphs(incoming);
       for (let i = start; i < state.messages.length; i++) {
         const existingMessage = state.messages[i] as ConversationMessage;
         // Compare like with like: a user echo may only suppress a user bubble.
         if (existingMessage.role !== action.message.role) continue;
         const existing = existingMessage.content.trim();
-        // Equality, or containment as a blank-line-delimited segment: the
-        // `done` handler joins a step's whole output list into ONE bubble,
-        // while this path receives one entry at a time, so the two producers
-        // would otherwise never compare equal for a multi-entry step.
-        if (existing === incoming || existing.split("\n\n").some((seg) => seg.trim() === incoming)) {
+        // Equality, or containment as a run of whole blank-line-delimited
+        // segments: the `done` handler joins a step's whole output list into
+        // ONE bubble, while this path receives one entry at a time — and an
+        // entry can itself hold blank lines ("First\n\nSecond"), so comparing
+        // single segments never matched it.
+        if (existing === incoming || containsRun(paragraphs(existing), incomingSegments)) {
           return state;
         }
       }

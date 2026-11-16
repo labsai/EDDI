@@ -1739,8 +1739,14 @@ export const handlers = [
   // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
   http.post("*/agents/:conversationId/stream", async ({ request }) => {
     const body = await request.clone().text();
+    // One `data:` line per payload line: a multi-line token (the rich-markdown
+    // reply) under a single prefix was cut at its first blank line, which ends
+    // the SSE frame, and only `done` delivered the rest.
     const frame = (name: string, data: unknown) =>
-      `event: ${name}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+      `event: ${name}\n${(typeof data === "string" ? data : JSON.stringify(data))
+        .split("\n")
+        .map((line) => `data: ${line}`)
+        .join("\n")}\n\n`;
     const frames = body.includes(TASK_FAILURE_TRIGGER)
       ? [
           frame("task_failed", {

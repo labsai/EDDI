@@ -191,9 +191,30 @@ export async function demoStartConversation(): Promise<{
   };
 }
 
+/** A delay that ends early when the turn is stopped. */
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return delay(ms) as Promise<void>;
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * The scripted reply. `signal` is the turn's: Stop (or a new conversation)
+ * ends the stream at once, scripted delay included, like a real one.
+ */
 export async function* demoSendMessageStreaming(
   message: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
+  if (signal?.aborted) return;
   const response = getResponse(message);
 
   // Simulate the pre-token phase. The real backend has no "thinking" event —
@@ -204,15 +225,18 @@ export async function* demoSendMessageStreaming(
       type: "task_start",
       data: '{"taskId":"demo","taskType":"LLM","index":0}',
     };
-    await delay(1500);
+    await abortableDelay(1500, signal);
+    if (signal?.aborted) return;
   }
 
   // Stream tokens word by word
   const words = response.text.split(/(\s+)/);
   for (const word of words) {
+    if (signal?.aborted) return;
     yield { type: "token", data: word };
-    await delay(25 + Math.random() * 35);
+    await abortableDelay(25 + Math.random() * 35, signal);
   }
+  if (signal?.aborted) return;
 
   yield { type: "done", data: "" };
 }
@@ -231,7 +255,7 @@ export function createDemoTransport(): AgentTransport {
       const { conversationId, welcomeMessage, quickReplies } = await demoStartConversation();
       return { conversationId, message: welcomeMessage, quickReplies };
     },
-    stream: (_conversationId, text) => demoSendMessageStreaming(text),
+    stream: (_conversationId, text, { signal }) => demoSendMessageStreaming(text, signal),
     quickRepliesAfter: demoGetQuickReplies,
     read: () => Promise.reject(new Error("the demo has no server to read")),
     undo: none,

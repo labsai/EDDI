@@ -168,6 +168,12 @@ export class AgentConversation {
    * slot let a late-failing turn withdraw a newer, unrelated message.
    */
   private readonly pendingTurns = new Map<string, PendingTurn>();
+  /**
+   * Turns sent so far. A turn's late continuations (the re-read after its
+   * stream, a Stop's cancel) share the generation with any turn sent after
+   * it, so this is what tells them a newer turn now owns the view.
+   */
+  private turnsSent = 0;
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
@@ -288,8 +294,13 @@ export class AgentConversation {
           });
         }
         const images = extractOutputImages(agentReplies);
-        if (images.length && !dedupe) {
-          dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage("", images, fullHistory ? index : undefined) });
+        // Deduplicated by image, not dropped: an image first produced after an
+        // approval is new, and is the whole reply when the reply has no text.
+        if (images.length) {
+          dispatch({
+            type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
+            message: makeAgentMessage("", images, fullHistory ? index : undefined),
+          });
         }
       });
       // Quick replies from the last output (most recent step) — on a resume
@@ -347,6 +358,15 @@ export class AgentConversation {
       !snapshot.conversationOutputs?.length
     ) {
       dispatch({ type: "REPLACE_MESSAGES", messages: [] });
+    }
+    // The state of the step now on top: undoing an ERROR turn back to a READY
+    // step must not keep describing the error.
+    if (snapshot.conversationState) {
+      dispatch({
+        type: "SET_CONVERSATION_STATE",
+        state: snapshot.conversationState,
+        endReason: snapshot.endReason ?? null,
+      });
     }
     dispatch({
       type: "SET_UNDO_REDO",
@@ -653,7 +673,21 @@ export class AgentConversation {
    * lose (the Manager showed none until the next turn).
    */
   async resume(conversationId: string): Promise<boolean> {
+    // A resume switches conversations, so it takes a generation of its own
+    // BEFORE it awaits: a slower earlier resume must not land over a newer
+    // one, and a turn still streaming must not write into the resumed
+    // transcript. The transcript itself is only replaced once the read
+    // succeeds, so a failed resume leaves what was on screen.
+    this.abort?.abort();
+    this.abort = null;
+    this.generation += 1;
     const gen = this.generation;
+    if (this.state.isProcessing) {
+      // Whatever was running belongs to the generation just left, and its
+      // continuations will not lower these any more.
+      this.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      this.dispatch({ type: "FINISH_STREAMING" });
+    }
     try {
       const snapshot = await this.transport.read(conversationId);
       if (!this.isCurrent(gen)) return false;
@@ -685,6 +719,8 @@ export class AgentConversation {
     // Conversation identity for THIS turn. Every async continuation below must
     // re-check it: New Conversation can land while a request is in flight.
     const sendGen = this.generation;
+    this.turnsSent += 1;
+    const turnNumber = this.turnsSent;
     const conversationId = this.state.conversationId;
 
     // Attachments staged in the composer travel with THIS turn as attachment_N
@@ -748,8 +784,12 @@ export class AgentConversation {
         const localTurn = newTurn(this.state.conversationState);
         let localDone = false;
         for await (const event of transport.stream(null, text, { signal: abort.signal })) {
+          // Stopped, or a new conversation: its events (and the quick replies
+          // below) belong to a turn nobody is showing any more.
+          if (!this.isCurrent(sendGen) || stopped()) return;
           if (this.handleEvent(event, localTurn)) localDone = true;
         }
+        if (!this.isCurrent(sendGen) || stopped()) return;
         if (localTurn.doneUnreadable) this.applyDone(null, localTurn);
         // Safety net: finish streaming if the stream closed without a done event.
         if (!localDone) dispatch({ type: "FINISH_STREAMING" });
@@ -794,11 +834,15 @@ export class AgentConversation {
           // An unreadable `done` left the turn's outcome unapplied; this read of
           // the current step carries the same fields, so it stands in.
           if (turn.doneUnreadable && !stopped()) this.applyDone(after, turn);
-          dispatch({
-            type: "SET_UNDO_REDO",
-            undoAvailable: after.undoAvailable ?? false,
-            redoAvailable: after.redoAvailable ?? false,
-          });
+          // `done` lowered isProcessing before this read, so a newer turn may
+          // have started — and finished — meanwhile. Its flags are the newer.
+          if (this.turnsSent === turnNumber) {
+            dispatch({
+              type: "SET_UNDO_REDO",
+              undoAvailable: after.undoAvailable ?? false,
+              redoAvailable: after.redoAvailable ?? false,
+            });
+          }
           // A failing stream sends `error` and closes WITHOUT a `done`, so only
           // this read learns the conversation is ERROR / EXECUTION_INTERRUPTED.
           // But it RACES a Stop: a refresh issued before Stop set
@@ -1116,6 +1160,10 @@ export class AgentConversation {
   /** Stop generating: abort the read at once, then ask the server to stop. */
   async stop(): Promise<void> {
     const dispatch = this.dispatch;
+    // The composer is released at once (a cancel can take a while), so a turn
+    // sent while the cancel is in flight is not the one stopped: captured here,
+    // before anything is awaited.
+    const turns = this.turnsSent;
     this.abort?.abort();
     this.abort = null;
     // Stopping before the first token left an empty bubble reading "No response".
@@ -1129,8 +1177,9 @@ export class AgentConversation {
     const gen = this.generation;
     try {
       await this.transport.cancel(conversationId);
-      // New Conversation while the cancel was in flight: the fresh one is not interrupted.
-      if (!this.isCurrent(gen)) return;
+      // New Conversation, or a turn sent after Stop, while the cancel was in
+      // flight: neither is the turn that was interrupted.
+      if (!this.isCurrent(gen) || this.turnsSent !== turns) return;
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
     } catch (err) {
       // 409 = nothing to cancel; the turn finished as we clicked.
