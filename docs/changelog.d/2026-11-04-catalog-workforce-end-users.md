@@ -21,13 +21,16 @@ may use, and chat, without any page answering 403.
   `AgentGroupConfiguration`. With workspaces enforced, `published` and `internal` visibility count
   as listed too. The Platform Operator (its agent id is read from the `platform.operator` global
   variable) is listed only by its explicit flag. `OperatorRevisionCheck.OPERATOR_VARIABLE` became
-  public for that. The flag is part of the JSON document, so ZIP export/import, agent sync and the
-  full-document MCP tools (`update_resource`, `update_group`) carry it.
+  public for that. The flag is part of the JSON document, so ZIP export/import and agent sync carry
+  it. Over MCP only a group's flag can be set, with `update_group`; `update_resource` does not
+  write the agent document, so an agent is listed from the Manager or over REST.
   `ListedFlagSerializationTest` pins the round trip and the default.
 - **B5.** `RestUserMemoryStoreCrossUserTest` runs the real `OwnershipValidator` and pins that
   `eddi-user` A gets 403 on every read and write of user B's memories, before the store is touched.
-- `landing-redirect.js` now shortcuts only a remembered `workforce` preference. Everything else
-  goes to `/welcome`, which knows the roles (D6).
+- `landing-redirect.js` now sends everyone to `/welcome`, which knows the roles (D6). It used to
+  shortcut a remembered `workforce` preference straight to `/workforce`, which let a dedicated
+  `eddi-viewer` or `eddi-approver` reach the end-user catalog; `LandingPage` now applies the role
+  decision to those visitors too.
 - Docs: new `docs/catalog.md` (plus SUMMARY), a pointer from `workspaces.md`, and a section in the
   `eddi-admin` Claude Code skill. `openapi-operations.json` gains the two operations.
 
@@ -43,7 +46,12 @@ may use, and chat, without any page answering 403.
 - **D5:** the Workforce top bar no longer mounts the Operator drawer. Admins get a link to
   `/manage/operator`.
 - **D6:** `/welcome` sends an end user straight to `/workforce`, including with `?choose` and with
-  a stale `manage` preference.
+  a stale `manage` preference. A dedicated `eddi-viewer` or `eddi-approver` cannot read
+  `/catalog/*`, so it goes to the Manager instead: an approver to `/manage/approvals`, a viewer to
+  `/manage`.
+- The `GET /catalog/agents` OpenAPI description no longer claims an anonymous caller sees published
+  agents (copied from `/v1/models`): with authorization on an anonymous caller is refused, with it
+  off visibility is not consulted.
 - The catalog's empty state explains how to list an agent to authors (shown on their dashboard as
   **What end users see**). A plain user gets a neutral sentence.
 - A **Listed in the catalog** switch on the agent page, in the Manager's group panel (saves at once),
@@ -55,7 +63,7 @@ may use, and chat, without any page answering 403.
   only with the mock API active) and fails if any Workforce page requests a store the backend
   refuses that role.
 - Platform Operator: the prompt explains `listed` and the catalog, the allow-list gains
-  `GET /catalog/agents` and `GET /catalog/groups`, and `operator-revision.json` moves to 53.
+  `GET /catalog/agents` and `GET /catalog/groups`, and `operator-revision.json` gets a revision bump.
 
 **Not done here / next:** phase 3 of the plan (`@eddi/ui` and the agent kind). The catalog has no
 paging; it is bounded at 2,000 group descriptors per request.

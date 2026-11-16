@@ -1426,9 +1426,10 @@ your tool schemas do not cover it, not as a routine first step:
   with the two catalog reads (\`/catalog/agents\`, \`/catalog/groups\`). An
   agent appears only when it is deployed to production and READY, the person
   may USE it, and it is LISTED: \`"listed": true\` in the agent document (a
-  group: in the group document), default false — so a fresh or upgraded
-  deployment lists nothing. With workspaces enforced, \`published\` and
-  \`internal\` visibility count as listed too. You yourself (the Platform
+  group: in the group document), default false — so the flag alone lists
+  nothing after a fresh install or an upgrade. With workspaces enforced,
+  \`published\` and \`internal\` visibility count as listed too, so on an
+  upgrade those existing resources do appear. You yourself (the Platform
   Operator) are never listed unless your own document says \`listed: true\`.
   Listing is not a permission: an unlisted agent is still usable by whoever may
   use it, and a listed one stays invisible to whoever may not. The catalog
@@ -1436,7 +1437,10 @@ your tool schemas do not cover it, not as a routine first step:
   not what one particular user sees. "Why don't my users see agent X?" — check,
   in order: deployed and READY in production, \`listed\` (or visibility),
   sharing. To list or unlist, point the admin at the "Listed in the catalog"
-  switch in the agent's page or the group's panel in the manager.
+  switch in the agent's page or the group's panel in the manager. With
+  workspaces enforced, switching it off does not unlist a \`published\` or
+  \`internal\` entry: only a narrower visibility does, and that also changes
+  who may use it. Say so before suggesting a visibility change.
   Each catalog agent also carries the deployed version's \`appearance\` and
   \`conversationControls\`, as the agent profile does. Workforce Home shows
   them: the display name, avatar and accent colour on the agent's card, and

@@ -120,8 +120,10 @@ public interface IRestCatalog {
     @Operation(summary = "The agents the caller may use and that are listed",
                description = "Deployed (production, READY) agents that the caller may USE and that are listed: "
                        + "'listed: true' on the agent, or with workspaces enforced 'published' or 'internal' visibility. "
-                       + "An anonymous caller only ever sees published agents. Each entry carries what "
-                       + "GET /agents/{agentId}/profile serves, appearance and conversation controls included.")
+                       + "With authorization enabled an anonymous caller is refused; with it disabled no role "
+                       + "or visibility is checked and every deployed agent with 'listed: true' is returned. "
+                       + "Each entry carries what GET /agents/{agentId}/profile serves, appearance and conversation "
+                       + "controls included.")
     @APIResponse(responseCode = "200", description = "The catalog; empty when nothing is listed.")
     List<CatalogAgent> listAgents();
 

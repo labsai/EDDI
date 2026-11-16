@@ -122,7 +122,35 @@ describe("LandingPage (D6)", () => {
     for (const roles of [["eddi-editor"], ["eddi-admin"]]) {
       const { unmount } = renderAs(roles, "/welcome?choose", [["/welcome", <LandingPage />]]);
       expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+      expect(screen.queryByTestId("where")).toBeNull();
       unmount();
+    }
+  });
+
+  // `/catalog/*` (all Workforce reads for a non-author) admits admin, editor and
+  // user only — sending these roles to Workforce would show them nothing but 403s.
+  it("sends a viewer-only user to the Manager, not to Workforce", () => {
+    renderAs(["eddi-viewer"], "/welcome", [["/welcome", <LandingPage />]]);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage$/);
+  });
+
+  it("sends an approver-only user to the approvals inbox, not to Workforce", () => {
+    renderAs(["eddi-approver"], "/welcome?choose", [["/welcome", <LandingPage />]]);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/approvals$/);
+  });
+
+  // `landing-redirect.js` sends every visitor here, so a remembered Workforce
+  // preference must not let these roles through to the end-user catalog.
+  it("ignores a remembered Workforce preference for a viewer or approver", () => {
+    localStorage.setItem("eddi-landing-preference", "workforce");
+    try {
+      const viewer = renderAs(["eddi-viewer"], "/welcome", [["/welcome", <LandingPage />]]);
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage$/);
+      viewer.unmount();
+      renderAs(["eddi-approver"], "/welcome", [["/welcome", <LandingPage />]]);
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/approvals$/);
+    } finally {
+      localStorage.clear();
     }
   });
 });
