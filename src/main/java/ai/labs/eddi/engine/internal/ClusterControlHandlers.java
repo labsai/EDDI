@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.ClusterStartable;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Serves the node-addressed control operations of cluster mode — what another
@@ -44,6 +46,10 @@ public class ClusterControlHandlers implements ClusterStartable {
     private final GroupConversationService groupConversationService;
     private final Instance<UserErasureParticipant> erasureParticipants;
     private final IConversationCoordinator coordinator;
+
+    /** Opens a sealed user-id hash (B5). Field-injected; null in tests. */
+    @Inject
+    Instance<ClusterMessageSigner> signer;
 
     @Inject
     public ClusterControlHandlers(IClusterRpc rpc, ConversationService conversationService, GroupConversationService groupConversationService,
@@ -88,7 +94,20 @@ public class ClusterControlHandlers implements ClusterStartable {
     }
 
     private Map<String, Object> gdprStop(Map<String, Object> request) {
-        String userIdHash = String.valueOf(request.get("userIdHash"));
+        String userIdHash;
+        if (request.get("userIdSealed") != null) {
+            // Sealed with the cluster signing key (B5); a node without the same key cannot
+            // open it and says so, which marks the erasure's cluster step incomplete.
+            var opened = signer != null && signer.isResolvable()
+                    ? signer.get().unseal(String.valueOf(request.get("userIdSealed")))
+                    : Optional.<String>empty();
+            if (opened.isEmpty()) {
+                return Map.of("stopped", 0, "error", "cannot open the sealed user id: eddi.cluster.signing.key differs on this node");
+            }
+            userIdHash = opened.get();
+        } else {
+            userIdHash = String.valueOf(request.get("userIdHash"));
+        }
         int stopped = 0;
         List<String> failed = new ArrayList<>();
         for (UserErasureParticipant participant : erasureParticipants) {

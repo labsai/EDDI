@@ -23,7 +23,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type Component
 import { Check, Copy, X } from "lucide-react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import { remarkGfmParse as remarkGfm } from "./remark-gfm-parse";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { useRichPlugins } from "./markdown-plugins";
 import { useConversationText } from "../react/hooks";
 
@@ -105,6 +105,8 @@ function CodeBlock({ node: _node, children, ...props }: ComponentPropsWithoutRef
  * has nothing to parse, so leaving it out changes nothing but the bundle.
  */
 const BASE_REHYPE: PluggableList = [rehypeSanitize];
+/** The prefix the default schema puts on every `id` (its `clobberPrefix`). */
+const SANITIZED_ID_PREFIX = defaultSchema.clobberPrefix ?? "user-content-";
 const REMARK_PLAIN: PluggableList = [remarkGfm];
 
 interface MdastNode {
@@ -136,7 +138,14 @@ const REMARK_ESCAPED: PluggableList = [remarkGfm, remarkHtmlAsText];
  * `node` is react-markdown's AST node, not an attribute.
  */
 function MarkdownLink({ node: _node, ...props }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
-  if (props.href?.startsWith("#")) return <a {...props} />;
+  if (props.href?.startsWith("#")) {
+    // rehype-sanitize prefixes every id (clobber protection) but leaves hrefs
+    // alone, so a GFM footnote's `#user-content-fn-1` pointed at nothing once
+    // its target became `user-content-user-content-fn-1`. Point same-page
+    // links at the ids the sanitizer actually produced.
+    const fragment = props.href.slice(1);
+    return <a {...props} href={fragment ? `#${SANITIZED_ID_PREFIX}${fragment}` : props.href} />;
+  }
   return <a {...props} target="_blank" rel="noopener noreferrer" />;
 }
 

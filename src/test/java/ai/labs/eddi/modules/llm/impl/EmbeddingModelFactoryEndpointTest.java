@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.sun.net.httpserver.HttpServer;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -22,11 +25,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -200,5 +206,33 @@ class EmbeddingModelFactoryEndpointTest {
             String message = String.valueOf(t.getMessage());
             assertTrue(!message.contains("vault-value-for-victim"), message);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"mistral", "gemini"})
+    @DisplayName("mistral, gemini: the cached client re-checks its destination before every request (DNS rebinding)")
+    void cachedClientRechecksTheDestination(String provider) {
+        // The build-time check passes; every later one — the transport's, per request
+        // — refuses, as it would once the hostname's DNS answer turned private.
+        var checks = new AtomicInteger();
+        var policy = mock(OutboundTargetPolicy.class);
+        doAnswer(inv -> {
+            if (checks.incrementAndGet() > 1) {
+                throw new IllegalArgumentException("now resolves to a private address");
+            }
+            return null;
+        }).when(policy).validateUrl(anyString());
+        var secretResolver = mock(SecretResolver.class);
+        var globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var guarded = new EmbeddingModelFactory(globalVariableResolver, secretResolver, policy);
+
+        var model = guarded.getOrCreate(config(provider, Map.of("baseUrl", baseUrl(), "apiKey", "k", "maxRetries", "0")),
+                EmbeddingInputType.DOCUMENT);
+
+        assertThrows(RuntimeException.class, () -> model.embed("hello"));
+        assertTrue(checks.get() > 1, "the transport checked the request URL");
+        assertEquals(List.of(), requests, "nothing reached the endpoint");
     }
 }

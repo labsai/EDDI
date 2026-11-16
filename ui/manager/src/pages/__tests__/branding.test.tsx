@@ -5,6 +5,7 @@ import { renderPage, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { BrandingPage } from "@/pages/branding";
 import { getBrand, setBrand } from "@/lib/brand";
+import { writeTimeout } from "@/lib/brand-write-guard";
 import { UNBRANDED_COLORS } from "@/lib/brand-css";
 import {
   MOCK_BRAND_CONFLICT_TRIGGER,
@@ -101,6 +102,16 @@ describe("BrandingPage — editing", () => {
     expect(picker("darkPrimary").className).not.toContain("opacity-40");
   });
 
+  it("shows a valid rgb() primary on the picker, not the unbranded amber", async () => {
+    const picker = (key: string) => screen.getByTestId(`branding-color-${key}-picker`);
+    renderBranding();
+    fireEvent.change(await screen.findByTestId("branding-color-primary"), { target: { value: "rgb(15 118 110)" } });
+    expect(picker("primary")).toHaveValue("#0f766e");
+    // An invalid colour still falls back to the unbranded default.
+    fireEvent.change(screen.getByTestId("branding-color-primary"), { target: { value: "nonsense" } });
+    expect(picker("primary")).not.toHaveValue("#0f766e");
+  });
+
   it("previews the colours in both modes with the brand.css formulas", async () => {
     renderBranding();
     fireEvent.change(await screen.findByTestId("branding-color-primary"), { target: { value: "#0f766e" } });
@@ -116,18 +127,25 @@ describe("BrandingPage — editing", () => {
   it("saves with the revision it read and applies the new brand to this tab without a reload", async () => {
     const user = userEvent.setup();
     let body: Record<string, unknown> | null = null;
-    server.events.on("request:start", async ({ request }) => {
+    // Named, and removed in `finally`, so a failing assertion cannot leak it into
+    // other tests — and removeAllListeners (which would also drop any listener
+    // the shared setup registers) is not needed.
+    const onRequest = async ({ request }: { request: Request }) => {
       if (request.method === "PUT" && new URL(request.url).pathname === "/administration/branding") {
         body = (await request.clone().json()) as Record<string, unknown>;
       }
-    });
-    renderBranding();
-    await user.type(await screen.findByTestId("branding-productName"), "Acme Assist");
-    fireEvent.change(screen.getByTestId("branding-color-primary"), { target: { value: "#0f766e" } });
-    await user.click(screen.getByTestId("branding-save-btn"));
+    };
+    server.events.on("request:start", onRequest);
+    try {
+      renderBranding();
+      await user.type(await screen.findByTestId("branding-productName"), "Acme Assist");
+      fireEvent.change(screen.getByTestId("branding-color-primary"), { target: { value: "#0f766e" } });
+      await user.click(screen.getByTestId("branding-save-btn"));
 
-    await waitFor(() => expect(screen.getByTestId("branding-source")).toHaveTextContent("Saved on this page"));
-    server.events.removeAllListeners();
+      await waitFor(() => expect(screen.getByTestId("branding-source")).toHaveTextContent("Saved on this page"));
+    } finally {
+      server.events.removeListener("request:start", onRequest);
+    }
     expect(body).toMatchObject({ revision: 0, productName: "Acme Assist", shortName: null });
     expect((body as unknown as { colors: Record<string, unknown> }).colors.primary).toBe("#0f766e");
 
@@ -323,5 +341,103 @@ describe("BrandingPage — images", () => {
     sessionStorage.setItem(MOCK_BRAND_LOCKED_KEY, "true");
     await upload("favicon", new File([PNG], "favicon.png", { type: "image/png" }));
     expect(await screen.findByTestId("brand-asset-favicon-error")).toHaveTextContent("locked");
+  });
+});
+
+describe("BrandingPage — one write at a time", () => {
+  const VIEW = (revision: number) => ({
+    document: { revision, productName: "Acme" },
+    effective: {
+      revision,
+      branded: true,
+      productName: "Acme",
+      shortName: "Acme",
+      poweredBy: true,
+      showUpdateCheck: true,
+    },
+    locked: false,
+    source: "database",
+  });
+
+  /** A PUT/asset handler that answers only when `release()` is called. */
+  function gated(method: "put" | "delete", path: string, revision: number) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http[method](path, async () => {
+        await gate;
+        return HttpResponse.json(VIEW(revision));
+      }),
+    );
+    return release;
+  }
+
+  const dropAria = (slot: string) => screen.getByTestId(`brand-asset-${slot}-drop`).getAttribute("aria-disabled");
+  const png = () => new File([PNG], "x.png", { type: "image/png" });
+
+  async function dirtyForm(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(await screen.findByTestId("branding-productName"), "Acme");
+  }
+
+  it("an image upload in flight disables Save, Reset and the other slots, then re-enables them", async () => {
+    const user = userEvent.setup();
+    const release = gated("put", "*/administration/branding/assets/:slot", 2);
+    renderBranding();
+    await dirtyForm(user);
+    expect(screen.getByTestId("branding-save-btn")).toBeEnabled();
+
+    fireEvent.change(screen.getByTestId("brand-asset-logo-input"), { target: { files: [png()] } });
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeDisabled());
+    expect(screen.getByTestId("branding-reset-btn")).toBeDisabled();
+    expect(dropAria("icon")).toBe("true");
+    expect(dropAria("favicon")).toBe("true");
+
+    // A second upload on another slot is ignored while the first is in flight.
+    let seconds = 0;
+    server.use(http.put("*/administration/branding/assets/icon", () => ((seconds += 1), HttpResponse.json(VIEW(3)))));
+    fireEvent.change(screen.getByTestId("brand-asset-icon-input"), { target: { files: [png()] } });
+
+    release();
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeEnabled());
+    expect(screen.getByTestId("branding-reset-btn")).toBeEnabled();
+    expect(dropAria("icon")).toBe("false");
+    expect(seconds).toBe(0);
+  });
+
+  it("a save in flight makes every slot inert and blocks an upload, then re-enables them", async () => {
+    const user = userEvent.setup();
+    const release = gated("put", "*/administration/branding", 1);
+    renderBranding();
+    await dirtyForm(user);
+    await user.click(screen.getByTestId("branding-save-btn"));
+
+    await waitFor(() => expect(dropAria("logo")).toBe("true"));
+    expect(dropAria("icon")).toBe("true");
+    expect(screen.getByTestId("branding-reset-btn")).toBeDisabled();
+
+    release();
+    await waitFor(() => expect(dropAria("logo")).toBe("false"));
+    expect(screen.getByTestId("branding-reset-btn")).toBeEnabled();
+  });
+
+  it("a request that never settles releases the page after the timeout", async () => {
+    const user = userEvent.setup();
+    const before = writeTimeout.ms;
+    writeTimeout.ms = 60;
+    try {
+      server.use(http.put("*/administration/branding/assets/:slot", () => new Promise<Response>(() => {})));
+      renderBranding();
+      await dirtyForm(user);
+      fireEvent.change(screen.getByTestId("brand-asset-logo-input"), { target: { files: [png()] } });
+      await waitFor(() => expect(dropAria("icon")).toBe("true"));
+
+      expect(await screen.findByTestId("brand-asset-logo-error")).toHaveTextContent("did not answer in time");
+      expect(dropAria("icon")).toBe("false");
+      expect(screen.getByTestId("branding-save-btn")).toBeEnabled();
+    } finally {
+      writeTimeout.ms = before;
+    }
   });
 });

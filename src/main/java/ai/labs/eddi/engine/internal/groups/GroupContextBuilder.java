@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.engine.pricing.SystemSpendMeter;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextWindowConfig;
@@ -18,7 +21,6 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
-import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -49,9 +52,19 @@ public class GroupContextBuilder {
     private static final Logger LOGGER = Logger.getLogger(GroupContextBuilder.class);
 
     private final ITemplatingEngine templatingEngine;
+    /**
+     * Group id to the outcome digest a RETRO phase quotes; {@code null} (every
+     * caller that never wires one) quotes nothing.
+     */
+    private volatile Function<String, String> outcomeDigestProvider;
 
     public GroupContextBuilder(ITemplatingEngine templatingEngine) {
         this.templatingEngine = templatingEngine;
+    }
+
+    /** Wires the source of the real-world outcomes a RETRO phase quotes. */
+    public void setOutcomeDigestProvider(Function<String, String> provider) {
+        this.outcomeDigestProvider = provider;
     }
 
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
@@ -68,11 +81,11 @@ public class GroupContextBuilder {
      * @param allMembers
      *            the full group roster, used only by {@code ARGUE}/{@code
      *            REBUTTAL} to resolve which transcript entries came from the
-     *            opposing team rather than merely "not me" (see
-     *            {@link #opposingArguments}). {@code null} or empty falls back to
-     *            the not-me filter, which is only correct for a 2-member debate —
-     *            existing callers that never reach those two phase types are
-     *            unaffected either way.
+     *            opposing team rather than merely "not me" (see the
+     *            {@code opposingArguments} template key). {@code null} or empty
+     *            falls back to the not-me filter, which is only correct for a
+     *            2-member debate — existing callers that never reach those two
+     *            phase types are unaffected either way.
      * @param window
      *            I9 transcript windowing, applied to the FULL/ANONYMOUS
      *            scope-filtered context only. {@code null} disables windowing
@@ -269,6 +282,10 @@ public class GroupContextBuilder {
             }
         }
 
+        // Everything quoted from another participant is cleaned and bounded in one
+        // place, for every phase type and for custom inputTemplates alike.
+        PeerContentGuard.apply(data);
+
         String rendered;
         try {
             rendered = templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
@@ -282,23 +299,30 @@ public class GroupContextBuilder {
         // otherwise silently disable abstention for exactly the turns already going
         // wrong — the member would be told nothing about PASS, answer normally, and
         // the phase would look like it simply had nothing to abstain about.
-        return AbstentionDetector.isEnabledFor(phase) ? rendered + AbstentionDetector.ABSTENTION_INSTRUCTION : rendered;
+        rendered = AbstentionDetector.isEnabledFor(phase) ? rendered + AbstentionDetector.ABSTENTION_INSTRUCTION : rendered;
+        return phase.type() == PhaseType.RETRO ? rendered + outcomeDigest(gc) : rendered;
     }
 
     /**
-     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
-     * flags them on every run; removing them breaks the build. Characterization
-     * tests reach this method through
-     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
-     * which resolves by exact parameter types, so a narrower signature is not
-     * findable — and those tests are the regression net this whole refactor leans
-     * on.
-     * <p>
-     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
-     * needs the speaker and the roster to decide, and a method that can only see
-     * the transcript would have to guess at both. See {@link #isDebateJudgment},
-     * which {@link #buildPhaseInput} consults first.
+     * The team's reported outcomes, appended after rendering (so a custom
+     * {@code inputTemplate} gets them too), or nothing when none are wired, the
+     * group has none enabled or the provider fails — a retro must never fail on its
+     * own context.
      */
+    private String outcomeDigest(GroupConversation gc) {
+        Function<String, String> provider = outcomeDigestProvider;
+        if (provider == null || gc == null || gc.getGroupId() == null) {
+            return "";
+        }
+        try {
+            String digest = provider.apply(gc.getGroupId());
+            return digest != null ? digest : "";
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Outcome digest unavailable for group %s: %s", gc.getGroupId(), e.getMessage());
+            return "";
+        }
+    }
+
     /**
      * The latest response of every peer except {@code speaker}, for a CRITIQUE
      * phase without {@code targetEachPeer}. Peers come from the roster when it is
@@ -333,6 +357,20 @@ public class GroupContextBuilder {
         return peers;
     }
 
+    /**
+     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
+     * flags them on every run; removing them breaks the build. Characterization
+     * tests reach this method through
+     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
+     * which resolves by exact parameter types, so a narrower signature is not
+     * findable — and those tests are the regression net this whole refactor leans
+     * on.
+     * <p>
+     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
+     * needs the speaker and the roster to decide, and a method that can only see
+     * the transcript would have to guess at both. See {@link #isDebateJudgment},
+     * which {@link #buildPhaseInput} consults first.
+     */
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
             // Use independent template if no context, or context template if
@@ -532,6 +570,7 @@ public class GroupContextBuilder {
     static final String WINDOW_SUMMARY_INSTRUCTIONS = """
             Summarize the group discussion entries below for a participant who must continue the discussion.
             Preserve: each speaker's position and key arguments, decisions reached, open disagreements, and task outcomes.
+            Copy every opaque identifier exactly as written (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names).
             [format: bullet points] [limit: 500 tokens]""";
 
     /**
@@ -601,6 +640,13 @@ public class GroupContextBuilder {
                 ? "## Summary of entries 1-" + alreadyCovered + ":\n" + previousSummary + "\n\n## New entries:\n" + newSlice
                 : newSlice;
 
+        if (!SystemSpendMeter.admit() || UnpricedCallPolicy.check(PriceOverride.of(window.inputPricePer1M(), window.outputPricePer1M()),
+                window.llmProvider(), window.llmModel(), null, false, "group_window") != null) {
+            LOGGER.warnf(
+                    "Group %s: tenant cost budget reached or summary model unpriced under strict pricing — plain truncation instead of a window summary",
+                    LogSanitizer.sanitize(gc.getId()));
+            return null;
+        }
         try {
             var result = summarizationService.summarizeWithUsage(content, WINDOW_SUMMARY_INSTRUCTIONS,
                     window.llmProvider(), window.llmModel());
@@ -619,10 +665,11 @@ public class GroupContextBuilder {
             // I1: the summarizer's own spend is discussion spend. Keyed per variant
             // and boundary so a re-run of the same extension replaces (idempotent)
             // while distinct extensions sum.
-            double cost = TokenPricing.cost(window.inputPricePer1M(), window.outputPricePer1M(),
-                    Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
             String costKey = "system:summarizer:" + (anonymous ? "anon" : "full") + ":" + coverThrough;
-            GroupCostLedger.recordSystemCost(gc, costKey, cost);
+            // priced through the one resolver, recorded in the ledger AND charged to the
+            // tenant
+            double cost = SystemSpendMeter.charge(gc, costKey, PriceOverride.of(window.inputPricePer1M(), window.outputPricePer1M()),
+                    result.tokenUsage(), costKey);
             // recordSystemCost drops a non-positive or non-finite cost, so an
             // unpriced window bills nothing — report no key rather than inviting
             // a $0 frame the UI would have to filter out again.

@@ -19,6 +19,7 @@ import type {
   InputField,
   OutputImage,
   QuickReply,
+  ToolActivity,
 } from "@eddi/core";
 
 /** An attachment a sent message shows (name, type, size, a local preview). */
@@ -92,12 +93,12 @@ export interface AgentConversationState {
    */
   isEscalating: boolean;
   /**
-   * Name of the tool the agent is running right now, from the live `tool_call`
-   * event, or null. There is no "tool finished" event, so resumed output is the
-   * completion signal: the next token clears it, as does anything that ends the
-   * turn. Transient by design — it drives the status line only.
+   * The tool the agent is running right now, from the live `tool_call` event,
+   * or null. Its `tool_result` (EDDI 6.7) clears it, and so does resumed output
+   * on an older server, as does anything that ends the turn. Transient by
+   * design — it drives the status line only.
    */
-  activeTool: string | null;
+  activeTool: ToolActivity | null;
   /**
    * isProcessing is also raised by undo, redo, retry and cancel, which use it
    * as the re-entrancy guard. Those are not the agent composing a reply, so
@@ -180,7 +181,7 @@ export type ConversationAction =
   | { type: "SET_HISTORY_BUSY" }
   | { type: "SET_THINKING"; value: boolean }
   | { type: "SET_ESCALATING"; value: boolean }
-  | { type: "SET_ACTIVE_TOOL"; tool: string | null }
+  | { type: "SET_ACTIVE_TOOL"; tool: ToolActivity | null }
   | { type: "SET_UNDO_REDO"; undoAvailable: boolean; redoAvailable: boolean }
   | { type: "REMOVE_EMPTY_STREAMING_MESSAGE" }
   | { type: "REPLACE_MESSAGES"; messages: ConversationMessage[] }
@@ -271,6 +272,23 @@ function patchAt(messages: ConversationMessage[], index: number, patch: Partial<
   return next;
 }
 
+/** A text's `\n\n`-delimited segments (how `done` joins a step's entries), trimmed, blanks dropped. */
+function paragraphs(text: string): string[] {
+  return text
+    .split("\n\n")
+    .map((seg) => seg.trim())
+    .filter(Boolean);
+}
+
+/** Whether `run` occurs in `list` as consecutive items. */
+function containsRun(list: readonly string[], run: readonly string[]): boolean {
+  if (!run.length || run.length > list.length) return false;
+  for (let i = 0; i + run.length <= list.length; i++) {
+    if (run.every((seg, j) => list[i + j] === seg)) return true;
+  }
+  return false;
+}
+
 export function conversationReducer<S extends AgentConversationState>(state: S, action: ConversationAction): S {
   switch (action.type) {
     case "SET_CONVERSATION_ID":
@@ -303,7 +321,8 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
       // transcript swallowed legitimate repeats (a fallback said twice, a
       // re-asked prompt).
       const incoming = action.message.content.trim();
-      if (!incoming) return state;
+      const incomingImages = action.message.images ?? [];
+      if (!incoming && !incomingImages.length) return state;
 
       // The window is the trailing turn: agent messages after the last user
       // bubble, plus that bubble itself. Including it matters because a
@@ -313,16 +332,31 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
       while (start > 0 && state.messages[start - 1]?.role === "agent") start -= 1;
       if (start > 0 && state.messages[start - 1]?.role === "user") start -= 1;
 
+      // An image-only message (images never stream as text): keep the images
+      // the trailing turn does not show yet. Dropping them all lost an image
+      // first produced after an approval.
+      if (!incoming) {
+        const shown = new Set<string>();
+        for (let i = start; i < state.messages.length; i++) {
+          for (const image of state.messages[i]?.images ?? []) shown.add(image.uri);
+        }
+        const unseen = incomingImages.filter((image) => !shown.has(image.uri));
+        if (!unseen.length) return state;
+        return { ...state, messages: [...state.messages, { ...action.message, images: unseen }] };
+      }
+
+      const incomingSegments = paragraphs(incoming);
       for (let i = start; i < state.messages.length; i++) {
         const existingMessage = state.messages[i] as ConversationMessage;
         // Compare like with like: a user echo may only suppress a user bubble.
         if (existingMessage.role !== action.message.role) continue;
         const existing = existingMessage.content.trim();
-        // Equality, or containment as a blank-line-delimited segment: the
-        // `done` handler joins a step's whole output list into ONE bubble,
-        // while this path receives one entry at a time, so the two producers
-        // would otherwise never compare equal for a multi-entry step.
-        if (existing === incoming || existing.split("\n\n").some((seg) => seg.trim() === incoming)) {
+        // Equality, or containment as a run of whole blank-line-delimited
+        // segments: the `done` handler joins a step's whole output list into
+        // ONE bubble, while this path receives one entry at a time — and an
+        // entry can itself hold blank lines ("First\n\nSecond"), so comparing
+        // single segments never matched it.
+        if (existing === incoming || containsRun(paragraphs(existing), incomingSegments)) {
           return state;
         }
       }
@@ -382,7 +416,10 @@ export function conversationReducer<S extends AgentConversationState>(state: S, 
 
     // Cleared on every token, so the same unchanged-value bail-out applies.
     case "SET_ACTIVE_TOOL":
-      return state.activeTool === action.tool ? state : { ...state, activeTool: action.tool };
+      return state.activeTool?.text === action.tool?.text &&
+        state.activeTool?.phrase === action.tool?.phrase
+        ? state
+        : { ...state, activeTool: action.tool };
 
     case "CLEAR_MESSAGES":
       return {

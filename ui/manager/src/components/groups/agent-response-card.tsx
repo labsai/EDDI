@@ -10,6 +10,7 @@ import { truncateContent, safeFormatDate } from "./group-utils";
 import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
 import { StructuredEntryBody } from "./structured-entry-body";
 import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -193,6 +194,14 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
           <Badge variant={badgeVar} className="text-[10px] px-1.5 py-0">
             {t(`groups.entryType.${entry.type}`, info.label)}
           </Badge>
+          {entry.errorReason === "reviewer-edit" && (
+            <span
+              className="rounded-full bg-warn-500/10 px-1.5 py-0 text-[10px] font-medium text-warn-700 dark:text-warn-400"
+              data-testid="transcript-reviewer-edit"
+            >
+              {t("hitlReview.reviewerEdit", "Reviewer edit")}
+            </span>
+          )}
           {entry.targetAgentId && (
             <span className="text-[10px] text-muted-foreground" title={entry.targetAgentId}>
               → {entry.targetAgentId.slice(0, 8)}…
@@ -228,7 +237,7 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span role="status" aria-relevant="text" className="min-w-0 break-all text-xs text-muted-foreground ms-1">
               {toolName
-                ? t("groups.usingTool", "using {{tool}}…", { tool: toolName })
+                ? t("groups.usingTool", "using {{tool}}…", { tool: humanizeToolName(toolName) || toolName })
                 : t("groups.responding", "responding…")}
             </span>
           </div>

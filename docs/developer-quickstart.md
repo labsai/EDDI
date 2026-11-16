@@ -50,7 +50,7 @@ same rule set or output set can be reused across workflows and agents.
 - **Java 25** (the version in `pom.xml` is authoritative)
 - **Maven** — not needed separately; the repo ships the `./mvnw` wrapper
   (`.\mvnw.cmd` on Windows)
-- **MongoDB 7** (or PostgreSQL — see [Architecture](architecture.md))
+- **MongoDB 6.0+** (or PostgreSQL — see [Architecture](architecture.md))
 - **Docker** — optional for running from source, required for the quick start
   below
 
@@ -91,7 +91,7 @@ cd EDDI
 # On Mac: brew services start mongodb-community
 # On Linux: sudo systemctl start mongod
 
-# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev)
+# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev-ui)
 ./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
@@ -116,13 +116,29 @@ cd ui && npm ci && cd manager && npm run dev    # http://localhost:3000, proxies
 
 ### Configuring AI Tools
 
-If you plan to use the **Web Search** or **Weather** tools in your agents, you need to set up API keys in your environment or `application.properties`.
+If you plan to use the **Web Search** or **Weather** tools in your agents, you may need to set up API keys in your environment or `application.properties`.
 
-**Web Search (Google):**
+**Web Search** uses DuckDuckGo by default (`eddi.tools.websearch.provider=duckduckgo`), which needs no key. **For the Brave Search API:**
 
-- `eddi.tools.websearch.provider=google`
-- `eddi.tools.websearch.google.api-key=...`
-- `eddi.tools.websearch.google.cx=...`
+- `eddi.tools.websearch.provider=brave`
+- `eddi.tools.websearch.brave.api-key=...`
+
+Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
+
+The `brave` provider first ships in the release after `6.6.0`; that image, and every earlier one, only knows Google and DuckDuckGo and ignores these settings. Once that release is on the [releases page](https://github.com/labsai/EDDI/releases), set `EDDI_VERSION` to it; until then, run from source or build the image from this repository.
+
+With Docker Compose, put the same two settings in `.env` as environment variables; `docker-compose.yml` passes them into the container:
+
+```bash
+EDDI_TOOLS_WEBSEARCH_PROVIDER=brave
+EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...
+```
+
+Environment is fixed when a container is created, so recreate it after editing `.env` (use the same `EDDI_VERSION` as before):
+
+```bash
+EDDI_VERSION=<the release with Brave> docker compose up -d
+```
 
 **Weather (OpenWeatherMap):**
 
@@ -199,6 +215,12 @@ curl -s "$EDDI/dictionarystore/dictionaries/<DICTIONARY_ID>?version=1" | jq
 >   -d '{ "operation": "SET",
 >         "document": { "name": "Greeting dictionary", "description": "hello / hi" } }'
 > ```
+>
+> The `document` may carry `name`, `description`, or both, and nothing else: a
+> document that also sets another field — `visibility`, `spaceId`, `grants`, a
+> timestamp, or a key the descriptor does not have — is refused with `400`, which
+> names each field, and nothing is changed. Visibility, space and sharing are
+> changed under [`/descriptorstore/descriptors/{id}/shares`](workspaces.md#sharing).
 
 ### 2. Create Behavior Rules
 
@@ -330,12 +352,14 @@ Step order is execution order. The available step types:
 | `eddi://ai.labs.apicalls`  | Outbound HTTP calls            | `config.uri` → API calls |
 | `eddi://ai.labs.mcpcalls`  | MCP tool calls                 | `config.uri` → MCP calls |
 | `eddi://ai.labs.llm`       | LLM interaction                | `config.uri` → LLM config |
+| `eddi://ai.labs.rag`       | Binds a knowledge base (retrieval runs inside the LLM task) | optional, see [RAG](rag.md) |
 | `eddi://ai.labs.output`    | Actions → user-visible output  | `config.uri` → output set |
 | `eddi://ai.labs.templating`| Resolves `{…}` in the output   | none                     |
 
-> **Add `eddi://ai.labs.templating` last** whenever an output or system prompt
-> contains `{properties.x}`-style placeholders. Without it the expressions are
-> never resolved. It is harmless when there is nothing to resolve, so the
+> **Add `eddi://ai.labs.templating` after the output step** whenever output texts
+> or quick replies contain `{properties.x}`-style placeholders. Without it the
+> expressions are never resolved. System prompts need no such step; the LLM task
+> renders its own. It is harmless when there is nothing to resolve, so the
 > examples keep it.
 >
 > `eddi://ai.labs.behavior` and `eddi://ai.labs.httpcalls` are accepted as
@@ -392,8 +416,8 @@ curl -s -X POST \
 ```
 
 Any status other than `READY` — typically `ERROR` — means the agent's workflow
-references something that does not resolve. Check the server log, then
-re-deploy. The status can be re-read at any time:
+references something that does not resolve; the response then also carries an
+`error` field saying why. Check the server log, then re-deploy. The status can be re-read at any time:
 
 ```bash
 curl -s "$EDDI/administration/production/deploymentstatus/<AGENT_ID>?version=1" | jq
@@ -451,7 +475,7 @@ curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>" \
 ```
 
 `conversationSteps` carries the step's public entries (`input:initial`,
-`actions`, `output:*`); add `?returnDetailed=true` to get every key, which is
+`actions`, `output:*`); add `?returnDetailed=true` to get the other pipeline keys (audit, trace and error keys are withheld, values redacted), which is
 what you want when debugging. The [REST API reference](rest-api-reference.md)
 covers the other conversation endpoints.
 
@@ -750,8 +774,9 @@ model:
 }
 ```
 
-Without `"occurrence": "currentStep"` an input matcher looks at the whole
-conversation, so a greeting from three turns ago would still match.
+`"occurrence": "currentStep"` is the default and is written out here for
+clarity; `"anyStep"` would look at the whole conversation, so a greeting from
+three turns ago would still match.
 
 ### Pattern 2: API Call Before LLM
 

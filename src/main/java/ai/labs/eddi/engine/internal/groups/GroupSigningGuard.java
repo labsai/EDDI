@@ -6,7 +6,6 @@ package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
-import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -110,9 +109,18 @@ public class GroupSigningGuard {
             if (agentConfig.getIdentity() != null
                     && agentConfig.getIdentity().getKeys() != null
                     && !agentConfig.getIdentity().getKeys().isEmpty()) {
-                keyVersion = agentConfig.getIdentity().getKeys().stream()
-                        .mapToInt(AgentPublicKey::version)
-                        .max().orElse(0);
+                // The same rule the validator and key generation use: the newest
+                // in-range version, so a legacy out-of-range entry never decides.
+                keyVersion = agentConfig.getIdentity().signingKeyVersion();
+                // A revoked newest key stops signing, with no fallback to an older
+                // key. Deleting its private half on revoke is best effort, so the
+                // vault may still hold it: the flag, not the vault, decides.
+                int newest = keyVersion;
+                if (agentConfig.getIdentity().getKeys().stream()
+                        .anyMatch(k -> k.version() == newest && k.revoked())) {
+                    LOGGER.warnf("Signing key v%d of agent '%s' is revoked — sending unsigned", newest, agentId);
+                    return SigningResult.UNSIGNED;
+                }
             }
             var signedEnvelope = agentSigningService.signEnvelope(
                     defaultTenantId, agentId, envelope, keyVersion);
@@ -231,7 +239,13 @@ public class GroupSigningGuard {
             for (int i = startIdx; i < totalEntries; i++) {
                 TranscriptEntry entry = transcript.get(i);
                 // Skip non-agent entries (user questions, errors, etc.)
-                if ("user".equals(entry.speakerAgentId()) || entry.content() == null) {
+                // A reviewer's edit (speaker hitl:<decidedBy>) is written by the engine on
+                // an authorized approval, never by an agent — nothing to verify. The speaker
+                // prefix alone proves nothing (a member may be named hitl:x); the engine-set
+                // marker does.
+                if ("user".equals(entry.speakerAgentId()) || entry.content() == null
+                        || entry.speakerAgentId() != null && entry.speakerAgentId().startsWith(GroupReviewEditor.REVIEWER_SPEAKER_PREFIX)
+                                && GroupReviewEditor.REVIEWER_EDIT_MARKER.equals(entry.errorReason())) {
                     continue;
                 }
 

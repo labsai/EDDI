@@ -4,7 +4,10 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.hitl.review.HitlReviewDetails;
 import ai.labs.eddi.datastore.ConnectionWaitTimeouts;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -16,8 +19,11 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -126,6 +132,38 @@ public class RestAgentEngine implements IRestAgentEngine {
     IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
 
     /**
+     * Reads {@code X-EDDI-Client} for the HITL audit channel; nullable in unit
+     * tests.
+     */
+    @Inject
+    HitlClientChannelReader hitlClientChannelReader;
+
+    /**
+     * The pinned agent config for approval-status review fields; nullable in unit
+     * tests.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
+
+    /**
+     * The HITL config of the agent version the paused conversation is pinned to, or
+     * null when it cannot be read — the review fields then fall back to their
+     * defaults (derived category, built-in reason codes, no editable draft).
+     */
+    private AgentConfiguration.HitlConfig pinnedHitlConfig(ConversationMemorySnapshot snapshot) {
+        if (agentConfigurationCache == null || snapshot == null || snapshot.getAgentId() == null || snapshot.getAgentVersion() == null) {
+            return null;
+        }
+        try {
+            AgentConfiguration config = agentConfigurationCache.read(snapshot.getAgentId(), snapshot.getAgentVersion());
+            return config != null ? config.getHitlConfig() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Review details of %s fall back to defaults: %s", sanitize(snapshot.getAgentId()), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Counts turns refused because their caller had already timed out; nullable in
      * unit tests.
      */
@@ -189,6 +227,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
         } catch (RuntimeException e) {
@@ -196,9 +238,54 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             throw e;
         }
     }
+
+    /**
+     * The {@code error} code of a conversation start the agent's configuration
+     * refused.
+     */
+    static final String AGENT_MISCONFIGURED = "agent_misconfigured";
+
+    /** Longest refusal message a 422 carries; the full one is in the server log. */
+    static final int MAX_REFUSAL_MESSAGE_CHARS = 1000;
+
+    /**
+     * {@code 422} for a conversation start that failed because the agent's own
+     * configuration cannot run — its {@code CONVERSATION_START} turn hit an
+     * {@link AgentConfigurationRefusal} (an httpcall whose vault reference names no
+     * secret, a secret sent to a host it may not reach). Not a 500: nothing on the
+     * server broke, and repeating the request fails the same way until the
+     * configuration changes. Not a 409 either: no state of the request's target
+     * conflicts — the request is well-formed, and what cannot be processed is the
+     * agent it addresses.
+     * <p>
+     * The body is the flat {@code {"error", "message"}} envelope this endpoint
+     * already answers its 503 with, so a client reads the code and shows the
+     * sentence. The message is the refusal's own — written to name the call and the
+     * reference, never a value — redacted again and bounded, with no stack trace. A
+     * say turn already reports the same sentence in its {@code taskErrors}.
+     */
+    static Response configurationRefused(String agentId, Throwable refusal) {
+        String message = SecretRedactionFilter.redact(String.valueOf(refusal.getMessage()));
+        if (message.length() > MAX_REFUSAL_MESSAGE_CHARS) {
+            message = message.substring(0, MAX_REFUSAL_MESSAGE_CHARS) + "...";
+        }
+        LOGGER.warnf("Conversation start of agent %s refused by its configuration: %s", sanitize(agentId), sanitize(message));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", AGENT_MISCONFIGURED);
+        body.put("message", message);
+        body.put("retryable", false);
+        return Response.status(UNPROCESSABLE_CONTENT).type(MediaType.APPLICATION_JSON).entity(body).build();
+    }
+
+    /** RFC 9110's 422; {@link Response.Status} has no constant for it. */
+    private static final int UNPROCESSABLE_CONTENT = 422;
 
     @Override
     public Response endConversation(String conversationId) {
@@ -727,7 +814,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             };
         }
         try {
-            Response immediate = resume(conversationId, decision, handler,
+            Response immediate = resume(conversationId, decision, handler, null,
                     returnDetailed != null ? returnDetailed : Boolean.FALSE,
                     returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
                     returningFields != null ? returningFields : List.of());
@@ -745,7 +832,25 @@ public class RestAgentEngine implements IRestAgentEngine {
      * synchronous form of the endpoint.
      */
     public Response resumeConversation(String conversationId, HitlDecision decision) {
-        return resume(conversationId, decision, null, false, true, List.of());
+        return resume(conversationId, decision, null, null, false, true, List.of());
+    }
+
+    /**
+     * The admission half of {@code POST /agents/{id}/resume/stream}: the very same
+     * checks, decision handling and error mapping as the plain resume (this is the
+     * same method), for a client that watches the resumed turn live.
+     *
+     * @return {@code null} once the decision is committed - from then on
+     *         {@code streaming} is the only channel; otherwise the plain HTTP
+     *         answer to refuse the request with. Nothing has been sent to
+     *         {@code streaming} in that case.
+     */
+    public Response resumeStreaming(String conversationId, HitlDecision decision, StreamingResponseHandler streaming,
+                                    Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
+        return resume(conversationId, decision, null, streaming,
+                returnDetailed != null ? returnDetailed : Boolean.FALSE,
+                returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
+                returningFields != null ? returningFields : List.of());
     }
 
     /** Maximum length of an unverified approver claim recorded from the body. */
@@ -772,11 +877,12 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     /**
-     * @return the response to send now, or {@code null} when {@code handler} will
-     *         answer once the resumed turn has run
+     * @return the response to send now, or {@code null} when {@code handler} (or
+     *         {@code streaming}) will answer once the resumed turn has run
      */
-    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler, Boolean returnDetailed,
-                            Boolean returnCurrentStepOnly, List<String> returningFields) {
+    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler,
+                            StreamingResponseHandler streaming, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                            List<String> returningFields) {
         if (decision == null || decision.getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
@@ -787,8 +893,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
-        validateConversationOwnership(conversationId, true);
-        if (handler != null) {
+        // Owner, admin or approver; an owner must also still be allowed to USE the
+        // agent, as for say — the resume runs the rest of the turn.
+        hitlAccessGuard.requireConversationResumeAccess(conversationId);
+        if (handler != null || streaming != null) {
             // A reply is a read of the conversation, and resume admits approver-only
             // callers: the approver role decides a pause, it does not license reading
             // the conversation (approval-status limits an approver to the paused turn).
@@ -800,13 +908,17 @@ public class RestAgentEngine implements IRestAgentEngine {
         // must not NPE; see resolveApprover for what is recorded instead.
         String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
         decision.setDecidedBy(resolveApprover(principalName, identity.isAnonymous(), decision.getDecidedBy()));
+        decision.setChannel(HitlClientChannelReader.of(hitlClientChannelReader));
         try {
-            if (handler == null) {
+            if (streaming != null) {
+                conversationService.resumeConversationStreaming(conversationId, decision, streaming, returnDetailed, returnCurrentStepOnly,
+                        returningFields);
+            } else if (handler == null) {
                 conversationService.resumeConversation(conversationId, decision, null);
             } else {
                 conversationService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
             }
-            return handler == null ? Response.ok().build() : null;
+            return handler == null && streaming == null ? Response.ok().build() : null;
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();
@@ -818,6 +930,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (IConversationService.PlanMismatchException e) {
+            // The decision named a plan (planHash) other than the pending one, or the
+            // stored plan no longer verifies. Nothing ran; the pause is untouched.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The pending approval's plan is not the one this decision was made for (planHash does not match) — "
+                            + "re-read approval-status and decide again.")
+                    .build();
         } catch (IConversationService.PauseMismatchException e) {
             // The decision named a pause (pauseId) that is no longer the current one.
             // Fixed text: the current pause is untouched and awaits a fresh decision.
@@ -904,6 +1023,12 @@ public class RestAgentEngine implements IRestAgentEngine {
             // The id a decision passes back as HitlDecision.pauseId, so it applies only
             // to the pause the reviewer is looking at.
             summary.put("pauseId", paused && snapshot.getHitlPausedAt() != null ? HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()) : "");
+            // The plan hash a decision passes back as HitlDecision.planHash, so it
+            // applies only to exactly the plan shown here (HitlPlanHash). Empty for a
+            // pause committed before plan hashing, and for one whose hash could not be
+            // computed (HitlPlanHash.UNAVAILABLE is not a plan a decision can name).
+            String planHash = paused ? HitlPlanHash.presentable(snapshot.getHitlPlanHash()) : null;
+            summary.put("planHash", planHash != null ? planHash : "");
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
@@ -911,6 +1036,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             // persisted. Absent entirely once the conversation is no longer
             // paused, same suppression rule as the bookmark fields above.
             summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, tail) : null);
+            // The designer's approvalContext, rendered once at pause commit and
+            // re-redacted here; applies to both pause types, hence outside pauseDetails.
+            summary.put("approvalContext", paused ? ApprovalContextViews.toView(snapshot.getHitlApprovalContext()) : null);
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -987,6 +1115,7 @@ public class RestAgentEngine implements IRestAgentEngine {
                         ? batch.getExecutedUngatedCallNames()
                         : List.of());
         details.put("outcomeUnknown", outcomeUnknown);
+        HitlReviewDetails.forToolCall(details, batch, pinnedHitlConfig(snapshot));
         return details;
     }
 
@@ -1036,6 +1165,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         details.put("type", "RULE");
         details.put("reason", tail.snapshot().getHitlPauseReason());
         details.put("actions", findPausedStepActions(conversationId, tail));
+        HitlReviewDetails.forRule(details, tail.snapshot(), pinnedHitlConfig(tail.snapshot()));
         return details;
     }
 

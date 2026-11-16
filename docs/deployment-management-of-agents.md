@@ -16,10 +16,12 @@ Deployment management provides:
 
 ### EDDI Environments
 
-| Environment      | Purpose                            | Access Control             |
-| ---------------- | ---------------------------------- | -------------------------- |
-| **`test`**       | Development and testing            | Same as production         |
-| **`production`** | Live deployments (default)         | Optional OAuth (Keycloak)  |
+| Environment      | Purpose                            |
+| ---------------- | ---------------------------------- |
+| **`test`**       | Development and testing            |
+| **`production`** | Live deployments (default)         |
+
+Authentication is deployment-wide and the same for both environments.
 
 ### Deployment Lifecycle
 
@@ -83,6 +85,10 @@ The deployment of a specific agent is done through a **`POST`** to **`/administr
 | API endpoint  | `/administration/{environment}/deploy/{agentId}`                                         |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **deploy**.                 |
+| `version`     | (`Query parameter`) agent version to deploy (required).                                  |
+| `autoDeploy`  | (`Query parameter`) default `true`.                                                      |
+| `waitForCompletion` | (`Query parameter`) default `false`. `true` waits up to 30 s and returns the final status; otherwise `202` is returned immediately. |
+| Refusals      | `404` agent not found; `429` when the tenant's `maxAgentsPerTenant` quota (distinct agent ids) is exceeded. `GET /administration/{environment}/deploy/{agentId}/preflight?version=N` runs the vault-grant check without deploying, see [Secrets Vault](secrets-vault.md#preflight-before-deploying). |
 
 ### Example _:_
 
@@ -204,8 +210,7 @@ and `mappingsApplied` counts) and requires `eddi-admin`.
 
 ## Running conversations and new agent versions
 
-A conversation used to run on the agent version it started on for its whole life. It can now
-**follow** newer versions of its agent — but only versions its author declared **compatible**.
+A conversation can **follow** newer versions of its agent — but only versions its author declared **compatible**.
 Every save is a **breaking change** unless the save says otherwise, so nothing changes for anyone
 who does not opt in.
 
@@ -459,7 +464,8 @@ Deployment status of an Agent REST API Endpoint
 | Api endpoint  | `/administration/{environment}/deploymentstatus/{agentId}`                                        |
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
-| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated). |
+| `version`     | (`Query parameter`, **required**):`Integer` the agent version to check.                          |
+| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated), or `?format=detailed` to add a `failure` object (code, message, and for a missing vault grant the fix) for a deployment in `ERROR`, to a caller who may edit the agent. |
 
 ### Example*:*
 
@@ -550,7 +556,7 @@ Agent
  │    ├── Behavior Set
  │    ├── HTTP Calls
  │    ├── Output Set
- │    ├── LangChain Config
+ │    ├── LLM Config
  │    ├── Property Setter
  │    └── Parser (with dictionaries)
  └── Workflow 2
@@ -561,7 +567,7 @@ Agent
 | ------------ | ------------------------------------------------------------------------------------------------------ |
 | HTTP Method  | `DELETE`                                                                                               |
 | API endpoint | `/agentstore/agents/{id}?version={version}&cascade=true&permanent=true`                                |
-| cascade      | (`Query parameter`) `Boolean` default `false`. If `true`, deletes packages and all extension resources |
+| cascade      | (`Query parameter`) `Boolean` default `false`. If `true`, deletes workflows and all extension resources |
 | permanent    | (`Query parameter`) `Boolean` default `false`. Applies to the **agent only** — see below                |
 
 #### Example
@@ -573,18 +579,22 @@ DELETE /agentstore/agents/5aaf98e19f7dd421ac3c7de9?version=1&cascade=true&perman
 
 This will:
 
-1. Read the agent configuration to discover its packages
-2. Resolve each package reference to the package's **current** version — references are version-pinned and are not re-pointed when the package is edited, so the pinned version frequently is not the one that exists
-3. Skip any package another agent still references (at any version), and any package with no live version left
-4. Soft-delete each remaining package, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, langchains, property setters, parser dictionaries)
-5. Delete the agent itself
+1. Read the agent configuration to discover its workflows
+2. Resolve each workflow reference to the workflow's **current** version — references are version-pinned and are not re-pointed when the workflow is edited, so the pinned version frequently is not the one that exists
+3. Skip any workflow another agent still references (at any version), and any workflow with no live version left
+4. Delete the agent itself
+5. Delete the agent's schedules, then soft-delete each remaining workflow, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, LLM configs, property setters, parser dictionaries)
+
+The agent is deleted **before** the schedules and workflows. A failure in step 5 is logged as a warning and does not roll the agent deletion back, so the agent can be gone while some of its workflows remain.
 
 > **`permanent=true` never cascades.** It applies to the resource named in the request — every
-> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault,
-> which no endpoint can regenerate. Cascaded resources are always **soft-deleted**, whatever
-> `permanent` says: the "is anyone else using this?" check can only speak for the versions it can
-> see, while `permanent` erases all of them. To erase a shared resource, delete it explicitly,
-> without cascade.
+> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault.
+> Those keys are destroyed for good: an agent restored from a backup afterwards cannot sign until an
+> admin generates it a new key with `POST /agentstore/agents/{id}/signing-keys` (`eddi-admin`) and
+> turns `security.signInterAgentMessages` back on. Cascaded resources are always **soft-deleted**,
+> whatever `permanent` says: the "is anyone else using this?" check can only speak for the versions
+> it can see, while `permanent` erases all of them. To erase a shared resource, delete it
+> explicitly, without cascade.
 
 > **`permanent=true` requires the current version.** It is ID-scoped, so a request naming a stale
 > version is refused with **409** before anything is deleted — as `cascade=true` already was. A
@@ -594,7 +604,7 @@ This will:
 
 > **Note:** Cascade delete is error-tolerant. If individual resource deletions fail (e.g., resource already deleted), the operation continues and the agent itself is still deleted. Failures are logged server-side.
 
-> **Safety:** Cascade delete checks for shared references before deleting each resource. If a package is used by another agent, or an extension resource is used by another package, it will be **skipped** (not deleted). Only resources exclusively owned by the deleted agent are removed.
+> **Safety:** Cascade delete checks for shared references before deleting each resource. If a workflow is used by another agent, or an extension resource is used by another workflow, it will be **skipped** (not deleted). Only resources exclusively owned by the deleted agent are removed.
 
 ### Cascade Delete for Workflows
 
@@ -602,14 +612,14 @@ Workflows can also be individually cascade-deleted:
 
 ```
 DELETE /workflowstore/workflows/{id}?version={version}&cascade=true
-→ 200 OK (package deleted, exclusively-owned extension resources soft-deleted)
+→ 200 OK (workflow deleted, exclusively-owned extension resources soft-deleted)
 ```
 
 The workflow delete reports how many extensions the cascade left alone — still referenced, not
 routable, or a delete that failed — in the `X-Cascade-Skipped` response header. It is absent when
 nothing was skipped, so a cascade that removed everything it walked no longer looks exactly like one
 that removed half the graph. The header is **not** propagated onto the agent-delete response; the
-packages a cascading agent delete skipped are named in the server log.
+workflows a cascading agent delete skipped are named in the server log.
 
 ### Important: Undeploy Before Deleting
 
@@ -627,7 +637,7 @@ DELETE /agentstore/agents/{agentId}?version=1&cascade=true&permanent=true
 
 ## Orphan Detection and Cleanup
 
-Over time, resources can become orphaned — they exist in the database but are no longer referenced by any agent or package. The orphan admin endpoint helps detect and clean up these resources.
+Over time, resources can become orphaned — they exist in the database but are no longer referenced by any agent or workflow. The orphan admin endpoint helps detect and clean up these resources.
 
 ### Scan for Orphans (Dry Run)
 
@@ -714,7 +724,7 @@ orphans. A failed scan is shown as an error with the server's message (it never 
 empty "Scan your platform" state), and a refused purge shows the server's reason, such as the 409
 above.
 
-> **Changed in 6.1.x:** `includeDeleted` was previously an *equality* filter — `true` matched only
+> **Note:** `includeDeleted` is not an *equality* filter — `true` matched only
 > soft-deleted resources instead of adding them to the live ones — and this endpoint defaulted to
 > `true` while the scan defaulted to `false`, so a scan followed by a purge operated on **disjoint**
 > sets. `true` now means "live and soft-deleted", and the default is `false`. A client relying on the

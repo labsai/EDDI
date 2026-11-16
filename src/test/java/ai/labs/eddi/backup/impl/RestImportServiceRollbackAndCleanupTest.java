@@ -16,6 +16,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.migration.IMigrationManager;
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import java.io.ByteArrayInputStream;
@@ -54,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -412,10 +415,53 @@ class RestImportServiceRollbackAndCleanupTest {
                 verify(restWorkflowStore).updateWorkflow(eq(LOCAL_WORKFLOW_ID), eq(3), any());
                 // ... and the compensation: the pre-import content written over v4
                 verify(restWorkflowStore).updateWorkflow(LOCAL_WORKFLOW_ID, 4, previous);
-                verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3), argThat((DocumentDescriptor d) -> d == previousDescriptor
-                        && d.getResource().toString().endsWith(LOCAL_WORKFLOW_ID + "?version=5")));
+                // The current descriptor, with the snapshot's metadata put back on it.
+                verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                        argThat((DocumentDescriptor d) -> d != previousDescriptor && "Before".equals(d.getName())
+                                && d.getResource().toString().endsWith(LOCAL_WORKFLOW_ID + "?version=5")));
                 verify(workflowStore, never()).deleteAllPermanently(LOCAL_WORKFLOW_ID);
             }
+        }
+
+        @Test
+        @DisplayName("the rollback puts back the metadata the merge rewrote, never the sharing the snapshot had")
+        void rollbackKeepsTheCurrentSharing() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var restWorkflowStore = mock(IRestWorkflowStore.class);
+            stubAgentWithOneWorkflowZip();
+            stubExistingLocalWorkflow(workflowStore);
+            when(documentDescriptorStore.getCurrentResourceId(LOCAL_WORKFLOW_ID)).thenReturn(resourceId(LOCAL_WORKFLOW_ID, 3));
+            var snapshot = new DocumentDescriptor();
+            snapshot.setName("Before");
+            snapshot.setOwnerId("owner-1");
+            snapshot.setVisibility("shared");
+            // While the import ran, the owner made the workflow private again.
+            when(documentDescriptorStore.readDescriptor(LOCAL_WORKFLOW_ID, 3)).thenReturn(snapshot, privateDescriptor(), privateDescriptor(),
+                    privateDescriptor(), privateDescriptor(), privateDescriptor());
+            when(restWorkflowStore.updateWorkflow(eq(LOCAL_WORKFLOW_ID), anyInt(), any())).thenReturn(Response.ok().build());
+            when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class)),
+                        IRestWorkflowStore.class, restWorkflowStore);
+
+                assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+            }
+
+            verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                    argThat((DocumentDescriptor d) -> "Before".equals(d.getName()) && "private".equals(d.getVisibility())
+                            && "owner-1".equals(d.getOwnerId())));
+            verify(documentDescriptorStore, never()).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                    argThat((DocumentDescriptor d) -> "shared".equals(d.getVisibility())));
+        }
+
+        private static DocumentDescriptor privateDescriptor() {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setOwnerId("owner-1");
+            descriptor.setVisibility("private");
+            return descriptor;
         }
 
         @Test
@@ -589,6 +635,94 @@ class RestImportServiceRollbackAndCleanupTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
         }
+    }
+
+    // ==================== an imported agent's signing identity
+    // ====================
+
+    @Nested
+    @DisplayName("signing identity of an agent the import creates")
+    class ImportedAgentIdentity {
+
+        /**
+         * The archive's identity belongs to the agent it was exported from: its private
+         * keys are vault entries under that agent's id. Kept, the new agent could never
+         * sign, and every later save of it — a workflow cascade included — was refused
+         * for signing with a key it does not hold.
+         */
+        @Test
+        @DisplayName("gets no identity and signing off, and keeps peer verification")
+        void createdAgentDropsTheArchivedIdentity() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            stubSigningAgentArchive(workflowStore, agentStore);
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
+
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+
+                var created = ArgumentCaptor.forClass(AgentConfiguration.class);
+                verify(agentStore).create(created.capture());
+                assertNull(created.getValue().getIdentity());
+                assertFalse(created.getValue().getSecurity().isSignInterAgentMessages());
+                assertTrue(created.getValue().getSecurity().isRequirePeerVerification(), "verifying peers needs no key of the agent's own");
+                // ... and the answer says so: the archive had signing on.
+                String turnedOff = response.getHeaderString(RestImportService.HEADER_SIGNING_TURNED_OFF);
+                assertNotNull(turnedOff, "the caller learns that signing was turned off");
+                assertTrue(turnedOff.contains("has no signing key yet"), turnedOff);
+            }
+        }
+
+        /**
+         * A first promotion has no target agent, so it goes through this import, and
+         * the import's header is the only place the turned-off flag is reported. The
+         * sync answers an {@link UpgradeResult}, not that response, so the header has
+         * to be carried into its warnings — or the caller sees a plain success while
+         * the new agent runs with signing off.
+         */
+        @Test
+        @DisplayName("a first-promotion sync reports it in the result's warnings")
+        void firstPromotionSyncReportsSigningTurnedOff() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            stubSigningAgentArchive(workflowStore, agentStore);
+
+            Response response;
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class);
+                    MockedStatic<RemoteApiResourceSource> remote = mockStatic(RemoteApiResourceSource.class)) {
+                stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class));
+                remote.when(() -> RemoteApiResourceSource.exportAgentArchive(any(), any(), any(), any(), any(), any()))
+                        .thenReturn(new byte[0]);
+
+                response = importService.executeSync("https://203.0.113.10", AGENT_ORIGIN_ID, 1, null, null, null, null, true, null);
+            }
+
+            var result = (UpgradeResult) response.getEntity();
+            assertTrue(result.agentUpdated(), "the agent was created");
+            assertEquals(1, result.warnings().size(), String.valueOf(result.warnings()));
+            assertTrue(result.warnings().getFirst().contains("has no signing key yet"), result.warnings().getFirst());
+        }
+    }
+
+    /**
+     * An archive whose agent signs and verifies, with an identity of the instance
+     * it was exported from; the stores answer the ids the import creates.
+     */
+    private void stubSigningAgentArchive(IWorkflowStore workflowStore, IAgentStore agentStore) throws Exception {
+        stubAgentWithOneWorkflowZip();
+        var archived = new AgentConfiguration();
+        archived.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ORIGIN_ID + "?version=1")));
+        var identity = new AgentConfiguration.AgentIdentity();
+        identity.setKeys(List.of(AgentPublicKey.createCurrent(1, "MCowBQYDK2VwAyEAkeyOfTheExportedAgent")));
+        archived.setIdentity(identity);
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        security.setRequirePeerVerification(true);
+        archived.setSecurity(security);
+        when(jsonSerialization.deserialize(eq("AGENTJSON"), eq(AgentConfiguration.class))).thenReturn(archived);
+        when(workflowStore.create(any())).thenReturn(resourceId(NEW_WORKFLOW_ID, 1));
+        when(agentStore.create(any())).thenReturn(resourceId(NEW_AGENT_ID, 1));
     }
 
     // ==================== H15 — archive limits ====================

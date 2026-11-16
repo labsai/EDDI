@@ -16,8 +16,11 @@
  * and the values each name resolves to in both themes.
  *
  * Two aliases point at another `--chat-*` name instead of a token: the user
- * bubble IS the accent (`?accentColor=` already set both), and that is now said
- * once.
+ * bubble and the input focus ring ARE the accent (`?accentColor=` already set
+ * all three), and that is now said once. The focus ring must not alias
+ * `--color-ring`: `/branding/brand.css` (BrandDelivery) writes the Manager's
+ * `--color-ring` on `:root`, and the widget loads that stylesheet, so the ring
+ * would follow the Manager primary instead of the chat accent.
  */
 export const CHAT_TOKEN_ALIASES = {
   "--chat-bg": "--color-background",
@@ -29,7 +32,7 @@ export const CHAT_TOKEN_ALIASES = {
   "--chat-agent-text": "--color-card-foreground",
   "--chat-user-bg": "--chat-accent",
   "--chat-input-border": "--color-input",
-  "--chat-input-focus": "--color-ring",
+  "--chat-input-focus": "--chat-accent",
   "--chat-input-text": "--color-foreground",
   "--chat-border": "--color-border",
   "--chat-warning": "--color-warning",

@@ -15,6 +15,9 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
+import ai.labs.eddi.engine.cluster.ClusterSigningConfig;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
@@ -28,12 +31,15 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -239,7 +245,7 @@ class GdprErasureInFlightAndGrantsTest {
     void deleteUserData_aNodeThatCouldNotStopTheUsersWorkMakesTheClusterStopAFailedStep() throws Exception {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap())).thenReturn(Map.of(
+        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(Map.of(
                 "n2", Map.of("stopped", 1),
                 "n3", Map.of("stopped", 0, "error", "stop step(s) failed: runningGroupDiscussions")));
         service.clusterRpc = rpc;
@@ -258,11 +264,41 @@ class GdprErasureInFlightAndGrantsTest {
         IClusterRpc rpc = mock(IClusterRpc.class);
         when(rpc.isClustered()).thenReturn(true);
         when(rpc.expectedPeers()).thenReturn(2);
-        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
+        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
         service.clusterRpc = rpc;
 
         var result = service.deleteUserData(USER_ID);
 
         assertEquals(List.of("clusterStop"), result.failedSteps());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_theClusterStopWaitsForTheFreshPeerCountWithItsOwnTimeoutAndSealsTheUser() throws Exception {
+        // B5: the scatter used to stop at a presence count cached for 3 s, compare a
+        // fresh
+        // one, and share the 2 s request timeout; and the user travelled as a plain,
+        // dictionary-reversible SHA-256.
+        IClusterRpc rpc = mock(IClusterRpc.class);
+        when(rpc.isClustered()).thenReturn(true);
+        when(rpc.expectedPeers()).thenReturn(3);
+        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), any(Duration.class), anyInt()))
+                .thenReturn(Map.of("n2", Map.of("stopped", 0), "n3", Map.of("stopped", 0), "n4", Map.of("stopped", 0)));
+        service.clusterRpc = rpc;
+        ClusterMessageSigner signer = new ClusterMessageSigner(
+                ClusterSigningConfig.of("fixturefixturefixturefixturefixture-test", List.of(), false, Duration.ofSeconds(60)),
+                new SimpleMeterRegistry());
+        Instance<ClusterMessageSigner> signerInstance = mock(Instance.class);
+        when(signerInstance.isResolvable()).thenReturn(true);
+        when(signerInstance.get()).thenReturn(signer);
+        service.clusterSigner = signerInstance;
+
+        var result = service.deleteUserData(USER_ID);
+
+        ArgumentCaptor<Map<String, Object>> request = ArgumentCaptor.forClass(Map.class);
+        verify(rpc).callAll(eq(IClusterRpc.GDPR_STOP), request.capture(), eq(Duration.ofSeconds(10)), eq(3));
+        assertFalse(request.getValue().containsKey("userIdHash"), "the plain hash must not travel when a key is configured");
+        assertEquals(KvKeys.sha256(USER_ID), signer.unseal(String.valueOf(request.getValue().get("userIdSealed"))).orElseThrow());
+        assertFalse(result.failedSteps().contains("clusterStop"));
     }
 }

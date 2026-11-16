@@ -158,6 +158,31 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
         }
     }
 
+    @Override
+    public CostReservationResult tryReserveCost(String tenantId, double amountUsd, double limit, long ttlMillis) {
+        TenantUsageCounters counters = getOrCreateCounters(tenantId);
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            long generation = counters.tryReserve(amountUsd, limit, ttlMillis);
+            if (generation < 0) {
+                return CostReservationResult.refused(QuotaCheckResult.denied(
+                        String.format("Monthly cost budget ($%.2f) cannot take this call's reservation for tenant '%s'", limit, tenantId)));
+            }
+            return CostReservationResult.granted(new CostReservation(amountUsd, generation));
+        }
+    }
+
+    @Override
+    public void releaseCost(String tenantId, long generation, double amountUsd) {
+        TenantUsageCounters counters = usageMap.get(tenantId);
+        if (counters == null) {
+            return;
+        }
+        synchronized (counters) {
+            counters.release(generation, amountUsd);
+        }
+    }
+
     // ─── Usage Reporting ───
 
     @Override

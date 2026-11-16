@@ -13,13 +13,17 @@ import type { ApprovalStatusSummary } from "@/lib/api/hitl";
  * covers every gated call nobody reviewed: `requireExplicitPerCall` is bypassed
  * without anyone seeing a single call.
  *
- * Two layers, because the backend grew the proper one only recently:
+ * Three layers, because the backend grew the proper ones only recently:
  *
  * 1. `pauseId` (the pause start's epoch milliseconds, reported by
  *    `approval-status`). A backend that knows it refuses a decision for a pause
  *    that is no longer current with 409 — atomically, on the server. A backend
  *    that predates it ignores the unknown field.
- * 2. For a backend that reports no `pauseId`, the pause is re-read immediately
+ * 2. `planHash` (EDDI 6.8+): the hash of exactly what the pause would let run.
+ *    The backend refuses a decision whose hash is not the pending plan's with
+ *    409, and an agent configured with `hitlConfig.requirePlanHash` refuses a
+ *    human decision without one with 400.
+ * 3. For a backend that reports no `pauseId`, the pause is re-read immediately
  *    before the resume and compared with what was shown. That leaves only the
  *    round trip open, instead of the whole time the decision took.
  */
@@ -38,6 +42,11 @@ export interface ShownPause {
   pauseType?: string | null;
   /** For a tool-call pause, the call ids the reviewer saw. */
   callIds?: readonly string[] | null;
+  /**
+   * `planHash` from approval-status: the exact plan the reviewer saw. Sent with
+   * the decision, so the backend refuses it when the plan is a different one.
+   */
+  planHash?: string | null;
 }
 
 /** Thrown when the pause changed between being shown and being decided. */
@@ -130,6 +139,7 @@ export function shownPauseOf(status: ApprovalStatusSummary | null | undefined): 
     pausedAt: status.pausedAt || null,
     pauseType: details?.type ?? null,
     callIds: details?.type === "TOOL_CALL" ? details.calls.map((c) => c.callId) : null,
+    planHash: usablePauseId(status.planHash),
   };
 }
 
@@ -156,6 +166,7 @@ export function currentGroupPauseOf(summary: Record<string, unknown>): CurrentPa
     pausedAt: text("pausedAt"),
     pauseType: text("pauseType"),
     callIds: null,
+    planHash: usablePauseId(text("planHash")),
   };
 }
 
@@ -168,6 +179,10 @@ export function currentGroupPauseOf(summary: Record<string, unknown>): CurrentPa
  */
 export function isSamePause(shown: ShownPause, current: CurrentPause): boolean {
   if (!current.paused) return false;
+  // Two plan hashes that differ are two plans, whatever else matches.
+  const shownPlan = usablePauseId(shown.planHash);
+  const currentPlan = usablePauseId(current.planHash);
+  if (shownPlan && currentPlan && shownPlan !== currentPlan) return false;
   const currentId = usablePauseId(current.pauseId);
   const shownId = usablePauseId(shown.pauseId);
   if (shownId && currentId) return shownId === currentId;
@@ -190,21 +205,30 @@ export function isSamePause(shown: ShownPause, current: CurrentPause): boolean {
 /**
  * The decision to send for the pause that was shown, or a `PauseChangedError`.
  *
- * With a `pauseId` in hand the backend does the check, so nothing is read. Without
- * one the pause is re-read through `readCurrent` and compared; if the fresh read
- * carries a `pauseId`, it goes along so the backend closes the remaining gap.
+ * With a `pauseId` in hand the backend does the check, so nothing is read; the
+ * shown `planHash` goes along when the status that was shown carried one. Without
+ * a `pauseId` the pause is re-read through `readCurrent` and compared; what the
+ * fresh read carries (`pauseId`, `planHash`) goes along so the backend closes the
+ * remaining gap — a shown pause without a plan hash (a pending-approvals row)
+ * takes the current one only once the fresh read is recognisably the same pause.
  */
-export async function bindDecisionToPause<D extends { pauseId?: string }>(
+export async function bindDecisionToPause<D extends { pauseId?: string; planHash?: string }>(
   decision: D,
   shown: ShownPause,
   readCurrent: () => Promise<CurrentPause>,
 ): Promise<D> {
   const shownId = usablePauseId(shown.pauseId);
-  if (shownId) return { ...decision, pauseId: shownId };
+  const shownPlan = usablePauseId(shown.planHash);
+  if (shownId) return { ...decision, pauseId: shownId, ...(shownPlan ? { planHash: shownPlan } : {}) };
   const current = await readCurrent();
   if (!isSamePause(shown, current)) throw new PauseChangedError();
   const currentId = usablePauseId(current.pauseId);
-  return currentId ? { ...decision, pauseId: currentId } : decision;
+  const currentPlan = shownPlan ?? usablePauseId(current.planHash);
+  return {
+    ...decision,
+    ...(currentId ? { pauseId: currentId } : {}),
+    ...(currentPlan ? { planHash: currentPlan } : {}),
+  };
 }
 
 /**
@@ -224,7 +248,7 @@ export function isPauseChanged(err: unknown): boolean {
   return (
     err instanceof ApiClientError &&
     err.status === 409 &&
-    /changed since this decision|pauseId no longer current|group conversation is not awaiting approval/i.test(
+    /changed since this decision|pauseId no longer current|planHash does not match|group conversation is not awaiting approval/i.test(
       err.message,
     )
   );

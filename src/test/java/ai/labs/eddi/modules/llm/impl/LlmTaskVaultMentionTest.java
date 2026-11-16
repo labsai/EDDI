@@ -13,8 +13,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -168,5 +170,25 @@ class LlmTaskVaultMentionTest {
         String value = "Plain prompt with {userName} and no secrets syntax.";
         assertSame(value, LlmTask.escapeConfigReferenceMentions(value));
         assertNull(LlmTask.escapeConfigReferenceMentions(null));
+    }
+
+    @Test
+    @DisplayName("the escape finds what CONFIG_REF_MENTION finds, and copies a mention literally")
+    void sameMatchesAsThePattern() {
+        String[] samples = {"a ${vault:k} b ${vars:m} c", "{vars:{vault:x}", "{vault:a} {nope:b} {caller:c", "{{{eddivault:t/k}}}",
+                "{connection:n}{vault:", "{vault:a$1\\b}"};
+        for (String sample : samples) {
+            String expected = LlmTask.CONFIG_REF_MENTION.matcher(sample)
+                    .replaceAll(match -> Matcher.quoteReplacement("{|" + match.group() + "|}"));
+            assertEquals(expected, LlmTask.escapeConfigReferenceMentions(sample), sample);
+        }
+    }
+
+    @Test
+    @DisplayName("unclosed openers cost linear time — an editor's prompt cannot burn quadratic CPU on every turn")
+    void unclosedOpenersAreLinear() {
+        String value = "{vault:".repeat(40_000);
+        String escaped = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> LlmTask.escapeConfigReferenceMentions(value));
+        assertEquals(value, escaped);
     }
 }

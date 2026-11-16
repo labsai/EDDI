@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.tools.quota;
 
 import ai.labs.eddi.modules.llm.model.ToolQuotaConfig;
 
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -63,9 +62,12 @@ public final class ToolQuotaConfigValidator {
             if (rule.getLimit() == null || rule.getLimit() < 1) {
                 throw new IllegalArgumentException(path + ".limit must be a positive integer");
             }
-            Duration window;
+            String window;
             try {
-                window = ToolQuotaRules.parseWindow(rule.getWindow());
+                // a per-run rule has no duration; pool terms compare the normalised scope
+                window = ToolQuotaRules.isRunWindow(rule.getWindow())
+                        ? ToolQuotaRules.RUN_WINDOW
+                        : ToolQuotaRules.parseWindow(rule.getWindow()).toString();
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException(path + "." + e.getMessage());
             }
@@ -87,6 +89,6 @@ public final class ToolQuotaConfigValidator {
         }
     }
 
-    private record PoolTerms(String tool, int limit, Duration window) {
+    private record PoolTerms(String tool, int limit, String window) {
     }
 }

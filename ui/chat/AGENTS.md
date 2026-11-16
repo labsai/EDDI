@@ -21,7 +21,7 @@
 
 ### Ecosystem
 
-- **EDDI backend** (repository root) — Quarkus REST API at `/agents/{env}/{agentId}`; the Maven build copies this widget into the jar, served at `/chat`
+- **EDDI backend** (repository root) — Quarkus REST API under `/agents` (`POST /agents/{agentId}/start?environment=…`, then `/agents/{conversationId}`); the Maven build copies this widget into the jar, served at `/chat`
 - **EDDI Manager** (`ui/manager`) — Admin UI with embedded chat panel, shares API patterns
 
 ---
@@ -32,14 +32,14 @@
 src/
 ├── api/            # The widget's own API layer — the backend contract itself is @eddi/core
 │   ├── embed-auth.ts       # postMessage token hand-off with the host page (docs/chat-ui-embedding.md)
-│   ├── chat-config.ts      # Operator settings chat.html loads before the widget; the URL token
-│   ├── brand.ts            # The deployment brand and per-agent appearance layers
+│   ├── chat-config.ts      # Operator settings from `window.__EDDI_CHAT__` (/chat/__config__.js), `?token=` gate
+│   ├── brand.ts            # Deployment brand from `window.__EDDI_BRAND__` (/branding/__brand__.js)
 │   ├── rating-api.ts       # RATING_CHANNEL, httpRatingClient, ratingErrorMessage() (the widget's copy)
 │   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
 │   ├── ChatApp.tsx         # Picks the screen for the URL; unknown paths → /chat/production/default
 │   ├── ChatLocationProvider.tsx # The address bar (or, with initialPath, an in-memory one for tests)
-│   ├── ChatRoute.tsx       # Direct routes; the demo is off under a brand
+│   ├── ChatRoute.tsx       # `/chat/:environment/:agentId[/:userId]` route; neutral state for the demo under a brand
 │   ├── ChatWidget.tsx      # Route, embedding (token, colours, config), profile → the shared AgentConversation and components
 │   └── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 ├── hooks/
@@ -125,7 +125,7 @@ to the widget's own `ChatMessage` and `ChatConfig`. The widget drives core's def
 client: `setBaseUrl`, `setAuthToken` and `setUnauthorizedHandler` (installed by
 `embed-auth.ts`).
 
-**The backend contract list — the rules verified against EDDI's source (six states, ten SSE
+**The backend contract list — the rules verified against EDDI's source (six states, fourteen SSE
 events, `inputField` on `done`, the 409 that restores the draft, the attachment context
 keys, the rating envelope, …) — is now [`ui/packages/core/README.md`](../packages/core/README.md),
 each rule with the test that pins it.** Read it before touching the turn loop. A contract
@@ -143,7 +143,7 @@ through `t()`) stays here.
 4a. **No router** — react-router was 92 KB of first load for three path shapes. `src/location.ts` parses `/chat/managed/:intent/:userId`, `/chat/:environment/:agentId/:userId` and `/chat/:environment/:agentId` with react-router's matching rules (case-insensitive literals, `managed` beats `:environment`, trailing slashes ignored, params decoded); `location.test.tsx` pins them — these URLs are a public contract for embedders. Do not add a router back for a fourth shape; extend `parseChatPath`.
 4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts` in `@eddi/conversation`), and GFM is parsed without its serialiser (`remark-gfm-parse.ts`, about 4 KB of gzip); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is still rendered (sanitised) for every agent until the per-agent `rawHtml` setting exists (frontend unification plan, D9).
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
-6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `apiServer`, `token` (read once, then removed from the address bar), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
+6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `lang` (`en`/`de`/`fr`/`es`, read in `i18n.ts`), `apiServer`, `token` (read once, then removed from the address bar; honoured only when the operator sets `eddi.chat.url-token.enabled`, default `false`), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
 8. **Lint** — `npm run lint` (ESLint, zero warnings) runs in CI next to `npm run typecheck` and `npm test`.
 
@@ -177,7 +177,7 @@ no CI at all), then builds and runs `npm run budget`. Run them all before pushin
 ## 5. Mandatory Workflow
 
 1. **Before work**: `git status`, read this file + the top of the root `docs/changelog.md` and anything pending in the root `docs/changelog.d/`
-2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates below.
+2. **During work**: Commit with `feat(chat-ui):` / `fix(chat-ui):` (`(ui)` for a change that spans both UIs). Each commit must pass the gates above.
 3. **After work**: add your entry as a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` — never edit `docs/changelog.md`, which every open PR would conflict over. See [`docs/changelog.d/README.md`](../../docs/changelog.d/README.md).
 
 ### DO NOT

@@ -85,7 +85,17 @@ public interface IAlertEventStore {
      * events held by a rule that has meanwhile been disabled or deleted (a replica
      * with a stale rule cache can create one after the release) are let go.
      */
-    List<String> findDigestPendingRuleIds(int limit);
+    default List<String> findDigestPendingRuleIds(int limit) {
+        return findDigestPendingRuleIds(null, limit);
+    }
+
+    /**
+     * The same, in ascending rule-id order and only those after {@code afterRuleId}
+     * ({@code null}: from the start). A pass that is bounded by {@code limit} would
+     * otherwise see the same first rules every time and never reach one that sorts
+     * later; the caller resumes from the last id it was given.
+     */
+    List<String> findDigestPendingRuleIds(String afterRuleId, int limit);
 
     /** The rule's events held for its digest, oldest first. */
     List<AlertEvent> findDigestPending(String ruleId, int limit);

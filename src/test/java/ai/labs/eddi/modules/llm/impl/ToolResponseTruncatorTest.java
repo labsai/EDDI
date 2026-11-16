@@ -4,7 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
+import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,7 +20,13 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for {@link ToolResponseTruncator}.
@@ -28,10 +40,39 @@ class ToolResponseTruncatorTest {
     private static final Map<String, String> TASK_PARAMS = Map.of(
             "apiKey", "sk-test", "modelName", "gpt-4o");
 
+    private ChatModelRegistry chatModelRegistry;
+    private GlobalVariableResolver globalVariableResolver;
+
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        truncator = new ToolResponseTruncator(meterRegistry, mock(ChatModelRegistry.class));
+        chatModelRegistry = mock(ChatModelRegistry.class);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        truncator = new ToolResponseTruncator(meterRegistry, chatModelRegistry, globalVariableResolver, mock(PaginatedResponseStore.class));
+    }
+
+    @Test
+    @DisplayName("summarize resolves a ${vars:...} provider type before building the summarizer")
+    void summarizeResolvesAVariableProviderType() throws Exception {
+        // LlmTask resolves the task's type through GlobalVariableResolver; this path
+        // passed the raw '${vars:provider}' to the registry, which cannot build a
+        // model for it, and the summarize strategy silently became truncation.
+        when(globalVariableResolver.resolveValue("${vars:provider}")).thenReturn("openai");
+        ChatModel summarizer = mock(ChatModel.class);
+        when(summarizer.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("short summary")).build());
+        when(chatModelRegistry.getOrCreate(eq("openai"), anyMap())).thenReturn(summarizer);
+        var limits = new ToolResponseLimits();
+        limits.setDefaultMaxChars(100);
+        limits.setTruncationStrategy("summarize");
+        limits.setSummarizerModel("gpt-4o-mini");
+
+        String result = truncator.truncateIfNeeded("webScraper", "a".repeat(500), limits, "${vars:provider}", TASK_PARAMS);
+
+        assertTrue(result.startsWith("[SUMMARY"), result);
+        assertTrue(result.endsWith("short summary"), result);
+        verify(chatModelRegistry).getOrCreate(eq("openai"), anyMap());
     }
 
     @Test
@@ -58,6 +99,7 @@ class ToolResponseTruncatorTest {
     void truncateIfNeeded_exceedsLimit_truncates() {
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(10);
+        limits.setTruncationStrategy("truncate"); // start only; the default keeps head and tail
         String input = "a".repeat(100);
 
         String result = truncator.truncateIfNeeded("myTool", input, limits, TASK_TYPE, TASK_PARAMS);
@@ -132,7 +174,9 @@ class ToolResponseTruncatorTest {
 
         String result = truncator.truncateIfNeeded("myTool", "a".repeat(100), limits, TASK_TYPE, TASK_PARAMS);
 
-        assertTrue(result.startsWith("a".repeat(10)), result);
+        // Head and tail (the default): 7 from the start and 3 from the end — 10 in all.
+        assertTrue(result.startsWith("a".repeat(7) + "\n"), result);
+        assertTrue(result.endsWith("\n" + "a".repeat(3)), result);
         assertTrue(result.contains("limit is 10"),
                 "the default ceiling must be what applies, not a limit derived from the null entry: " + result);
     }

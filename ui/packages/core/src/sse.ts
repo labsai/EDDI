@@ -93,6 +93,10 @@ const NO_EVENT_TYPE = "\u0000no-event-type";
  *    and then the BUFFER: a server or proxy that closes right after the last
  *    frame drops the blank line that terminates it, and that frame is usually
  *    the one that matters (`done`, `error`, `group_complete`).
+ *    The decoder flush only ever adds a U+FFFD for a body cut mid-character
+ *    (a complete character is never held back). The Manager's old chat reader
+ *    skipped it on purpose to keep that glyph out of the transcript; one rule for
+ *    every stream won, and the glyph at least shows that the reply was truncated.
  */
 export async function* readSseStream(
   body: ReadableStream<Uint8Array> | null | undefined,

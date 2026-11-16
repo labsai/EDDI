@@ -8,7 +8,7 @@
 
 EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. It provides a visual workspace for building, testing, deploying, and monitoring AI agents — no code required.
 
-**🌐 Website:** [eddi.labs.ai](https://eddi.labs.ai/) · **📖 Docs:** [docs.labs.ai](https://docs.labs.ai/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+**🌐 Website:** [eddi.technology](https://eddi.technology/) · **📖 Docs:** [docs.eddi.technology](https://docs.eddi.technology/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 
@@ -16,11 +16,11 @@ EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. 
 
 - **Agent Builder** — Create and configure agents with a drag-and-drop workflow pipeline
 - **Agent Studio** — 3-panel workspace with live chat, debug drawer, and pipeline inspector
-- **Group Discussions** — Orchestrate multi-agent conversations across 8 discussion styles
-- **LLM Configuration** — Connect to 11 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
+- **Group Discussions** — Orchestrate multi-agent conversations across the discussion styles (round table, peer review, devil's advocate, Delphi, debate, task force, negotiation, plus custom phases)
+- **LLM Configuration** — Connect to 19 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
 - **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
 - **Secrets Vault** — Manage encrypted API keys with vault references
-- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{{vars.<key>}}`)
+- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{vars.<key>}`)
 - **Audit Trail** — Timeline-based compliance and debugging viewer
 - **11 Languages** — English, German, French, Spanish, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
@@ -42,7 +42,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 If you want to develop the Manager UI itself:
 
 ```bash
-# Prerequisites: Node.js ≥ 22.18 (Stryker 10's Babel 8 floor; the build pins 26.13.0), EDDI backend on localhost:7070
+# Prerequisites: Node.js 22.22.2+, 24.15.0+ or 26+ (jsdom's floor for the test suite; the build pins 26.13.0), EDDI backend on localhost:7070
 (cd .. && npm ci)    # once, at ui/: the npm workspaces root and its one lockfile
 npm run dev          # Vite dev server on http://localhost:3000
 ```

@@ -8,6 +8,18 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * A named cache with the {@link ConcurrentMap} contract plus per-entry
+ * lifespans.
+ * <p>
+ * <b>The views are for reading.</b> {@link #keySet()}, {@link #values()} and
+ * {@link #entrySet()} — their iterators and entries included — throw
+ * {@link UnsupportedOperationException} on any change. Entries change through
+ * the map methods only, because in cluster mode those are what tell the other
+ * nodes ({@code ClusterInvalidatingCache}) or reach the shared bucket
+ * ({@code SharedKvCache}); a change through a view reached neither. To remove
+ * the keys a view shows, collect them first and {@link #remove(Object)} each.
+ */
 public interface ICache<K, V> extends ConcurrentMap<K, V> {
 
     String getCacheName();
@@ -21,6 +33,25 @@ public interface ICache<K, V> extends ConcurrentMap<K, V> {
      */
     default int sizeExact() {
         return size();
+    }
+
+    /**
+     * A read-through fill: stores a value the caller has just read from its source
+     * of truth. Nothing changed, so in cluster mode no other node is told — an
+     * ordinary {@link #put(Object, Object)} announces an eviction, and a fill that
+     * did so made the nodes of a round-robin cluster evict each other's fresh
+     * copies on every read (B3). Use {@code put} for a mutation.
+     */
+    default V fill(K key, V value) {
+        return put(key, value);
+    }
+
+    /**
+     * {@link #putIfAbsent(Object, Object)} for a read-through fill: like
+     * {@link #fill}, never announced to the other nodes.
+     */
+    default V fillIfAbsent(K key, V value) {
+        return putIfAbsent(key, value);
     }
 
     /**

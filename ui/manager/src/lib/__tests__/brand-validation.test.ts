@@ -5,6 +5,7 @@ import {
   isSafeBrandColor,
   parseSrgb,
   toColorInputValue,
+  toPickerValue,
 } from "@/lib/brand-validation";
 
 /** BrandValidator's grammar and rules, so the page flags what the server would refuse. */
@@ -63,5 +64,19 @@ describe("toColorInputValue", () => {
     expect(toColorInputValue("#ABC")).toBe("#aabbcc");
     expect(toColorInputValue("#0f766e")).toBe("#0f766e");
     expect(toColorInputValue("rgb(1 2 3)")).toBeNull();
+  });
+});
+
+describe("toPickerValue", () => {
+  it("keeps hex and converts rgb() so the picker shows the configured colour", () => {
+    expect(toPickerValue("#ABC")).toBe("#aabbcc");
+    expect(toPickerValue("rgb(15 118 110)")).toBe("#0f766e");
+    expect(toPickerValue("rgb(100% 0% 0%)")).toBe("#ff0000");
+  });
+
+  it("is null for what it cannot read or what is invalid", () => {
+    expect(toPickerValue("hsl(0 0% 0%)")).toBeNull();
+    expect(toPickerValue("not a colour")).toBeNull();
+    expect(toPickerValue("")).toBeNull();
   });
 });

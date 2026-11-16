@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -128,11 +129,13 @@ class ConversationServiceQueuedTurnTest {
         doReturn(new HashMap<String, String>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
         doReturn(QuotaCheckResult.OK).when(tenantQuotaService).acquireApiCallSlot();
         doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+        // Read after the turn ran (the committed state, the state cache refresh).
         doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
-        // The snapshots below are loaded at revision 1; unless a test says otherwise
-        // the
-        // store still holds it, i.e. nothing committed while the turn was queued.
-        doReturn(1L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        // What the queued turn reads when it starts: state and revision in one read,
+        // the path both production stores take. The snapshots below are loaded at
+        // revision 1; unless a test says otherwise the store still holds it, i.e.
+        // nothing committed while the turn was queued.
+        storeHolds(ConversationState.READY, 1L);
         stubRuntimeInline();
 
         conversationService = new ConversationService(
@@ -154,7 +157,7 @@ class ConversationServiceQueuedTurnTest {
         var current = snapshot(ConversationState.READY, 2L, 2);
         current.getConversationProperties().put("fromTurnOne", new Property("fromTurnOne", "set by turn 1", Property.Scope.conversation));
         doReturn(atRequest, current).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        storeHolds(ConversationState.READY, 2L);
 
         IConversation staleConversation = mock(IConversation.class);
         IConversation currentConversation = mock(IConversation.class);
@@ -183,7 +186,7 @@ class ConversationServiceQueuedTurnTest {
     @DisplayName("H13a: a turn whose snapshot is still current is not reloaded")
     void currentTurnIsNotReloaded() throws Exception {
         doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-        doReturn(1L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        storeHolds(ConversationState.READY, 1L);
         IConversation conversation = mock(IConversation.class);
         stubContinueConversation(conversation);
 
@@ -195,11 +198,85 @@ class ConversationServiceQueuedTurnTest {
     }
 
     @Test
+    @DisplayName("a store without the one-read method still runs the guard: state and revision are read separately")
+    void storeWithoutTheOneReadStillGuards() throws Exception {
+        // The interface default: this store cannot answer both in one read.
+        doReturn(null).when(conversationMemoryStore).getStateAndRevision(CONVERSATION_ID);
+        doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
+                .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        IConversation staleConversation = mock(IConversation.class);
+        IConversation currentConversation = mock(IConversation.class);
+        stubContinueConversation(staleConversation, currentConversation);
+
+        runQueuedSay();
+
+        verify(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        verify(staleConversation, never()).say(anyString(), any());
+        verify(currentConversation).say(eq("second message"), any());
+        assertEquals(2L, builtOver.get(1).getRevision(), "the separately read revision still drives the stale-snapshot guard");
+    }
+
+    @Test
+    @DisplayName("RT-1: a queued turn of a conversation deleted while it waited is not run, and is answered as ended")
+    void turnOfDeletedConversationIsNotRun() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        // Both stores answer a missing document with no state and no revision.
+        storeHolds(null, null);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = runQueuedSay();
+
+        verify(conversation, never()).say(anyString(), any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        ArgumentCaptor<SimpleConversationMemorySnapshot> skipped = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+        verify(handler).onSkipped(skipped.capture());
+        assertEquals(ConversationState.ENDED, skipped.getValue().getConversationState(),
+                "ENDED is what REST answers 410 for, and what the clients recover from by starting a new conversation");
+    }
+
+    @Test
+    @DisplayName("RT-2: a store failure while the queued turn reads its state is answered busy; the turn does not run and nothing escapes")
+    void storeFailureAtTheGuardIsAnsweredBusy() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doThrow(new IllegalStateException("pool timeout")).when(conversationMemoryStore).getStateAndRevision(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = assertDoesNotThrow(this::runQueuedSay,
+                "a failure that escapes the task is dead-lettered, and its caller never hears back");
+
+        verify(conversation, never()).say(anyString(), any());
+        ArgumentCaptor<SimpleConversationMemorySnapshot> skipped = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+        verify(handler).onSkipped(skipped.capture());
+        assertEquals(ConversationState.IN_PROGRESS, skipped.getValue().getConversationState(),
+                "busy (409 + Retry-After): the input was not consumed");
+    }
+
+    @Test
+    @DisplayName("RT-2: a store failure on the two-read fallback is answered busy as well")
+    void storeFailureOnTheFallbackIsAnsweredBusy() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(null).when(conversationMemoryStore).getStateAndRevision(CONVERSATION_ID);
+        doThrow(new IllegalStateException("pool timeout")).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = assertDoesNotThrow(this::runQueuedSay);
+
+        verify(conversation, never()).say(anyString(), any());
+        ArgumentCaptor<SimpleConversationMemorySnapshot> skipped = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+        verify(handler).onSkipped(skipped.capture());
+        assertEquals(ConversationState.IN_PROGRESS, skipped.getValue().getConversationState());
+    }
+
+    @Test
     @DisplayName("H13a: a turn that cannot be rebuilt over the current document is skipped, not run on the stale one")
     void unrebuildableTurnIsSkipped() throws Exception {
         doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
                 .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        storeHolds(ConversationState.READY, 2L);
         IConversation staleConversation = mock(IConversation.class);
         doReturn(false).when(staleConversation).isEnded();
         doAnswer(inv -> {
@@ -337,7 +414,7 @@ class ConversationServiceQueuedTurnTest {
     void supersededRerunIsSkipped() throws Exception {
         doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
                 .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        storeHolds(ConversationState.READY, 2L);
         IConversation conversation = mock(IConversation.class);
         stubContinueConversation(conversation);
 
@@ -377,7 +454,7 @@ class ConversationServiceQueuedTurnTest {
     void supersededStreamingTurnIsRebuiltAndCompletesTheStream() throws Exception {
         doReturn(snapshot(ConversationState.READY, 1L, 1), snapshot(ConversationState.READY, 2L, 2))
                 .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        storeHolds(ConversationState.READY, 2L);
         IConversation staleConversation = mock(IConversation.class);
         IConversation currentConversation = mock(IConversation.class);
         stubContinueConversation(staleConversation, currentConversation);
@@ -412,13 +489,21 @@ class ConversationServiceQueuedTurnTest {
         stubContinueConversation(conversation);
         doThrow(new ConcurrentConversationModificationException(CONVERSATION_ID, 1L))
                 .when(conversationMemoryStore).storeConversationMemorySnapshot(any());
-        // READY for the queued-turn guard, then the store is unreachable.
-        doReturn(ConversationState.READY).doThrow(new IllegalStateException("store blip"))
-                .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+        // The queued-turn guard read state and revision together; from then on the
+        // store is unreachable.
+        doThrow(new IllegalStateException("store blip")).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
 
         assertDoesNotThrow(this::runQueuedSay);
 
         verify(conversationStateCache).remove(CONVERSATION_ID);
+    }
+
+    /**
+     * What the store answers when the queued turn reads the conversation's state
+     * and revision together ({@code null, null}: the document does not exist).
+     */
+    private void storeHolds(ConversationState state, Long revision) {
+        doReturn(new StateAndRevision(state, revision)).when(conversationMemoryStore).getStateAndRevision(CONVERSATION_ID);
     }
 
     private ConversationResponseHandler runQueuedSay() throws Exception {

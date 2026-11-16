@@ -6,19 +6,28 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Ticker;
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -297,6 +306,96 @@ class EmbeddingStoreFactoryBranchTest {
                 assertFalse(String.valueOf(t.getMessage()).contains("s3cr3t-plaintext"), t.getMessage());
             }
             assertTrue(e.getMessage().contains("storeParameters.port"), e.getMessage());
+        }
+
+        @Test
+        @DisplayName("an invalid Chroma apiVersion names the parameter, never its (vault-resolved) value")
+        void invalidChromaApiVersionIsNotQuoted() {
+            GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
+            SecretResolver sr = mock(SecretResolver.class);
+            when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(sr.resolveSecrets(any())).thenAnswer(inv -> {
+                Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
+                resolved.replaceAll((k, v) -> "${vault:victim}".equals(v) ? "s3cr3t-plaintext" : v);
+                return resolved;
+            });
+            var redactingFactory = new EmbeddingStoreFactory(gvr, sr);
+
+            var config = new RagConfiguration();
+            config.setStoreNamespace("id");
+            config.setStoreType("chroma");
+            config.setStoreParameters(Map.of("apiVersion", "${vault:victim}"));
+
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> redactingFactory.getOrCreate("kb-chroma-redaction", config));
+            for (Throwable t = e; t != null; t = t.getCause()) {
+                assertFalse(String.valueOf(t.getMessage()).contains("s3cr3t-plaintext"), t.getMessage());
+            }
+            assertTrue(e.getMessage().contains("storeParameters.apiVersion"), e.getMessage());
+        }
+    }
+
+    @Nested
+    @DisplayName("destinations the outbound policy sees")
+    class OutboundPolicy {
+
+        private EmbeddingStoreFactory guarded(OutboundTargetPolicy policy) {
+            GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
+            SecretResolver sr = mock(SecretResolver.class);
+            when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(sr.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            return new EmbeddingStoreFactory(gvr, sr, policy);
+        }
+
+        @Test
+        @DisplayName("a MongoDB connection string's proxyHost is checked like its seeds")
+        void mongoProxyHostIsChecked() {
+            var policy = mock(OutboundTargetPolicy.class);
+            doThrow(new IllegalArgumentException("metadata service")).when(policy).validateHost("169.254.169.254:1080");
+
+            var config = new RagConfiguration();
+            config.setStoreNamespace("id");
+            config.setStoreType("mongodb-atlas");
+            config.setStoreParameters(Map.of("connectionString", "mongodb://203.0.113.10:27017/?proxyHost=169.254.169.254&proxyPort=1080"));
+
+            var e = assertThrows(IllegalArgumentException.class, () -> guarded(policy).getOrCreate("kb-mongo-proxy", config));
+            assertTrue(e.getMessage().contains("mongodb-atlas"), e.getMessage());
+            verify(policy).validateHost("203.0.113.10:27017");
+        }
+
+        @Test
+        @DisplayName("a cached Chroma client re-checks its destination before every request (DNS rebinding)")
+        void chromaRequestsAreRechecked() throws Exception {
+            var requests = new AtomicInteger();
+            HttpServer server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            server.createContext("/", exchange -> {
+                requests.incrementAndGet();
+                exchange.sendResponseHeaders(500, -1);
+                exchange.close();
+            });
+            server.start();
+            try {
+                // The build-time check passes; the transport's own, per request, refuses.
+                var checks = new AtomicInteger();
+                var policy = mock(OutboundTargetPolicy.class);
+                doAnswer(inv -> {
+                    if (checks.incrementAndGet() > 1) {
+                        throw new IllegalArgumentException("now resolves to a private address");
+                    }
+                    return null;
+                }).when(policy).validateUrl(anyString());
+
+                var config = new RagConfiguration();
+                config.setStoreNamespace("id");
+                config.setStoreType("chroma");
+                config.setStoreParameters(Map.of("baseUrl", "http://127.0.0.1:" + server.getAddress().getPort()));
+
+                assertThrows(RuntimeException.class, () -> guarded(policy).getOrCreate("kb-chroma-rebind", config));
+                assertTrue(checks.get() > 1, "the transport checked the request URL");
+                assertEquals(0, requests.get(), "nothing reached the endpoint");
+            } finally {
+                server.stop(0);
+            }
         }
     }
 }

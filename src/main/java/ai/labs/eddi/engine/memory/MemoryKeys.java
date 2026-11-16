@@ -69,6 +69,29 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<List<String>> EXPRESSIONS_MATCHES = MemoryKey.of("expressions:matches");
 
+    /**
+     * How sure the parser is of {@link #EXPRESSIONS_PARSED}: the accuracy of the
+     * least accurate match that contributed an expression, 0..1 (1 = every
+     * contributing word matched as typed; a typo correction, a case mismatch or a
+     * phrase fragment lowers it; for a semantic-fallback match it is the similarity
+     * score). Absent when nothing was understood. Written by InputParserTask.
+     */
+    public static final MemoryKey<Double> EXPRESSIONS_CONFIDENCE = MemoryKey.of("expressions:confidence");
+
+    /**
+     * Other readings of the input, best first, each as an expression string —
+     * stored only when the parser's {@code maxAlternatives} is above 0. Written by
+     * InputParserTask.
+     */
+    public static final MemoryKey<List<String>> EXPRESSIONS_ALTERNATIVES = MemoryKey.of("expressions:alternatives");
+
+    /**
+     * {@code true} when the input had more tokens than the parser's
+     * {@code maxInputTokens} and only the first ones were parsed. Absent otherwise.
+     * Written by InputParserTask.
+     */
+    public static final MemoryKey<Boolean> EXPRESSIONS_INPUT_TRUNCATED = MemoryKey.of("expressions:inputTruncated");
+
     /** Extracted intent names. Written by InputParserTask. */
     public static final MemoryKey<List<String>> INTENTS = MemoryKey.ofPublic("intents");
 
@@ -76,6 +99,18 @@ public final class MemoryKeys {
 
     /** Action strings emitted by behavior rules. Read by most downstream tasks. */
     public static final MemoryKey<List<String>> ACTIONS = MemoryKey.ofPublic("actions");
+
+    // ---- HITL ----
+
+    /**
+     * The plan hash a HITL resume was admitted against ({@code HitlPlanHash}).
+     * Written by {@code Conversation#resume}; read by {@code LifecycleManager} into
+     * the audit entries of the tasks the resume runs. A colon key: not visible to
+     * templates.
+     *
+     * @since 6.8.0
+     */
+    public static final MemoryKey<String> HITL_PLAN_HASH = MemoryKey.of("hitl:plan_hash");
 
     // ---- Langchain ----
 
@@ -218,6 +253,31 @@ public final class MemoryKeys {
      * @since 6.7.0
      */
     public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
+
+    /**
+     * How the step's model spend was priced: {@code {calls, unpricedCalls, sources,
+     * cacheReadTokens, cacheWriteTokens}}. Deliberately not prefixed
+     * {@code audit:cost} — step lookups prefix-match. Copied into the audit entry's
+     * {@code llmDetail.pricing}.
+     */
+    public static final String AUDIT_PRICING = "audit:pricing";
+
+    /**
+     * What the step's spend events already reported of the step's accumulated
+     * unpriced-call and token totals ({@code unpricedCalls}, {@code inputTokens},
+     * {@code outputTokens}), so a pause-and-resume settles only the difference.
+     * Exact-key reads only, like {@link #AUDIT_METERED_COST}.
+     */
+    public static final String AUDIT_SPEND_REPORTED = "audit:spend_reported";
+
+    /**
+     * The unpriced-call and token attribution ({@code unpricedCalls},
+     * {@code inputTokens}, {@code outputTokens}) of a charge that
+     * {@link #AUDIT_PENDING_COST} carries, so the spend event of the settle that
+     * finally records it reports the whole amount's attribution. Newest value wins,
+     * like the pending cost; an all-zero map is how a recovered charge is recorded.
+     */
+    public static final String AUDIT_PENDING_SPEND = "audit:pending_spend";
 
     /**
      * Prefix of the guardrail evidence keys,

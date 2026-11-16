@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.orchestration;
 
+import ai.labs.eddi.modules.llm.pricing.MeteredTokenUsage;
 import ai.labs.eddi.modules.llm.impl.LlmTask;
 import ai.labs.eddi.modules.llm.impl.TokenCounterFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -48,10 +49,14 @@ public class ToolContextBudget {
     public static final int DEFAULT_MAX_TOOL_CONTEXT_TOKENS = 60_000;
 
     /**
-     * The three token-usage count keys of the map {@link #tokenUsageMap} produces,
-     * in reporting order. Shared by every consumer that merges usage maps.
+     * The persisted token-usage count keys of the map {@link #tokenUsageMap}
+     * produces, in reporting order. Shared by every consumer that merges usage
+     * maps. The cache counts are subsets of {@code inputTokens}; the other keys a
+     * metered map carries (long-context buckets, pricing model, catalog price) are
+     * transient pricing inputs and are never persisted.
      */
-    public static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens");
+    public static final List<String> TOKEN_USAGE_FIELDS = List.of("inputTokens", "outputTokens", "totalTokens",
+            MeteredTokenUsage.CACHE_READ_TOKENS, MeteredTokenUsage.CACHE_WRITE_TOKENS);
 
     private final TokenCounterFactory tokenCounterFactory;
 
@@ -250,6 +255,9 @@ public class ToolContextBudget {
         if (b == null) {
             return a;
         }
+        if (a instanceof MeteredTokenUsage || b instanceof MeteredTokenUsage) {
+            return MeteredTokenUsage.sum(a, b);
+        }
         return new TokenUsage(sumInt(a.inputTokenCount(), b.inputTokenCount()), sumInt(a.outputTokenCount(), b.outputTokenCount()),
                 sumInt(a.totalTokenCount(), b.totalTokenCount()));
     }
@@ -266,6 +274,9 @@ public class ToolContextBudget {
         map.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
         map.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
         map.put("totalTokens", usage.totalTokenCount() != null ? usage.totalTokenCount() : 0);
+        if (usage instanceof MeteredTokenUsage metered) {
+            metered.putInto(map);
+        }
         return map;
     }
 }

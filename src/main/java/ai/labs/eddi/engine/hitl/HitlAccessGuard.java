@@ -11,10 +11,12 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -44,6 +46,15 @@ public class HitlAccessGuard {
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationService conversationService;
     private final IGroupConversationService groupConversationService;
+
+    /**
+     * The turn guard a resume by the owner has to pass — see
+     * {@link #requireConversationResumeAccess}. Field-injected and lazy, so the
+     * tests that build this guard with its constructor keep working; without it no
+     * {@code USE} re-check runs.
+     */
+    @Inject
+    Instance<ConversationAccessGuard> conversationAccessGuardInstance;
 
     @Inject
     public HitlAccessGuard(SecurityIdentity identity,
@@ -112,6 +123,31 @@ public class HitlAccessGuard {
             LOGGER.warnf("Could not load conversation descriptor for HITL ownership check: %s", sanitize(conversationId));
             throw new ForbiddenException("Access denied: unable to verify conversation ownership");
         }
+    }
+
+    /**
+     * {@link #requireConversationHitlAccess} for a decision that resumes the
+     * conversation. A resume runs the rest of the paused turn — its tools, a model
+     * call — so an owner who is neither admin nor approver also has to pass the
+     * turn check {@code say} applies: under enforced workspaces, still allowed to
+     * {@code USE} the conversation's agent. Ownership outlives a revoked share; the
+     * right to run the agent does not. Admins and approvers decide by their role,
+     * unchanged.
+     *
+     * @return the conversation owner's userId, as
+     *         {@link #requireConversationHitlAccess} returns it
+     * @throws ForbiddenException
+     *             if the caller may not resume this conversation.
+     */
+    public String requireConversationResumeAccess(String conversationId) {
+        String ownerId = requireConversationHitlAccess(conversationId);
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+            return ownerId;
+        }
+        if (conversationAccessGuardInstance != null && conversationAccessGuardInstance.isResolvable()) {
+            conversationAccessGuardInstance.get().requireConversationTurnAccess(conversationId);
+        }
+        return ownerId;
     }
 
     /**

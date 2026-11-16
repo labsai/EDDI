@@ -433,6 +433,8 @@ public class UpgradeExecutor {
         private Boolean compatible;
         private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
+        /** See {@link UpgradeResult#warnings()}. */
+        private final List<String> warnings = new ArrayList<>();
         /**
          * Target resource id -> the version this run's own update produced. A resource
          * two target workflows share is written once per workflow, and the second write
@@ -454,7 +456,8 @@ public class UpgradeExecutor {
 
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
             return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
-                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null);
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null,
+                    agentUpdated ? warnings : List.of());
         }
     }
 
@@ -954,6 +957,12 @@ public class UpgradeExecutor {
                 // run with earlier resources already written and no rollback.
                 callerTokenAuthorPolicy.requireMayAuthor(content, source.type());
             }
+            if (content instanceof ParserConfiguration parser) {
+                // RestParserStore's create check, recorded like the one above: a
+                // dictionary the source did not serve keeps the source's reference,
+                // which may name a dictionary here the caller cannot read.
+                WorkflowReferenceAccess.requireAccessToParserReferences(resourceAccessGuard, parser);
+            }
             if (content instanceof RagConfiguration rag) {
                 // A created knowledge base is a new one, addressed by its own id — the
                 // rule the REST create and the import apply. Without it a source config
@@ -1424,7 +1433,10 @@ public class UpgradeExecutor {
             } else if (adoptSourceConfig && hasSteps(sourceWf.config())) {
                 refusedAdoption = adoptableSourceConfig(sourceWf.config(), targetRefs, createdForAdoption);
                 if (refusedAdoption == null) {
-                    configToWrite = sourceWf.config();
+                    // A copy: the loop below repoints it in place, and the source's
+                    // config is shared by every position that names the same workflow
+                    // (IResourceSource#atPosition).
+                    configToWrite = copyOf(sourceWf.config());
                 }
             }
 
@@ -1486,6 +1498,45 @@ public class UpgradeExecutor {
             outcome.failed(workflowId, "workflow", null, e);
             return null;
         }
+    }
+
+    /**
+     * A copy of the workflow whose steps' maps and lists are its own, so repointing
+     * a reference in it leaves the original as it was.
+     */
+    static WorkflowConfiguration copyOf(WorkflowConfiguration workflow) {
+        WorkflowConfiguration copy = new WorkflowConfiguration();
+        List<WorkflowConfiguration.WorkflowStep> steps = new ArrayList<>();
+        if (workflow.getWorkflowSteps() != null) {
+            for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                if (step == null) {
+                    steps.add(null);
+                    continue;
+                }
+                WorkflowConfiguration.WorkflowStep stepCopy = new WorkflowConfiguration.WorkflowStep();
+                stepCopy.setType(step.getType());
+                stepCopy.setConfig(deepCopy(step.getConfig()));
+                stepCopy.setExtensions(deepCopy(step.getExtensions()));
+                steps.add(stepCopy);
+            }
+        }
+        copy.setWorkflowSteps(steps);
+        return copy;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T deepCopy(T value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, entry) -> copy.put(key, deepCopy(entry)));
+            return (T) copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(entry -> copy.add(deepCopy(entry)));
+            return (T) copy;
+        }
+        return value;
     }
 
     /**
@@ -1668,6 +1719,7 @@ public class UpgradeExecutor {
                 // StructuralMatcher.adoptableAgentJson.
                 adopted.setIdentity(current.getIdentity());
                 adopted.setWorkflows(originalWorkflows);
+                signOnlyIfTargetCan(agentId, adopted, outcome);
                 String adoptedJson = jsonSerialization.serialize(adopted);
                 settingsChanged = adoptedJson == null || !adoptedJson.equals(jsonSerialization.serialize(current));
             }
@@ -1678,6 +1730,11 @@ public class UpgradeExecutor {
                 return null;
             }
             AgentConfiguration agentConfig = settingsChanged ? adopted : current;
+            if (!settingsChanged) {
+                // The target's own flag: written back unchanged, it would be refused all
+                // the same, and with it every workflow change this run made.
+                signOnlyIfTargetCan(agentId, agentConfig, outcome);
+            }
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
@@ -1706,6 +1763,29 @@ public class UpgradeExecutor {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Turns {@code signInterAgentMessages} off in {@code config}, and says so in
+     * the result's warnings, when the target agent cannot sign. A sync never
+     * replaces the target's identity — its private keys are this instance's — so
+     * the source's "sign" is only honoured where the target's own newest key is
+     * usable; otherwise the agent save would be refused, and with it every workflow
+     * change this run wrote.
+     */
+    private void signOnlyIfTargetCan(String agentId, AgentConfiguration config, Outcome outcome) {
+        var security = config.getSecurity();
+        if (security == null || !security.isSignInterAgentMessages()) {
+            return;
+        }
+        String problem = agentStore.signingKeyProblem(agentId);
+        if (problem == null) {
+            return;
+        }
+        security.setSignInterAgentMessages(false);
+        String warning = "Agent " + agentId + ": signInterAgentMessages was turned off: " + problem;
+        outcome.warnings.add(warning);
+        LOGGER.warnf("Sync: %s", LogSanitizer.sanitize(warning));
     }
 
     /**

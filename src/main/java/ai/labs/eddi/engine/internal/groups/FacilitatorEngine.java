@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -660,7 +661,7 @@ public class FacilitatorEngine {
         int repeats = Math.max(phase.repeats(), 1);
         sb.append("- Current phase: '").append(phase.name()).append("' (").append(phase.type())
                 .append("), repeat ").append(ctx.repeat() + 1).append(" of ").append(repeats).append('\n');
-        Double ceiling = protocol != null ? protocol.maxCostPerDiscussion() : null;
+        Double ceiling = TeamBudgetCeilings.effective(gc, protocol).ceiling();
         sb.append("- Cost so far: $").append(String.format(Locale.ROOT, "%.4f", gc.getTotalCost()))
                 .append(ceiling != null ? " of $" + String.format(Locale.ROOT, "%.2f", ceiling) + " ceiling" : " (no ceiling)")
                 .append('\n');

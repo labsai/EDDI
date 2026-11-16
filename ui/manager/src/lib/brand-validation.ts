@@ -92,3 +92,17 @@ export function toColorInputValue(value: string | null): string | null {
   const hex = value.slice(1);
   return `#${hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex}`.toLowerCase();
 }
+
+/**
+ * `#rrggbb` for a native colour input from any colour the validator accepts and
+ * this module can read — hex, or `rgb()` — else `null` (`hsl()`/`oklch()` are
+ * accepted by the server but not converted here). Unlike
+ * {@link toColorInputValue}, an `rgb(15 118 110)` is shown as itself.
+ */
+export function toPickerValue(value: string | null): string | null {
+  const hex = toColorInputValue(value);
+  if (hex) return hex;
+  const channels = parseSrgb(value);
+  if (!channels) return null;
+  return `#${channels.map((c) => Math.round(c * 255).toString(16).padStart(2, "0")).join("")}`;
+}

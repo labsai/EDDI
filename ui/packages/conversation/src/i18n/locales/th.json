@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "คุณแนบไฟล์ได้สูงสุด {{max}} ไฟล์ต่อข้อความ",
   "conversation.attach.notAttached": "ไม่ได้แนบ: {{files}}",
   "conversation.attach.done": "แนบ {{file}} แล้ว",
-  "conversation.attach.doneLarge": "แนบ {{file}} แล้ว แต่มีขนาดใหญ่เกินกว่าจะส่งโดยตรง — ผู้ช่วยอาจอ่านไฟล์นี้ไม่ได้",
+  "conversation.attach.doneLarge": "แนบ {{file}} แล้ว ไฟล์มีขนาดใหญ่เกินกว่าจะใส่ไว้ในข้อความโดยตรง ผู้ช่วยจึงได้รับไฟล์นี้เป็นการอ้างอิงแทน",
   "conversation.attach.removed": "ลบ {{file}} ออกแล้ว",
   "conversation.attach.remove": "ลบ {{file}} ออก",
   "conversation.attach.removeNth": "ลบ {{file}} ออก ({{n}} จาก {{total}})",

@@ -7,7 +7,15 @@
    ChatProvider), and the components below read it without props drilling.
    ────────────────────────────────────────────── */
 
-import { createContext, useContext, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { initialConversationState, type AgentConversationState, type ConversationAction } from "../controller/state";
 
 export interface ConversationContextValue {
@@ -41,6 +49,18 @@ export function ConversationProvider({
   children: ReactNode;
 }) {
   const composerConversation = useRef<string | null | undefined>(undefined);
+  // Follow a conversation change even while no composer is mounted (the
+  // requested field replaces it): an upload started in the old conversation
+  // that settles meanwhile must be judged against the one on screen, not
+  // staged into it. Only a CHANGE writes — on mount the composer's own prop
+  // is the record, so a host whose composer is given its id another way is
+  // left alone. Both write in the commit, before any continuation can run.
+  const lastConversationId = useRef(state.conversationId);
+  useLayoutEffect(() => {
+    if (lastConversationId.current === state.conversationId) return;
+    lastConversationId.current = state.conversationId;
+    composerConversation.current = state.conversationId;
+  }, [state.conversationId]);
   const value = useMemo(() => ({ state, dispatch, composerConversation }), [state, dispatch]);
   return (
     <ConversationContext.Provider value={value}>{children}</ConversationContext.Provider>

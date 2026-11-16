@@ -34,7 +34,7 @@ describe("pauseHeadline", () => {
       }),
     );
 
-    expect(text).toContain("send_email");
+    expect(text).toContain("Send email");
   });
 
   it("falls back to the pause reason on a RULE pause", () => {

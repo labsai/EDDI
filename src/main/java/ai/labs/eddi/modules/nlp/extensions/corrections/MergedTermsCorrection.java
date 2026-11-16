@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections;
 
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
+import ai.labs.eddi.modules.nlp.model.RegEx;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -26,12 +27,19 @@ public class MergedTermsCorrection implements ICorrection {
         if (word.length() > MAX_CORRECTABLE_LENGTH) {
             return IDictionary.NO_WORDS_FOUND;
         }
+        // One budget for every retry of this word. Each lookup has its own regex
+        // deadline and treats expiry as a miss, so a word of N characters could cost
+        // up to 2N of those; past this, the word is simply not corrected.
+        final long deadline = System.nanoTime() + RegEx.MATCH_BUDGET_NANOS;
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         String tmpWord = word;
         for (int i = tmpWord.length(); i > 0; i--) {
+            if (System.nanoTime() > deadline) {
+                return IDictionary.NO_WORDS_FOUND;
+            }
             part = tmpWord.substring(0, i);
-            List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
+            List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries, deadline);
             if (match.size() > 0) {
                 possibleTerms.addAll(match);
                 tmpWord = tmpWord.substring(i);
@@ -42,8 +50,11 @@ public class MergedTermsCorrection implements ICorrection {
         if (!tmpWord.isEmpty()) {
             possibleTerms.clear();
             for (int i = 0; i < tmpWord.length(); i++) {
+                if (System.nanoTime() > deadline) {
+                    return IDictionary.NO_WORDS_FOUND;
+                }
                 part = tmpWord.substring(i);
-                List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
+                List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries, deadline);
                 if (match.size() > 0) {
                     possibleTerms.addAll(match);
                     tmpWord = tmpWord.substring(0, i);
@@ -60,16 +71,29 @@ public class MergedTermsCorrection implements ICorrection {
         }
     }
 
-    private List<IDictionary.IFoundWord> matchWord(String part, String userLanguage, List<IDictionary> temporaryDictionaries) {
+    private List<IDictionary.IFoundWord> matchWord(String part, String userLanguage, List<IDictionary> temporaryDictionaries, long deadline) {
         List<IDictionary> allDictionaries = new LinkedList<>();
         allDictionaries.addAll(temporaryDictionaries);
         allDictionaries.addAll(dictionaries);
 
         // Same language gate as the parser's direct lookup — a dictionary that is
         // skipped for a lookup must not sneak back in through a correction.
-        return allDictionaries.stream().filter(dictionary -> IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage))
-                .map(dictionary -> dictionary.lookupTerm(part)).filter(result -> result.size() > 0).findFirst().orElse(IDictionary.NO_WORDS_FOUND);
-
+        for (IDictionary dictionary : allDictionaries) {
+            // A miss in one dictionary costs up to a regex budget of its own, so the
+            // shared deadline is also checked between dictionaries, not only between
+            // words. (Passing it into lookupTerm itself is the remaining step.)
+            if (System.nanoTime() > deadline) {
+                break;
+            }
+            if (!IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage)) {
+                continue;
+            }
+            List<IDictionary.IFoundWord> result = dictionary.lookupTerm(part);
+            if (result.size() > 0) {
+                return result;
+            }
+        }
+        return IDictionary.NO_WORDS_FOUND;
     }
 
     @Override

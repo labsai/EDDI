@@ -80,7 +80,7 @@
   "conversation.attach.maxFiles": "Vous pouvez joindre au maximum {{max}} fichiers par message.",
   "conversation.attach.notAttached": "Non joints : {{files}}",
   "conversation.attach.done": "{{file}} joint.",
-  "conversation.attach.doneLarge": "{{file}} joint, mais trop volumineux pour être transmis directement — l’assistant ne pourra peut-être pas le lire.",
+  "conversation.attach.doneLarge": "{{file}} joint. Il est trop volumineux pour être inclus dans le message lui-même ; l’assistant le reçoit donc sous forme de référence.",
   "conversation.attach.removed": "{{file}} retiré.",
   "conversation.attach.remove": "Retirer {{file}}",
   "conversation.attach.removeNth": "Retirer {{file}} ({{n}} sur {{total}})",

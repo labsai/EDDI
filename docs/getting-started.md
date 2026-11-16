@@ -25,8 +25,9 @@ Once running, you can:
 ## Verifying It Works
 
 Whichever option you pick below, these three checks tell you the install
-succeeded. They are the same ones CI runs against every published image, so if
-they pass, the service is genuinely up — not merely listening.
+succeeded. The first two are the ones CI's smoke test runs against every
+published image, so if they pass, the service is genuinely up — not merely
+listening.
 
 ```bash
 # 1. Readiness — the only check that also proves the database is reachable
@@ -218,7 +219,7 @@ See the [Kubernetes Deployment Guide](kubernetes.md) for full details including 
 
 - Java 25
 - MongoDB ≥ 6.0 (or PostgreSQL)
-- Docker, if you want Dev Services to start the database for you
+- Docker, if you want Dev Services to start MongoDB for you (PostgreSQL has no Dev Service; start it yourself and use the `postgres` profile)
 
 No local Maven install is needed — the repository ships the Maven wrapper
 (`./mvnw`, or `.\mvnw.cmd` on Windows), which downloads the pinned version on
@@ -228,7 +229,7 @@ first use.
 
 Setup a local MongoDB (≥ 6.0) or PostgreSQL instance.
 
-> **Note:** If no database instance is available, Quarkus Dev Services will try to start a container automatically (requires Docker running on the host).
+> **Note:** If no database instance is available, Quarkus Dev Services will try to start a MongoDB container automatically (requires Docker running on the host).
 
 On a terminal, under project root folder, run the following command:
 
@@ -237,7 +238,7 @@ On a terminal, under project root folder, run the following command:
 ```
 
 The API is then on [http://localhost:7070](http://localhost:7070) and the Quarkus
-Dev UI on [http://localhost:7070/q/dev](http://localhost:7070/q/dev). Dev mode
+Dev UI on [http://localhost:7070/q/dev-ui](http://localhost:7070/q/dev-ui). Dev mode
 starts with authentication off — the guards described above only apply in
 production mode.
 
@@ -251,8 +252,11 @@ production mode.
 ### Build App & Docker image
 
 ```bash
-./mvnw clean package '-Dquarkus.container-image.build=true'
+./mvnw clean package -DskipTests
+docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .
 ```
+
+This is the Dockerfile CI builds. `-Dquarkus.container-image.build=true` does not work here: the Quarkus Docker extension looks for `src/main/docker/Dockerfile.jvm`, which does not exist.
 
 ### Download from Docker hub registry
 

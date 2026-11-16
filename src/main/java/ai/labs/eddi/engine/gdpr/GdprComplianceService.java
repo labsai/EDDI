@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.gdpr;
 
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
@@ -30,6 +31,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -133,6 +135,21 @@ public class GdprComplianceService {
      */
     @Inject
     IClusterRpc clusterRpc;
+
+    /**
+     * Cluster mode: seals the user-id hash of the cluster stop (B5) when a cluster
+     * signing key is configured. Field-injected; null in tests.
+     */
+    @Inject
+    Instance<ClusterMessageSigner> clusterSigner;
+
+    /**
+     * How long the cluster stop waits for every other node (B5): its own budget,
+     * not the 2 s NATS request timeout every other RPC shares — an erasure is rare
+     * and a node busy with a GC pause must still be counted.
+     */
+    @ConfigProperty(name = "eddi.cluster.gdpr-stop-timeout", defaultValue = "10s")
+    Duration clusterStopTimeout = Duration.ofSeconds(10);
 
     @Inject
     IConversationCoordinator conversationCoordinator;
@@ -458,8 +475,12 @@ public class GdprComplianceService {
         // conversation — but it can still flush audit entries after the sweep).
         if (clusterRpc != null && clusterRpc.isClustered()) {
             try {
+                // One fresh count for both the wait and the verdict (B5): the scatter used to
+                // stop at a presence count cached for 3 s and the verdict compared a fresh one,
+                // so a node that had just joined or left made the step fail, or wait,
+                // spuriously.
                 int expectedPeers = clusterRpc.expectedPeers();
-                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, Map.of("userIdHash", KvKeys.sha256(userId)));
+                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, clusterStopRequest(userId), clusterStopTimeout, expectedPeers);
                 if (replies.size() < expectedPeers) {
                     // A node that did not answer may still be running the user's work and
                     // flush it (audit entries, memory) after the sweeps below. The cascade
@@ -570,6 +591,11 @@ public class GdprComplianceService {
         // the snapshot is what lists it under the user, so deleting it would leave a
         // retry with no id to find the orphaned blobs by — and a clean report.
         boolean attachmentCleanupIncomplete = false;
+        // The same for every other per-conversation record the sweeps below reach by
+        // conversation id — dead letters, journal, descriptors, checkpoints: one that
+        // failed to delete keeps the snapshots (4c), or a retry finds no id to reach
+        // it by and reports a clean erasure.
+        boolean dependentCleanupIncomplete = false;
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
@@ -607,6 +633,7 @@ public class GdprComplianceService {
                 try {
                     deadLettersPurged += conversationCoordinator.purgeDeadLetters(convId);
                 } catch (Exception e) {
+                    dependentCleanupIncomplete = true;
                     recordFailure(failedSteps, "deadLetters", e, pseudonym);
                 }
             }
@@ -623,6 +650,7 @@ public class GdprComplianceService {
             try {
                 journalEntriesDeleted += hitlToolJournalStore.deleteByConversationId(convId);
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "hitlToolJournal", e, pseudonym);
             }
         }
@@ -639,6 +667,7 @@ public class GdprComplianceService {
                 conversationDescriptorStore.deleteAllDescriptor(convId);
                 descriptorsDeleted++;
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "conversationDescriptors", e, pseudonym);
             }
         }
@@ -656,6 +685,7 @@ public class GdprComplianceService {
             try {
                 checkpointsDeleted += checkpointStore.deleteByConversationId(convId);
             } catch (Exception e) {
+                dependentCleanupIncomplete = true;
                 recordFailure(failedSteps, "conversationCheckpoints", e, pseudonym);
             }
         }
@@ -713,6 +743,9 @@ public class GdprComplianceService {
         } else if (attachmentCleanupIncomplete) {
             recordFailure(failedSteps, "conversations",
                     new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else if (dependentCleanupIncomplete) {
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until their dependent records are erased — retry the erasure"), pseudonym);
         } else if (conversationLookupFailed) {
             // The ids that the journal, descriptor, checkpoint and attachment sweeps above
             // work
@@ -1067,6 +1100,25 @@ public class GdprComplianceService {
     }
 
     /**
+     * The conversation's descriptor for export — the live one, else the archived
+     * copy a soft delete leaves (it still holds the title) — or null when neither
+     * can be read. A missing descriptor only drops the title from the entry; the
+     * conversation itself is still exported.
+     */
+    private ConversationDescriptor exportableDescriptor(String conversationId) {
+        if (conversationDescriptorStore == null) {
+            return null;
+        }
+        try {
+            // Live first, then the history collection a soft delete archives into.
+            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0);
+        } catch (Exception e) {
+            LOGGER.debugf("[GDPR] No descriptor for conversation %s; exported without a title", conversationId);
+            return null;
+        }
+    }
+
+    /**
      * Export all user data (GDPR Art. 15/20).
      *
      * @param userId
@@ -1132,12 +1184,17 @@ public class GdprComplianceService {
                 var snapshot = conversationMemoryStore
                         .loadConversationMemorySnapshot(convId);
                 if (snapshot != null) {
+                    // The title is derived conversation content, so it travels with the
+                    // conversation it names (and is erased with its descriptor).
+                    ConversationDescriptor descriptor = exportableDescriptor(convId);
                     conversations.add(new UserDataExport.ConversationExportEntry(
                             convId,
                             snapshot.getAgentId(),
                             snapshot.getAgentVersion(),
                             snapshot.getConversationState(),
-                            snapshot.getConversationOutputs()));
+                            snapshot.getConversationOutputs(),
+                            descriptor != null ? descriptor.getTitle() : null,
+                            descriptor != null && descriptor.isPinned()));
                 } else {
                     // The id came from this same store moments ago, so an absent
                     // document is a conversation lost between the two reads, not an
@@ -1485,6 +1542,22 @@ public class GdprComplianceService {
     }
 
     /**
+     * The cluster stop's request. The user travels as the SHA-256 of their id —
+     * sealed with the cluster signing key when one is configured (B5): a plain hash
+     * of an e-mail address is reversible by dictionary for anyone who reads NATS.
+     */
+    private Map<String, Object> clusterStopRequest(String userId) {
+        String hash = KvKeys.sha256(userId);
+        if (clusterSigner != null && clusterSigner.isResolvable()) {
+            String sealed = clusterSigner.get().seal(hash);
+            if (sealed != null) {
+                return Map.of("userIdSealed", sealed);
+            }
+        }
+        return Map.of("userIdHash", hash);
+    }
+
+    /**
      * Drop a cached restriction verdict. Null-safe because it is called from catch
      * blocks, where throwing would replace the failure being reported (Caffeine
      * rejects a null key outright).
@@ -1517,7 +1590,12 @@ public class GdprComplianceService {
      * caching is off and the caller should simply use its own store read.
      */
     private Boolean offerUnrestricted(String userId) {
-        return restrictionCache == null ? null : restrictionCache.putIfAbsent(userId, false);
+        // A read-through fill (the store said "not restricted"): not announced to the
+        // other
+        // nodes, which would otherwise evict their copy on every miss here. A
+        // "restricted"
+        // observation is still published with put, so it reaches every node at once.
+        return restrictionCache == null ? null : restrictionCache.fillIfAbsent(userId, false);
     }
 
     /**

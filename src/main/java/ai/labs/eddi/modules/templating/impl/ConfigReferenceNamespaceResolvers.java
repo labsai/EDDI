@@ -44,6 +44,19 @@ public final class ConfigReferenceNamespaceResolvers {
         }
     }
 
+    /**
+     * {@code ${context:key}}, resolved in an httpcall header from the turn's secret
+     * context ({@code SecretContextReferences}). Without it Qute renders the
+     * reference empty and the header goes out as {@code "Bearer $"}. The plain data
+     * expression {@code {context.key}} has no colon and is unaffected.
+     */
+    @ApplicationScoped
+    public static class SecretContext extends ReferencePassThroughNamespaceResolver {
+        public SecretContext() {
+            super("context");
+        }
+    }
+
     /** {@code ${vars:name}}, resolved from the global variable store. */
     @ApplicationScoped
     public static class GlobalVariable extends ReferencePassThroughNamespaceResolver {

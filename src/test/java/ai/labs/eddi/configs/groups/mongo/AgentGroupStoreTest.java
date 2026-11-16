@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.ServiceJudgeConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -22,6 +24,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.HumanTieBreakConfig;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -223,6 +226,48 @@ class AgentGroupStoreTest {
         var e = assertThrows(IllegalArgumentException.class, () -> store.rejectNestingCycle("g1", parent));
         assertTrue(e.getMessage().contains("g1"), e.getMessage());
         assertDoesNotThrow(() -> store.rejectNestingCycle("g3", parent));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void serviceJudgeVaultGrantProblemsRejectTheSave() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
+        var grants = mock(ServiceJudgeVaultGrants.class);
+        store.serviceJudgeVaultGrants = grants;
+        var service = new ServiceJudgeConfig("openai", "gpt-4o-mini", Map.of("apiKey", "${vault:k}"), null, null, null);
+        var convergence = new AgentGroupConfiguration.ConvergenceConfig(true, 2, 0.8, "SERVICE", null, service);
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        c.setPhases(List.of(new AgentGroupConfiguration.DiscussionPhase("P", AgentGroupConfiguration.PhaseType.OPINION, "ALL",
+                AgentGroupConfiguration.TurnOrder.SEQUENTIAL, AgentGroupConfiguration.ContextScope.FULL, false, null, 1, false, convergence)));
+
+        when(grants.problems(any(), any())).thenReturn(List.of());
+        assertDoesNotThrow(() -> store.validateServiceJudgeGrants(c));
+
+        when(grants.problems(eq("phases[0].convergence.service.parameters"), any())).thenReturn(List.of("x.apiKey needs a grant"));
+        var e = assertThrows(IllegalArgumentException.class, () -> store.validateServiceJudgeGrants(c));
+        assertTrue(e.getMessage().contains("x.apiKey needs a grant"), e.getMessage());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void lessonConsolidationVaultGrantProblemsRejectTheSave() {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class));
+        var grants = mock(ServiceJudgeVaultGrants.class);
+        store.serviceJudgeVaultGrants = grants;
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        c.setLessonConfig(new AgentGroupConfiguration.LessonConfig(null, null, null, new AgentGroupConfiguration.LessonConsolidationConfig(
+                "openai", "gpt-4o-mini", Map.of("apiKey", "${vault:k}"), null, null, null, null, null, null, null)));
+
+        when(grants.problems(any(), any())).thenReturn(List.of());
+        assertDoesNotThrow(() -> store.validateServiceJudgeGrants(c));
+
+        when(grants.problems(eq("lessonConfig.consolidation.parameters"), any())).thenReturn(List.of("y.apiKey needs a grant"));
+        var e = assertThrows(IllegalArgumentException.class, () -> store.validateServiceJudgeGrants(c));
+        assertTrue(e.getMessage().contains("y.apiKey needs a grant"), e.getMessage());
     }
 
     @Test
@@ -490,23 +535,72 @@ class AgentGroupStoreTest {
     }
 
     /**
-     * The rejection stands, but its stated reason must not: HUMAN members ship (I6
-     * — this same class validates them), so blaming their absence tells a config
-     * author a shipped feature is missing. What is actually absent is the resume
-     * path a paused tie-break would need. Asserting on the alternatives rather than
-     * on prose keeps this test from pinning the wording again.
+     * HUMAN_DECIDES ships: accepted once a decider can be resolved — named, or the
+     * group's single HUMAN member — and refused, naming the field, when not.
      */
     @Test
-    void votePhase_humanDecides_isRejectedPendingResumePath() {
-        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(
-                votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
-                        new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
-                                TiePolicy.HUMAN_DECIDES)))));
-        assertTrue(ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("MODERATOR_DECIDES"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("NO_DECISION"), ex.getMessage());
-        assertFalse(ex.getMessage().contains("not available yet"),
-                "must not claim HUMAN members are unavailable — they ship: " + ex.getMessage());
+    void votePhase_humanDecides_isAcceptedWithAResolvableDecider() {
+        var named = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null))));
+        assertDoesNotThrow(() -> AgentGroupStore.validateVotePhases(named));
+
+        var unnamed = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES)));
+        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(unnamed));
+        assertTrue(ex.getMessage().contains("humanTieBreak.decider"), ex.getMessage());
+    }
+
+    /**
+     * A nested group's tie-break pause would be cancelled by the parent's turn
+     * (nested pauses are unsupported), so the tie would never be decided — refuse
+     * it at save time, like a nested HUMAN member.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesVote_isRejected() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var child = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null))));
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> store.validateHumanMembers(parent));
+        assertTrue(ex.getMessage().contains("members['g2']") && ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
+
+        var moderatorChild = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.MODERATOR_DECIDES)));
+        doReturn(moderatorChild).when(store).readChildConfig("g2");
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
+    }
+
+    /**
+     * A HUMAN_DECIDES voteConfig left on a non-VOTE phase never starts a vote, so
+     * it must not refuse the parent that nests the group.
+     */
+    @Test
+    void nestedGroupWithHumanDecidesConfigOnNonVotePhase_isAccepted() throws Exception {
+        IResourceStorageFactory storageFactory = mock(IResourceStorageFactory.class);
+        when(storageFactory.create(eq("groups"), any(), eq(AgentGroupConfiguration.class))).thenReturn(mock(IResourceStorage.class));
+        var store = spy(new AgentGroupStore(storageFactory, mock(IDocumentBuilder.class)));
+
+        var staleVoteConfig = new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null));
+        var opinion = new DiscussionPhase("Opinions", PhaseType.OPINION, "ALL", TurnOrder.PARALLEL, ContextScope.NONE, false, null, 1, false,
+                null, false, staleVoteConfig);
+        var child = voteGroup(opinion);
+        assertFalse(AgentGroupStore.hasHumanDecidesVote(child));
+
+        doReturn(child).when(store).readChildConfig("g2");
+        var parent = config(DiscussionStyle.ROUND_TABLE, null, "m");
+        parent.setMembers(List.of(new GroupMember("g2", "Child", 1, null, MemberType.GROUP)));
+        assertDoesNotThrow(() -> store.validateHumanMembers(parent));
     }
 
     @Test
@@ -555,14 +649,24 @@ class AgentGroupStoreTest {
     }
 
     @Test
-    void humanMember_inTaskForceGroup_isRejected_presetExpanded() {
+    void humanMember_asTaskForcePlanner_isRejected_presetExpanded() {
         // TASK_FORCE stores NO phases — the preset expansion is what makes this
-        // check reach PLAN/EXECUTE/VERIFY at all.
+        // check reach PLAN/VERIFY at all. Without a moderator the first member by
+        // speaking order plans and verifies, and here that is the human.
         var problems = AgentGroupStore.humanMemberProblems(humanConfig(DiscussionStyle.TASK_FORCE,
                 null, human("h-1", "Hannah")));
 
         assertFalse(problems.isEmpty());
-        assertTrue(problems.stream().anyMatch(p -> p.contains("task-force")), problems.toString());
+        assertTrue(problems.stream().anyMatch(p -> p.contains("plan or verify")), problems.toString());
+    }
+
+    @Test
+    void humanMember_asTaskForceExecutor_isAccepted() {
+        var config = humanConfig(DiscussionStyle.TASK_FORCE, null, human("h-1", "Hannah"),
+                new GroupMember("lead", "Lead", 2, null));
+        config.setModeratorAgentId("lead");
+
+        assertTrue(AgentGroupStore.humanMemberProblems(config).isEmpty());
     }
 
     @Test

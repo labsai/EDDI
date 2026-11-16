@@ -13,16 +13,29 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { formatToolArguments } from "@/lib/hitl-format-args";
+import {
+  argumentsForEditing,
+  formatToolArguments,
+  parseToolArgumentsForDisplay,
+  REDACTION_MARKER,
+  sameJsonText,
+} from "@/lib/hitl-format-args";
+import { humanizeToolName, toolArgumentFields } from "@/lib/tool-labels";
+import { ToolArgumentFields } from "@/components/shared/tool-argument-fields";
 import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
 import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import {
   AMENDED_ARGS_MAX_BYTES,
+  type ApprovalContextView,
+  type DecisionReview,
   type HitlVerdict,
   type PauseDetails,
   type PendingToolCallView,
   type ToolCallDecision,
 } from "@/lib/api/hitl";
+import { AnswerEditor, ReasonCodeSelect } from "@/components/hitl/answer-editor";
+import { ApprovalContext } from "@/components/hitl/approval-context";
+import { validateEditedAnswer } from "@/lib/hitl-edit";
 
 export interface ApprovalBannerProps {
   /** What kind of surface this approval is for. */
@@ -44,6 +57,9 @@ export interface ApprovalBannerProps {
   /** Structured pause details from GET …/approval-status. When this is a
    *  TOOL_CALL pause, the per-call tool approval UI is rendered (regular only). */
   pauseDetails?: PauseDetails | null;
+  /** The designer's `approvalContext` for this pause (draft, sources, claims …),
+   *  shown above the decision. Absent/empty = nothing is rendered. */
+  approvalContext?: ApprovalContextView | null;
   /** Whether the mutation is in-flight. */
   isSubmitting?: boolean;
   /** True while the structured pause details are still loading for a paused
@@ -75,12 +91,14 @@ export interface ApprovalBannerProps {
    *  alongside `pauseDetailsError`. */
   onRetryPauseDetails?: () => void;
   /** Called when the user submits a decision. `toolDecisions` is populated only
-   *  for a TOOL_CALL pause (per-call verdicts / amended arguments). */
+   *  for a TOOL_CALL pause (per-call verdicts / amended arguments); `review`
+   *  carries an edited answer and a reason code when the reviewer gave them. */
   onDecide: (
     verdict: HitlVerdict,
     note?: string,
     taskApprovals?: Record<string, string>,
     toolDecisions?: Record<string, ToolCallDecision>,
+    review?: DecisionReview,
   ) => void;
   /** Called when the user cancels. */
   onCancel?: () => void;
@@ -156,6 +174,9 @@ function isJsonObject(s: string): boolean {
   }
 }
 
+/** How a gated call's arguments are shown: label/value rows, formatted JSON, or the exact text. */
+type ArgsView = "fields" | "formatted" | "raw";
+
 /** Per-call reviewer state for a TOOL_CALL pause. Absent verdict = "inherit the
  *  top-level verdict"; a non-empty `amend` replaces the call's arguments. */
 interface CallState {
@@ -174,6 +195,7 @@ export function ApprovalBanner({
   granularity,
   pendingTaskIds,
   pauseDetails,
+  approvalContext,
   isSubmitting,
   pauseDetailsPending,
   pauseDetailsError,
@@ -195,6 +217,10 @@ export function ApprovalBanner({
   // must never fire on a single click: resuming a TOOL_CALL pause runs real
   // gated tools, reject cannot be undone, and cancel aborts in-flight work.
   const [confirmAction, setConfirmAction] = useState<HitlVerdict | "CANCEL" | null>(null);
+  // Edit-on-approve (RULE pause with pauseDetails.editableAnswer) and reason codes.
+  const [editing, setEditing] = useState(false);
+  const [editedAnswer, setEditedAnswer] = useState("");
+  const [reasonCode, setReasonCode] = useState("");
 
   // Tick every second so the countdown updates live and flips to "Overdue"
   // while the banner is on screen (the banner shows precisely when paused, so
@@ -212,6 +238,12 @@ export function ApprovalBanner({
 
   const toolPause = pauseDetails?.type === "TOOL_CALL" ? pauseDetails : null;
   const isToolCall = !!toolPause;
+  const rulePause = pauseDetails?.type === "RULE" ? pauseDetails : null;
+  const editableAnswer = surface === "regular" ? (rulePause?.editableAnswer ?? null) : null;
+  const reasonCodes = (toolPause?.reasonCodes ?? rulePause?.reasonCodes ?? []);
+  const isEditing = editing && !!editableAnswer;
+  // The same test handleSubmit applies: an editor opened and left as it was is a plain approval.
+  const hasEdit = isEditing && !!editableAnswer && editedAnswer !== editableAnswer.draft;
 
   // Every gated call must carry an explicit verdict before Approve is offered.
   // Checked against callStates directly (not toolDecisions, which is built only
@@ -247,6 +279,18 @@ export function ApprovalBanner({
     setSubmitError(null);
   };
 
+  /**
+   * The review fields to send. A reason code explains a change — a rejection,
+   * an edit, an amended or rejected call — so the backend refuses one on a plain
+   * approval; it is dropped there rather than turned into a 400.
+   */
+  const reviewFor = (verdict: HitlVerdict, changed: boolean, edited?: string): DecisionReview | undefined => {
+    const review: DecisionReview = {};
+    if (edited !== undefined) review.editedAnswer = edited;
+    if (reasonCode && (verdict === "REJECTED" || changed)) review.reasonCode = reasonCode;
+    return Object.keys(review).length ? review : undefined;
+  };
+
   const submitToolDecision = (topVerdict: HitlVerdict) => {
     if (!toolPause) return;
     const finalNote = note.trim() || undefined;
@@ -254,13 +298,25 @@ export function ApprovalBanner({
     // top-level REJECTED is contradictory (the backend 400s it). To approve
     // some and reject others, use the Approve action with per-call toggles.
     if (topVerdict === "REJECTED") {
-      onDecide("REJECTED", finalNote, undefined, undefined);
+      const review = reviewFor("REJECTED", true);
+      if (review) onDecide("REJECTED", finalNote, undefined, undefined, review);
+      else onDecide("REJECTED", finalNote, undefined, undefined);
       return;
     }
-    const toolDecisions: Record<string, ToolCallDecision> = {};
+    // No prototype: a provider-chosen call id of "__proto__" would otherwise re-prototype this object
+    // instead of becoming a key, the reviewer's explicit decision on it would vanish from the JSON sent,
+    // and the backend would read the missing entry as an approval.
+    const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
-      const amend = s?.amend?.trim();
+      // An amendment identical to the arguments shown is no amendment: the server
+      // compares it with the stored arguments and would answer a reason code on
+      // that "plain approval" with a 400. Arguments redacted for display differ from
+      // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      // The editor is pre-filled with the arguments pretty-printed, so a copy
+      // that differs from them only in whitespace is untouched, not amended.
+      const typed = s?.amend?.trim();
+      const amend = typed && !(call.arguments && sameJsonText(typed, call.arguments)) ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;
@@ -275,6 +331,15 @@ export function ApprovalBanner({
           setSubmitError(t("hitl.amendInvalidJson", "Amended arguments must be a valid JSON object."));
           return;
         }
+        if (amend.includes(REDACTION_MARKER)) {
+          setSubmitError(
+            t(
+              "hitl.amendRedactedMarker",
+              "The amended arguments still contain <REDACTED>. Replace it with the real value, or approve without amending: an amendment is sent exactly as written.",
+            ),
+          );
+          return;
+        }
         if (byteLength(amend) > AMENDED_ARGS_MAX_BYTES) {
           setSubmitError(t("hitl.amendTooLarge", "Amended arguments are too large."));
           return;
@@ -283,7 +348,13 @@ export function ApprovalBanner({
       }
       toolDecisions[call.callId] = decision;
     }
-    onDecide("APPROVED", finalNote, undefined, Object.keys(toolDecisions).length ? toolDecisions : undefined);
+    const changed = Object.values(toolDecisions).some((d) => d.verdict === "REJECTED" || !!d.amendedArguments);
+    const review = reviewFor("APPROVED", changed);
+    const decisions = Object.keys(toolDecisions).length ? toolDecisions : undefined;
+    // The review argument is passed only when there is one, so a decision without
+    // review fields reaches the caller exactly as before.
+    if (review) onDecide("APPROVED", finalNote, undefined, decisions, review);
+    else onDecide("APPROVED", finalNote, undefined, decisions);
   };
 
   const handleSubmit = (verdict: HitlVerdict) => {
@@ -292,6 +363,27 @@ export function ApprovalBanner({
       return;
     }
     const finalNote = note.trim() || undefined;
+    if (verdict === "APPROVED" && isEditing && editableAnswer) {
+      // An edit identical to the draft is a plain approval - and is not held to the
+      // edit limits (a blank or over-long draft can still be approved as it stands).
+      const changed = editedAnswer !== editableAnswer.draft;
+      const error = changed
+        ? editedAnswer.includes("<REDACTED>")
+          ? t(
+              "hitlReview.redactedMarkerRemains",
+              "The text still contains the redaction marker <REDACTED>. Remove it, or approve without edits: the server cannot apply an edit that keeps it.",
+            )
+          : validateEditedAnswer(t, editedAnswer, editableAnswer)
+        : null;
+      if (error) {
+        setSubmitError(error);
+        return;
+      }
+      const review = reviewFor("APPROVED", changed, changed ? editedAnswer : undefined);
+      if (review) onDecide("APPROVED", finalNote, undefined, undefined, review);
+      else onDecide("APPROVED", finalNote, undefined);
+      return;
+    }
     // For TASK granularity, send an explicit decision for every pending task:
     // any task the reviewer didn't individually toggle defaults to the
     // top-level verdict, so no task is left ambiguous.
@@ -302,7 +394,10 @@ export function ApprovalBanner({
         finalTaskApprovals[id] = taskApprovals[id] ?? verdict;
       }
     }
-    onDecide(verdict, finalNote, finalTaskApprovals);
+    const anyTaskRejected = !!finalTaskApprovals && Object.values(finalTaskApprovals).includes("REJECTED");
+    const review = reviewFor(verdict, anyTaskRejected);
+    if (review) onDecide(verdict, finalNote, finalTaskApprovals, undefined, review);
+    else onDecide(verdict, finalNote, finalTaskApprovals);
   };
 
   const handleTaskToggle = (taskId: string, verdict: string) => {
@@ -321,7 +416,7 @@ export function ApprovalBanner({
   // Distinct gated tool names for the Approve confirmation on a TOOL_CALL pause,
   // so the reviewer sees exactly what will execute before it runs.
   const gatedToolNames = toolPause
-    ? Array.from(new Set(toolPause.calls.map((c) => c.toolName)))
+    ? Array.from(new Set(toolPause.calls.map((c) => humanizeToolName(c.toolName) || c.toolName)))
     : [];
 
   // Fire the pending action only after the reviewer confirms. Validation and the
@@ -352,12 +447,22 @@ export function ApprovalBanner({
               confirmLabel: t("hitl.approve", "Approve"),
               variant: "warning" as const,
             }
-          : {
-              title: t("hitl.confirmApproveTitle", "Approve request?"),
-              description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
-              confirmLabel: t("hitl.approve", "Approve"),
-              variant: "warning" as const,
-            };
+          : hasEdit
+            ? {
+                title: t("hitlReview.confirmApproveEditedTitle", "Approve with your edits?"),
+                description: t(
+                  "hitlReview.confirmApproveEditedDescription",
+                  "Your text replaces the agent's answer and the conversation resumes.",
+                ),
+                confirmLabel: t("hitlReview.approveEdited", "Approve with edits"),
+                variant: "warning" as const,
+              }
+            : {
+                title: t("hitl.confirmApproveTitle", "Approve request?"),
+                description: t("hitl.confirmApproveDescription", "Approve and resume this conversation?"),
+                confirmLabel: t("hitl.approve", "Approve"),
+                variant: "warning" as const,
+              };
       case "REJECTED":
         // Two different outcomes, and conflating them pushed the wrong way. A
         // TOOL_CALL rejection does NOT end the conversation: the backend
@@ -478,6 +583,8 @@ export function ApprovalBanner({
         )}
       </div>
 
+      <ApprovalContext context={approvalContext} />
+
       {/* Tool-call approvals (TOOL_CALL pause) */}
       {toolPause && (
         <div className="mb-3 space-y-2" data-testid="tool-call-approvals">
@@ -533,7 +640,16 @@ export function ApprovalBanner({
                   verdict: callStates[call.callId]?.verdict === verdict ? undefined : verdict,
                 })
               }
-              onToggleAmend={() => setCall(call.callId, { showAmend: !callStates[call.callId]?.showAmend })}
+              onToggleAmend={() => {
+                const current = callStates[call.callId];
+                // Edit-on-approve starts from the call as the model wrote it
+                // (redacted), so the approver changes a value instead of
+                // retyping the whole object. An untouched copy is no amendment.
+                setCall(call.callId, {
+                  showAmend: !current?.showAmend,
+                  amend: current?.amend ?? (call.arguments ? argumentsForEditing(call.arguments) : ""),
+                });
+              }}
               onAmendChange={(amend) => setCall(call.callId, { amend })}
             />
           ))}
@@ -655,6 +771,43 @@ export function ApprovalBanner({
         </div>
       )}
 
+      {/* Edit-on-approve: the agent's answer, editable before approving (RULE) */}
+      {rulePause?.lastEditRefused && (
+        <p
+          role="alert"
+          className="mb-3 flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-500/10 p-2 text-xs text-warn-700 dark:text-warn-400"
+          data-testid="last-edit-refused"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {rulePause.lastEditRefused.reason === "SCREENED_OUT"
+            ? t("hitlReview.lastEditScreenedOut", "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.", {
+                guardrail: rulePause.lastEditRefused.guardrail ?? "",
+              })
+            : rulePause.lastEditRefused.reason === "REDACTED_CONTENT"
+              ? t("hitlReview.lastEditRedacted", "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.")
+              : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
+        </p>
+      )}
+      {editableAnswer && (
+        <AnswerEditor
+          editable={editableAnswer}
+          editing={isEditing}
+          value={editedAnswer}
+          onToggle={() => {
+            if (!editing) setEditedAnswer(editableAnswer.draft);
+            setEditing((v) => !v);
+            setSubmitError(null);
+          }}
+          onChange={(v) => {
+            setEditedAnswer(v);
+            setSubmitError(null);
+          }}
+        />
+      )}
+      {reasonCodes.length > 0 && (
+        <ReasonCodeSelect options={reasonCodes} value={reasonCode} onChange={setReasonCode} />
+      )}
+
       {/* Note toggle + input */}
       <div className="mb-3">
         <button
@@ -763,7 +916,11 @@ export function ApprovalBanner({
           data-testid="approve-button"
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          {perCallReview ? t("hitl.submitDecisions", "Submit decisions") : t("hitl.approve", "Approve")}
+          {perCallReview
+            ? t("hitl.submitDecisions", "Submit decisions")
+            : hasEdit
+              ? t("hitlReview.approveEdited", "Approve with edits")
+              : t("hitl.approve", "Approve")}
         </button>
         <button
           type="button"
@@ -841,7 +998,26 @@ function ToolCallRow({
     () => formatToolArguments(call.arguments ?? "", call.argsTruncated),
     [call.arguments, call.argsTruncated],
   );
-  const [showRaw, setShowRaw] = useState(false);
+  const argumentFields = useMemo(
+    () => toolArgumentFields(parseToolArgumentsForDisplay(call.arguments, call.argsTruncated)),
+    [call.arguments, call.argsTruncated],
+  );
+  // Fields (label/value rows) when the arguments are a JSON object, the
+  // formatted JSON when it reads differently from the raw text, and always the
+  // exact raw text — the one the decision is made on.
+  const views: ArgsView[] = [
+    ...(argumentFields ? (["fields"] as const) : []),
+    ...(formattedArguments !== call.arguments ? (["formatted"] as const) : []),
+    "raw",
+  ];
+  const [chosenView, setView] = useState<ArgsView | null>(null);
+  const view: ArgsView = chosenView && views.includes(chosenView) ? chosenView : views[0]!;
+  const toolLabel = humanizeToolName(call.toolName) || call.toolName;
+  const viewLabel: Record<ArgsView, string> = {
+    fields: t("hitl.argsViewFields", "Fields"),
+    formatted: t("hitl.argsViewJson", "JSON"),
+    raw: t("hitl.argsViewRaw", "Raw"),
+  };
   return (
     <div
       className={cn(
@@ -860,7 +1036,16 @@ function ToolCallRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <Wrench className="h-3.5 w-3.5 text-warn-500" aria-hidden="true" />
-            <span className="font-mono text-sm font-medium text-foreground">{call.toolName}</span>
+            <span className="text-sm font-medium text-foreground" data-testid={`tool-label-${call.callId}`}>
+              {toolLabel}
+            </span>
+            {/* The exact name stays visible: it is what the gate patterns and the
+                audit trail name, and two tools can humanise alike. */}
+            {toolLabel !== call.toolName && (
+              <span className="font-mono text-[11px] text-muted-foreground" data-testid={`tool-name-${call.callId}`}>
+                {call.toolName}
+              </span>
+            )}
             {call.source && (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {call.source}
@@ -889,7 +1074,7 @@ function ToolCallRow({
           <button
             type="button"
             aria-pressed={state.verdict === "APPROVED"}
-            aria-label={`${t("hitl.approve", "Approve")} — ${call.toolName}`}
+            aria-label={`${t("hitl.approve", "Approve")} — ${toolLabel}`}
             onClick={() => onToggle("APPROVED")}
             // Undecided reads as an OUTLINED control, not flat muted-on-muted:
             // these were being mistaken for disabled labels, which made a
@@ -908,7 +1093,7 @@ function ToolCallRow({
           <button
             type="button"
             aria-pressed={state.verdict === "REJECTED"}
-            aria-label={`${t("hitl.reject", "Reject")} — ${call.toolName}`}
+            aria-label={`${t("hitl.reject", "Reject")} — ${toolLabel}`}
             onClick={() => onToggle("REJECTED")}
             className={cn(
               "rounded-md border px-2.5 py-1 text-xs transition-colors",
@@ -926,28 +1111,47 @@ function ToolCallRow({
       {extra}
       {call.arguments && (
         <div className="min-w-0">
-          {formattedArguments !== call.arguments && (
-            <div className="mb-1 flex justify-end">
-              <button
-                type="button"
-                aria-pressed={showRaw}
-                onClick={() => setShowRaw((v) => !v)}
-                className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                data-testid={`tool-args-view-toggle-${call.callId}`}
-                data-view={showRaw ? "raw" : "formatted"}
-              >
-                {showRaw
-                  ? t("hitl.argsShowFormatted", "Show formatted")
-                  : t("hitl.argsShowRaw", "Show raw")}
-              </button>
+          {views.length > 1 && (
+            <div
+              className="mb-1 flex justify-end gap-1"
+              role="group"
+              aria-label={t("hitl.argsViewLabel", "Show arguments as")}
+              data-testid={`tool-args-views-${call.callId}`}
+              data-view={view}
+            >
+              {views.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                    view === v
+                      ? "border-primary/40 bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground",
+                  )}
+                  data-testid={`tool-args-view-${v}-${call.callId}`}
+                >
+                  {viewLabel[v]}
+                </button>
+              ))}
             </div>
           )}
-          <pre
-            className="max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
-            data-testid={`tool-args-${call.callId}`}
-          >
-            {showRaw ? call.arguments : formattedArguments}
-          </pre>
+          {view === "fields" && argumentFields ? (
+            <ToolArgumentFields
+              fields={argumentFields}
+              className="max-h-96 overflow-auto rounded bg-muted/60 p-2"
+              testId={`tool-args-fields-${call.callId}`}
+            />
+          ) : (
+            <pre
+              className="max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
+              data-testid={`tool-args-${call.callId}`}
+            >
+              {view === "raw" ? call.arguments : formattedArguments}
+            </pre>
+          )}
         </div>
       )}
       {!call.argsTruncated && (

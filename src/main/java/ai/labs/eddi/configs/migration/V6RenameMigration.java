@@ -556,9 +556,11 @@ public class V6RenameMigration {
             }
 
             if (changed) {
-                var query = eq(ID_FIELD, doc.get(ID_FIELD));
-                collection.replaceOne(query, doc);
-                migrated++;
+                if (saveDocument(collection, doc, false)) {
+                    migrated++;
+                } else {
+                    failed++;
+                }
             }
         }
 

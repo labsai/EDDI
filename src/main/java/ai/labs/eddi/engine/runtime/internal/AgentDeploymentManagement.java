@@ -5,10 +5,15 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import java.util.Set;
+import java.util.HashMap;
 import java.util.HashSet;
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.TransientDeployments;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -27,7 +32,6 @@ import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.engine.hitl.lint.ReservedActionLint;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -63,11 +67,13 @@ import java.util.function.Supplier;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
@@ -115,7 +121,21 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * of scalar fields, so a batch is small whatever the conversations weigh.
      */
     static final int IDLE_SWEEP_BATCH_SIZE = 200;
-    private final List<DeploymentInfo> deploymentInfos = new LinkedList<>();
+    /**
+     * The deployment rows the sweep has confirmed READY on this node, and so skips
+     * apart from the periodic config check.
+     *
+     * <p>
+     * Derived from the registry at the start of every sweep (see
+     * {@link #untrackWhatIsNotServed}). Only an undeploy event from another node
+     * used to remove a row: an undeploy this node made itself — REST, the daily
+     * retirement, the delete cascade, sub-agent teardown — left it tracked, so when
+     * the same version was deployed again from another node, this node's sweep
+     * skipped it until a restart. A concurrent set, so the cluster event thread
+     * that applies an undeploy never waits for a running sweep.
+     * </p>
+     */
+    private final Set<DeploymentInfo> deploymentInfos = ConcurrentHashMap.newKeySet();
     /** Whether the "sweep parked" warning has been logged; see checkDeployments. */
     private final AtomicBoolean sweepParkedLogged = new AtomicBoolean();
     /**
@@ -137,8 +157,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * {@link #checkDeployments()} at once (the scheduler's SKIP only keeps sweeps
      * from overlapping each other), and a flag cleared when the run STARTED let the
      * second caller deploy from documents the first was still migrating.
+     * <p>
+     * Volatile so {@link #awaitClusterDeployment} can read it without the lock: a
+     * request must not wait for the migrations, only refrain from deploying while
+     * they are owed.
      */
-    private boolean documentMigrationsDeferred;
+    private volatile boolean documentMigrationsDeferred;
     /**
      * Held while the deferred document migrations run, so every caller of
      * {@link #checkDeployments()} waits for them before deploying anything or
@@ -227,6 +251,51 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     IClusterEventBus clusterEvents;
 
     /**
+     * Holds {@link #DOCUMENT_MIGRATIONS_LEASE} while the document migrations run;
+     * see {@link #runDocumentMigrations()}. The local manager (single node) grants
+     * it at once. Field-injected; null in tests built with {@code new}, which then
+     * run the migrations without it.
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    /**
+     * The cluster lease the document migrations run under. Not a {@code leader.}
+     * key: a drained node hands those back at once, which would let a second node
+     * start the pass while this one is still writing.
+     */
+    static final String DOCUMENT_MIGRATIONS_LEASE = "migration.documents";
+
+    /**
+     * How long a node waits for another node's document migrations. The holder
+     * renews the lease only while it is alive, so a node that crashed mid-pass is
+     * taken over after the lease TTL; this bound only matters for a live holder
+     * that is still working. Readiness is DOWN for the whole wait.
+     */
+    Duration documentMigrationsLeaseWait = Duration.ofMinutes(15);
+
+    /**
+     * Cluster mode: the shared record of {@code autoDeploy=false} deployments,
+     * which the sweep reconciles like the deployment collection and which decides
+     * whether a deployment event is stale. Field-injected; null in tests.
+     */
+    @Inject
+    TransientDeployments transientDeployments;
+
+    /**
+     * When this node last saw a {@code DEPLOYED} transient record for a key. A
+     * record that vanished (expired: NATS kept nothing for longer than the TTL) is
+     * re-created only for a deployment confirmed within the TTL, so a node that was
+     * cut off long enough to miss the tombstone of an undeploy never brings the
+     * agent back on every node.
+     */
+    private final Map<String, Instant> transientConfirmed = new ConcurrentHashMap<>();
+
+    private boolean transientRecorded() {
+        return clustered() && transientDeployments != null && transientDeployments.enabled();
+    }
+
+    /**
      * Locally deployed agents first seen without a {@code deployed} record — an
      * undeploy needs two consecutive sweeps, so an agent whose REST deploy has not
      * written its record yet is never taken down by the race.
@@ -237,23 +306,63 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         return clusterConfig != null && clusterConfig.isNats();
     }
 
+    /**
+     * On-demand deployments submitted and not yet finished, so a burst of requests
+     * for one agent queues one deployment, not one per request — each of which
+     * would invalidate the agent's config caches before finding it deployed.
+     */
+    private final Set<String> onDemandDeploys = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Never enters the sweep. It used to run {@link #checkDeployments()} first: the
+     * request queued behind any sweep in progress, deployed every agent this node
+     * was missing before its own, and a burst of requests ran one full sweep each —
+     * all before the {@code maxWait} clock started.
+     */
     @Override
     public <T> T awaitClusterDeployment(Environment environment, String agentId, Supplier<T> resolve, Duration maxWait) {
         if (!clustered() || agentId == null) {
             return null;
         }
+        long deadline = System.nanoTime() + maxWait.toNanos();
+        List<Integer> recordedVersions;
+        Map<Integer, Deployment.Status> local = new HashMap<>();
         try {
-            boolean deployedSomewhere = deploymentStore.readDeploymentInfos(deployed).stream()
-                    .anyMatch(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId()));
-            if (!deployedSomewhere) {
+            recordedVersions = deploymentStore.readDeploymentInfos(deployed).stream()
+                    .filter(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId()) && info.getAgentVersion() != null)
+                    .map(DeploymentInfo::getAgentVersion).distinct().toList();
+            if (recordedVersions.isEmpty()) {
                 return null;
             }
-        } catch (RuntimeException | IResourceStore.ResourceStoreException e) {
+            // Not getAgent(): it blocks for up to a minute on a deployment in progress.
+            for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
+                if (agentId.equals(agent.getAgentId())) {
+                    local.put(agent.getAgentVersion(), agent.getDeploymentStatus());
+                }
+            }
+        } catch (RuntimeException | ResourceStoreException | ServiceException e) {
             LOGGER.debugf("On-demand deployment check of %s failed: %s", sanitize(agentId), e.getMessage());
             return null;
         }
-        checkDeployments();
-        long deadline = System.nanoTime() + maxWait.toNanos();
+        // While the startup migrations run or are owed, nothing is deployed: an agent
+        // built from unmigrated templates stays READY with them until a restart.
+        boolean deployAllowed = !startupMigrationsRunning.get() && !documentMigrationsDeferred && !v6RenameMigration.isPending();
+        boolean worthWaiting = false;
+        for (Integer version : recordedVersions) {
+            Deployment.Status status = local.get(version);
+            if (status == Deployment.Status.ERROR) {
+                // Failed here: the sweep retries it with its backoff, and no wait makes it
+                // ready.
+                continue;
+            }
+            worthWaiting = true;
+            if (status == null && deployAllowed) {
+                deployOnDemand(environment, agentId, version);
+            }
+        }
+        if (!worthWaiting) {
+            return null;
+        }
         while (true) {
             T found = resolve.get();
             if (found != null) {
@@ -269,6 +378,33 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 Thread.currentThread().interrupt();
                 return null;
             }
+        }
+    }
+
+    /**
+     * Deploys one version on the runtime executor. The sweep records it once it
+     * sees it READY, as after a REST deploy; a failure leaves it in ERROR, which
+     * the sweep retries with its backoff.
+     */
+    private void deployOnDemand(Environment environment, String agentId, Integer version) {
+        String key = keyOf(environment, agentId, version);
+        if (!onDemandDeploys.add(key)) {
+            return;
+        }
+        try {
+            runtime.getExecutorService().submit(() -> {
+                try {
+                    LOGGER.debugf("Deploying agent %s version %d in %s on demand on this node", sanitize(agentId), version, environment);
+                    agentFactory.deployAgent(environment, agentId, version, null);
+                } catch (Exception e) {
+                    LOGGER.warnf("Could not deploy agent %s version %d on demand: %s", sanitize(agentId), version, e.getMessage());
+                } finally {
+                    onDemandDeploys.remove(key);
+                }
+            });
+        } catch (RuntimeException e) {
+            onDemandDeploys.remove(key);
+            LOGGER.debugf("Could not submit the on-demand deployment of %s: %s", sanitize(agentId), e.getMessage());
         }
     }
 
@@ -354,6 +490,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             return;
         }
         if (DeploymentStore.TRANSIENT.equals(status)) {
+            if (transientEventIsStale(event.getString("env"), agentId, event.get("version"))) {
+                LOGGER.debugf("Ignoring a stale transient deployment event for %s version %s: its record says otherwise",
+                        sanitize(agentId), event.get("version"));
+                return;
+            }
             deployTransient(event.getString("env"), agentId, event.get("version"));
             return;
         }
@@ -367,6 +508,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
                     if (agentId.equals(agent.getAgentId())
                             && (version == null || String.valueOf(version).equals(String.valueOf(agent.getAgentVersion())))) {
+                        if (stillMeantToBeDeployed(environment, agent.getAgentId(), agent.getAgentVersion())) {
+                            // The event is older than the record: a redeploy (recorded, or
+                            // autoDeploy=false) followed the undeploy it announces, and its own
+                            // event may have arrived first.
+                            LOGGER.debugf("Ignoring a stale undeploy event for %s version %s: it is deployed again",
+                                    sanitize(agentId), agent.getAgentVersion());
+                            continue;
+                        }
                         undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "undeployed on node " + event.originNode());
                     }
                 }
@@ -374,6 +523,54 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 LOGGER.warnf("Could not apply a remote undeploy of %s: %s", agentId, e.getMessage());
             }
         }
+    }
+
+    /**
+     * A transient-deploy event is stale when the shared record no longer says
+     * {@code DEPLOYED} (a tombstone was written after it, or it was never written —
+     * the record goes in before the event). Unknown (NATS unreachable, single node)
+     * is not stale: the event is applied as before, and the sweep corrects it.
+     */
+    private boolean transientEventIsStale(String env, String agentId, Object version) {
+        if (!transientRecorded() || env == null || version == null) {
+            return false;
+        }
+        try {
+            return transientDeployments.read(env, agentId, version).map(e -> e.state() != TransientDeployments.State.DEPLOYED)
+                    .orElse(true);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether the authoritative records — the deployment collection and the
+     * transient record — still want this version deployed, read now. An undeploy
+     * event older than either is stale and dropped. A read that fails answers
+     * false: the event is applied as before, and the sweep redeploys whatever the
+     * records still want.
+     */
+    private boolean stillMeantToBeDeployed(Environment environment, String agentId, Integer agentVersion) {
+        if (!clustered()) {
+            return false;
+        }
+        try {
+            DeploymentInfo record = deploymentStore.getDeploymentInfo(environment.toString(), agentId, agentVersion);
+            if (record != null && record.getDeploymentStatus() == deployed) {
+                return true;
+            }
+        } catch (RuntimeException | ResourceStoreException e) {
+            return false;
+        }
+        if (transientRecorded()) {
+            try {
+                return transientDeployments.read(environment.toString(), agentId, agentVersion)
+                        .map(e -> e.state() == TransientDeployments.State.DEPLOYED).orElse(false);
+            } catch (RuntimeException e) {
+                return false;
+            }
+        }
+        return false;
     }
 
     /**
@@ -415,23 +612,16 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             unrecorded.remove(key);
             everRecorded.remove(key);
             missingSince.remove(key);
-            synchronized (sweepLock) {
-                deploymentInfos.removeIf(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId())
-                        && agentVersion.equals(info.getAgentVersion()));
-            }
+            // No sweepLock: this runs on the cluster event thread, and waiting for a
+            // running sweep stalled every later event on the node behind it.
+            deploymentInfos.removeIf(info -> info.getEnvironment() == environment && agentId.equals(info.getAgentId())
+                    && agentVersion.equals(info.getAgentVersion()));
             LOGGER.infof("Undeployed agent %s version %d in %s on this node (%s)", agentId, agentVersion, environment, why);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not undeploy agent %s version %d locally: %s", agentId, agentVersion, e.getMessage());
         }
     }
 
-    /**
-     * The second direction of the sweep, cluster mode only: an agent this node
-     * serves whose record is no longer {@code deployed} — undeployed or deleted on
-     * another node — is undeployed here as well. Runs only on a list the store
-     * actually returned (an exception means "no information", never "undeploy
-     * everything"), and only after the agent was missing in two consecutive sweeps.
-     */
     /**
      * Every deployment this node has seen a record of — only those can lose one.
      */
@@ -455,6 +645,14 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    /**
+     * The second direction of the sweep, cluster mode only: an agent this node
+     * serves whose record is no longer {@code deployed} — undeployed or deleted on
+     * another node — is undeployed here as well. Runs only on a list the store
+     * actually returned (an exception means "no information", never "undeploy
+     * everything"), and only after the agent was missing in consecutive sweeps at
+     * least five seconds apart.
+     */
     private void reconcileUndeployed(List<DeploymentInfo> meantToBeDeployed) {
         Set<String> wanted = new HashSet<>();
         for (DeploymentInfo info : meantToBeDeployed) {
@@ -491,6 +689,93 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
         }
         missingSince.keySet().retainAll(seenMissing);
+    }
+
+    /**
+     * Cluster mode: brings this node in line with the shared record of
+     * {@code autoDeploy=false} deployments — deploys what it says is
+     * {@code DEPLOYED} and this node lacks (a node that joined later, or missed the
+     * event), takes down what it serves and the record now tombstones (a lost or
+     * out-of-order undeploy event), refreshes the records of what it serves before
+     * they expire, and re-creates a record that expired under a deployment it still
+     * serves and saw confirmed within the TTL. An unreadable bucket changes
+     * nothing: no information is never read as "undeploy".
+     */
+    private void reconcileTransient(List<DeploymentInfo> meantToBeDeployed) {
+        if (!transientRecorded()) {
+            return;
+        }
+        transientDeployments.retryPending();
+        List<TransientDeployments.Entry> entries;
+        try {
+            entries = transientDeployments.list();
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Transient deployments not reconciled this sweep: %s", e.getMessage());
+            return;
+        }
+        Set<String> recorded = new HashSet<>();
+        for (DeploymentInfo info : meantToBeDeployed) {
+            recorded.add(keyOf(info.getEnvironment(), info.getAgentId(), info.getAgentVersion()));
+        }
+        Map<String, TransientDeployments.Entry> byKey = new HashMap<>();
+        Instant now = clock.instant();
+        for (TransientDeployments.Entry entry : entries) {
+            Environment environment;
+            try {
+                environment = Environment.valueOf(entry.environment());
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            String key = keyOf(environment, entry.agentId(), entry.version());
+            byKey.put(key, entry);
+            if (entry.state() != TransientDeployments.State.DEPLOYED || recorded.contains(key)) {
+                continue;
+            }
+            transientConfirmed.put(key, now);
+            IAgent local = null;
+            try {
+                local = agentFactory.getAgent(environment, entry.agentId(), entry.version());
+            } catch (Exception e) {
+                LOGGER.debugf("Could not look up agent %s locally: %s", sanitize(entry.agentId()), e.getMessage());
+            }
+            if (local == null) {
+                deployTransient(entry.environment(), entry.agentId(), entry.version());
+            } else {
+                noteUnrecordedDeployment(environment, entry.agentId(), entry.version());
+                transientDeployments.refreshIfOld(entry, now.toEpochMilli());
+            }
+        }
+        for (Environment environment : Environment.values()) {
+            List<IAgent> served;
+            try {
+                served = agentFactory.getAllDeployedAgents(environment);
+            } catch (ServiceException e) {
+                continue;
+            }
+            for (IAgent agent : served) {
+                String key = keyOf(environment, agent.getAgentId(), agent.getAgentVersion());
+                if (!unrecorded.contains(key) || recorded.contains(key)) {
+                    continue;
+                }
+                TransientDeployments.Entry entry = byKey.get(key);
+                if (entry != null && entry.state() == TransientDeployments.State.UNDEPLOYED) {
+                    transientConfirmed.remove(key);
+                    undeployLocally(environment, agent.getAgentId(), agent.getAgentVersion(), "its autoDeploy=false deployment was undeployed");
+                } else if (entry == null
+                        && !transientDeployments.isPending(environment.toString(), agent.getAgentId(), agent.getAgentVersion())) {
+                    Instant confirmed = transientConfirmed.get(key);
+                    if (confirmed == null) {
+                        // Deployed here before this node ever read its record (this node's own
+                        // REST deploy, whose record may still be in flight): judged next sweep.
+                        transientConfirmed.put(key, now);
+                    } else if (Duration.between(confirmed, now).compareTo(transientDeployments.ttl()) < 0
+                            && transientDeployments.recreate(environment.toString(), agent.getAgentId(), agent.getAgentVersion())) {
+                        LOGGER.infof("Re-created the expired cluster record of agent %s version %d (%s, autoDeploy=false)",
+                                sanitize(agent.getAgentId()), agent.getAgentVersion(), environment);
+                    }
+                }
+            }
+        }
     }
 
     void onStart(@Observes StartupEvent ev) {
@@ -605,7 +890,86 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
     }
 
+    /**
+     * Runs the document migrations under the cluster lease
+     * {@link #DOCUMENT_MIGRATIONS_LEASE}, so that replicas starting together do not
+     * run them at the same time.
+     * <p>
+     * Each migration checks its completion flag and writes it at the end, with
+     * nothing in between that another node could see. Two nodes starting together
+     * both found the flag unset and both ran the pass: the in-place rewrites of the
+     * Qute and access-index migrations converge on the same result, but the channel
+     * connector migration <em>creates</em> a configuration per channel, under a
+     * fresh id each time, and its duplicate check could not see what the other node
+     * was creating at that moment, so every channel was migrated once per node.
+     * <p>
+     * A node that waits gets the lease once the holder is done and then finds every
+     * flag set, so the pass is a no-op there. A node that cannot get the lease
+     * within {@link #documentMigrationsLeaseWait}, or because NATS is unreachable
+     * and the degraded policy is {@code reject}, skips the pass: whatever the other
+     * node does not finish is retried on the next start, as for any failed
+     * migration. Under the {@code local} degraded policy the lease comes back
+     * unfenced and the pass runs, as a turn would.
+     */
     private void runDocumentMigrations() {
+        if (leaseManager == null) {
+            runDocumentMigrationsNow();
+            return;
+        }
+        LeaseHandle lease = acquireDocumentMigrationsLease();
+        if (lease == null) {
+            return;
+        }
+        try {
+            runDocumentMigrationsNow();
+        } finally {
+            try {
+                leaseManager.release(lease);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not release the document-migration lease (it expires on its own): %s", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The document-migration lease, or {@code null} when this node skips the pass.
+     */
+    private LeaseHandle acquireDocumentMigrationsLease() {
+        CompletableFuture<LeaseHandle> pending = leaseManager.acquireKey(DOCUMENT_MIGRATIONS_LEASE, documentMigrationsLeaseWait)
+                .toCompletableFuture();
+        try {
+            // A little longer than the lease manager's own deadline, which answers first.
+            long waitMillis = documentMigrationsLeaseWait.toMillis();
+            return pending.get(waitMillis + Math.min(30_000, waitMillis), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            pending.cancel(false);
+            LOGGER.warn("Interrupted while waiting for the document-migration lease — skipping the document migrations; "
+                    + "they are retried on the next start.");
+        } catch (TimeoutException e) {
+            // Completing the future here makes a grant that arrives later hand the lease
+            // straight back.
+            pending.cancel(false);
+            LOGGER.warnf("Another node has held the document-migration lease for more than %s — skipping the document "
+                    + "migrations here; whatever that node does not finish is retried on the next start.",
+                    documentMigrationsLeaseWait);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof LeaseUnavailableException unavailable
+                    && unavailable.reason() == LeaseUnavailableException.Reason.TIMEOUT) {
+                LOGGER.warnf("Another node has held the document-migration lease for more than %s — skipping the document "
+                        + "migrations here; whatever that node does not finish is retried on the next start.",
+                        documentMigrationsLeaseWait);
+            } else {
+                LOGGER.warnf("Could not take the document-migration lease (%s) — skipping the document migrations, so "
+                        + "that two nodes cannot run them at once; they are retried on the next start.",
+                        cause == null ? e.getMessage() : cause.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private void runDocumentMigrationsNow() {
         try {
             v6QuteMigration.runIfNeeded();
         } catch (Exception e) {
@@ -704,6 +1068,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         }
         runDeferredDocumentMigrations();
         try {
+            // Before the records are read, not after: an undeploy drops the agent from
+            // the registry and then flips its record. Read the other way round, an
+            // undeploy landing between the two reads finds the record still deployed and
+            // the agent no longer served, and this sweep would deploy it again.
+            untrackWhatIsNotServed();
             List<DeploymentInfo> meantToBeDeployed = deploymentStore.readDeploymentInfos(deployed).stream()
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
             // A deployment that is no longer meant to be deployed is no longer failing.
@@ -711,14 +1080,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             trackedConfigChecks.keySet().retainAll(meantToBeDeployed);
             if (clustered()) {
                 reconcileUndeployed(meantToBeDeployed);
+                reconcileTransient(meantToBeDeployed);
             }
             Instant now = clock.instant();
             meantToBeDeployed.stream()
                     .filter(deploymentInfo -> isRetryDue(deploymentInfo, now)).forEach(deploymentInfo -> {
-                        boolean trackedLocally;
-                        synchronized (sweepLock) {
-                            trackedLocally = this.deploymentInfos.contains(deploymentInfo);
-                        }
+                        boolean trackedLocally = this.deploymentInfos.contains(deploymentInfo);
                         if (trackedLocally) {
                             Instant lastChecked = trackedConfigChecks.get(deploymentInfo);
                             if (lastChecked != null && now.isBefore(lastChecked.plus(TRACKED_CONFIG_CHECK_INTERVAL))) {
@@ -805,6 +1172,28 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Drops every tracked row this node's registry does not hold READY, so the
+     * sweep deploys it again if its record still says deployed. A registry that
+     * cannot be read untracks nothing: no information is never read as "gone".
+     */
+    private void untrackWhatIsNotServed() {
+        Set<String> ready = new HashSet<>();
+        for (Environment environment : Environment.values()) {
+            try {
+                for (IAgent agent : agentFactory.getAllDeployedAgents(environment)) {
+                    if (agent.getDeploymentStatus() == Deployment.Status.READY) {
+                        ready.add(keyOf(environment, agent.getAgentId(), agent.getAgentVersion()));
+                    }
+                }
+            } catch (ServiceException e) {
+                LOGGER.debugf("Tracked deployments not checked against the registry this sweep: %s", e.getMessage());
+                return;
+            }
+        }
+        deploymentInfos.removeIf(info -> !ready.contains(keyOf(info.getEnvironment(), info.getAgentId(), info.getAgentVersion())));
     }
 
     private boolean isRetryDue(DeploymentInfo deploymentInfo, Instant now) {

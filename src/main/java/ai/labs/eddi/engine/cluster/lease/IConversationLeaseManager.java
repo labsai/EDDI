@@ -64,6 +64,38 @@ public interface IConversationLeaseManager {
 
     Optional<LeaseInfo> peekKey(String key);
 
+    /**
+     * Like {@link #peek}, but an unreachable lease store is an exception, not "no
+     * lease": a caller that acts on "nobody holds it" (a recovery that resumes a
+     * conversation) must not mistake a NATS outage for that. Throws
+     * {@code ClusterUnavailableException} when the holder could not be read.
+     */
+    default Optional<LeaseInfo> peekStrict(String conversationId) {
+        return peekKeyStrict(CONVERSATION + conversationId);
+    }
+
+    /** {@link #peekStrict} for an arbitrary lease key. */
+    default Optional<LeaseInfo> peekKeyStrict(String key) {
+        return peekKey(key);
+    }
+
+    /**
+     * Offers a held lease to the next turn of the same conversation queued on this
+     * node, instead of releasing it and acquiring it again. No I/O.
+     * <p>
+     * Answers {@code true} only while the lease is still held, has enough validity
+     * left for another turn, and no other node is known to be waiting for it (and
+     * only a bounded number of times in a row, so a busy node cannot keep a
+     * conversation from a node whose interest it never heard of). The handle is
+     * then reset for its next turn: lost callbacks registered by the finished turn
+     * are dropped and {@link LeaseHandle#wasTakenOver()} reads {@code false}. The
+     * caller keeps the lease and must still release it, either after the next turn
+     * or at once when no turn takes it.
+     */
+    default boolean handOver(LeaseHandle handle) {
+        return false;
+    }
+
     /** Leases this node currently holds. */
     int heldCount();
 

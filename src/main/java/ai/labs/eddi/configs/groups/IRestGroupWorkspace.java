@@ -11,6 +11,7 @@ import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -35,8 +36,34 @@ public interface IRestGroupWorkspace {
      *
      * @param priority
      *            higher runs earlier when a cadence pulls
+     * @param hypothesis
+     *            optional, to file the task as a bet: what is believed. Needs
+     *            {@code metric} and {@code reviewDate} too
+     * @param metric
+     *            what judges the bet
+     * @param target
+     *            the value that counts as success (free text)
+     * @param reviewDate
+     *            ISO date ({@code 2026-12-01}) or instant the bet is due for a
+     *            verdict
      */
-    record BacklogTaskRequest(String subject, String description, int priority) {
+    record BacklogTaskRequest(String subject, String description, int priority, String hypothesis, String metric, String target,
+            String reviewDate) {
+
+        /** An ordinary task, not a bet. */
+        public BacklogTaskRequest(String subject, String description, int priority) {
+            this(subject, description, priority, null, null, null, null);
+        }
+    }
+
+    /**
+     * A verdict on a bet.
+     *
+     * @param rescheduleTo
+     *            when set the bet is reopened for this later review date instead of
+     *            closed
+     */
+    record BetReviewRequest(String rescheduleTo) {
     }
 
     /**
@@ -61,6 +88,17 @@ public interface IRestGroupWorkspace {
     @Path("/backlog")
     @Operation(description = "Add a task to the backlog (cap: 200 — the backlog is a working set, not an archive).")
     Response addBacklogTask(@PathParam("groupId") String groupId, BacklogTaskRequest request);
+
+    @GET
+    @Path("/backlog/due-reviews")
+    @Operation(description = "Bets whose review date has arrived and that have no verdict yet, earliest first. "
+            + "Optional asOf (ISO instant) answers 'what will be due by then'.")
+    Response readDueBetReviews(@PathParam("groupId") String groupId, @QueryParam("asOf") String asOf);
+
+    @POST
+    @Path("/backlog/{taskId}/bet/review")
+    @Operation(description = "Close a bet's review (it stops being due), or reopen it for a later date with rescheduleTo.")
+    Response reviewBet(@PathParam("groupId") String groupId, @PathParam("taskId") String taskId, BetReviewRequest request);
 
     @POST
     @Path("/cadences")

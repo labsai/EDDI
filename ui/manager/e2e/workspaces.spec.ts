@@ -465,7 +465,13 @@ test.describe("notifications", () => {
     await expect(page.getByTestId("notification-count")).toHaveCount(0);
   });
 
-  test("no bell while workspaces are off", async ({ page }) => {
+  test("no bell while workspaces and the update check are both off", async ({ page }) => {
+    // The update check is on by default and its notice reaches the bell, so the
+    // bell is only absent once that is off too.
+    await page.addInitScript(
+      ([key, value]) => localStorage.setItem(key as string, value as string),
+      ["eddi-e2e-update-check", JSON.stringify({ enabled: false, lockedByConfig: true, uiEnabled: true })],
+    );
     await page.goto("/manage/agents");
     await waitForApp(page);
 
