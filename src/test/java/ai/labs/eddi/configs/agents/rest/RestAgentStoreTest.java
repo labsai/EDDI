@@ -1008,6 +1008,20 @@ class RestAgentStoreTest {
                     AgentPublicKey.createCurrent(2, v2.publicKeyB64()).revoke())), "Signing key v2 is revoked");
         }
 
+        /**
+         * GroupSigningGuard refuses a version when any of its entries is revoked, so an
+         * active duplicate listed first must not let the validator accept it.
+         */
+        @Test
+        @DisplayName("updateAgent refuses signing when the newest version also has a revoked duplicate, whatever the order")
+        void updateAgent_rejectsANewestVersionWithARevokedDuplicate() throws Exception {
+            var v2 = signing.generateKey("default", AGENT_ID, 2);
+            var active = AgentPublicKey.createCurrent(2, v2.publicKeyB64());
+
+            assertRefused(signingAgent(identityWith(active, active.revoke())), "Signing key v2 is revoked");
+            assertRefused(signingAgent(identityWith(active.revoke(), active)), "Signing key v2 is revoked");
+        }
+
         @Test
         @DisplayName("updateAgent refuses signing when the newest key has expired")
         void updateAgent_rejectsAnExpiredNewestKey() throws Exception {

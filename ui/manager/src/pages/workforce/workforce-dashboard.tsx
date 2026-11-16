@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
 import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
@@ -30,7 +30,9 @@ import { useRecentAgents } from "@/hooks/use-recent-agents";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/workforce/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
-
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { EndUserCatalog, CatalogPreview } from "@/components/workforce/catalog-view";
+import { HomeComposer, RecentSessions } from "@/components/workforce/workforce-home";
 import { toast } from "sonner";
 
 // ─── View mode persistence ───────────────────────────────────────
@@ -315,7 +317,17 @@ function WorkforceSection() {
 
 // ─── Dashboard Page ──────────────────────────────────────────────
 
+/**
+ * An author (`eddi-editor` / `eddi-admin`) gets the building dashboard, read
+ * from the group and agent stores; everyone else gets the catalog of what they
+ * may use — those stores would answer them 403.
+ */
 function WorkforceDashboard() {
+  const { canAuthor } = useWorkforceAccess();
+  return canAuthor ? <AuthorDashboard /> : <EndUserCatalog />;
+}
+
+function AuthorDashboard() {
   const { t } = useTranslation();
   const { data: boards, isLoading, isError, refetch } =
     useEnrichedGroupDescriptors();
@@ -438,6 +450,12 @@ function WorkforceDashboard() {
   // Populated — 3-pillar Intelligence Dashboard
   return (
     <div className="flex-1 overflow-auto p-5 md:p-8 space-y-8">
+      {/* ─── Home (T1.4): ask an agent, pick up where you left off ── */}
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <HomeComposer />
+        <RecentSessions />
+      </div>
+
       {/* ─── Pillar 1: Your Digital Workforce ────────────────── */}
       <WorkforceSection />
 
@@ -455,6 +473,9 @@ function WorkforceDashboard() {
 
       {/* ─── Knowledge Health ────────────────────────────────── */}
       <KnowledgeHealthCard />
+
+      {/* ─── What end users see (the catalog) ────────────────── */}
+      <CatalogPreview />
 
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel

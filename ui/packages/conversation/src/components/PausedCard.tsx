@@ -1,0 +1,137 @@
+/* ──────────────────────────────────────────────
+   PausedCard — the turn is waiting on a human decision
+   Read-only by design: this widget shows that a reviewer must act and lets the
+   user back out, but never offers Approve/Reject. Deciding belongs to a
+   reviewer via Manager UI (/agents/pending-approvals) — a user approving their
+   own gate defeats the oversight the pause exists to provide.
+   ────────────────────────────────────────────── */
+
+import { useEffect, useState } from "react";
+import { Hand } from "lucide-react";
+import { approvalDeadline, gatedToolNames, type ApprovalStatus } from "@eddi/core";
+import { pauseHeadline } from "../controller/notices";
+import type { Translate } from "../i18n/text";
+import { useConversationText } from "../react/hooks";
+
+interface PausedCardProps {
+  /**
+   * What approval-status says about the pause, or null while it is not known yet.
+   * The stream announces a pause before it is stored, so the card is shown at
+   * once from the stream's own news (title, "checking", Cancel available) and
+   * enriched when the status arrives.
+   */
+  status: ApprovalStatus | null;
+  onCancel: () => void;
+  cancelDisabled?: boolean;
+  /** The locale a deadline's clock time is written in (the app's language). */
+  locale?: string;
+}
+
+/** Coarse "time left" text — seconds precision is noise at approval timescales. */
+function formatRemaining(ms: number, t: Translate): string {
+  if (ms <= 0) return t("conversation.paused.anyMoment");
+  const totalMinutes = Math.floor(ms / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (totalMinutes > 0) return `${totalMinutes}m`;
+  return `${Math.max(1, Math.ceil(ms / 1000))}s`;
+}
+
+/** What happens when the timeout expires, in plain language. */
+function describePolicy(policy: string, t: Translate): string {
+  switch (policy) {
+    case "AUTO_APPROVE":
+      return t("conversation.paused.policy.approve");
+    case "AUTO_REJECT":
+      return t("conversation.paused.policy.reject");
+    case "ABORT":
+      return t("conversation.paused.policy.abort");
+    default:
+      return t("conversation.paused.policy.other");
+  }
+}
+
+export function PausedCard({ status, onCancel, cancelDisabled, locale }: PausedCardProps) {
+  const t = useConversationText();
+  const deadline = status ? approvalDeadline(status) : null;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (deadline === null) return;
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, [deadline]);
+
+  const tools = status ? gatedToolNames(status) : [];
+  const policy = describePolicy(status?.timeoutPolicy ?? "", t);
+
+  return (
+    // No live region of its own: the card lands inside the transcript's log,
+    // which announces what is added, and a nested region read the card twice
+    // and again on every countdown tick.
+    <div className={status ? "paused-card" : "paused-card paused-card--pending"} data-testid="paused-card">
+      <div data-testid={status ? undefined : "paused-pending"}>
+        <div className="paused-card__head">
+          {/* A raised hand: the same "waiting on a human" icon the Manager uses
+              for a paused conversation, so both UIs say it the same way. */}
+          <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
+          <span className="paused-card__title">{t("conversation.paused.title")}</span>
+        </div>
+        {!status && <p className="paused-card__text">{t("conversation.paused.pending")}</p>}
+      </div>
+
+      <p className="paused-card__text" data-testid="paused-headline">
+        {status ? pauseHeadline(status, t) : t("conversation.paused.headline")}
+      </p>
+
+      {tools.length > 0 && (
+        <ul className="paused-card__tools">
+          {tools.map((name) => (
+            <li key={name} className="paused-card__tool">
+              {name}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {deadline !== null && (
+        <>
+          {/* The countdown ticks, so it is for eyes only. Assistive technology
+              gets the fixed clock time instead, which never changes under it. */}
+          <p
+            className="paused-card__deadline"
+            aria-hidden="true"
+            data-testid="paused-deadline"
+          >
+            {t("conversation.paused.deadline", {
+              policy,
+              remaining: formatRemaining(deadline - now, t),
+            })}
+          </p>
+          <p className="chat-sr-only" data-testid="paused-deadline-sr">
+            {t("conversation.paused.deadlineAt", {
+              policy,
+              time: new Date(deadline).toLocaleTimeString(locale, {
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
+            })}
+          </p>
+        </>
+      )}
+
+      <div className="paused-card__actions">
+        <button
+          type="button"
+          className="paused-card__cancel"
+          onClick={onCancel}
+          disabled={cancelDisabled}
+          data-testid="paused-cancel"
+        >
+          {t("conversation.paused.cancel")}
+        </button>
+      </div>
+    </div>
+  );
+}

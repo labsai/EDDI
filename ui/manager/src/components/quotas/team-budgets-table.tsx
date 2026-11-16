@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Wallet } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useGroupDescriptors } from "@/hooks/use-groups";
 import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useTeamBudgets } from "@/hooks/use-team-budget";
@@ -25,7 +25,7 @@ export function TeamBudgetsTable() {
   const ids = useMemo(() => groupGroupsByName(groups.data ?? []).map((g) => g.id), [groups.data]);
   const budgets = useTeamBudgets(ids);
   const [adjusting, setAdjusting] = useState<TeamBudgetSnapshot | null>(null);
-  const [transferFrom, setTransferFrom] = useState<string | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   const teams = (budgets.data?.teams ?? []).filter((s) => s.capUsd !== null);
   // Only a failure with nothing loaded replaces the table. A failed background poll
@@ -68,7 +68,7 @@ export function TeamBudgetsTable() {
           </p>
         </div>
         {isAdmin && teams.length > 1 && (
-          <Button size="sm" variant="outline" onClick={() => setTransferFrom("")} data-testid="team-budget-open-transfer">
+          <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)} data-testid="team-budget-open-transfer">
             {t("teamBudget.transfer", "Transfer budget")}
           </Button>
         )}
@@ -133,7 +133,7 @@ export function TeamBudgetsTable() {
       )}
 
       <AdjustBudgetDialog snapshot={adjusting} onClose={() => setAdjusting(null)} />
-      <TransferBudgetDialog open={transferFrom !== null} teams={teams} initialFromId={transferFrom ?? undefined} onClose={() => setTransferFrom(null)} />
+      <TransferBudgetDialog open={transferOpen} teams={teams} onClose={() => setTransferOpen(false)} />
     </section>
   );
 }

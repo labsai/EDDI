@@ -695,24 +695,6 @@ public class TaskForceEngine {
         }
     }
 
-    /**
-     * Wall-clock budget one EXECUTE wave gets before the orchestrator gives up on
-     * the agents still running.
-     * <p>
-     * Derived from {@link GroupConversationService#parallelBatchBudgetSeconds} —
-     * the per-member-turn figure that already accounts for retries and setup grace
-     * — multiplied by the longest task chain any single agent holds, since one
-     * agent runs its own tasks sequentially.
-     * <p>
-     * Extracted so the derivation is assertable without timing a real wave. It was
-     * previously an inline {@code agentTimeoutSeconds × maxTasksPerAgent}, which
-     * under-budgeted a RETRY wave by a factor of {@code maxRetries + 1} and carried
-     * no setup grace at all.
-     *
-     * @param maxTasksPerAgent
-     *            the largest number of tasks assigned to one agent in this wave;
-     *            values below 1 are treated as 1
-     */
     /** What the planner is told about a HUMAN member, ahead of their role. */
     static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
 
@@ -746,6 +728,24 @@ public class TaskForceEngine {
                 : null;
     }
 
+    /**
+     * Wall-clock budget one EXECUTE wave gets before the orchestrator gives up on
+     * the agents still running.
+     * <p>
+     * Derived from {@link GroupConversationService#parallelBatchBudgetSeconds} —
+     * the per-member-turn figure that already accounts for retries and setup grace
+     * — multiplied by the longest task chain any single agent holds, since one
+     * agent runs its own tasks sequentially.
+     * <p>
+     * Extracted so the derivation is assertable without timing a real wave. It was
+     * previously an inline {@code agentTimeoutSeconds × maxTasksPerAgent}, which
+     * under-budgeted a RETRY wave by a factor of {@code maxRetries + 1} and carried
+     * no setup grace at all.
+     *
+     * @param maxTasksPerAgent
+     *            the largest number of tasks assigned to one agent in this wave;
+     *            values below 1 are treated as 1
+     */
     static long waveBudgetSeconds(ProtocolConfig protocol, int maxTasksPerAgent) {
         long perTurn = GroupConversationService.parallelBatchBudgetSeconds(protocol);
         return perTurn * Math.max(1, maxTasksPerAgent);

@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.pricing.SpendSinks;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.modules.llm.impl.LlmSpendGate;
@@ -89,7 +90,7 @@ class TenantCostMeteringIT extends MongoTestBase {
         ITenantQuotaStore store = factory.get();
         var quotaService = new TenantQuotaService(store, new SimpleMeterRegistry(), tenant);
         quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 0.01, true));
-        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry(), SpendSinks.NONE);
 
         assertTrue(quotaService.checkCostBudget(tenant).allowed(), storeName + ": a fresh month allows");
 
@@ -117,7 +118,7 @@ class TenantCostMeteringIT extends MongoTestBase {
         var quotaService = new TenantQuotaService(store, new SimpleMeterRegistry(), tenant);
         quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 0.01, true));
 
-        new TurnCostMeter(quotaService, new SimpleMeterRegistry())
+        new TurnCostMeter(quotaService, new SimpleMeterRegistry(), SpendSinks.NONE)
                 .meterSettledStep(new ConversationMemory("0123456789abcdef01234567", "agent", 1, "u"));
 
         assertEquals(0.0, store.getMonthlyCost(tenant), storeName);
@@ -158,7 +159,7 @@ class TenantCostMeteringIT extends MongoTestBase {
         ITenantQuotaStore quotaStore = quotaFactory.get();
         var quotaService = new TenantQuotaService(quotaStore, new SimpleMeterRegistry(), tenant);
         quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
-        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry(), SpendSinks.NONE);
         IConversationMemoryStore memoryStore = memoryFactory.get();
 
         // The turn spends $0.004 before it pauses for approval; the pause settles it.
@@ -203,7 +204,7 @@ class TenantCostMeteringIT extends MongoTestBase {
                 anyDouble());
         var quotaService = new TenantQuotaService(quotaStore, new SimpleMeterRegistry(), tenant);
         quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
-        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry(), SpendSinks.NONE);
         IConversationMemoryStore memoryStore = memoryFactory.get();
 
         IConversationMemory first = new ConversationMemory("0123456789abcdef01234567", 1, "user");
@@ -248,7 +249,7 @@ class TenantCostMeteringIT extends MongoTestBase {
                 anyDouble());
         var quotaService = new TenantQuotaService(quotaStore, new SimpleMeterRegistry(), tenant);
         quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
-        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry(), SpendSinks.NONE);
         IConversationMemoryStore memoryStore = memoryFactory.get();
 
         // Turn 1 (unpriced), then turn 2 spends $0.004 and its charge is left pending.

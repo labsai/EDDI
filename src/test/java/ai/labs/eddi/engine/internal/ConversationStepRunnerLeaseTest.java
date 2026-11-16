@@ -48,6 +48,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -199,6 +200,20 @@ class ConversationStepRunnerLeaseTest {
         InOrder order = inOrder(store);
         order.verify(store).raiseFence(ID, 42L);
         order.verify(store).getStateAndRevision(ID);
+    }
+
+    @Test
+    @DisplayName("RT-2: a turn the runtime refuses to start is answered busy instead of escaping to the coordinator")
+    void runtimeRefusalAnswersBusy() throws Exception {
+        when(runtime.submitCallable(any(), any(), any())).thenThrow(new RejectedExecutionException("pool saturated"));
+        List<IConversationMemory> skipped = new CopyOnWriteArrayList<>();
+
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, null);
+        runner.runConversationStep(Environment.production, memory, ID, Map.of(), () -> null, null, skipped::add, new TestLease(42L));
+
+        assertEquals(List.of(memory, memory), skipped, "single node and cluster: the caller is answered through the skip notifier");
+        verify(memory, times(2)).setConversationState(ConversationState.IN_PROGRESS);
+        assertEquals(0, runner.abandonedTurnsRunning.get(), "a body that never started is not counted as still running");
     }
 
     @Test

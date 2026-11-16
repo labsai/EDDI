@@ -76,11 +76,12 @@ public class GracefulShutdownService {
      * orchestrator SIGKILLs the pod part-way through and the turns it was
      * protecting are dropped anyway.
      * <p>
-     * {@code k8s/base/eddi-deployment.yaml}, {@code k8s/quickstart.yaml} and
-     * {@code helm/eddi/templates/deployment.yaml} all set
-     * {@code terminationGracePeriodSeconds: 30}. The defaults below therefore total
-     * 3 s readiness grace + 20 s drain = 23 s, leaving headroom for the rest of the
-     * Quarkus shutdown sequence.
+     * {@code k8s/base/eddi-deployment.yaml} and {@code k8s/quickstart.yaml} set
+     * {@code terminationGracePeriodSeconds: 30}, as the Helm chart does outside
+     * cluster mode (in cluster mode it sets 75 s and a 65 s drain, and refuses to
+     * render a grace period the drain, readiness grace and preStop sleep do not fit
+     * in). The defaults below therefore total 3 s readiness grace + 20 s drain = 23
+     * s, leaving headroom for the rest of the Quarkus shutdown sequence.
      * <p>
      * Operators who raise {@code terminationGracePeriodSeconds} can raise
      * {@code eddi.shutdown.drain-timeout-seconds} to match — but the two must be

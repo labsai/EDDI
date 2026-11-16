@@ -88,6 +88,26 @@ describe("ChatHistory", () => {
     expect(screen.getByText("IN_PROGRESS")).toBeInTheDocument();
   });
 
+  it("shows a conversation's title (B2) instead of its id once it has one", async () => {
+    useChatStore.getState().setSelectedAgent("agent-1", "Agent 1");
+    server.use(
+      http.get("*/conversationstore/conversations", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv-titled",
+            conversationState: "READY",
+            lastModifiedOn: new Date("2026-06-01").getTime(),
+            title: "Where is order 1042?",
+            titleSource: "AUTO",
+          },
+        ]),
+      ),
+    );
+    renderWithProviders(<ChatHistory open={true} onNewConversation={() => {}} />);
+    expect(await screen.findByText("Where is order 1042?")).toBeInTheDocument();
+    expect(screen.queryByText(/conv-titled/)).toBeNull();
+  });
+
   it("triggers loadConversation when clicking a conversation item", async () => {
     const user = userEvent.setup();
     useChatStore.getState().setSelectedAgent("agent-1", "Agent 1");

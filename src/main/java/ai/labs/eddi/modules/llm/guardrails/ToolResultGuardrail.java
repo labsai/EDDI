@@ -46,7 +46,10 @@ public class ToolResultGuardrail {
     static final String BLOCKED_NOTICE = "[tool result withheld: it contained instruction-shaped content and this agent is configured to "
             + "block such results. The call itself completed; only its output was withheld.]";
 
-    /** Result of inspecting one tool result. */
+    /**
+     * Result of screening one tool result: the action taken and the governed text,
+     * not yet marked.
+     */
     public record Outcome(String action, String result) {
     }
 
@@ -58,20 +61,29 @@ public class ToolResultGuardrail {
     }
 
     /**
-     * Inspects one tool result and returns what the model should see.
+     * Screens one WHOLE tool result for directive-shaped content and returns the
+     * text with the configured action applied — redacted, withheld or unchanged —
+     * and without the provenance envelope, which {@link #mark} adds once the text
+     * has been cut to size.
+     * <p>
+     * Whole, because this runs before truncation. Screening the cut text instead
+     * left everything past the cut ungoverned: the {@code paginate} strategy stored
+     * the rest as pages that come back through a built-in tool (so a guardrail
+     * narrowed to {@code ["mcp"]} never sees them again), and the {@code summarize}
+     * strategy sent the unscreened text to a second model.
      *
      * @param toolName
      *            dispatch name the model called
      * @param source
      *            provenance tag from {@code ToolSourceRegistry}
      * @param result
-     *            the tool's output, already truncated
+     *            the tool's whole output, before truncation
      * @param config
      *            the task's configuration; {@code null} means defaults
      */
-    public Outcome inspect(String toolName, String source, String result, ToolResultGuardrailConfig config) {
+    public Outcome screen(String toolName, String source, String result, ToolResultGuardrailConfig config) {
         try {
-            return inspectOrThrow(toolName, source, result, config);
+            return screenOrThrow(toolName, source, result, config);
         } catch (RuntimeException e) {
             // Degrade to allow, loudly. The alternative — failing the tool call —
             // turns a guardrail defect into an outage, and this runs on every tool
@@ -82,7 +94,41 @@ public class ToolResultGuardrail {
         }
     }
 
-    private Outcome inspectOrThrow(String toolName, String source, String result, ToolResultGuardrailConfig config) {
+    /**
+     * Wraps the text the model will see in the provenance envelope naming the tool
+     * and its source, unless the task turned marking (or the guardrail) off.
+     * Applied after truncation, which is why {@code ToolLoopRunner} reserves the
+     * envelope's worst case from the truncation budget.
+     *
+     * @param text
+     *            the screened and truncated result; {@code null} stays {@code null}
+     *            rather than becoming an envelope around nothing
+     */
+    public String mark(String toolName, String source, String text, ToolResultGuardrailConfig config) {
+        if (text == null) {
+            return null;
+        }
+        try {
+            ToolResultGuardrailConfig effective = config != null ? config : new ToolResultGuardrailConfig();
+            // The source filter gates DIRECTIVE handling only; marking is never
+            // narrowed. Gating both is what an earlier version did, and it produced
+            // precisely the gap the design forbids: narrowing to ["mcp","a2a","http"]
+            // left a websearch result arriving BARE, in the same transcript position a
+            // system instruction occupies, teaching the model that an unmarked result
+            // is authoritative. The narrowing example is in the shipped docs, so it
+            // was one copy-paste away.
+            if (!isTrue(effective.getEnabled(), true) || !isTrue(effective.getMarkProvenance(), true)) {
+                return text;
+            }
+            return ToolResultProvenance.mark(toolName, source, text);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Tool-result guardrail failed to mark the result of tool '%s'; passing it through unmarked", sanitize(toolName));
+            count("error", source);
+            return text;
+        }
+    }
+
+    private Outcome screenOrThrow(String toolName, String source, String result, ToolResultGuardrailConfig config) {
         if (result == null) {
             return new Outcome(ACTION_ALLOW, null);
         }
@@ -95,21 +141,13 @@ public class ToolResultGuardrail {
         String action = ACTION_ALLOW;
         String governed = result;
 
-        // The source filter gates the DIRECTIVE handling only — provenance marking
-        // below is unconditional. Gating both is what an earlier version did, and it
-        // produced precisely the gap the design forbids: narrowing to
-        // ["mcp","a2a","http"] left a websearch result arriving BARE, in the same
-        // transcript position a system instruction occupies, teaching the model that
-        // an unmarked result is authoritative. The narrowing example is in the
-        // shipped docs, so it was one copy-paste away.
         // One scan, not two: redactResultDirectives detects and redacts together and
         // returns null when nothing matched. Asking "does it contain one?" and then
         // "redact it" meant two full regex passes over the same bulk text on the
         // DEFAULT path, for every tool result of every turn.
         //
         // No length cap on the redaction: truncation is ToolResponseTruncator's job
-        // and has already happened, so re-truncating here would silently shorten a
-        // result the operator configured to that length.
+        // and comes next, on the text returned here.
         String redacted = appliesToDirectives(effective, source) && !isExempt(effective, toolName)
                 ? RemoteTextGovernor.redactResultDirectives(result)
                 : null;
@@ -124,10 +162,6 @@ public class ToolResultGuardrail {
         }
 
         count(action, source);
-
-        if (isTrue(effective.getMarkProvenance(), true)) {
-            governed = ToolResultProvenance.mark(toolName, source, governed);
-        }
         return new Outcome(action, governed);
     }
 

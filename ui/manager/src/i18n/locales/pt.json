@@ -544,6 +544,32 @@
       "noticePlaceholder": "As conversas com este agente podem ser lidas pelas pessoas que o mantêm, para melhorá-lo.",
       "versionNote": "Abrange conversas na versão criada por esta alteração e nas posteriores — nunca o que foi dito antes. Slack, Teams e clientes da API não conseguem exibir o aviso; se as pessoas usarem este agente por esses meios, mencione isso na saudação."
     },
+    "presentation": {
+      "title": "Apresentação e títulos",
+      "description": "Como as janelas de chat mostram este agente. Tudo é opcional; campos vazios mantêm os padrões.",
+      "displayName": "Nome exibido",
+      "accentColor": "Cor de destaque (#rrggbb)",
+      "avatar": "Avatar (URL https ou URI data:image pequena)",
+      "starters": "Sugestões de conversa (uma por linha, até {{count}})",
+      "controls": "Controles do chat",
+      "control": {
+        "undo": "Desfazer",
+        "redo": "Refazer",
+        "attachments": "Anexos",
+        "rating": "Avaliação",
+        "quickReplies": "Respostas rápidas",
+        "streaming": "Streaming",
+        "rawHtml": "Renderizar HTML nas respostas"
+      },
+      "rawHtmlNote": "Desativado por padrão: o HTML nas respostas é mostrado como texto. Ative apenas para um agente cujas respostas devam conter HTML.",
+      "titles": "Títulos das conversas",
+      "titlesEnable": "Deixar um modelo escrever os títulos das conversas",
+      "titlesNote": "Caso contrário, a conversa recebe a primeira mensagem como título. O modelo é executado uma vez por conversa, em segundo plano, e cobrado do orçamento de custos. Um título definido pelo usuário nunca é substituído.",
+      "titlesProvider": "Provedor",
+      "titlesModel": "Modelo",
+      "titlesMaxLength": "Título mais longo",
+      "titlesCredentials": "As credenciais ficam em titleGeneration.parameters do documento do agente (por exemplo, uma apiKey que referencia um segredo do cofre); veja a documentação de configuração do agente."
+    },
     "copyUrl": "Copiar URL",
     "liveElsewhere": "Ativa: v{{live}} · A ver v{{viewing}} (não implantada)",
     "removeWorkflow": "Remover o fluxo de trabalho do agente",
@@ -1005,7 +1031,11 @@
       "errDisabled": "Esta versão do agente não pede avaliações.",
       "errOwner": "Somente a pessoa que teve esta conversa pode avaliá-la.",
       "errGeneric": "Não foi possível salvar a avaliação."
-    }
+    },
+    "toolArgs": "Argumentos",
+    "toolResult": "Resultado",
+    "toolArgsShowFields": "Campos",
+    "toolArgsShowJson": "JSON"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -1781,9 +1811,18 @@
     "grModeReplace": "Usar apenas os padrões extras",
     "grPiiKinds": "Tipos a detectar",
     "grPiiEmail": "Endereços de e-mail",
-    "grPiiSsn": "Números de seguro social dos EUA",
     "grPiiCard": "Números de cartão de pagamento (verificados com Luhn)",
     "grPiiPhone": "Números de telefone",
+    "grPiiIban": "IBANs (soma de verificação validada)",
+    "grPiiDateOfBirth": "Datas de nascimento (junto a uma palavra-chave como “nascido”)",
+    "grPiiIpAddress": "Endereços IP (IPv4 e IPv6)",
+    "grPiiPassportMrz": "Zonas de leitura ótica de passaportes (qualquer país)",
+    "grPiiCountries": "Identificadores nacionais",
+    "grPiiCountriesHint": "Marque um país para encontrar todos os seus identificadores, ou marque identificadores individuais. Cada um é verificado pelo seu formato e dígito de controlo; alguns exigem ainda uma palavra-chave como «PESEL» ou «NHS» logo antes do número.",
+    "grPiiRegionEurope": "Europa",
+    "grPiiRegionAmericas": "Américas",
+    "grPiiRegionAsiaPacific": "Ásia-Pacífico",
+    "grPiiRegionAfrica": "África",
     "grReplacement": "Substituição",
     "grPiiReplacementHint": "Padrão [REDACTED:<kind>]. Um valor personalizado pode conter {kind}, que é substituído pelo tipo detectado.",
     "grPatterns": "Padrões",
@@ -2794,30 +2833,25 @@
     "openEditor": "Abrir no Editor",
     "editorComingSoon": "Integração do editor no local em breve",
     "noPipeline": "Nenhuma etapa no pipeline",
-    "type": {
-      "parser": "Analisador",
-      "rules": "Regras",
-      "property": "Setter de propriedade",
-      "apicalls": "Chamadas API",
-      "llm": "LLM",
-      "output": "Saída",
-      "output.template": "Modelo de Saída",
-      "mcpcalls": "Chamadas MCP",
-      "rag": "Base de conhecimento",
-      "dictionary": "Dicionário"
-    },
     "landingDescription": "Selecione um agente para abrir o editor visual de pipeline, depurador e chat em direto",
     "noAgents": "Nenhum agente encontrado — crie um na página de Agentes",
     "chat": "Chat",
     "backToAgent": "Voltar ao agente",
     "selectStageHint": "Selecione uma extensão no pipeline para ver e editar a sua configuração em linha",
-    "noConfig": "Esta etapa do pipeline não tem URI de configuração",
-    "unsupportedType": "Editor não disponível para este tipo de extensão",
     "testReady": "Guardado e implantado como v{{version}} — o chat está pronto",
     "workflow": "Fluxo de trabalho",
     "unsavedTitle": "Alterações por guardar nesta etapa",
     "unsavedMessage": "Mudar de etapa substitui o editor. Guarde primeiro as alterações, descarte-as ou permaneça nesta etapa.",
-    "discardAndSwitch": "Descartar e mudar"
+    "discardAndSwitch": "Descartar e mudar",
+    "inlineConfig": "Configuração incorporada",
+    "stepInfo": {
+      "templating": "Substitui os marcadores {…} nos textos de saída e nas respostas rápidas deste turno. Não tem configuração própria, por isso não há nada para editar aqui.",
+      "inlineConfig": "A configuração desta etapa está incorporada no workflow em vez de guardada como um recurso separado. Edite-a na página do workflow.",
+      "noConfig": "Esta etapa não referencia nenhum recurso de configuração. Associe um na página do workflow.",
+      "unknown": "O Manager não tem editor para este tipo de etapa. A configuração guardada no workflow é mostrada abaixo.",
+      "openWorkflow": "Abrir workflow",
+      "configHeading": "Configuração da etapa (somente leitura)"
+    }
   },
   "ragEditor": {
     "general": "Geral",
@@ -3510,6 +3544,8 @@
     "hitlSection": "Aprovação humana",
     "hitlApprovalPoints": "Aprovação em",
     "hitlOnTaskRejection": "Ao rejeitar",
+    "hitlApprovalCompletesBacklogTask": "A aprovação conta como concluída no backlog",
+    "hitlApprovalCompletesBacklogTaskHelp": "Equipes permanentes: uma tarefa aprovada por uma pessoa permanece concluída quando a execução da cadência é gravada, em vez de voltar ao backlog e ser executada novamente. Aprovações automáticas por tempo limite não contam.",
     "hitlEdit": "Editar",
     "hitlSaved": "Definições de aprovação guardadas",
     "hitlEnable": "Exigir aprovação humana",
@@ -4637,7 +4673,12 @@
     "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes.",
     "conversationColumn": "Conversa",
     "groupReviewLoadError": "Não foi possível carregar a discussão.",
-    "groupReviewNoEntries": "Ainda não foi dito nada."
+    "groupReviewNoEntries": "Ainda não foi dito nada.",
+    "argsViewLabel": "Mostrar argumentos como",
+    "argsViewFields": "Campos",
+    "argsViewJson": "JSON",
+    "argsViewRaw": "Bruto",
+    "amendRedactedMarker": "Os argumentos alterados ainda contêm <REDACTED>. Substitua pelo valor real ou aprove sem alterar: uma alteração é enviada exatamente como escrita."
   },
   "hitlReview": {
     "approveEdited": "Aprovar com alterações",
@@ -4781,6 +4822,22 @@
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend {{productName}} para dados reais."
   },
+  "spendControl": {
+    "title": "Alterações pendentes",
+    "description": "Propostas via MCP e não aplicadas: cada uma afrouxaria o controle de gastos. Aprovar aplica a alteração em seu nome.",
+    "proposedBy": "Proposta por {{who}} em {{when}}",
+    "loosening": "Afrouxa o controle de gastos",
+    "allChanges": "Todas as alterações",
+    "approve": "Aprovar",
+    "reject": "Rejeitar",
+    "approveTitle": "Aprovar esta alteração?",
+    "rejectTitle": "Rejeitar esta alteração?",
+    "approveDesc": "Ela é aplicada agora, com você como autor, e afrouxa o controle de gastos: {{loosening}}",
+    "rejectDesc": "Nada é aplicado. Quem propôs pode enviá-la novamente.",
+    "approved": "Alteração aprovada e aplicada",
+    "rejected": "Alteração rejeitada; nada foi aplicado",
+    "approveBlockedDirty": "Guarde primeiro as suas alterações à quota ou recarregue a página para as descartar: guardá-las depois de uma aprovação substituiria a quota aprovada."
+  },
   "modelPrices": {
     "nav": "Preços de modelos",
     "title": "Preços de modelos",
@@ -4870,6 +4927,8 @@
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
+    "editsDiscardedAfterRefresh": "A quota foi recarregada e as suas alterações não guardadas foram descartadas, para não substituírem os limites atuais.",
+    "refreshFailedSaveBlocked":"Não foi possível atualizar a quota, por isso a gravação está em pausa. Tente novamente para carregar primeiro os limites atuais.",
     "configuration": "Configuração",
     "conversationsToday": "Conversas hoje",
     "description": "Configure limites de taxa, limites de uso e orçamentos de custo por locatário.",
@@ -5178,6 +5237,12 @@
       "temperature": "Temperatura",
       "contextWindow": "Limite de Contexto",
       "activeTools": "Ferramentas Ativas",
+      "toolsResources": "Conjuntos de ferramentas conectados",
+      "toolsBuiltIn": "Integradas",
+      "toolsAllBuiltIn": "Todas as ferramentas integradas",
+      "toolsMemory": "Memória",
+      "toolsShowMore": "Mostrar mais {{hidden}}",
+      "toolsShowFewer": "Mostrar menos",
       "noLlm": "Nenhum LLM configurado",
       "noTools": "Nenhum configurado",
       "add": "Adicionar",
@@ -5603,7 +5668,48 @@
       "useStarterPrompt": "Inserir um prompt inicial",
       "yourAdvisors": "Seus consultores"
     },
-    "workforce": "Equipa"
+    "workforce": "Equipa",
+    "operatorLink": "Operador da plataforma",
+    "catalog": {
+      "emptyTitle": "Ainda não há nada para mostrar",
+      "emptyAuthorHint": "Os utilizadores finais só veem agentes e equipas listados. Abra um agente ou um grupo no Manager e ative \"Listado no catálogo\" — ou, com os espaços de trabalho ativos, torne-o publicado ou interno. Continua a ser preciso ter acesso para o usar.",
+      "openAgents": "Abrir agentes no Manager",
+      "emptyUserHint": "Ainda não foram disponibilizados agentes nem equipas para si. Volte mais tarde.",
+      "agents": "Agentes",
+      "teams": "Equipas",
+      "previewTitle": "O que os utilizadores finais veem",
+      "previewCounts": "{{agents}} agentes listados e {{teams}} equipas listadas são oferecidos às pessoas autorizadas a usá-los."
+    },
+    "sessions": {
+      "title": "Suas conversas",
+      "loading": "Carregando…",
+      "loadError": "Não foi possível carregar suas conversas. Tentar novamente",
+      "empty": "Nenhuma conversa ainda. Comece uma no Início.",
+      "pinned": "Fixadas",
+      "today": "Hoje",
+      "yesterday": "Ontem",
+      "previous7": "Últimos 7 dias",
+      "previous30": "Últimos 30 dias",
+      "rename": "Renomear",
+      "renameLabel": "Título da conversa",
+      "pin": "Fixar",
+      "unpin": "Desafixar",
+      "delete": "Excluir",
+      "deleteTitle": "Excluir esta conversa?",
+      "deleteDescription": "“{{title}}” sai da sua lista. Isso não pode ser desfeito aqui.",
+      "renameFailed": "Não foi possível renomear: {{error}}",
+      "pinFailed": "Não foi possível alterar a fixação: {{error}}",
+      "deleteFailed": "Não foi possível excluir: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Iniciar uma conversa",
+      "placeholder": "Pergunte a {{agent}}…",
+      "messageLabel": "Sua mensagem",
+      "agentLabel": "Agente",
+      "send": "Enviar",
+      "starters": "Sugestões",
+      "recent": "Recentes"
+    }
   },
   "operator": {
     "title": "Operador da plataforma",
@@ -6182,13 +6288,15 @@
       "static": "Chave de API",
       "basic": "Usuário e senha",
       "clientCredentials": "Conta de serviço OAuth",
-      "authorizationCode": "Login de usuário OAuth"
+      "authorizationCode": "Login de usuário OAuth",
+      "jwtBearer": "Conta de serviço com chave de assinatura"
     },
     "choice": {
       "staticBody": "Um cabeçalho fixo, igual para todos — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. O {{productName}} faz a codificação, então a senha continua sendo uma entrada separada do cofre, que você pode trocar sozinha.",
       "clientCredentialsBody": "O agente se identifica como ele mesmo. Um token de acesso compartilhado por todos, renovado automaticamente.",
-      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre."
+      "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre.",
+      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos."
     },
     "binding": {
       "perUser": "Por pessoa",
@@ -6222,7 +6330,7 @@
     "clientId": "ID do cliente",
     "clientSecret": "Segredo do cliente",
     "clientAuthMethod": "Autenticação do cliente",
-    "clientAuthMethodHint": "Como o segredo do cliente chega ao endpoint do token. Errar aqui parece exatamente um segredo errado, por isso é um ajuste e não um chute.",
+    "clientAuthMethodHint": "Como o cliente se identifica no endpoint de token: com o segredo do cliente via Basic ou no corpo, ou com private_key_jwt — uma asserção assinada com uma chave privada guardada no cofre, para um aplicativo registrado com certificado. Escolher errado parece exatamente um segredo incorreto, por isso é uma configuração e não uma alternativa automática.",
     "discoveryUrl": "URL de descoberta (opcional)",
     "pkceAlwaysOn": "O PKCE (S256) é sempre aplicado a um login de usuário e não pode ser desligado — o destino do redirecionamento é um caminho público.",
     "scopes": "Escopos",
@@ -6308,7 +6416,9 @@
       "paramReserved": "Um destes parâmetros é definido pelo próprio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Substituí-lo quebraria o fluxo.",
       "paramValueReference": "Os valores dos parâmetros são enviados exatamente como escritos — uma referência ${…} aqui não é resolvida e colocaria um ponteiro do cofre num URL. Use apenas valores de protocolo simples.",
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
-      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui."
+      "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
+      "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url.",
+      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -6331,7 +6441,30 @@
     "confirmAuthChangeDesc": "As contas ligadas através desta ligação deixarão de se resolver — uma concessão pertence ao fluxo que a produziu. O {{productName}} recusa a alteração enquanto alguma conta continuar ligada e diz quantas; desligue-as primeiro, ou crie uma nova ligação e deixe as pessoas ligarem essa.",
     "confirmAuthChangeAccept": "Alterar",
     "deleted": "Conexão \"{{name}}\" excluída",
-    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?"
+    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?",
+    "privateKey": "Chave privada",
+    "privateKeyHint": "Uma entrada do cofre com uma chave RSA PKCS#8 PEM não criptografada (BEGIN PRIVATE KEY), ou o arquivo de chave JSON completo de uma conta de serviço do Google. A chave nunca sai do {{productName}}; só uma asserção assinada de curta duração é enviada.",
+    "certificateThumbprint": "Impressão digital do certificado",
+    "certificateThumbprintHint": "Do certificado enviado ao provedor de identidade — em hexadecimal como o portal mostra, ou em base64url. Pública, não é um segredo.",
+    "certificateThumbprintHeader": "Cabeçalho da impressão digital",
+    "thumbprintS256": "x5t#S256 — SHA-256 (padrão do Entra)",
+    "thumbprintSha1": "x5t — impressão SHA-1",
+    "serviceAccountEmail": "Conta de serviço (emissor)",
+    "serviceAccountEmailHint": "ex.: agent@project.iam.gserviceaccount.com. Opcional quando a chave privada é um arquivo de chave JSON, que indica a própria conta.",
+    "audience": "Público da asserção (opcional)",
+    "audienceHint": "A claim aud da asserção assinada. Deixe em branco para usar a URL do token, que é o que o Google espera.",
+    "preset": "Começar de um modelo",
+    "presetNone": "Nenhum — preencher todos os campos",
+    "presets": {
+      "entra-app-certificate": {
+        "label": "Aplicação do Microsoft Entra com certificado",
+        "description": "Um registo de aplicação do Entra que se autentica com um certificado em vez de um segredo de cliente (private_key_jwt). Substitua <tenant-id> no URL do token, preencha o ID da aplicação (cliente) e a impressão digital do certificado e guarde a chave privada do certificado no cofre como PEM PKCS#8 não encriptado. Adicione https://login.microsoftonline.com à lista de permissões de endpoints de credenciais."
+      },
+      "google-service-account": {
+        "label": "Conta de serviço do Google (chave JSON)",
+        "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
+      }
+    }
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",
@@ -6339,7 +6472,6 @@
     "rules": "Regras",
     "property": "Definidor de propriedades",
     "apicalls": "Chamadas à API",
-    "httpcallsLegacy": "Chamadas à API (legado)",
     "llm": "LLM",
     "output": "Saída",
     "templating": "Modelos",
@@ -7748,6 +7880,13 @@
       "lte": "é no máximo",
       "contains": "contém"
     }
+  },
+  "catalogListing": {
+    "label": "Listado no catálogo",
+    "agentDescription": "Oferece este agente aos utilizadores finais no Workforce. Só o veem as pessoas que o podem usar, e só depois de implementado. Com os espaços de trabalho ativos, os agentes publicados e internos são listados de qualquer forma.",
+    "groupDescription": "Oferece esta equipa aos utilizadores finais no Workforce. Só a veem as pessoas que a podem usar. Com os espaços de trabalho ativos, as equipas publicadas e internas são listadas de qualquer forma.",
+    "listedToast": "Listado no catálogo",
+    "unlistedToast": "Removido do catálogo"
   },
   "groupLearning": {
     "betToggle": "Registrar como aposta",

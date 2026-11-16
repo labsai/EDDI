@@ -474,7 +474,7 @@ void redoLastStep();
 void executeLifecycle(
     IConversationMemory conversationMemory,
     List<String> lifecycleTaskTypes
-) throws LifecycleException
+) throws LifecycleException, ConversationStopException, ConversationPauseException
 ```
 
 **How It Works**:
@@ -983,7 +983,7 @@ Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent
 | Layer | Component | What It Blocks |
 |-------|-----------|----------------|
 | **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
-| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and strips credentials (fixed names and any `${caller:...}`-derived header) on a cross-origin hop. Maximum 5 hops |
+| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and on a cross-origin hop keeps only an allow-list of headers (`Accept`, `Accept-Encoding`, `Accept-Language`, `User-Agent`, `Content-Type`, `Content-Language`, `Cache-Control`, `Pragma`) and strips every other one, including the trace context. Maximum 5 hops |
 | **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
 
 **Usage pattern:**
@@ -1053,8 +1053,9 @@ The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gap
 
 | Tool | Trigger | What It Checks |
 |------|---------|----------------|
-| **CodeQL** | Every PR + weekly schedule | Java semantic analysis (injection, SSRF, crypto misuse) |
-| **Trivy** | Docker image build | CVEs in OS packages and Java dependencies |
+| **CodeQL** | Every PR + weekly schedule | Semantic analysis of the Java backend and, in a separate job, the UIs (injection, SSRF, crypto misuse) |
+| **Trivy** | Every code PR (filesystem scan) + Docker image build (image scan) | CVEs in OS packages and Java dependencies; both scans block on fixable CRITICAL/HIGH |
+| **Gitleaks** (`Secret Scanning`) | Every PR | Committed credentials |
 | **Dependency Review** | Every PR | License compliance and known vulnerabilities in new dependencies |
 | **Jackson 3 Ban** | Every build (Maven Enforcer) | Prevents accidental Jackson 3.x introduction (incompatible with Quarkus) |
 

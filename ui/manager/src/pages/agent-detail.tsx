@@ -1,3 +1,5 @@
+import { CatalogListingToggle } from "@/components/shared/catalog-listing-toggle";
+import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RatingConfigSection } from "@/components/editors/rating-config-section";
 import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
@@ -5,7 +7,7 @@ import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
-import { useState, useEffect, useCallback, useMemo, useId } from "react";
+import { useState, useEffect, useCallback, useMemo, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useBrand } from "@/hooks/use-brand";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -49,7 +51,7 @@ import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   useAgent,
   useDeploymentStatus,
@@ -147,7 +149,10 @@ export function AgentDetailPage() {
 
   // Reset version when navigating to a different agent (React reuses
   // the component, so useState values persist across route param changes).
+  /** The agent on screen now, for async completions started on another one. */
+  const currentIdRef = useRef(id);
   useEffect(() => {
+    currentIdRef.current = id;
     setVersion(undefined);
     setDraft(null);
     setRebaseFrom(null);
@@ -155,20 +160,29 @@ export function AgentDetailPage() {
     setShowDiscardDialog(false);
   }, [id]);
 
-  const { data: versions } = useAgentVersions(id!);
+  const { data: versions, error: versionsQueryError, refetch: refetchVersions } = useAgentVersions(id!);
+  // Fatal only while there is no list at all: a failed background refetch keeps
+  // the one already on screen.
+  const versionsError = versions ? null : versionsQueryError;
   // Delete (and sharing) need OWN. An EDIT grantee was offered Delete here and
   // met a 403 — the agents list already hid it for them via the same level.
   // Only consulted when no descriptor for this id came back — see accessForDetail.
   // `enforcement`, not `enabled`: a failed /workspaces must not read as "off".
   const workspacesEnforced = useSpaces().enforcement;
   const access = accessForDetail(versions, id, workspacesEnforced);
+  // A viewer gets the configuration to read, not to change or deploy. Also true
+  // while the descriptors are loading (`access` offers nothing until then).
+  const readOnly = !access.canEdit;
 
-  // Default to latest version once loaded
-  const resolvedVersion = version ?? versions?.[0]?.version ?? 1;
+  // Follow the latest version once the list is in. Until then the version is
+  // 0, "not known yet": every query keyed on it waits, so the page neither
+  // shows nor deploys another version in the meantime. Falling back to v1
+  // here put v1 on screen, deployable and editable, until the list arrived, and
+  // an edit made then was saved over the latest version as a v1-based draft.
+  const resolvedVersion = version ?? (versions ? (versions[0]?.version ?? 1) : 0);
 
   const {
     data: agent,
-    isLoading,
     isError,
     error: loadError,
     refetch,
@@ -289,17 +303,31 @@ export function AgentDetailPage() {
   const isDirty = isAgentDraftDirty(draft, agent);
   const changedFields = useMemo(() => changedAgentFields(draft, agent), [draft, agent]);
   const isSaving = updateAgentMutation.isPending;
+  /**
+   * A key generate or revoke in flight. It writes a new version the page then
+   * follows, so an edit made meanwhile would build a draft on the version
+   * before it and hide the key change until that draft is saved or discarded.
+   */
+  const keyChangePending = generateSigningKeyMutation.isPending || revokeSigningKeyMutation.isPending;
+  /**
+   * Each section's own `disabled`. A viewer's sections are disabled one by one,
+   * not through the fieldset: a disabled fieldset also disables the headers
+   * that expand a section, and a viewer must still be able to open one to read it.
+   */
+  const sectionsDisabled = isSaving || keyChangePending || readOnly;
   /** Whether any of these top-level fields holds an unsaved edit. */
   const touched = (...fields: string[]) => fields.some((f) => changedFields.has(f));
 
   const editAgent = useCallback<AgentEdit>(
     (next) => {
-      if (!agent || !editable || configPending) return;
+      // No draft for a viewer: the backend refuses their save (EDIT), so there
+      // is nothing to hold an edit for.
+      if (!agent || !editable || configPending || keyChangePending || readOnly) return;
       // Applied onto the latest draft, not taken wholesale: an edit built from
       // a slightly older render must not undo the one before it.
       setDraft((prev) => applyChangedFields(prev ?? agent, editable, next));
     },
-    [agent, editable, configPending],
+    [agent, editable, configPending, keyChangePending, readOnly],
   );
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
@@ -492,10 +520,14 @@ export function AgentDetailPage() {
 
   /** Generates a signing key; the backend saves it as a new version, which the page then follows. */
   async function handleGenerateSigningKey() {
+    const agentId = id!;
     try {
-      const result = await generateSigningKeyMutation.mutateAsync({ id: id!, version: resolvedVersion });
+      const result = await generateSigningKeyMutation.mutateAsync({ id: agentId, version: resolvedVersion });
       const created = parseVersionFromLocation(result?.location);
-      if (created !== null) setVersion(created);
+      // The version belongs to the agent the key was made for: if the page has
+      // moved to another agent meanwhile, following it would select a version
+      // that agent may not have.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
       toast.success(
         t("agentDetail.signingKeyGenerated", "Signing key v{{version}} generated and saved as a new agent version.", {
           version: result?.version,
@@ -508,10 +540,12 @@ export function AgentDetailPage() {
 
   /** Revokes a signing key; the backend saves that as a new version, which the page then follows. */
   async function handleRevokeSigningKey(keyVersion: number) {
+    const agentId = id!;
     try {
-      const result = await revokeSigningKeyMutation.mutateAsync({ id: id!, keyVersion, version: resolvedVersion });
+      const result = await revokeSigningKeyMutation.mutateAsync({ id: agentId, keyVersion, version: resolvedVersion });
       const created = parseVersionFromLocation(result?.location);
-      if (created !== null) setVersion(created);
+      // As for generation: only follow the new version on the agent it belongs to.
+      if (created !== null && currentIdRef.current === agentId) setVersion(created);
       toast.success(t("agentDetail.signingKeyRevoked", "Signing key v{{version}} revoked.", { version: keyVersion }));
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -564,7 +598,9 @@ export function AgentDetailPage() {
     [versions],
   );
 
-  if (isLoading && !agent) {
+  // Not `isLoading`: while the version is not known the document query is
+  // disabled, and a disabled query does not report itself as loading.
+  if (!agent && !isError && !versionsError) {
     return (
       <div className="flex items-center justify-center py-20" data-testid="agent-detail-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -572,7 +608,7 @@ export function AgentDetailPage() {
     );
   }
 
-  if (isForbidden(loadError)) {
+  if (isForbidden(loadError) || isForbidden(versionsError)) {
     return (
       <div className="space-y-4">
         <BackLink />
@@ -581,15 +617,23 @@ export function AgentDetailPage() {
     );
   }
 
-  if (isError || !agent) {
+  // Without the version list there is no version to show: the page says so
+  // rather than guessing one.
+  if (isError || versionsError || !agent) {
     return (
       <div className="space-y-4">
         <BackLink />
-        <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16">
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5 py-16"
+          data-testid="agent-detail-error"
+        >
           <AlertCircle className="h-12 w-12 text-destructive" />
           <p className="mt-4 text-lg font-medium text-destructive">{t("common.error")}</p>
           <button
-            onClick={() => refetch()}
+            onClick={() => {
+              if (versionsError) void refetchVersions();
+              if (isError) void refetch();
+            }}
             className="mt-4 rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20"
           >
             {t("common.retry")}
@@ -605,6 +649,7 @@ export function AgentDetailPage() {
   const doc = editable ?? agent;
   const modifiedSectionCount = [
     touched("workflows"),
+    touched("listed"),
     touched("a2aEnabled", "description", "a2aSkills"),
     touched("security", "identity"),
     touched("capabilities"),
@@ -615,6 +660,7 @@ export function AgentDetailPage() {
     touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
     touched("ratingConfig"),
+    touched("appearance", "conversationControls", "titleGeneration"),
     touched("hitlConfig"),
     touched("channels"),
   ].filter(Boolean).length;
@@ -671,40 +717,42 @@ export function AgentDetailPage() {
         {/* Actions — edit state, then primary (deploy/chat), then secondary (tools) */}
         <div className="flex flex-col gap-2 items-end">
           {/* Edits — same controls as the workflow and resource editors */}
-          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="agent-save-controls">
-            {isDirty && (
+          {!readOnly && (
+            <div className="flex flex-wrap items-center justify-end gap-2" data-testid="agent-save-controls">
+              {isDirty && (
+                <button
+                  type="button"
+                  onClick={() => setShowReviewDialog(true)}
+                  className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-xs font-medium text-warn-800 hover:bg-warn-200 transition-colors dark:bg-warn-900/30 dark:text-warn-400 dark:hover:bg-warn-900/50"
+                  title={t("agentDetail.reviewChanges", "Review changes")}
+                  data-testid="dirty-indicator"
+                >
+                  <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                  {t("editor.dirty", "Unsaved changes")}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setShowReviewDialog(true)}
-                className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-xs font-medium text-warn-800 hover:bg-warn-200 transition-colors dark:bg-warn-900/30 dark:text-warn-400 dark:hover:bg-warn-900/50"
-                title={t("agentDetail.reviewChanges", "Review changes")}
-                data-testid="dirty-indicator"
+                onClick={() => setShowDiscardDialog(true)}
+                disabled={!isDirty || isSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+                data-testid="discard-btn"
               >
-                <AlertCircle className="h-3 w-3" aria-hidden="true" />
-                {t("editor.dirty", "Unsaved changes")}
+                <Undo2 className="h-4 w-4" aria-hidden="true" />
+                {t("editor.discard", "Discard")}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setShowDiscardDialog(true)}
-              disabled={!isDirty || isSaving}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
-              data-testid="discard-btn"
-            >
-              <Undo2 className="h-4 w-4" aria-hidden="true" />
-              {t("editor.discard", "Discard")}
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveDraft()}
-              disabled={!isDirty || isSaving}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
-              data-testid="save-btn"
-            >
-              <Save className="h-4 w-4" aria-hidden="true" />
-              {isSaving ? t("editor.saving", "Saving...") : t("editor.save", "Save")}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => void saveDraft()}
+                disabled={!isDirty || isSaving}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+                data-testid="save-btn"
+              >
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {isSaving ? t("editor.saving", "Saving...") : t("editor.save", "Save")}
+              </button>
+            </div>
+          )}
 
           {/* Primary actions: status + deploy + chat */}
           <div className="flex flex-wrap items-center gap-2">
@@ -721,31 +769,33 @@ export function AgentDetailPage() {
               {statusLabel}
             </div>
 
-            {/* Deploy/Undeploy */}
-            <button
-              onClick={isDeployed ? () => openUndeployDialog("production") : () => handleDeploy()}
-              disabled={isBusy || isDirty}
-              title={deployBlockedTitle}
-              className={cn(
-                "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                isDeployed
-                  ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90",
-                (isBusy || isDirty) && "cursor-not-allowed opacity-50"
-              )}
-              data-testid="deploy-btn"
-            >
-              {isBusy
-                ? t("common.loading")
-                : isDeployed
-                  ? liveEnvironments.length > 1
-                    ? t("agents.undeployFromProduction", "Undeploy from production")
-                    : t("agents.undeploy")
-                  : t("agents.deploy")}
-            </button>
+            {/* Deploy/Undeploy — EDIT, like saving; a viewer keeps the status pill */}
+            {!readOnly && (
+              <button
+                onClick={isDeployed ? () => openUndeployDialog("production") : () => handleDeploy()}
+                disabled={isBusy || isDirty}
+                title={deployBlockedTitle}
+                className={cn(
+                  "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  isDeployed
+                    ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90",
+                  (isBusy || isDirty) && "cursor-not-allowed opacity-50"
+                )}
+                data-testid="deploy-btn"
+              >
+                {isBusy
+                  ? t("common.loading")
+                  : isDeployed
+                    ? liveEnvironments.length > 1
+                      ? t("agents.undeployFromProduction", "Undeploy from production")
+                      : t("agents.undeploy")
+                    : t("agents.deploy")}
+              </button>
+            )}
 
             {/* Deploy & Chat */}
-            {!isChatReachable && !isBusy && (
+            {!isChatReachable && !isBusy && !readOnly && (
               <button
                 onClick={async () => {
                   const drawerStore = useChatDrawerStore.getState();
@@ -951,6 +1001,7 @@ export function AgentDetailPage() {
           onUndeploy={(env) => openUndeployDialog(env)}
           isBusy={isBusy}
           blockedTitle={deployBlockedTitle}
+          readOnly={readOnly}
         />
       )}
 
@@ -969,14 +1020,16 @@ export function AgentDetailPage() {
             </span>
             {touched("workflows") && <ModifiedPill />}
           </div>
-          <button
-            onClick={() => setShowAddWorkflow(!showAddWorkflow)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
-            data-testid="add-workflow-btn"
-          >
-            <Plus className="h-4 w-4" />
-            {t("agentDetail.addWorkflow", "Add Workflow")}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowAddWorkflow(!showAddWorkflow)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+              data-testid="add-workflow-btn"
+            >
+              <Plus className="h-4 w-4" />
+              {t("agentDetail.addWorkflow", "Add Workflow")}
+            </button>
+          )}
         </div>
 
         {/* Workflow list — clickable cards */}
@@ -1031,7 +1084,7 @@ export function AgentDetailPage() {
                   </div>
                 </Link>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {isStale && (
+                  {isStale && !readOnly && (
                     <button
                       onClick={(e) => { e.preventDefault(); handleUpdateWorkflowVersion(wfUri, latestVer!); }}
                       disabled={isSaving}
@@ -1050,16 +1103,18 @@ export function AgentDetailPage() {
                     {t("agentDetail.openWorkflow", "Open")}
                     <ExternalLink className="h-3 w-3" />
                   </Link>
-                  <button
-                    onClick={() => handleRemoveWorkflow(wfUri)}
-                    disabled={isSaving}
-                    className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                    title={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
-                    aria-label={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
-                    data-testid={`remove-workflow-${wfId}`}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => handleRemoveWorkflow(wfUri)}
+                      disabled={isSaving}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+                      title={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                      aria-label={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                      data-testid={`remove-workflow-${wfId}`}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1077,13 +1132,22 @@ export function AgentDetailPage() {
       )}
 
       {/* The editable sections. Disabled while the previous version's document
-          is standing in for the one being loaded (see `configPending`). */}
+          is standing in for the one being loaded (see `configPending`); a
+          viewer's are disabled section by section (see `sectionsDisabled`). */}
       <fieldset
-        disabled={configPending || isSaving}
-        aria-busy={configPending || isSaving}
+        disabled={configPending || isSaving || keyChangePending}
+        aria-busy={configPending || isSaving || keyChangePending}
         className="contents"
         data-testid="agent-config-sections"
       >
+      {/* End-user catalog listing (opt-in, IRestCatalog) */}
+      <CatalogListingToggle
+        kind="agent"
+        listed={doc.listed}
+        onChange={(listed) => editAgent({ ...doc, listed })}
+        disabled={sectionsDisabled}
+      />
+
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
         agent={doc}
@@ -1091,15 +1155,17 @@ export function AgentDetailPage() {
         agentName={versions?.find((v) => v.version === resolvedVersion)?.name}
         version={resolvedVersion}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("a2aEnabled", "description", "a2aSkills")}
       />
 
       {/* Security & Identity */}
+      {/* Keyed by agent: a revoke dialog left open must not carry over to another agent. */}
       <SecurityIdentitySection
+        key={`security-${id}`}
         agent={doc}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("security", "identity")}
         signingKeyAction={
           mayGenerateSigningKey
@@ -1120,23 +1186,23 @@ export function AgentDetailPage() {
       />
 
       {/* Capabilities */}
-      <CapabilitiesSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("capabilities")} />
+      <CapabilitiesSection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("capabilities")} />
 
       {/* User Memory */}
-      <UserMemorySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("enableMemoryTools", "userMemoryConfig")} />
+      <UserMemorySection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("enableMemoryTools", "userMemoryConfig")} />
 
       {/* Memory Policy */}
-      <MemoryPolicySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("memoryPolicy")} />
+      <MemoryPolicySection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("memoryPolicy")} />
 
       {/* Session Management */}
-      <SessionManagementSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("sessionManagement")} />
+      <SessionManagementSection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("sessionManagement")} />
 
       {/* Usage, and opt-in review of conversations by the agent's maintainers */}
       <ConversationReviewSection
         agent={doc}
         agentId={id!}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("conversationReview")}
       />
 
@@ -1144,36 +1210,44 @@ export function AgentDetailPage() {
       <RatingConfigSection
         agent={doc}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("ratingConfig")}
         onValidityChange={setRatingInvalid}
       />
 
+      {/* Appearance, chat controls and conversation titles */}
+      <AgentPresentationSection
+        agent={doc}
+        onChange={editAgent}
+        disabled={sectionsDisabled}
+        modified={touched("appearance", "conversationControls", "titleGeneration")}
+      />
+
       {/* Spend limits */}
-      <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
+      <LimitsSection key={`limits-${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
       {/* Self-continuation */}
       <ContinuationSection
         key={`continuation-${id}-${resolvedVersion}`}
         agent={doc}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("maxContinuations", "continuationInput")}
         onValidityChange={setContinuationInvalid}
       />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection
-        key={`${id}-${resolvedVersion}`}
+        key={`hitl-${id}-${resolvedVersion}`}
         agent={doc}
         onChange={editAgent}
-        disabled={isSaving}
+        disabled={sectionsDisabled}
         modified={touched("hitlConfig")}
         onValidityChange={setHitlNotifyInvalid}
       />
 
       {/* Channel Connectors */}
-      <ChannelsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("channels")} />
+      <ChannelsSection agent={doc} onChange={editAgent} disabled={sectionsDisabled} modified={touched("channels")} />
 
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={doc} />
@@ -1476,6 +1550,7 @@ function EnvironmentBadges({
   onUndeploy,
   isBusy,
   blockedTitle,
+  readOnly = false,
 }: {
   agentId: string;
   version: number;
@@ -1485,6 +1560,8 @@ function EnvironmentBadges({
   isBusy: boolean;
   /** Set while deploying is held back (unsaved edits); the reason, as a tooltip. */
   blockedTitle?: string;
+  /** The caller may not deploy (below EDIT): statuses only, no deploy/undeploy buttons. */
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const envStatusLabels: Record<string, string> = {
@@ -1541,21 +1618,23 @@ function EnvironmentBadges({
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
-                disabled={isBusy || !!blockedTitle}
-                title={blockedTitle}
-                data-testid={`env-toggle-${environment}`}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                  isUp
-                    ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
-                    : "bg-primary/10 text-primary hover:bg-primary/20",
-                  (isBusy || blockedTitle) && "cursor-not-allowed opacity-50"
-                )}
-              >
-                {isUp ? t("agents.undeploy") : t("agents.deploy")}
-              </button>
+              {!readOnly && (
+                <button
+                  onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
+                  disabled={isBusy || !!blockedTitle}
+                  title={blockedTitle}
+                  data-testid={`env-toggle-${environment}`}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    isUp
+                      ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                      : "bg-primary/10 text-primary hover:bg-primary/20",
+                    (isBusy || blockedTitle) && "cursor-not-allowed opacity-50"
+                  )}
+                >
+                  {isUp ? t("agents.undeploy") : t("agents.deploy")}
+                </button>
+              )}
             </div>
           );
         })}
@@ -1899,6 +1978,7 @@ function A2ASection({
                 type="text"
                 value={agent.description ?? ""}
                 onChange={(e) => onChange({ ...agent, description: e.target.value })}
+                disabled={disabled}
                 placeholder={t("agentDetail.a2aDescPlaceholder", "What does this agent do?")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
                 data-testid="a2a-description"
@@ -1923,7 +2003,8 @@ function A2ASection({
                     <button
                       type="button"
                       onClick={() => handleRemoveSkill(i)}
-                      className="rounded p-0.5 hover:bg-primary/20 transition-colors"
+                      disabled={disabled}
+                      className="rounded p-0.5 hover:bg-primary/20 transition-colors disabled:opacity-50"
                       aria-label={t("common.removeItem", { item: skill, defaultValue: "Remove {{item}}" })}
                     >
                       <X className="h-3 w-3" />
@@ -1942,6 +2023,7 @@ function A2ASection({
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
+                  disabled={disabled}
                   onKeyDown={(e) => {
                     if (isImeComposing(e)) return;
                     if (e.key === "Enter") {
@@ -1956,7 +2038,8 @@ function A2ASection({
                 <button
                   type="button"
                   onClick={handleAddSkill}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  disabled={disabled}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
                   aria-label={t("agentDetail.a2aAddSkill", "Add skill")}
                   data-testid="a2a-add-skill"
                 >

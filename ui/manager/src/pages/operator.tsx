@@ -9,7 +9,7 @@ import {
   PauseCircle,
   RefreshCw,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { EmptyState } from "@/components/shared/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { OperatorActivation } from "@/components/operator/operator-activation";

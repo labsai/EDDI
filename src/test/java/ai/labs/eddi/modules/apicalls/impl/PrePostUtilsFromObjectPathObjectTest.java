@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -49,7 +48,7 @@ class PrePostUtilsFromObjectPathObjectTest {
     void setUp() throws Exception {
         var templatingEngine = mock(ITemplatingEngine.class);
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(invocation -> invocation.getArgument(0));
-        prePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), templatingEngine, new DataFactory(),
+        prePostUtils = new PrePostUtils(mock(IJsonSerialization.class), templatingEngine, new DataFactory(),
                 new SecretPropertyVault(mock(ISecretProvider.class), new DataFactory()));
         memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
         templateData = new HashMap<>();
@@ -128,7 +127,7 @@ class PrePostUtilsFromObjectPathObjectTest {
     void httpCallsJsonStringStillParsed() throws Exception {
         var json = mock(IJsonSerialization.class);
         when(json.deserialize("{\"a\":1}")).thenReturn(Map.of("a", 1));
-        var utils = new PrePostUtils(json, mock(IMemoryItemConverter.class), passThroughEngine(), new DataFactory(),
+        var utils = new PrePostUtils(json, passThroughEngine(), new DataFactory(),
                 new SecretPropertyVault(mock(ISecretProvider.class), new DataFactory()));
         templateData.put("httpResponse", Map.of("payload", "{\"a\":1}", "n", 5));
 

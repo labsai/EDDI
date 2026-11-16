@@ -119,7 +119,7 @@ Make sure the templating is defined after the output, not before.
 
 ### String Methods
 
-All standard String methods are available as natural method calls on string variables:
+The following String methods are available as natural method calls on string variables. They are registered as template extensions (`StringTemplateExtensions`); a String method not listed here is not available, because the runtime engine invokes no arbitrary methods:
 
 | Expression | Description |
 | --- | --- |
@@ -129,10 +129,14 @@ All standard String methods are available as natural method calls on string vari
 | `{str.substring(5)}` | Substring from index |
 | `{str.substring(0, 5)}` | Substring range |
 | `{str.indexOf('x')}` | Find character index |
+| `{str.lastIndexOf('x')}` | Find last index |
 | `{str.contains('sub')}` | Check if contains |
 | `{str.startsWith('pre')}` | Check prefix |
 | `{str.endsWith('suf')}` | Check suffix |
 | `{str.trim()}` | Trim whitespace |
+| `{str.strip()}` | Trim Unicode whitespace |
+| `{str.charAt(0)}` | Character at index |
+| `{str.concat('x')}` | Append |
 | `{str.length()}` | String length |
 | `{str.isEmpty()}` | Empty check |
 
@@ -166,7 +170,7 @@ EDDI provides custom namespace extensions for use in templates (output, httpcall
 | --- | --- | --- |
 | `json` | `{json:serialize(obj)}` | Serialise a value to JSON text |
 | `json` | `{json:deserialize(text)}` | Parse JSON text into a map or list |
-| `encoder` | `{encoder:base64(data)}` | Base64 encode (also `base64Url`, `base64Mime`) |
+| `encoder` | `{encoder:base64(data)}` | Base64 encode (also `base64Url`, `base64Mime`; `mimeHeader` writes a mail header value as folded RFC 2047 encoded words) |
 
 ### What a template can reach
 

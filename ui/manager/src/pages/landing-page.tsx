@@ -7,8 +7,11 @@ import {
   Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/layout/theme-provider";
+import { useTheme } from "@eddi/ui";
 import { BrandIcon } from "@/components/layout/brand-logo";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { useMayUse } from "@/hooks/use-auth";
+import { ROLE_APPROVER, ROLE_USER } from "@/lib/roles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -128,6 +131,26 @@ export function LandingPage() {
   // changed from here.
   const [searchParams] = useSearchParams();
   const forceChooser = searchParams.has("choose");
+  const { canAuthor } = useWorkforceAccess();
+  const may = useMayUse();
+
+  // An end user (`eddi-user` without `eddi-editor` / `eddi-admin`) has one
+  // place to go: Workforce (decision D6). The chooser offers the Manager, whose
+  // building screens they cannot use, so it is skipped — even with `?choose`
+  // and whatever preference an older visit stored. `/` reaches this page for
+  // everyone (`landing-redirect.js` cannot read roles, so it sends every visitor
+  // here, remembered preference or not), so this is where the role decides.
+  //
+  // Workforce reads `/catalog/*`, which admits only admin, editor and user. A
+  // dedicated `eddi-viewer` or `eddi-approver` would get nothing but 403s
+  // there, so they go to the Manager instead: an approver to the approvals
+  // inbox (their whole job, and an endpoint that admits them), a viewer to the
+  // Manager dashboard.
+  if (!canAuthor) {
+    if (may([ROLE_USER])) return <Navigate to="/workforce" replace />;
+    if (may([ROLE_APPROVER])) return <Navigate to="/manage/approvals" replace />;
+    return <Navigate to="/manage" replace />;
+  }
 
   // Synchronous redirect — no flash
   const pref = getStoredPreference();

@@ -13,11 +13,19 @@ import ai.labs.eddi.modules.rules.impl.conditions.BaseMatcher.ConversationStepOc
 import ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.*;
+import java.util.stream.Stream;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.FAIL;
+import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.SUCCESS;
 import static org.mockito.Mockito.*;
 
 /**
@@ -175,5 +183,64 @@ public class ActionMatcherTest extends BaseMatcherTest {
         when(previousConversationStep2.getLatestData(eq(KEY_ACTIONS))).thenAnswer(invocation -> new Data<>(KEY_ACTIONS, inputActions));
         when(memory.getAllSteps()).thenAnswer(
                 invocation -> new ConversationMemory.ConversationStepStack(Arrays.asList(previousConversationStep1, previousConversationStep2)));
+    }
+
+    /**
+     * What a configured {@code actionmatcher} means, run against a real
+     * conversation memory. A comma list is an AND that must appear as an ordered,
+     * adjacent sublist of the step's actions (AGENTS.md §5, rule 3) — the tests
+     * above stub every lookup and assert SUCCESS only, so they kept passing with
+     * the sublist check swapped for {@code containsAll}.
+     */
+    @Nested
+    class Semantics {
+
+        static Stream<Arguments> rows() {
+            return Stream.of(
+                    row("a comma list matches an ordered, adjacent sublist", "a,b", "currentStep", SUCCESS, List.of("x", "a", "b", "y")),
+                    row("a comma list does not match when the actions are not adjacent", "a,c", "currentStep", FAIL, List.of("a", "b", "c")),
+                    row("a comma list does not match in the reverse order", "b,a", "currentStep", FAIL, List.of("a", "b")),
+                    row("a single action matches when present", "a", "currentStep", SUCCESS, List.of("x", "a")),
+                    row("a single action fails when absent", "a", "currentStep", FAIL, List.of("x")),
+                    row("'empty' matches a step without actions", "empty", "currentStep", SUCCESS, (List<String>) null),
+                    row("'empty' fails on a step with actions", "empty", "currentStep", FAIL, List.of("a")),
+                    row("lastStep fails on the first step of a conversation", "a", "lastStep", FAIL, List.of("a")),
+                    row("lastStep reads the previous step", "a", "lastStep", SUCCESS, List.of("a"), List.of("x")),
+                    row("lastStep ignores the current step", "a", "lastStep", FAIL, List.of("x"), List.of("a")),
+                    row("anyStep matches an earlier step", "a", "anyStep", SUCCESS, List.of("a"), List.of("x")),
+                    row("anyStep fails when no step matches", "a", "anyStep", FAIL, List.of("x"), List.of("y")),
+                    row("never fails when an earlier step matched", "a", "never", FAIL, List.of("a"), List.of("x")),
+                    row("never matches when no step matched", "a", "never", SUCCESS, List.of("x"), List.of("y")));
+        }
+
+        /**
+         * @param steps
+         *            the actions of each step, oldest first; the last is the current
+         *            step, and {@code null} stores no actions in that step
+         */
+        @SafeVarargs
+        private static Arguments row(String description, String configuredActions, String occurrence, ExecutionState expected,
+                                     List<String>... steps) {
+            return Arguments.of(Named.of(description, configuredActions), occurrence, expected, Arrays.asList(steps));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("rows")
+        void matches(String configuredActions, String occurrence, ExecutionState expected, List<List<String>> steps) {
+            var memory = new ConversationMemory("conversation-1", "agent-1", 1, "user-1");
+            for (int i = 0; i < steps.size(); i++) {
+                if (i > 0) {
+                    memory.startNextStep();
+                }
+                if (steps.get(i) != null) {
+                    memory.getCurrentStep().storeData(new Data<>(ACTIONS.key(), steps.get(i)));
+                }
+            }
+            var actionMatcher = new ActionMatcher();
+            actionMatcher.setConfigs(Map.of(KEY_ACTIONS, configuredActions, KEY_OCCURRENCE, occurrence));
+            actionMatcher.validateConfiguration();
+
+            Assertions.assertEquals(expected, actionMatcher.execute(memory, new LinkedList<>()));
+        }
     }
 }

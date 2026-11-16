@@ -4,7 +4,7 @@ import { Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/ime";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   formatAttachmentBytes,
   useGroupAttachmentStaging,

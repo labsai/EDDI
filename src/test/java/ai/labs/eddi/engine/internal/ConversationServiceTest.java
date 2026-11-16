@@ -403,7 +403,48 @@ class ConversationServiceTest {
             assertTrue(result.conversationUri().toString().contains(CONVERSATION_ID));
 
             verify(conversationStateCache).put(eq(CONVERSATION_ID), eq(ConversationState.READY));
-            verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(agent), eq(USER_ID), eq(CONVERSATION_ID), any());
+            verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(agent), eq(USER_ID), eq(CONVERSATION_ID), any(),
+                    isNull());
+        }
+
+        @Test
+        @DisplayName("a member conversation a group discussion starts records its group conversation on the descriptor")
+        void memberStart_recordsGroupConversationId() throws Exception {
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            IConversationMemory memory = mock(IConversationMemory.class);
+            Map<String, Context> context = new LinkedHashMap<>();
+            context.put("groupConversationId", new Context(Context.ContextType.string, "gc-1"));
+
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+            doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
+            doReturn(conversation).when(agent).startConversation(eq(USER_ID), eq(context), any(), isNull());
+            doReturn(memory).when(conversation).getConversationMemory();
+            doReturn(ConversationState.READY).when(memory).getConversationState();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
+            doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+
+            conversationService.startConversation(ENV, AGENT_ID, USER_ID, context);
+
+            verify(conversationSetup).createConversationDescriptor(eq(AGENT_ID), eq(agent), eq(USER_ID), eq(CONVERSATION_ID), any(),
+                    eq("gc-1"));
+        }
+
+        @Test
+        @DisplayName("groupConversationIdOf ignores an absent, blank or non-string value")
+        void groupConversationIdOf_ignoresNonIds() {
+            assertNull(ConversationService.groupConversationIdOf(null));
+            assertNull(ConversationService.groupConversationIdOf(Map.of()));
+            assertNull(ConversationService.groupConversationIdOf(
+                    Map.of("groupConversationId", new Context(Context.ContextType.string, " "))));
+            assertNull(ConversationService.groupConversationIdOf(
+                    Map.of("groupConversationId", new Context(Context.ContextType.object, Map.of("id", "gc-1")))));
+            assertEquals("gc-1", ConversationService.groupConversationIdOf(
+                    Map.of("groupConversationId", new Context(Context.ContextType.string, "gc-1"))));
         }
 
         @Test
@@ -426,7 +467,7 @@ class ConversationServiceTest {
             doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
             doThrow(new ResourceStoreException("descriptor write failed"))
-                    .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+                    .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any(), any());
 
             assertThrows(ResourceStoreException.class,
                     () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, context));
@@ -459,7 +500,7 @@ class ConversationServiceTest {
             doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
             if (descriptorFails) {
                 doThrow(new ResourceStoreException("descriptor write failed"))
-                        .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+                        .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any(), any());
             }
             return pauseCommitted;
         }
@@ -472,7 +513,7 @@ class ConversationServiceTest {
             conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>());
 
             var order = inOrder(conversationSetup, pauseCommitted);
-            order.verify(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+            order.verify(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any(), any());
             order.verify(pauseCommitted).fireAsync(any());
         }
 

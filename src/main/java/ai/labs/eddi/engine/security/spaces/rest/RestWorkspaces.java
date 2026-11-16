@@ -26,6 +26,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -126,7 +127,9 @@ public class RestWorkspaces implements IRestWorkspaces {
         String legacyVisibility = acceptLegacyVisibility(update.legacyVisibility(), previous.legacyVisibility());
 
         String principal = spaceContext.currentPrincipal();
-        var written = new StoredWorkspaceSettings(defaultSpace, legacyVisibility, Instant.now(), principal);
+        // To the millisecond, the precision both stores keep (Mongo a Date, Postgres
+        // finer): what is adopted below is then exactly what any replica reads back.
+        var written = new StoredWorkspaceSettings(defaultSpace, legacyVisibility, Instant.now().truncatedTo(ChronoUnit.MILLIS), principal);
         try {
             settingsStore.write(WorkspaceSettings.TENANT, written);
         } catch (RuntimeException e) {

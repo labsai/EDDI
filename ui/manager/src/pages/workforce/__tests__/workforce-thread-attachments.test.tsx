@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { renderPage, userEvent } from "@/test/test-utils";
 
 import * as useGroupsHook from "@/hooks/use-groups";
@@ -946,5 +946,38 @@ describe("WorkforceThread – Attachment Features", () => {
       // What arrived is kept.
       expect(screen.getByText(/Half/)).toBeInTheDocument();
     });
+  });
+});
+
+describe("WorkforceThread – on the shared controller (phase 3c)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows the image output items the agent designer configured", async () => {
+    setupMocks({
+      sendMessageStreaming: (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(
+        async function* () {
+          yield {
+            type: "done",
+            data: JSON.stringify({
+              conversationState: "READY",
+              conversationOutputs: [
+                { output: [{ type: "image", uri: "https://cdn.example/chart.png", alt: "Chart" }] },
+              ],
+            }),
+          };
+        },
+      ),
+    });
+    renderThread();
+    await waitForInit();
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("thread-input"), "Show me");
+    await user.click(screen.getByTestId("thread-send"));
+
+    const gallery = await screen.findByTestId("message-images");
+    expect(within(gallery).getAllByRole("img").map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("thread-no-response")).not.toBeInTheDocument();
   });
 });

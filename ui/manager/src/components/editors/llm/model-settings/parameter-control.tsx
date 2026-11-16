@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Wand2 } from "lucide-react";
 import { NumberInput } from "@/components/editors/number-input";
 import { ChipInput } from "@/components/shared/chip-input";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { CatalogParam } from "@/lib/llm-parameter-catalog";
 import { cn } from "@/lib/utils";
 import {
