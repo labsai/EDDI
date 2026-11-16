@@ -9,7 +9,7 @@ import {
 import Keycloak from "keycloak-js";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { getAuthConfig, type AuthConfig } from "@/lib/auth-config";
 import { api } from "@/lib/api-client";
 import { clearWorkforcePins } from "@/lib/workforce-pins";

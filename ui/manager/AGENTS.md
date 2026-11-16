@@ -25,7 +25,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | --- | --- |
 | **Build** | Vite 8 |
 | **UI** | React 19 + TypeScript 5 (strict) |
-| **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
+| **Styling** | Tailwind CSS v4 + CSS variables (black/gold); the tokens are `@eddi/ui/theme.css` |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand for cross-component UI state (chat, debug events, drawers, command palette, onboarding, navigation guard — `src/hooks/`), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
@@ -161,9 +161,9 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 src/
 ├── app.tsx                   # Routes (pages load through lazyPage — Key Patterns 5)
 ├── components/
-│   ├── ui/                   # Low-level primitives (button, badge, dialog, …)
+│   ├── ui/                   # Low-level primitives (badge, dialog, …); Button is @eddi/ui's
 │   ├── shared/               # App-level shared components (empty/error state, pickers, …)
-│   ├── layout/               # AppLayout, Sidebar, TopBar, theme provider
+│   ├── layout/               # AppLayout, Sidebar, TopBar, AppToaster (ThemeProvider is @eddi/ui's)
 │   ├── editors/              # Extension editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
 │   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
@@ -174,11 +174,12 @@ src/
 │                             # secrets, connections, groups, workflows, …
 ├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …)
+│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …);
+│   │                         # chat.ts binds @eddi/core's conversation API (ui/packages/core)
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
-├── i18n/                     # config.ts + locales/ (11 locale JSON files)
+├── i18n/                     # config.ts (setupI18n from @eddi/ui) + locales/ (11 locale JSON files)
 ├── pages/                    # Route pages; pages/workforce/ for the Workforce app
 └── test/
     ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
@@ -188,6 +189,10 @@ src/
 
 Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
 `src/components/` rather than trusting any enumeration here — it grows with every feature.
+
+### Shared packages: `@eddi/core` and `@eddi/ui`
+
+Two packages under [`ui/packages`](../packages/README.md) are compiled into this app as source. `@eddi/core` is the conversation contract (below, API Communication). `@eddi/ui` holds the design tokens (`index.css` imports `@eddi/ui/theme.css`), `ThemeProvider` / `useTheme`, the i18next setup and per-locale fonts, `Button` and `ThemedToaster` — import them from `@eddi/ui`. A change to a token or to `Button` reaches the Chat UI too once it uses them; it stays a pure move unless the change is meant to be visual. Tailwind scans the package (`@source` in `theme.css`), so its classes are generated. `npm run i18n:check` scans `ui/packages/*/src` with this app's locale files.
 
 ### Key Patterns
 
@@ -416,10 +421,12 @@ Consequences worth knowing:
   mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
   `src/test/setup.ts`.
 - **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
-  so it must resolve synchronously); the other ten load through a tiny i18next
-  backend in `src/i18n/config.ts`. Add a locale by adding it to
-  `SUPPORTED_LANGUAGES` **and** `LOCALE_LOADERS` — the types make a missed entry
-  a compile error. `main.tsx` awaits `i18nReady` before the first render so a
+  so it must resolve synchronously); the other ten load through the lazy backend
+  `setupI18n` installs (`@eddi/ui`, [`ui/packages/ui`](../packages/ui/README.md)),
+  from `LOCALE_LOADERS` in `src/i18n/config.ts`. Add a locale by adding it to
+  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to both apps' loader maps (this one and
+  the Chat UI's `src/i18n/index.ts`) — the types make a missed entry a compile error.
+  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `main.tsx` awaits `i18nReady` before the first render so a
   non-English user never sees a flash of English, and `i18n.changeLanguage()` is
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).
@@ -440,7 +447,8 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
-- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- **The agent conversation protocol lives in `@eddi/core`** ([`ui/packages/core`](../packages/core/README.md), shared with the Chat UI): the SSE frame parser and reader (agent and group streams), the conversation endpoints, HITL status, attachment context, rating steps, the stream payload helpers (`UNCONSUMED_STREAM_ERROR_CODES`, `parseErrorEvent`) and the contract list, each rule with its test. `lib/api/chat.ts` is the Manager's binding of it: it keeps the signatures and message types the hooks are written against, and builds its `HttpClient` on `api.authorizedFetch` with `apiErrorFromResponse`, so a conversation call refreshes the token, retries a 401 once and fails with an `ApiClientError` like any `api.post`. The group reader in `groups.ts` is `readSseStream`. A contract change goes into the package with a test there; what the Manager *says* about it stays here
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`bearer-event-source.ts`; the conversation stream goes through `api.authorizedFetch`, above), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
 - `secrets.ts` is the exception that is *not* justified: its seven remaining raw `fetch` call sites are ordinary JSON CRUD for historical reasons (one more has already moved onto `ApiClient`). They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`

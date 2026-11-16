@@ -9,7 +9,7 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { useClusterDeadLetters, useDeadLetterSummary, useDiscardDeadLetters, useReplayDeadLetters } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";

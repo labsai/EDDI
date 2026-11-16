@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,8 @@ import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -132,6 +135,7 @@ class VaultHostAllowlistTest {
             assertTrue(error.getMessage().contains("attacker.example:443"), error.getMessage());
             assertTrue(error.getMessage().contains("api.openai.com"), error.getMessage());
             assertTrue(error.getMessage().contains("/grant"), "the fix must be named: " + error.getMessage());
+            assertInstanceOf(AgentConfigurationRefusal.class, error, "a configuration refusal: a conversation start answers 422");
         }
 
         @Test
@@ -156,16 +160,18 @@ class VaultHostAllowlistTest {
         @DisplayName("a provider failure is closed: the secret is not sent because its list is unknown")
         void providerFailureIsClosed() throws Exception {
             when(provider.getMetadata(OPENAI)).thenThrow(new ISecretProvider.SecretProviderException("db down"));
-            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+            var error = assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
                     () -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://api.openai.com/v1", "x"));
+            assertFalse(error instanceof AgentConfigurationRefusal, "a vault outage is not a misconfiguration: it stays a 500");
         }
 
         @Test
         @DisplayName("a missing secret is refused: deleted after resolution, it must not leave unchecked; a non-reference is skipped")
         void missingSecretIsRefusedAndNonReferencesAreSkipped() throws Exception {
             when(provider.getMetadata(OPENAI)).thenThrow(new ISecretProvider.SecretNotFoundException("missing"));
-            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+            var error = assertThrows(VaultHostAllowlist.HostRefusedException.class,
                     () -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://anywhere.example/", "x"));
+            assertTrue(error.getMessage().contains(OPENAI_REF + " (no tenant given, so tenant 'default')"), error.getMessage());
             assertDoesNotThrow(() -> allowlist.requireAllowed(List.of("not-a-reference"), "https://anywhere.example/", "x"));
             assertDoesNotThrow(() -> allowlist.requireAllowed((Iterable<String>) null, "https://anywhere.example/", "x"));
         }

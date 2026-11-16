@@ -9,7 +9,7 @@ import { pinsStorageKey } from "@/lib/workforce-pins";
 import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { truncateContent } from "@/components/groups/group-utils";
 import { StructuredEntryBody } from "@/components/groups/structured-entry-body";
 import { entryBodyToMarkdown, isStructuredBody, readEntryBody } from "@/lib/group-entry-body";

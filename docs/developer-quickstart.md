@@ -118,11 +118,27 @@ cd ui && npm ci && cd manager && npm run dev    # http://localhost:3000, proxies
 
 If you plan to use the **Web Search** or **Weather** tools in your agents, you may need to set up API keys in your environment or `application.properties`.
 
-**Web Search** uses DuckDuckGo by default (`eddi.tools.websearch.provider=duckduckgo`), which needs no key. **For Google:**
+**Web Search** uses DuckDuckGo by default (`eddi.tools.websearch.provider=duckduckgo`), which needs no key. **For the Brave Search API:**
 
-- `eddi.tools.websearch.provider=google`
-- `eddi.tools.websearch.google.api-key=...`
-- `eddi.tools.websearch.google.cx=...`
+- `eddi.tools.websearch.provider=brave`
+- `eddi.tools.websearch.brave.api-key=...`
+
+Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
+
+The `brave` provider first ships in the release after `6.6.0`; that image, and every earlier one, only knows Google and DuckDuckGo and ignores these settings. Once that release is on the [releases page](https://github.com/labsai/EDDI/releases), set `EDDI_VERSION` to it; until then, run from source or build the image from this repository.
+
+With Docker Compose, put the same two settings in `.env` as environment variables; `docker-compose.yml` passes them into the container:
+
+```bash
+EDDI_TOOLS_WEBSEARCH_PROVIDER=brave
+EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...
+```
+
+Environment is fixed when a container is created, so recreate it after editing `.env` (use the same `EDDI_VERSION` as before):
+
+```bash
+EDDI_VERSION=<the release with Brave> docker compose up -d
+```
 
 **Weather (OpenWeatherMap):**
 

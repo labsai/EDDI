@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -226,6 +227,10 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
         } catch (RuntimeException e) {
@@ -233,9 +238,54 @@ public class RestAgentEngine implements IRestAgentEngine {
                 LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
                 return datastoreBusy();
             }
+            Throwable refusal = AgentConfigurationRefusal.find(e);
+            if (refusal != null) {
+                return configurationRefused(agentId, refusal);
+            }
             throw e;
         }
     }
+
+    /**
+     * The {@code error} code of a conversation start the agent's configuration
+     * refused.
+     */
+    static final String AGENT_MISCONFIGURED = "agent_misconfigured";
+
+    /** Longest refusal message a 422 carries; the full one is in the server log. */
+    static final int MAX_REFUSAL_MESSAGE_CHARS = 1000;
+
+    /**
+     * {@code 422} for a conversation start that failed because the agent's own
+     * configuration cannot run — its {@code CONVERSATION_START} turn hit an
+     * {@link AgentConfigurationRefusal} (an httpcall whose vault reference names no
+     * secret, a secret sent to a host it may not reach). Not a 500: nothing on the
+     * server broke, and repeating the request fails the same way until the
+     * configuration changes. Not a 409 either: no state of the request's target
+     * conflicts — the request is well-formed, and what cannot be processed is the
+     * agent it addresses.
+     * <p>
+     * The body is the flat {@code {"error", "message"}} envelope this endpoint
+     * already answers its 503 with, so a client reads the code and shows the
+     * sentence. The message is the refusal's own — written to name the call and the
+     * reference, never a value — redacted again and bounded, with no stack trace. A
+     * say turn already reports the same sentence in its {@code taskErrors}.
+     */
+    static Response configurationRefused(String agentId, Throwable refusal) {
+        String message = SecretRedactionFilter.redact(String.valueOf(refusal.getMessage()));
+        if (message.length() > MAX_REFUSAL_MESSAGE_CHARS) {
+            message = message.substring(0, MAX_REFUSAL_MESSAGE_CHARS) + "...";
+        }
+        LOGGER.warnf("Conversation start of agent %s refused by its configuration: %s", sanitize(agentId), sanitize(message));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", AGENT_MISCONFIGURED);
+        body.put("message", message);
+        body.put("retryable", false);
+        return Response.status(UNPROCESSABLE_CONTENT).type(MediaType.APPLICATION_JSON).entity(body).build();
+    }
+
+    /** RFC 9110's 422; {@link Response.Status} has no constant for it. */
+    private static final int UNPROCESSABLE_CONTENT = 422;
 
     @Override
     public Response endConversation(String conversationId) {
