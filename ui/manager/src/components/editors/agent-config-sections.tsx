@@ -37,7 +37,8 @@ import {
   type HitlRejectionAction,
   type ToolApprovalsConfig,
 } from "@/lib/api/hitl";
-import { parseNotifyRecipients } from "@/lib/hitl-notify";
+import { mergeNotify, parseNotifyRecipients } from "@/lib/hitl-notify";
+import { SlackNotifyField } from "@/components/hitl/slack-notify-field";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
@@ -1416,7 +1417,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
     const parsed = parseNotifyRecipients(draft);
     if (parsed.error) return;
     if (parsed.recipients.join(",") !== savedRecipientsKey) {
-      patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+      patchHitl({ notify: mergeNotify(hitl.notify, { email: { recipients: parsed.recipients } }) });
     }
   }
 
@@ -1424,11 +1425,11 @@ export const HitlConfigSection = memo(function HitlConfigSection({
     setNotifyOn(on);
     if (!on) {
       switchedOffByUser.current = true;
-      patchHitl({ notify: null });
+      patchHitl({ notify: mergeNotify(hitl.notify, { email: null }) });
       return;
     }
     const parsed = parseNotifyRecipients(recipientsDraft);
-    if (!parsed.error) patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+    if (!parsed.error) patchHitl({ notify: mergeNotify(hitl.notify, { email: { recipients: parsed.recipients } }) });
   }
 
   function recipientsProblem(): string | null {
@@ -1455,10 +1456,18 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   // Same rule for the approval-context blocks: an unsavable block would only be
   // refused by the backend, so the page withholds the save while one is shown.
   const contextInvalid = enabled && approvalContextHasErrors(hitl.approvalContext, "agent");
+  // The Slack integration name: an unsavable one is never written either.
+  const [slackInvalidState, setSlackInvalid] = useState(false);
+  const slackInvalid = enabled && slackInvalidState;
+  // The unsavable name being typed, kept here so collapsing the section does not lose it.
+  const [slackDraft, setSlackDraft] = useState<string | null>(null);
   useEffect(() => {
-    onValidityChange?.(recipientsInvalid || contextInvalid);
+    if (!enabled) setSlackDraft(null);
+  }, [enabled]);
+  useEffect(() => {
+    onValidityChange?.(recipientsInvalid || contextInvalid || slackInvalid);
     return () => onValidityChange?.(false);
-  }, [recipientsInvalid, contextInvalid, onValidityChange]);
+  }, [recipientsInvalid, contextInvalid, slackInvalid, onValidityChange]);
 
   return (
     <EditorSection
@@ -1468,6 +1477,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
       variant="card"
       modified={modified}
       defaultOpen={enabled}
+      toggleTestId="hitl-config-toggle"
     >
       <div className="space-y-4" data-testid="hitl-config-section">
         <p className="text-[10px] text-muted-foreground leading-relaxed">
@@ -1709,6 +1719,21 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                   </p>
                 </div>
               )}
+            </div>
+
+            {/* Slack approval card for pauses no Slack thread started. */}
+            <div className="border-t border-border pt-3">
+              <SlackNotifyField
+                value={hitl.notify?.slack?.integration ?? null}
+                onChange={(integration) =>
+                  patchHitl({ notify: mergeNotify(hitl.notify, { slack: integration ? { integration } : null }) })
+                }
+                onInvalidChange={setSlackInvalid}
+                restoreDraft={slackDraft}
+                onDraftChange={setSlackDraft}
+                disabled={disabled}
+                subject="agent"
+              />
             </div>
           </div>
         )}

@@ -587,7 +587,8 @@
     "hitlNotifyRecipients": "宛先（カンマ区切り、または 1 行に 1 件）",
     "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
     "hitlNotifyHint": "一時停止ごとに 1 通、このデプロイのシステムメーラー（eddi.mail.smtp.*、運用者が設定）から、運用者が許可したドメインにのみ送信されます。承認ページへのリンクを含み、何かを承認することはできません。ユーザーのメッセージやエージェントの応答は含みません。ツール呼び出しの一時停止では、保留中のツールを、伏せ字にして短縮した引数とともに一覧表示します。",
-    "hitlNotifyFixBeforeSave": "保存する前に、承認メールの宛先を修正するか、メール通知をオフにしてください。",
+    "reviewPendingHitl": "保存できない Human-in-the-Loop の値が保留中です（強調表示されたフィールドを確認してください）。下のドキュメントには含まれていません。",
+    "hitlNotifyFixBeforeSave": "保存する前に、強調表示されている Human-in-the-Loop の設定（承認メールの宛先、Slack 連携名、承認コンテキスト）を修正するか、オフにしてください。",
     "hitlNotifyEmpty": "アドレスを 1 件以上追加するか、メール通知をオフにしてください。",
     "hitlNotifyTooMany": "アドレスは最大 {{max}} 件です。それ以上は配布リストを使ってください。",
     "hitlNotifyInvalid": "{{position}} 件目は name@example.com のような通常のアドレスではありません。",
@@ -4630,7 +4631,16 @@
     "argsViewFields": "フィールド",
     "argsViewJson": "JSON",
     "argsViewRaw": "そのまま",
-    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。"
+    "amendRedactedMarker": "修正した引数にまだ <REDACTED> が含まれています。実際の値に置き換えるか、修正せずに承認してください。修正内容は書かれたとおりに送信されます。",
+    "slackNotifyEmpty": "Slack 連携を指定するか、オフにしてデプロイのデフォルトを使用してください（設定されている場合）。",
+    "slackNotifyPipe": "名前に '|' が含まれています。承認ボタンでは扱えないため、連携の名前を変更してください。",
+    "slackNotifyTooLong": "{{max}} 文字以内で入力してください。",
+    "slackNotifyEnableGroup": "このグループの承認カードに特定の Slack 連携を使用する",
+    "slackNotifyEnableAgent": "このエージェントの承認カードに特定の Slack 連携を使用する",
+    "slackNotifyIntegration": "Slack 連携の名前",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "オフの場合はデプロイのデフォルト連携（eddi.slack.hitl.notify.default-integration）が適用され、設定がなければカードは投稿されません。",
+    "slackNotifyHint": "指定した Slack チャネル連携が、Slack から始まった一時停止と同じ承認カードを投稿します。スケジュール実行、チームのケイデンス、Webhook、REST、MCP でも同様です。チャネル (hitlApprovalChannel)、ボタンを押せる人 (hitlApproverUserIds)、承認コンテキストを表示するかどうかは、その連携自身の設定で決まります。リクエストが他の場所で決定されると、カードは更新されます。オフの場合はデプロイのデフォルト連携（eddi.slack.hitl.notify.default-integration）が適用され、設定がなければカードは投稿されません。"
   },
   "hitlReview": {
     "approveEdited": "編集して承認",

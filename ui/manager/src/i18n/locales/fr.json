@@ -588,7 +588,8 @@
     "hitlNotifyRecipients": "Destinataires (séparés par des virgules ou un par ligne)",
     "hitlNotifyPlaceholder": "approbateurs@example.com, responsable-ops@example.com",
     "hitlNotifyHint": "Un e-mail par pause, envoyé par le service d'envoi système de ce déploiement (eddi.mail.smtp.*, configuré par l'exploitant), uniquement vers les domaines que l'exploitant autorise. Il renvoie vers la page Approbations et ne peut rien approuver. Il ne contient ni les messages des utilisateurs ni les réponses de l'agent ; pour une pause d'appel d'outil, il liste les outils en attente avec leurs arguments masqués et raccourcis.",
-    "hitlNotifyFixBeforeSave": "Corrigez les destinataires de l'e-mail d'approbation, ou désactivez les notifications par e-mail, avant d'enregistrer.",
+    "reviewPendingHitl": "Une valeur Human-in-the-Loop qui ne peut pas être enregistrée est en attente (voir le champ signalé). Elle ne fait pas partie du document ci-dessous.",
+    "hitlNotifyFixBeforeSave": "Corrigez les réglages Human-in-the-Loop signalés (destinataires de l'e-mail d'approbation, nom de l'intégration Slack, contexte d'approbation), ou désactivez-les, avant d'enregistrer.",
     "hitlNotifyEmpty": "Ajoutez au moins une adresse, ou désactivez les notifications par e-mail.",
     "hitlNotifyTooMany": "{{max}} adresses au maximum — utilisez une liste de diffusion pour davantage.",
     "hitlNotifyInvalid": "L'entrée {{position}} n'est pas une adresse simple comme nom@example.com.",
@@ -4678,7 +4679,16 @@
     "argsViewFields": "Champs",
     "argsViewJson": "JSON",
     "argsViewRaw": "Brut",
-    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle."
+    "amendRedactedMarker": "Les arguments modifiés contiennent encore <REDACTED>. Remplacez-le par la vraie valeur, ou approuvez sans modification : une modification est envoyée telle quelle.",
+    "slackNotifyEmpty": "Indiquez une intégration Slack, ou désactivez cette option pour utiliser celle par défaut du déploiement (si elle existe).",
+    "slackNotifyPipe": "Le nom contient « | », que les boutons d'approbation ne peuvent pas transporter — renommez l'intégration.",
+    "slackNotifyTooLong": "{{max}} caractères au maximum.",
+    "slackNotifyEnableGroup": "Utiliser une intégration Slack précise pour les cartes d'approbation de ce groupe",
+    "slackNotifyEnableAgent": "Utiliser une intégration Slack précise pour les cartes d'approbation de cet agent",
+    "slackNotifyIntegration": "Nom de l'intégration Slack",
+    "slackNotifyPlaceholder": "ops-slack",
+    "slackNotifyOffHint": "Sans cette option, l'intégration par défaut du déploiement (eddi.slack.hitl.notify.default-integration) s'applique ; sans elle, aucune carte n'est publiée.",
+    "slackNotifyHint": "L'intégration de canal Slack indiquée publie la même carte d'approbation qu'une pause démarrée depuis Slack — y compris pour les exécutions planifiées, les cadences d'équipe, les webhooks, REST et MCP. Ses propres réglages déterminent le canal (hitlApprovalChannel), qui peut appuyer sur les boutons (hitlApproverUserIds) et si le contexte d'approbation est affiché. La carte est mise à jour quand la demande est tranchée ailleurs. Sans cette option, l'intégration par défaut du déploiement (eddi.slack.hitl.notify.default-integration) s'applique ; sans elle, aucune carte n'est publiée."
   },
   "hitlReview": {
     "approveEdited": "Approuver avec modifications",

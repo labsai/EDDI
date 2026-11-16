@@ -406,8 +406,9 @@ export interface AgentHitlConfig {
   onRejection?: HitlRejectionAction | null;
   /** Under `REVISE`, revisions one turn may take, 1..10 (absent = 3). */
   maxRevisionsPerTurn?: number | null;
-  /** Who is told when this agent pauses — `notify.email.recipients` today
-   *  (backend `HitlNotifyConfig`). Absent = nobody is notified. */
+  /** Who is told when this agent pauses — `notify.email.recipients` and
+   *  `notify.slack.integration` (backend `HitlNotifyConfig`). Absent = nobody
+   *  is mailed, and a Slack card only through the deployment default. */
   notify?: HitlNotifyConfig | null;
   /** What the approver sees next to the decision — draft, sources, claims. At most 8 blocks. */
   approvalContext?: ApprovalContextBlock[] | null;
@@ -422,13 +423,21 @@ export const DEFAULT_MAX_REVISIONS_PER_TURN = 3;
 export const MIN_REVISIONS_PER_TURN = 1;
 export const MAX_REVISIONS_PER_TURN = 10;
 
-/** `hitlConfig.notify` — needs the deployment's system mailer (`eddi.mail.smtp.*`). */
+/** `hitlConfig.notify`. `email` needs the deployment's system mailer (`eddi.mail.smtp.*`); groups take `slack` only. */
 export interface HitlNotifyConfig {
   email?: {
     /** 1–20 plain ASCII addresses; the backend refuses an empty list (400). */
     recipients: string[];
   } | null;
+  /** A Slack approval card, posted by the named channel integration into its `hitlApprovalChannel` (6.8+). */
+  slack?: {
+    /** The integration's `name`: not blank, at most {@link MAX_NOTIFY_INTEGRATION_NAME} characters, no `|`. */
+    integration: string;
+  } | null;
 }
+
+/** Mirrors `HitlConfigValidation.MAX_NOTIFY_INTEGRATION_NAME`. */
+export const MAX_NOTIFY_INTEGRATION_NAME = 255;
 
 /** Mirrors `HitlConfigValidation.MAX_NOTIFY_RECIPIENTS`. */
 export const MAX_NOTIFY_RECIPIENTS = 20;
@@ -447,6 +456,8 @@ export interface GroupHitlConfig {
   approvalCompletesBacklogTask?: boolean;
   /** What the approver sees next to the decision; `group.*` is available. At most 8 blocks. */
   approvalContext?: ApprovalContextBlock[] | null;
+  /** `notify.slack` only — the backend refuses `notify.email` for groups (6.8+). */
+  notify?: HitlNotifyConfig | null;
 }
 
 // ── SSE payload types (group surface) ─────────────────────────────

@@ -272,6 +272,11 @@ public class GroupHitlCoordinator {
         // MAJOR-2: Schedule group timeout if configured
         scheduleGroupHitlTimeout(gc);
         counterGroupHitlPause.increment();
+        // Durable now: tell asynchronous observers (Slack cards for discussions no
+        // Slack thread started). Never throws.
+        if (groupConversationService != null) {
+            groupConversationService.firePauseCommitted(gc.getId(), gc.getPausedAt());
+        }
 
         if (listener != null) {
             // The plan hash travels to listeners (Slack puts it in its buttons) but not

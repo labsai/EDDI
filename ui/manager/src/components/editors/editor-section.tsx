@@ -16,6 +16,8 @@ export interface EditorSectionProps {
   icon?: React.ComponentType<{ className?: string }>;
   accent?: string;
   variant?: "inline" | "card";
+  /** `data-testid` of the header button that opens and collapses the section. */
+  toggleTestId?: string;
   /**
    * Marks the section as holding unsaved edits — a pill beside the label (shown
    * on the header, so a collapsed section still says so).
@@ -30,6 +32,7 @@ export function EditorSection({
   icon: Icon,
   accent,
   variant = "inline",
+  toggleTestId,
   modified = false,
   children,
 }: EditorSectionProps) {
@@ -57,6 +60,7 @@ export function EditorSection({
             onClick={() => setOpen(!open)}
             aria-expanded={open}
             aria-controls={panelId}
+            data-testid={toggleTestId}
             className="flex w-full items-center gap-2 border-b border-border p-5 text-start"
           >
             {open ? (
@@ -85,6 +89,7 @@ export function EditorSection({
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-controls={panelId}
+        data-testid={toggleTestId}
         className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? (

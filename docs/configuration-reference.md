@@ -606,6 +606,8 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.api-max-retries` | `3` | Attempts, including the first, for a Slack Web API call |
 | `eddi.slack.api-retry-base-ms` | `500` | Base delay for the exponential backoff between those attempts |
 | `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
+| `eddi.slack.hitl.notify.default-integration` | unset | Name of the Slack channel integration that posts the approval card for every pause whose agent or group sets no `hitlConfig.notify.slack` — scheduled runs, team cadences, webhook-triggered agents, REST/MCP conversations included. Unset = only agents and groups that name an integration get cards. See [hitl.md → Slack cards for pauses started anywhere](hitl.md#slack-cards-for-pauses-started-anywhere) |
+| `eddi.slack.hitl.notify.sweep-interval` | `60s` | How often each instance replaces the buttons of tracked approval cards whose pause ended elsewhere (Manager, REST, MCP, timeout, cancel) |
 | `eddi.webhook.max-body-bytes` | `262144` | Largest body, in bytes, the signed inbound webhook endpoint (`POST /integrations/webhook/{integrationId}`) reads before answering 413. The cap is applied to the raw bytes before the signature is checked, so it also bounds what an unauthenticated caller can make EDDI buffer |
 
 ### Email

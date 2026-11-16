@@ -82,7 +82,11 @@ public final class HitlConfigValidation {
      * duplicate. The refusal names the position, never the address.
      */
     public static void validateNotify(HitlNotifyConfig notify, String fieldPath) {
-        if (notify == null || notify.getEmail() == null) {
+        if (notify == null) {
+            return;
+        }
+        validateNotifySlack(notify.getSlack(), fieldPath + ".slack");
+        if (notify.getEmail() == null) {
             return;
         }
         List<String> recipients = notify.getEmail().getRecipients();
@@ -112,6 +116,35 @@ public final class HitlConfigValidation {
                 LOGGER.warnf("%s. No system mailer is configured, so this is not refused now; it will not be mailed unless the "
                         + "operator allows the domain.", rule);
             }
+        }
+    }
+
+    /** Upper bound for {@code hitlConfig.notify.slack.integration}. */
+    public static final int MAX_NOTIFY_INTEGRATION_NAME = 255;
+
+    /**
+     * Validates {@code hitlConfig.notify.slack}: when present it names a Slack
+     * channel integration — not blank, at most
+     * {@value #MAX_NOTIFY_INTEGRATION_NAME} characters, and without {@code |},
+     * which the card's buttons use as their separator. Whether such an integration
+     * exists is not checked here: integrations are created and renamed
+     * independently, and a name that matches none is reported when a pause would
+     * have used it.
+     */
+    public static void validateNotifySlack(HitlNotifyConfig.Slack slack, String fieldPath) {
+        if (slack == null) {
+            return;
+        }
+        String integration = slack.getIntegration();
+        String path = fieldPath + ".integration";
+        if (integration == null || integration.isBlank()) {
+            throw new IllegalArgumentException(path + " is empty: name a Slack channel integration, or remove " + fieldPath);
+        }
+        if (integration.length() > MAX_NOTIFY_INTEGRATION_NAME) {
+            throw new IllegalArgumentException(path + " is longer than " + MAX_NOTIFY_INTEGRATION_NAME + " characters");
+        }
+        if (integration.contains("|")) {
+            throw new IllegalArgumentException(path + " contains '|', which approval buttons cannot carry — rename the integration");
         }
     }
 
@@ -330,6 +363,23 @@ public final class HitlConfigValidation {
         HitlReviewConfigValidation.validate(hitlConfig.getReview(), "hitlConfig.review");
         ApprovalContextValidation.validate(hitlConfig.getApprovalContext(), "hitlConfig.approvalContext",
                 ApprovalContextValidation.Scope.GROUP);
+        validateGroupNotify(hitlConfig.getNotify(), "hitlConfig.notify");
+    }
+
+    /**
+     * Validates a group's {@code hitlConfig.notify}: only {@code slack} is
+     * delivered for group pauses, so {@code email} is refused rather than saved and
+     * silently never sent.
+     */
+    static void validateGroupNotify(HitlNotifyConfig notify, String fieldPath) {
+        if (notify == null) {
+            return;
+        }
+        if (notify.getEmail() != null) {
+            throw new IllegalArgumentException(fieldPath + ".email is not supported for groups — group pauses are announced through "
+                    + fieldPath + ".slack; set hitlConfig.notify.email on the member agents instead");
+        }
+        validateNotifySlack(notify.getSlack(), fieldPath + ".slack");
     }
 
     private static void validateApprovalTimeout(String approvalTimeout, boolean finitePolicy) {

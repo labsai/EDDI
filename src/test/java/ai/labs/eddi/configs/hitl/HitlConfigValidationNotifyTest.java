@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.hitl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.engine.mail.NotifyRecipientPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -126,5 +127,51 @@ class HitlConfigValidationNotifyTest {
         } finally {
             HitlConfigValidation.recipientPolicySource = previous;
         }
+    }
+
+    private static AgentConfiguration.HitlConfig withSlack(String integration) {
+        var slack = new HitlNotifyConfig.Slack();
+        slack.setIntegration(integration);
+        var notify = new HitlNotifyConfig();
+        notify.setSlack(slack);
+        var hitl = new AgentConfiguration.HitlConfig();
+        hitl.setNotify(notify);
+        return hitl;
+    }
+
+    @Test
+    @DisplayName("notify.slack: a named integration passes, and the JSON shape round-trips")
+    void slackValid() throws Exception {
+        assertDoesNotThrow(() -> HitlConfigValidation.validate(withSlack("ops-slack")));
+
+        var parsed = new ObjectMapper().readValue("{\"hitlConfig\":{\"notify\":{\"slack\":{\"integration\":\"ops-slack\"}}}}",
+                AgentConfiguration.class);
+        assertEquals("ops-slack", parsed.getHitlConfig().getNotify().getSlack().getIntegration());
+    }
+
+    @Test
+    @DisplayName("notify.slack: blank, '|' and over-long names are refused with the field path")
+    void slackRefused() {
+        for (String bad : new String[]{null, " ", "a|b", "x".repeat(HitlConfigValidation.MAX_NOTIFY_INTEGRATION_NAME + 1)}) {
+            String message = assertThrows(IllegalArgumentException.class, () -> HitlConfigValidation.validate(withSlack(bad))).getMessage();
+            assertTrue(message.startsWith("hitlConfig.notify.slack.integration"), message);
+        }
+        assertDoesNotThrow(() -> HitlConfigValidation.validate(withSlack("x".repeat(HitlConfigValidation.MAX_NOTIFY_INTEGRATION_NAME))));
+    }
+
+    @Test
+    @DisplayName("groups: notify.slack is validated, notify.email is refused rather than never sent")
+    void groupNotify() {
+        var group = new AgentGroupConfiguration.HitlConfig();
+        group.setNotify(withSlack("ops-slack").getNotify());
+        assertDoesNotThrow(() -> HitlConfigValidation.validate(group));
+
+        group.setNotify(withSlack("a|b").getNotify());
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HitlConfigValidation.validate(group)).getMessage()
+                .startsWith("hitlConfig.notify.slack.integration"));
+
+        group.setNotify(withRecipients(List.of("ops@example.com")).getNotify());
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> HitlConfigValidation.validate(group)).getMessage()
+                .contains("hitlConfig.notify.email is not supported for groups"));
     }
 }

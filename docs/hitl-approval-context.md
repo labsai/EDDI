@@ -170,7 +170,7 @@ conversation data at pause time — not verified by EDDI", and for each block a 
   Manager"; the buttons are always the last block and the card always posts.
 - A value longer than 2,900 characters is split over sections.
 
-Group discussions started from Slack get the same on their group approval card.
+Group discussions started from Slack get the same on their group approval card, and so do cards posted for pauses no Slack thread started ([`hitlConfig.notify.slack`](hitl.md#slack-cards-for-pauses-started-anywhere)) — the opt-in is always the posting integration's `hitlApprovalContext`.
 
 ## Save-time validation
 

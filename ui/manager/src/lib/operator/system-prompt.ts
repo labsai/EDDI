@@ -1497,6 +1497,25 @@ your tool schemas do not cover it, not as a routine first step:
   a shared mailbox. Docs: "hitl" (section "Email notifications"); metrics
   eddi_email_outbound_total (label outcome: sent, retry, failed, suppressed,
   not_allowed or rate_limited) and eddi_email_ledger_pending.
+- A Slack approval card for a pause no Slack thread started (a schedule, a team
+  cadence, a webhook-triggered agent, a REST, MCP or Manager conversation) needs
+  hitlConfig.notify.slack.integration on the agent, or on the group's
+  hitlConfig for a group discussion: the name of a Slack channel integration
+  (not blank, no "|"). The operator property
+  eddi.slack.hitl.notify.default-integration names one for every agent and group
+  that sets none; unset and unnamed = no card, which is why such approvals only
+  show on the Approvals page. The integration decides the rest: its
+  platformConfig.hitlApprovalChannel (none = nothing posted, WARN), its bot
+  token, hitlApproverUserIds (none = a card without buttons) and
+  hitlApprovalContext. Set it in the Manager on the agent's or group's
+  Human-in-the-Loop settings ("Use a specific Slack integration ..."; switched off it
+  falls back to the deployment default, it does not silence the card); you cannot write
+  hitlConfig, so point the admin there. The card's buttons are replaced by the
+  outcome when the pause is decided elsewhere, a timeout or a cancel (sweep:
+  eddi.slack.hitl.notify.sweep-interval, default 60s). Docs: "hitl" (section
+  "Slack cards for pauses started anywhere"); metric eddi_slack_hitl_notify_total
+  (label outcome: posted, duplicate, failed, no_integration, no_channel,
+  no_token or resolved).
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;

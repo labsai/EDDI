@@ -179,4 +179,13 @@ class GroupHitlCoordinatorApprovalContextTest {
         assertNull(new GroupConversationEventSink.HitlPauseEvent(0, "p", "r", "PHASE", Instant.now()).approvalContext());
         assertNull(new GroupConversationEventSink.HitlPauseEvent(0, "p", "r", "PHASE").approvalContext());
     }
+
+    @Test
+    @DisplayName("commitPause announces the durable pause (GroupHitlPauseCommittedEvent) with its pause time")
+    void commitPauseAnnouncesThePause() throws Exception {
+        coordinator.commitPause(gc, 0, phase, "PHASE", 3, null, config);
+
+        assertNotNull(gc.getPausedAt());
+        verify(facade).firePauseCommitted("gc-1", gc.getPausedAt());
+    }
 }

@@ -146,7 +146,7 @@ For the bot to accept DMs, you must enable the Messages Tab:
 
 ### 8. Approval buttons (optional, HITL)
 
-To use Slack buttons for human-in-the-loop approvals, enable **Interactivity & Shortcuts** in the Slack app and set the **Request URL** to `https://<your-eddi-host>/integrations/slack/interactive`. Set `hitlApprovalChannel` and `hitlApproverUserIds` (the approvers' Slack user ids; without it EDDI renders no buttons and the approval is notification-only) in the integration's `platformConfig`. See [HITL → Slack Integration](hitl.md#slack-integration) for the keys and scopes.
+To use Slack buttons for human-in-the-loop approvals, enable **Interactivity & Shortcuts** in the Slack app and set the **Request URL** to `https://<your-eddi-host>/integrations/slack/interactive`. Set `hitlApprovalChannel` and `hitlApproverUserIds` (the approvers' Slack user ids; without it EDDI renders no buttons and the approval is notification-only) in the integration's `platformConfig`. See [HITL → Slack Integration](hitl.md#slack-integration) for the keys and scopes. Pauses that no Slack thread started — scheduled runs, team cadences, webhook-triggered agents, REST and MCP conversations — get the same card when the agent or group names this integration in `hitlConfig.notify.slack.integration` (or the operator sets `eddi.slack.hitl.notify.default-integration`): see [Slack cards for pauses started anywhere](hitl.md#slack-cards-for-pauses-started-anywhere).
 
 The Slack timeouts and retry counts above are configurable through `eddi.slack.*`; see the [Configuration Reference](configuration-reference.md).
 
