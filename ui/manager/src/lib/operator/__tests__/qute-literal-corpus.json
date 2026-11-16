@@ -306,6 +306,12 @@
       "text": "{#if context.screen}\nadmin text\n{/if}\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}",
       "kind": "live",
       "escaped": "{|{|}#if context.screen}\nadmin text\n{|{|}/if}\n{#if context.screen}\nThe administrator is currently viewing: {context.screen}{#if context.agentId} (agent {context.agentId}){/if}{#if context.workflowId} (workflow {context.workflowId}){/if}{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}{#if context.conversationId} (conversation {context.conversationId}){/if}{#if context.channelId} (channel {context.channelId}){/if}{#if context.boardId} (workforce board {context.boardId}){/if}.\nIf a question about which agent, workflow, group, resource, conversation or\nboard is meant is ambiguous, assume this one unless told otherwise. A resource\nread by id also needs its version: find it before reading.\n{/if}"
+    },
+    {
+      "name": "multi-pipe unparsed block holding a closer and an expression",
+      "text": "{||before |} {input} after||} then {a}",
+      "kind": "raw",
+      "escaped": "{||before |} {input} after||} then {|{|}a}"
     }
   ]
 }

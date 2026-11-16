@@ -175,7 +175,16 @@ class OperatorToolNamesTest {
         List<String> names = new ArrayList<>();
         result.configsByGroup().values().forEach(config -> config.getHttpCalls().forEach(call -> names.add(call.getName())));
 
-        assertEquals(result.endpointCount(), names.size());
+        // Counted from the reconstructed spec, not from the builder's own output: a
+        // dropped operation would lower both of the builder's numbers and still agree.
+        // An OpenAPI document holds one operation per verb and path, so that is what is
+        // counted (JAX-RS may declare the same pair twice, e.g. per media type). The
+        // reconstructed spec has no deprecated operations, so the only ones the builder
+        // may leave out are those it reports as unusable (an input a tool cannot send).
+        long specOperations = operations.stream().map(Op::key).distinct().count();
+        assertEquals(specOperations, names.size() + result.unusableEndpoints().size(),
+                "the generator dropped a tool without reporting it as unusable: " + result.unusableEndpoints());
+        assertEquals(names.size(), result.endpointCount());
         Set<String> seen = new HashSet<>();
         List<String> repeated = names.stream().filter(name -> !seen.add(name)).distinct().sorted().toList();
         assertTrue(repeated.isEmpty(),

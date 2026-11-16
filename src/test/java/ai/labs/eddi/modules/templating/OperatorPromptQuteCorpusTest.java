@@ -136,7 +136,7 @@ class OperatorPromptQuteCorpusTest {
                 assertEquals(text, render(escaped, Map.of()), "a reference mention reaches the model exactly as written: " + escaped);
                 assertFalse(escaped.contains("{|{vault"), "the escape must split around a mention, not wrap it: " + escaped);
             }
-            case "raw" -> assertEquals(text.replaceAll("\\{\\|([\\s\\S]*?)\\|\\}", "$1"), render(escaped, Map.of()),
+            case "raw" -> assertEquals(text.replaceAll("\\{(\\|+)([\\s\\S]*?)\\1\\}", "$2"), render(escaped, Map.of()),
                     "an unparsed block the author wrote is kept and unwrapped by the engine");
             case "live" -> {
                 Map<String, Object> data = Map.of("context", Map.of("screen", "Home", "agentId", "a1"));

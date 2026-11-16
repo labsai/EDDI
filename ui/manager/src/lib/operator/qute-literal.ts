@@ -49,8 +49,8 @@ import { BODY_APP_CONTEXT } from "./context-block";
 
 /** A reference mention, which the backend escapes itself. Same shape as `LlmTask`'s. */
 const MENTION = String.raw`\{(?:vault|eddivault|vars|connection|caller):[^}]*\}`;
-/** An unparsed block the author already wrote. */
-const RAW_BLOCK = String.raw`\{\|[\s\S]*?\|\}`;
+/** An unparsed block the author already wrote: opened by one or more pipes, closed by the same number. */
+const RAW_BLOCK = String.raw`\{(\|+)[\s\S]*?\1\}`;
 /** Spans the escape leaves exactly as it found them (the context block is matched separately). */
 const KEPT = new RegExp(`${RAW_BLOCK}|${MENTION}`, "g");
 /** What gets wrapped: an opener (with any backslashes before it), or a backslash-escaped closer. */
