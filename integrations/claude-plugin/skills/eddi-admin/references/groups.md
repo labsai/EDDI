@@ -41,6 +41,12 @@ A team keeps a backlog that outlives any one discussion; scheduled cadences pull
 into task-force runs. `add_team_task` (higher priority runs earlier), `list_team_backlog`
 for status, assignee and verification outcome.
 
+Cadences: `list_team_cadences` (cron, time zone, next fire, per-run cap),
+`create_team_cadence` (5-field cron, IANA `timeZone`, and a required `maxCostPerRun`) and
+`delete_team_cadence`. Lesson consolidation runs on its own schedule:
+`read_lesson_consolidation`, `schedule_lesson_consolidation`, `unschedule_lesson_consolidation`
+(the group needs `lessonConfig.consolidation`). `read_docs("team-learning-loop")`.
+
 Other teams and agents can hand work over. `list_team_handoffs` shows the intake inbox
 (handoffs under a REVIEW rule wait there) and where each handed-off task came from — the
 place to look when a team "never got" a piece of work. `accept_team_handoff` (optionally
