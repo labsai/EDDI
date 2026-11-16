@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseResourceUri, getAgent, type AgentDescriptor } from "@/lib/api/agents";
+import { http, HttpResponse } from "msw";
+import { parseResourceUri, getAgent, generateAgentSigningKey, revokeAgentSigningKey, type AgentDescriptor } from "@/lib/api/agents";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { groupAgentsByName } from "@/hooks/use-agents";
+import { server } from "@/test/mocks/server";
 
 describe("parseResourceUri", () => {
   it("parses standard agent resource URI", () => {
@@ -82,6 +85,49 @@ describe("getAgent — version parameter guard", () => {
   it("includes version query param for positive values", async () => {
     const result = await getAgent("agent1", 3);
     expect(result).toBeDefined();
+  });
+});
+
+describe("generateAgentSigningKey", () => {
+  it("posts to the agent's signing-keys endpoint with its version and returns the key and the new version", async () => {
+    let requested: string | undefined;
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys", ({ request }) => {
+        requested = new URL(request.url).pathname + new URL(request.url).search;
+        return HttpResponse.json(
+          { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAkey", validFromMs: 1, validUntilMs: 0 },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=4" } },
+        );
+      }),
+    );
+
+    const result = await generateAgentSigningKey("agent1", 3);
+
+    expect(requested).toBe("/agentstore/agents/agent1/signing-keys?version=3");
+    expect(result.version).toBe(2);
+    expect(result.publicKeyB64).toBe("MCowBQYDK2VwAyEAkey");
+    expect(parseVersionFromLocation(result.location)).toBe(4);
+  });
+});
+
+describe("revokeAgentSigningKey", () => {
+  it("posts to the key's revoke endpoint with the agent's version and returns the revoked key and the new version", async () => {
+    let requested: string | undefined;
+    server.use(
+      http.post("*/agentstore/agents/:id/signing-keys/:keyVersion/revoke", ({ request }) => {
+        requested = new URL(request.url).pathname + new URL(request.url).search;
+        return HttpResponse.json(
+          { version: 2, publicKeyB64: "MCowBQYDK2VwAyEAkey", validFromMs: 1, validUntilMs: 0, revoked: true },
+          { status: 200, headers: { Location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=5" } },
+        );
+      }),
+    );
+
+    const result = await revokeAgentSigningKey("agent1", 2, 4);
+
+    expect(requested).toBe("/agentstore/agents/agent1/signing-keys/2/revoke?version=4");
+    expect(result.revoked).toBe(true);
+    expect(parseVersionFromLocation(result.location)).toBe(5);
   });
 });
 
