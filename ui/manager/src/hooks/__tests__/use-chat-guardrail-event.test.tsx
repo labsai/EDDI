@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
@@ -18,7 +18,8 @@ vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { chatConversation, useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { RECONNECT_DELAYS_MS } from "@eddi/conversation";
 import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -38,7 +39,15 @@ describe("use-chat — guardrail_triggered", () => {
     useChatStore.getState().reset();
     useDebugStore.getState().reset();
     h.frames = [];
+    // These streams end without a `done`, which the controller follows as a
+    // dropped stream (reconnectDelaysMs); the guardrail cases are about the
+    // events, so the follow is off here.
+    chatConversation.setOptions({ reconnectDelaysMs: [] });
     useChatStore.setState({ selectedAgentId: "agent1", conversationId: "conv1", streamingEnabled: true });
+  });
+
+  afterEach(() => {
+    chatConversation.setOptions({ reconnectDelaysMs: RECONNECT_DELAYS_MS });
   });
 
   async function send() {

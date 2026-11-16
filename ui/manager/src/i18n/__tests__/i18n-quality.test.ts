@@ -26,4 +26,9 @@ describeI18nQuality({
     de: 16, es: 19, fr: 26,
     ar: 73, hi: 76, ja: 77, ko: 77, pt: 81, th: 79, zh: 78,
   },
+  // The version line is two placeholders ("{{productName}} {{version}}"), the
+  // same in every language — not a translation left undone.
+  deliberatelyIdentical: Object.fromEntries(
+    (["fr", "ar", "hi", "ja", "ko", "th", "zh"] as const).map((code) => [code, ["nav.versionLabel"]]),
+  ),
 });

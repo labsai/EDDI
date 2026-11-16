@@ -146,6 +146,7 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
   its controller's `tool_result` events into a page-wide `ToolActivityLog` and draws
   `ToolActivityCards` under each turn's question. The chat page gets the same from
   `ChatPanel`.
+
 ### Tier 2 (phase 8)
 
 - **Teams beside chats (T2.1).** Home's picker lists the catalog's teams under the agents; with

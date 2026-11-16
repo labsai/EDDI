@@ -143,7 +143,7 @@ class ToolLoopRunnerToolResultWiringTest {
 
         assertEquals(1, toolRuns.get());
         InOrder order = inOrder(sink);
-        order.verify(sink).onToolCall("lookup");
+        order.verify(sink).onToolCall(eq("lookup"), any(), any());
         order.verify(sink).onToolResult(eq("lookup"), any(), eq("ok"), anyLong(), eq("found it"));
     }
 
@@ -158,7 +158,7 @@ class ToolLoopRunnerToolResultWiringTest {
 
         assertEquals(0, toolRuns.get());
         InOrder order = inOrder(sink);
-        order.verify(sink).onToolCall("lookup");
+        order.verify(sink).onToolCall(eq("lookup"), any(), any());
         order.verify(sink).onToolResult(eq("lookup"), any(), not(eq("ok")), anyLong(), contains("Budget exceeded"));
         verify(sink, never()).onToolResult(eq("lookup"), any(), eq("ok"), anyLong(), anyString());
     }

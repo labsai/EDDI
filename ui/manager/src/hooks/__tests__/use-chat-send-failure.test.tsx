@@ -90,10 +90,19 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     server.use(
       http.get("*/agents/c1", () => {
         reads += 1;
+        // The first read is the baseline taken as the turn is sent: the step
+        // stored before it. The follow-up reads find the turn's own step, settled.
         return HttpResponse.json(
           reads === 1
-            ? { conversationState: "IN_PROGRESS" }
-            : { conversationState: "READY", conversationOutputs: [{ output: [{ type: "text", text: "Half an answer, whole" }] }] },
+            ? { conversationState: "IN_PROGRESS", conversationSteps: [{ timestamp: 1, conversationStep: [] }] }
+            : {
+                conversationState: "READY",
+                conversationSteps: [
+                  { timestamp: 1, conversationStep: [] },
+                  { timestamp: 2, conversationStep: [] },
+                ],
+                conversationOutputs: [{ output: [{ type: "text", text: "Half an answer, whole" }] }],
+              },
         );
       }),
     );

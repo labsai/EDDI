@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { AppLink } from "@eddi/app-kit/components/shared/app-link";
 import { useTranslation } from "react-i18next";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowUpRight, ChevronDown, ChevronUp, Globe, Plug, Wrench, Database, Boxes } from "lucide-react";
@@ -138,9 +138,9 @@ export function ActiveToolsList({ task, workflows, workflowsLoading, enableMemor
               return (
                 <li key={`${ref.id}@${ref.version}`} title={name ? `${name}\n${ref.uri}` : ref.uri} data-testid={`active-tool-${ref.id}`}>
                   {ref.slug ? (
-                    <Link to={`/manage/resources/${ref.slug}/${ref.id}?version=${ref.version}`} className={cn(rowClass, "hover:bg-muted/50 transition-colors")}>
+                    <AppLink to={`/manage/resources/${ref.slug}/${ref.id}?version=${ref.version}`} className={cn(rowClass, "hover:bg-muted/50 transition-colors")}>
                       {content}
-                    </Link>
+                    </AppLink>
                   ) : (
                     <div className={rowClass}>{content}</div>
                   )}
