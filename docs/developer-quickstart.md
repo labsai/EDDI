@@ -125,7 +125,7 @@ If you plan to use the **Web Search** or **Weather** tools in your agents, you m
 
 Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
 
-The `brave` provider first ships in EDDI **6.7.0**; earlier images (including the `6.6.0` used in the Docker setup above) only know Google and DuckDuckGo and ignore these settings. Once 6.7.0 is on the [releases page](https://github.com/labsai/EDDI/releases), start it with `EDDI_VERSION=6.7.0`; until then, run from source or build the image from this repository.
+The `brave` provider first ships in the release after `6.6.0`; that image, and every earlier one, only knows Google and DuckDuckGo and ignores these settings. Once that release is on the [releases page](https://github.com/labsai/EDDI/releases), set `EDDI_VERSION` to it; until then, run from source or build the image from this repository.
 
 With Docker Compose, put the same two settings in `.env` as environment variables; `docker-compose.yml` passes them into the container:
 
@@ -137,7 +137,7 @@ EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...
 Environment is fixed when a container is created, so recreate it after editing `.env` (use the same `EDDI_VERSION` as before):
 
 ```bash
-EDDI_VERSION=6.7.0 docker compose up -d
+EDDI_VERSION=<the release with Brave> docker compose up -d
 ```
 
 **Weather (OpenWeatherMap):**
