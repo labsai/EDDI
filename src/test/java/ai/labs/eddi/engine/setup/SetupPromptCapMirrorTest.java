@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * The Manager holds a copy of
  * {@link AgentSetupService#MAX_SYSTEM_PROMPT_LENGTH}
  * ({@code SETUP_MAX_SYSTEM_PROMPT_LENGTH} in
- * {@code ui/manager/src/lib/api/agent-setup.ts}), and its
+ * {@code ui/packages/app-kit/src/lib/api/agent-setup.ts}), and the Manager's
  * {@code operator-prompt-size.test.ts} holds the Platform Operator's prompt to
  * 80% of that copy. The guard is only as good as the copy: 6.7.0 shipped an
  * Operator prompt of ~110,000 characters against a backend cap of 100,000, so
@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 class SetupPromptCapMirrorTest {
 
-    private static final Path MANAGER_SETUP_API = Path.of("ui", "manager", "src", "lib", "api", "agent-setup.ts");
+    private static final Path MANAGER_SETUP_API = Path.of("ui", "packages", "app-kit", "src", "lib", "api", "agent-setup.ts");
     private static final Pattern MIRROR = Pattern.compile("export const SETUP_MAX_SYSTEM_PROMPT_LENGTH\\s*=\\s*([0-9][0-9_]*)\\s*;");
 
     @Test
