@@ -86,6 +86,10 @@ and re-sharing stay with whoever created it.
 
 ### Access levels
 
+> Which of the agents a person may use are *offered* to them in Workforce is a separate, opt-in
+> question: see the [End-User Catalog](catalog.md). `published` and `internal` resources are
+> listed there automatically while workspaces are enforced.
+
 | Level | Can | Cannot |
 | --- | --- | --- |
 | `USE` | Start conversations with the deployed agent; see its name and description. | Read the configuration, its workflows, tools or vault references. |
