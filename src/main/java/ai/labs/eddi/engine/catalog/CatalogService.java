@@ -18,6 +18,8 @@ import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.api.IRestAgentProfile.AppearanceProfile;
+import ai.labs.eddi.engine.api.IRestAgentProfile.ControlsProfile;
 import ai.labs.eddi.engine.api.IRestAgentProfile.RatingProfile;
 import ai.labs.eddi.engine.api.OperatorRevisionCheck;
 import ai.labs.eddi.engine.catalog.IRestCatalog.CatalogAgent;
@@ -160,8 +162,12 @@ public class CatalogService {
 
             String notice = reviewPolicy.noticeFor(agentId, version).orElse(null);
             RatingProfile rating = ratingPolicy.ratingConfigOf(agentId, version).map(RatingProfile::of).orElse(null);
+            // The same views GET /agents/{agentId}/profile serves, from the
+            // configuration already read, so a catalog card needs no profile call.
+            AppearanceProfile appearance = config == null ? null : AppearanceProfile.of(config.getAppearance());
+            ControlsProfile controls = ControlsProfile.of(config == null ? null : config.getConversationControls());
             return new CatalogAgent(agentId, descriptor == null ? null : descriptor.getName(),
-                    descriptor == null ? null : descriptor.getDescription(), notice, rating, level.name());
+                    descriptor == null ? null : descriptor.getDescription(), notice, rating, level.name(), appearance, controls);
         } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
             LOGGER.debugf("Leaving agent %s out of the catalog: %s", sanitize(agentId), sanitize(e.getMessage()));
             return null;

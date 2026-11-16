@@ -109,6 +109,10 @@ What the widget shows for an agent — display name, avatar, accent colour, conv
 
 ## Upgrading: HTML in replies is off by default
 
-`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until now the widget rendered HTML for every agent; the Manager never did.
+`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until 6.7.0 the widget rendered HTML for every agent; the Manager never did.
 
-The profile reports the setting from 6.7.0 on. The widget follows it from the release that ships its side of the change (the frontend unification plan, decision D9), and until then keeps rendering HTML, so nothing changes before agents can opt in. **If an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it now**; otherwise, once the widget follows the setting, its replies show the markup as text. Agents whose replies are plain text or markdown need nothing.
+**From 6.7.0 the widget follows the setting** (decision D9 of the frontend unification plan): it reads `conversationControls` from `GET /agents/{agentId}/profile` and renders HTML only for an agent that sets `"rawHtml": true`. For every other agent — and for a profile that reports no controls — `<b>bold</b>` in a reply appears as the literal text `<b>bold</b>`, while markdown (`**bold**`) renders as before. No image in model text loads either way: a markdown image becomes a link, and a raw `<img>` is text, or a link for an agent with `rawHtml` ([section 3](#3-images-in-agent-output)).
+
+**What to do when upgrading:** if an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it and deploy the new version. Agents whose replies are plain text or markdown need nothing. The HTML parser stays a separate chunk, loaded only when a reply of such an agent contains HTML.
+
+The other switches are honoured too: an agent with `undo`, `redo`, `attachments`, `quickReplies` or `rating` set to `false` gets no such control in the widget, and `streaming: false` sends its turns without streaming. The `hide*` URL parameters still hide a control for every agent; the agent's switch can only take one away, never bring back one the URL hid.
