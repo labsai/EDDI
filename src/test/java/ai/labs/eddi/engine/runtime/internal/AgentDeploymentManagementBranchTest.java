@@ -423,12 +423,19 @@ class AgentDeploymentManagementBranchTest {
             info.setEnvironment(Environment.production);
 
             when(deploymentStore.readDeploymentInfos(deployed)).thenReturn(List.of(info));
+            // Tracking follows the registry: a row stays tracked while this node holds it
+            // READY.
+            IAgent served = mock(IAgent.class);
+            when(served.getAgentId()).thenReturn("agent1");
+            when(served.getAgentVersion()).thenReturn(1);
+            when(served.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+            when(agentFactory.getAllDeployedAgents(Environment.production)).thenReturn(List.of(served));
 
             // First call deploys
             management.checkDeployments();
             verify(agentFactory, times(1)).deployAgent(any(), any(), anyInt(), any());
 
-            // Second call skips (already in list)
+            // Second call skips (tracked, and still READY in the registry)
             management.checkDeployments();
             verify(agentFactory, times(1)).deployAgent(any(), any(), anyInt(), any());
         }

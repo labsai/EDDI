@@ -9,7 +9,9 @@ import ai.labs.eddi.engine.health.model.HealthFailure;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
+import com.mongodb.client.AggregateIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
@@ -23,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -31,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -189,5 +193,41 @@ class MongoHealthTurnStoreTest {
         assertThrows(HealthStoreException.class, () -> store.upsert(turn(false)));
         when(collection.deleteMany(any(Bson.class))).thenThrow(new MongoException("down"));
         assertThrows(HealthStoreException.class, () -> store.deleteByUserId("u"));
+    }
+
+    @Test
+    @DisplayName("the orphan sweep groups the conversations of rows and markers written since the instant, limited")
+    void updatedSincePipeline() {
+        List<Bson> pipeline = MongoHealthTurnStore.updatedSincePipeline(Instant.parse("2026-11-08T00:00:00Z"), 7);
+        assertEquals(3, pipeline.size());
+        String match = render(pipeline.get(0)).toJson();
+        assertTrue(match.contains("\"updatedAt\": {\"$gte\""), match);
+        assertTrue(match.contains("\"discardedAt\": {\"$gte\""), match);
+        assertTrue(render(pipeline.get(1)).toJson().contains("\"_id\": \"$conversationId\""));
+        assertEquals(7, render(pipeline.get(2)).getInt32("$limit").getValue());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("the orphan sweep streams each grouped id, skips a null group, and wraps driver failures")
+    void forEachConversationUpdatedSince() {
+        AggregateIterable<Document> aggregate = mock(AggregateIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        when(collection.aggregate(anyList())).thenReturn(aggregate);
+        when(aggregate.allowDiskUse(anyBoolean())).thenReturn(aggregate);
+        when(aggregate.iterator()).thenReturn(cursor);
+        when(cursor.hasNext()).thenReturn(true, true, true, false);
+        when(cursor.next()).thenReturn(new Document("_id", "c1"), new Document("_id", null), new Document("_id", "c2"));
+
+        List<String> ids = new ArrayList<>();
+        store.forEachConversationUpdatedSince(Instant.parse("2026-11-08T00:00:00Z"), 10, ids::add);
+
+        assertEquals(List.of("c1", "c2"), ids);
+        verify(aggregate).allowDiskUse(true);
+        verify(cursor).close();
+
+        when(collection.aggregate(anyList())).thenThrow(new MongoException("down"));
+        assertThrows(HealthStoreException.class, () -> store.forEachConversationUpdatedSince(Instant.now(), 10, id -> {
+        }));
     }
 }

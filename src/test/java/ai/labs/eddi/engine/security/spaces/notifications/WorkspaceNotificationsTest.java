@@ -285,7 +285,7 @@ class WorkspaceNotificationsTest {
         @DisplayName("cannot be read through a principal that is named like the shared inbox")
         void reservedPrincipal() {
             when(spaceContext.currentPrincipal()).thenReturn(WorkspaceNotifications.SYSTEM_ADMINS);
-            when(guard.callerIsAdmin()).thenReturn(false);
+            when(guard.isAdmin()).thenReturn(false);
 
             sut.inbox(false, 50);
             sut.unreadCount();
@@ -310,7 +310,7 @@ class WorkspaceNotificationsTest {
         @Test
         @DisplayName("are read by an administrator in addition to their own inbox, newest first")
         void administratorReadsBoth() {
-            when(guard.callerIsAdmin()).thenReturn(true);
+            when(guard.isAdmin()).thenReturn(true);
             var own = new WorkspaceNotification("a", "bob", WorkspaceNotification.Type.SHARED_WITH_YOU, "r", null, "R", "al", "Al", "VIEW", null,
                     Instant.parse("2026-01-01T00:00:00Z"), null);
             var update = new WorkspaceNotification("b", WorkspaceNotifications.SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, "9.9.9",
@@ -327,7 +327,7 @@ class WorkspaceNotificationsTest {
         @Test
         @DisplayName("are invisible to a caller who is not an administrator")
         void hiddenFromOthers() {
-            when(guard.callerIsAdmin()).thenReturn(false);
+            when(guard.isAdmin()).thenReturn(false);
 
             sut.inbox(false, 50);
             sut.unreadCount();
@@ -342,7 +342,7 @@ class WorkspaceNotificationsTest {
         @DisplayName("reach an administrator when authorization is off and there is no principal")
         void anonymousAdministrator() {
             when(spaceContext.currentPrincipal()).thenReturn(null);
-            when(guard.callerIsAdmin()).thenReturn(true);
+            when(guard.isAdmin()).thenReturn(true);
 
             sut.markRead(null);
 

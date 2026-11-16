@@ -124,6 +124,7 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
         snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         snapshot.setHitlApprovalContext(conversationMemory.getHitlApprovalContext());
+        snapshot.setHitlPlanHash(conversationMemory.getHitlPlanHash());
         return snapshot;
     }
 
@@ -189,6 +190,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.setHitlApprovalContext(snapshot.getHitlApprovalContext());
+        conversationMemory.setHitlPlanHash(snapshot.getHitlPlanHash());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
 
@@ -251,12 +253,6 @@ public class ConversationMemoryUtilities {
         return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
     }
 
-    /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
     /**
      * Sums {@code audit:cost} over every step of the conversation. The value is per
      * step — {@code LlmTask} accumulates it on the current step, and each new step
@@ -346,6 +342,12 @@ public class ConversationMemoryUtilities {
         return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -1099,6 +1101,10 @@ public class ConversationMemoryUtilities {
         // which reads the persisted document. Unlike requestFingerprint no boolean is
         // derived from it, so it is dropped rather than replaced with a marker.
         batch.setFingerprint(null);
+        // The plan nonce is the secret that keeps the published plan hash from being
+        // an offline guessing oracle over the raw arguments (see HitlPlanHash) —
+        // served next to the hash it would undo exactly that.
+        batch.setPlanNonce(null);
         if (batch.getCalls() == null) {
             return snapshot;
         }

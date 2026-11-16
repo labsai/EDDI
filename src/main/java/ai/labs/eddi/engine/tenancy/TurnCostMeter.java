@@ -71,17 +71,16 @@ public class TurnCostMeter {
     private final MeterRegistry meterRegistry;
 
     /**
-     * Receives every charge the tenant counter accepted (the attribution SPI).
-     * Field-injected so the direct constructor and its tests are unaffected; null
-     * delivers nothing.
+     * Receives every charge the tenant counter accepted (the attribution SPI). Code
+     * built without CDI passes {@link SpendSinks#NONE}.
      */
-    @Inject
-    SpendSinks spendSinks;
+    private final SpendSinks spendSinks;
 
     @Inject
-    public TurnCostMeter(TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry) {
+    public TurnCostMeter(TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry, SpendSinks spendSinks) {
         this.tenantQuotaService = tenantQuotaService;
         this.meterRegistry = meterRegistry;
+        this.spendSinks = spendSinks;
     }
 
     /**
@@ -157,9 +156,7 @@ public class TurnCostMeter {
                 step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, spendMap(0, 0, 0)));
             }
             count(result.allowed() ? "recorded" : "over_budget");
-            if (spendSinks != null) {
-                spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge, carriedSpend));
-            }
+            spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge, carriedSpend));
             return charge;
         } catch (RuntimeException e) {
             count("error");

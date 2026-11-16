@@ -1,8 +1,54 @@
+import {
+  HttpClient,
+  STREAM_FAILED_CONTEXT,
+  createConversationApi,
+  parseConversationIdFromLocation,
+  type ContextMap,
+  type SSEEvent,
+  type SSEEventType,
+} from "@eddi/core";
 import { api, apiErrorFromResponse, isApiError } from "../api-client";
-import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 import type { Environment } from "@/lib/constants";
 import { seg } from "./path-segment";
+
+/*
+ * The Manager's binding of @eddi/core's agent conversation API.
+ *
+ * The protocol — the endpoints, the SSE reader, the empty-200 undo — is the
+ * package's, shared with the Chat UI. What is kept here is the Manager's: the
+ * signatures its hooks and their tests are written against, its message types,
+ * and its errors. Every call goes through `ApiClient.authorizedFetch` (token
+ * refresh, one 401 retry) and fails with an `ApiClientError` carrying the
+ * backend's own sentence (`apiErrorFromResponse`), exactly as an `api.post` does.
+ */
+const conversationHttp = new HttpClient({
+  baseUrl: api.getBaseUrl(),
+  fetch: (url, init) => api.authorizedFetch(url, init),
+  // The backend's own sentence when it sends one; the status phrase — "Streaming
+  // failed: …" for a refused stream — only when the body has nothing to say.
+  createError: (response, context) =>
+    apiErrorFromResponse(
+      response,
+      context === STREAM_FAILED_CONTEXT ? `${STREAM_FAILED_CONTEXT}: ${response.statusText}` : response.statusText,
+    ),
+});
+
+const conversation = createConversationApi(conversationHttp);
+
+/**
+ * The package encodes every id it puts in a path; the Manager also REFUSES the
+ * ones no EDDI resource has (`seg` — a slash, `..`, whitespace), synchronously,
+ * as every other Manager API wrapper does. Returns the id unencoded: the
+ * package encodes it.
+ */
+function checkedId(conversationId: string): string {
+  seg(conversationId);
+  return conversationId;
+}
+
+export { parseConversationIdFromLocation };
+export type { SSEEvent, SSEEventType };
 
 // --- Types ---
 
@@ -76,7 +122,7 @@ export interface ChatMessage {
   /**
    * The conversation step this message belongs to, when the source said so (a
    * transcript rebuilt from a snapshot). Reply ratings are keyed by it; live
-   * messages are counted from the nearest one that has it (`chat-rating-steps.ts`).
+   * messages are counted from the nearest one that has it (`rating-steps.ts` in @eddi/core).
    */
   stepIndex?: number;
 }
@@ -91,32 +137,6 @@ export interface GuardrailNotice {
   action: string;
 }
 
-export type SSEEventType =
-  | "token"
-  | "task_start"
-  | "task_complete"
-  | "task_failed"
-  | "tool_call"
-  | "cascade_step_start"
-  | "cascade_escalation"
-  | "guardrail_triggered"
-  | "done"
-  | "error";
-
-export interface SSEEvent {
-  type: SSEEventType;
-  data: string;
-}
-
-// --- Helpers ---
-
-/** Extract conversation ID from Location header (e.g. "/agents/CONV_ID?...") */
-export function parseConversationIdFromLocation(location: string): string {
-  const parts = location.split("/");
-  // The conversationId may have query params — strip them
-  const last = parts[parts.length - 1] || location;
-  return last.split("?")[0] ?? last;
-}
 
 // --- API Functions ---
 
@@ -138,6 +158,11 @@ export function parseConversationIdFromLocation(location: string): string {
  * activation probes tag theirs (see `OPERATOR_PROBE_USER_ID`) so that restoring
  * "your last conversation" cannot adopt a canary that is about to be ended
  * underneath it.
+ *
+ * Still an `api.post`, not the package's `startConversation`: `ApiClient` takes
+ * the id from the `Location` header or, failing that, from a `location` field
+ * in the body, and the Manager's mock backend answers with the body. The
+ * package reads the header only, which is what EDDI sends.
  */
 export async function startConversation(
   environment: Environment,
@@ -153,19 +178,15 @@ export async function startConversation(
 }
 
 /** Read an existing conversation (GET). Used after start (welcome message) and to resume. */
-export function readConversation(
+export async function readConversation(
   _environment: string,
   _agentId: string,
   conversationId: string,
   returnCurrentStepOnly = false
 ): Promise<SimpleConversationMemorySnapshot> {
-  const params = new URLSearchParams({
-    returnDetailed: "false",
-    returnCurrentStepOnly: String(returnCurrentStepOnly),
-  });
-  return api.get<SimpleConversationMemorySnapshot>(
-    `/agents/${seg(conversationId)}?${params.toString()}`
-  );
+  // The Manager reads the snapshot through its own, wider type.
+  const snapshot: unknown = await conversation.readConversation(checkedId(conversationId), returnCurrentStepOnly);
+  return snapshot as SimpleConversationMemorySnapshot;
 }
 
 /** Send a plain-text message (non-streaming). */
@@ -175,50 +196,26 @@ export async function sendMessage(
   conversationId: string,
   message: string
 ): Promise<SimpleConversationMemorySnapshot> {
-  // Plain text requires raw fetch since api-client always sets JSON content-type
-  const params = new URLSearchParams({
-    returnDetailed: "false",
-    returnCurrentStepOnly: "true",
-  });
-  const response = await fetch(
-    `${api.getBaseUrl()}/agents/${seg(conversationId)}?${params.toString()}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain",
-        ...api.getAuthHeader(),
-      },
-      body: message,
-    }
-  );
-  if (!response.ok) {
-    throw await apiErrorFromResponse(response);
-  }
-  return response.json();
+  const snapshot: unknown = await conversation.sendMessage(checkedId(conversationId), message);
+  return snapshot as SimpleConversationMemorySnapshot;
 }
 
 /** Send a message with context (non-streaming). */
-export function sendMessageWithContext(
+export async function sendMessageWithContext(
   _environment: string,
   _agentId: string,
   conversationId: string,
   inputData: InputData
 ): Promise<SimpleConversationMemorySnapshot> {
-  const params = new URLSearchParams({
-    returnDetailed: "false",
-    returnCurrentStepOnly: "true",
+  const snapshot: unknown = await conversation.sendMessage(checkedId(conversationId), inputData.input, {
+    context: inputData.context as ContextMap | undefined,
   });
-  return api.post<SimpleConversationMemorySnapshot>(
-    `/agents/${seg(conversationId)}?${params.toString()}`,
-    inputData
-  );
+  return snapshot as SimpleConversationMemorySnapshot;
 }
 
 /**
- * Send a message via SSE streaming.
- * Returns an async generator yielding SSE events.
- * Note: SSE streaming requires raw fetch for ReadableStream access,
- * but we still attach auth headers.
+ * Send a message via SSE streaming. Yields the events as they arrive; the
+ * request is made on the first pull. Framing is `@eddi/core`'s `readSseStream`.
  */
 export async function* sendMessageStreaming(
   _environment: string,
@@ -227,72 +224,19 @@ export async function* sendMessageStreaming(
   inputData: InputData,
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
-  const response = await fetch(
-    `${api.getBaseUrl()}/agents/${seg(conversationId)}/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...api.getAuthHeader(),
-      },
-      body: JSON.stringify(inputData),
-      signal,
-    }
-  );
-
-  if (!response.ok) {
-    // The backend's own sentence when it sends one; "Streaming failed: …" only
-    // when the body has nothing to say.
-    throw await apiErrorFromResponse(response, `Streaming failed: ${response.statusText}`);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("No readable stream");
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // Frames are separated by a blank line. CRLF framing leaves a "\r" on the
-      // preceding line, which parseSseFrame strips.
-      const parts = buffer.split(/\r?\n\r?\n/);
-      buffer = parts.pop() ?? "";
-
-      for (const part of parts) {
-        const frame = parseSseFrame(part, "token");
-        if (!frame) continue;
-        yield { type: frame.type as SSEEventType, data: frame.data };
-      }
-    }
-
-    // No decoder flush here on purpose. `decode(value, {stream: true})` holds only
-    // an INCOMPLETE trailing sequence, so a complete multi-byte character is never
-    // at risk; the only thing a final `decode()` would add is a U+FFFD for a body
-    // that was truncated mid-character, which then rides into the transcript as
-    // content. Leave the malformed tail out rather than render a replacement glyph.
-    //
-    // A server that closes without a trailing blank line leaves the last frame
-    // in the buffer; emit it rather than dropping the final chunk of a reply.
-    const tail = parseSseFrame(buffer, "token");
-    if (tail) yield { type: tail.type as SSEEventType, data: tail.data };
-  } finally {
-    reader.releaseLock();
-  }
+  yield* conversation.sendMessageStreaming(checkedId(conversationId), inputData.input, {
+    context: inputData.context as ContextMap | undefined,
+    signal,
+  });
 }
 
 /** End a conversation. */
 export function endConversation(conversationId: string): Promise<void> {
-  return api.post(`/agents/${seg(conversationId)}/endConversation`);
+  return conversation.endConversation(checkedId(conversationId));
 }
 
 /**
- * POST an undo/redo and report whether the backend actually performed it.
+ * Report whether the backend actually performed an undo/redo.
  *
  * `RestAgentEngine.undo`/`redo` answer an EMPTY 200 when the step moved and a
  * 409 when there was nothing to move (or a concurrent turn / a HITL pause got
@@ -302,9 +246,9 @@ export function endConversation(conversationId: string): Promise<void> {
  * every further click undid another turn. The caller re-reads the conversation
  * instead of trusting a body.
  */
-async function postStepMove(conversationId: string, move: "undo" | "redo"): Promise<boolean> {
+async function stepMoved(move: Promise<unknown>): Promise<boolean> {
   try {
-    await api.post<void>(`/agents/${seg(conversationId)}/${seg(move)}`);
+    await move;
     return true;
   } catch (err) {
     if (isApiError(err) && err.status === 409) return false;
@@ -322,7 +266,7 @@ export function undoConversation(
   _agentId: string,
   conversationId: string
 ): Promise<boolean> {
-  return postStepMove(conversationId, "undo");
+  return stepMoved(conversation.undoConversation(checkedId(conversationId)));
 }
 
 /** Redo a previously undone step. Same contract as {@link undoConversation}. */
@@ -331,16 +275,15 @@ export function redoConversation(
   _agentId: string,
   conversationId: string
 ): Promise<boolean> {
-  return postStepMove(conversationId, "redo");
+  return stepMoved(conversation.redoConversation(checkedId(conversationId)));
 }
 
 /** Rerun the last conversation step (retry after error). */
-export function rerunLastStep(
+export async function rerunLastStep(
   conversationId: string,
 ): Promise<void> {
-  const params = new URLSearchParams({
-    returnDetailed: "false",
-    returnCurrentStepOnly: "true",
+  await conversation.rerunLastStep(checkedId(conversationId), {
+    returnDetailed: false,
+    returnCurrentStepOnly: true,
   });
-  return api.post(`/agents/${seg(conversationId)}/rerun?${params.toString()}`);
 }

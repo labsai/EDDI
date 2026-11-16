@@ -16,6 +16,7 @@ import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -585,7 +586,10 @@ public class RestSecretStore implements IRestSecretStore {
     @Override
     public Response healthCheck() {
         boolean available = secretProvider.isAvailable();
-        var status = Map.of("status", available ? "UP" : "DOWN", "provider", secretProvider.getClass().getSimpleName(), "available", available);
+        // The injected @ApplicationScoped provider is an ArC client proxy, whose class
+        // is VaultSecretProvider_ClientProxy: name the bean behind it.
+        var status = Map.of("status", available ? "UP" : "DOWN", "provider", ClientProxy.unwrap(secretProvider).getClass().getSimpleName(),
+                "available", available);
 
         if (available) {
             return Response.ok(status).build();

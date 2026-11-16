@@ -192,6 +192,32 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private final int keepAliveIntervalSeconds;
 
     /**
+     * {@code systemRuntime.agentTimeoutInSeconds}: how long the watchdog waits for
+     * a turn before it gives up on it.
+     *
+     * <p>
+     * The keep-alive tick uses it as a backstop. A turn the watchdog gave up on
+     * normally ends its stream itself, with the error its interrupted pipeline
+     * reports. A body that swallowed the interrupt and hangs never does, and REST
+     * has its {@code 408} for that case while a stream had nothing: it stayed open,
+     * kept warm by the keep-alive, for as long as the body hung. So once the turn
+     * has written its first event, a stream that then carries none of the turn's
+     * events for this timeout plus one keep-alive interval is ended with an
+     * {@code error} event, code {@code turn_timeout}. A live turn cannot reach
+     * that: the watchdog bounds it at this timeout from its start. A turn still
+     * queued has written no event yet, so its wait is never cut. With the
+     * keep-alive off ({@code 0}) nothing ticks, and the backstop is off too.
+     * </p>
+     */
+    private final int agentTimeoutSeconds;
+
+    /**
+     * The {@code code} of the error event that ends a stream the backstop gave up
+     * on.
+     */
+    static final String TURN_TIMEOUT_CODE = "turn_timeout";
+
+    /**
      * One daemon thread ticks every open turn stream. A tick only checks a clock
      * and, rarely, writes a comment line, so one thread serves any number of
      * streams. Replaceable in unit tests, which run the tick by hand.
@@ -245,11 +271,22 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             @ConfigProperty(name = "eddi.streaming.cancel-on-client-disconnect",
                             defaultValue = DEFAULT_CANCEL_ON_CLIENT_DISCONNECT) boolean cancelOnClientDisconnect,
             @ConfigProperty(name = "eddi.streaming.keepalive-interval-seconds",
-                            defaultValue = DEFAULT_KEEPALIVE_INTERVAL_SECONDS) int keepAliveIntervalSeconds) {
+                            defaultValue = DEFAULT_KEEPALIVE_INTERVAL_SECONDS) int keepAliveIntervalSeconds,
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeoutSeconds) {
         this.conversationService = conversationService;
         this.conversationAccessGuard = conversationAccessGuard;
         this.cancelOnClientDisconnect = cancelOnClientDisconnect;
         this.keepAliveIntervalSeconds = Math.max(0, keepAliveIntervalSeconds);
+        this.agentTimeoutSeconds = agentTimeoutSeconds;
+    }
+
+    /**
+     * Convenience constructor for the direct-construction unit tests — applies the
+     * shipped default for {@code systemRuntime.agentTimeoutInSeconds} (60).
+     */
+    RestAgentEngineStreaming(IConversationService conversationService,
+            ConversationAccessGuard conversationAccessGuard, boolean cancelOnClientDisconnect, int keepAliveIntervalSeconds) {
+        this(conversationService, conversationAccessGuard, cancelOnClientDisconnect, keepAliveIntervalSeconds, 60);
     }
 
     /**
@@ -615,34 +652,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     }
 
     /**
-     * Per-request SSE stream: it owns the sink and, crucially, notices when the
-     * client is gone.
-     * <p>
-     * <strong>Why the send path is the disconnect detector.</strong> The endpoint
-     * receives only {@link SseEventSink} and {@link Sse}. A JAX-RS
-     * {@code ConnectionCallback} is not an option here: RESTEasy Reactive's
-     * {@code AsyncResponseImpl.register} stores connection callbacks in a request
-     * property that <em>nothing in the server ever reads</em>, so registering one
-     * would be dead code that silently cancels nothing. What IS reliable is
-     * {@code SseEventSink.isClosed()} — RESTEasy Reactive implements it as
-     * {@code serverResponse().closed()}, which Vert.x flips as soon as the client
-     * drops the connection. Every outbound frame therefore re-checks it, which
-     * makes a disconnect observable at the very next token/task boundary.
-     * <p>
-     * On the first such observation before the terminal frame, the in-flight turn
-     * is cancelled through {@code IConversationService.cancelConversation}, which
-     * sets the cooperative cancel flag on the live conversation memory. Without it,
-     * closing the tab at token 5 of 4000 still ran — and billed — the whole
-     * completion, and could escalate through every cascade model on the way. A
-     * cancelled turn is DISCARDED rather than saved — see
-     * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
-     * semantics and the config switch that turns this off.
-     * <p>
-     * The cancel is issued synchronously on the calling (pipeline worker) thread
-     * and at most once, so it never touches the Vert.x event loop and never
-     * repeats.
-     */
-    /**
      * Prefix every line of an SSE payload with one space.
      * <p>
      * The SSE grammar is {@code field ":" [ space ] value}, and a consumer strips a
@@ -677,6 +686,34 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return " " + normalised.replace("\n", "\n ");
     }
 
+    /**
+     * Per-request SSE stream: it owns the sink and, crucially, notices when the
+     * client is gone.
+     * <p>
+     * <strong>Why the send path is the disconnect detector.</strong> The endpoint
+     * receives only {@link SseEventSink} and {@link Sse}. A JAX-RS
+     * {@code ConnectionCallback} is not an option here: RESTEasy Reactive's
+     * {@code AsyncResponseImpl.register} stores connection callbacks in a request
+     * property that <em>nothing in the server ever reads</em>, so registering one
+     * would be dead code that silently cancels nothing. What IS reliable is
+     * {@code SseEventSink.isClosed()} — RESTEasy Reactive implements it as
+     * {@code serverResponse().closed()}, which Vert.x flips as soon as the client
+     * drops the connection. Every outbound frame therefore re-checks it, which
+     * makes a disconnect observable at the very next token/task boundary.
+     * <p>
+     * On the first such observation before the terminal frame, the in-flight turn
+     * is cancelled through {@code IConversationService.cancelConversation}, which
+     * sets the cooperative cancel flag on the live conversation memory. Without it,
+     * closing the tab at token 5 of 4000 still ran — and billed — the whole
+     * completion, and could escalate through every cascade model on the way. A
+     * cancelled turn is DISCARDED rather than saved — see
+     * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
+     * semantics and the config switch that turns this off.
+     * <p>
+     * The cancel is issued synchronously on the calling (pipeline worker) thread
+     * and at most once, so it never touches the Vert.x event loop and never
+     * repeats.
+     */
     private final class SseStream {
         private final String conversationId;
         private final String safeConversationId;
@@ -704,6 +741,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          * turn instead.
          */
         private volatile boolean turnEventSent;
+        /**
+         * When the turn's last event was written (a keep-alive comment does not count);
+         * guarded by {@link #writeLock}. Read by the turn-timeout backstop (see
+         * {@link RestAgentEngineStreaming#agentTimeoutSeconds}).
+         */
+        private long lastTurnEventMillis;
 
         /** Whether this stream's vanished client cancels the turn it was following. */
         private final boolean cancelOnDisconnect;
@@ -744,6 +787,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                 stopKeepAlive();
                 return;
             }
+            if (turnTimedOut()) {
+                endTimedOutTurn();
+                return;
+            }
             boolean gone = false;
             synchronized (writeLock) {
                 if (clockMillis.getAsLong() - lastWriteMillis < TimeUnit.SECONDS.toMillis(keepAliveIntervalSeconds)) {
@@ -782,6 +829,42 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
 
         /**
+         * Whether the turn has gone silent for longer than the watchdog lets a live
+         * turn run (see {@link RestAgentEngineStreaming#agentTimeoutSeconds}). Never
+         * before the turn's first event: until then it may still be queued.
+         */
+        private boolean turnTimedOut() {
+            if (agentTimeoutSeconds <= 0 || !turnEventSent) {
+                return false;
+            }
+            long limitMillis = TimeUnit.SECONDS.toMillis((long) agentTimeoutSeconds + keepAliveIntervalSeconds);
+            synchronized (writeLock) {
+                return clockMillis.getAsLong() - lastTurnEventMillis > limitMillis;
+            }
+        }
+
+        /**
+         * Ends a stream whose turn the watchdog gave up on and whose body never
+         * returned, with an {@code error} event the client can act on, unless the
+         * turn's own terminal frame got there first. The turn itself was already
+         * abandoned (cancel flag and interrupt), so nothing is cancelled here.
+         */
+        private void endTimedOutTurn() {
+            if (!terminal.compareAndSet(false, true)) {
+                return;
+            }
+            LOGGER.warnf("Turn stream of conversation %s carried no event of its turn for longer than "
+                    + "systemRuntime.agentTimeoutInSeconds (%d s) plus one keep-alive interval — ending it with a %s error",
+                    safeConversationId, agentTimeoutSeconds, TURN_TIMEOUT_CODE);
+            try {
+                send("error", String.format("{\"message\":\"%s\",\"code\":\"%s\"}",
+                        "The turn did not finish within the agent timeout; its outcome is discarded", TURN_TIMEOUT_CODE));
+            } finally {
+                close();
+            }
+        }
+
+        /**
          * Marks the stream as finishing normally, so the sink closing from here on is
          * our own doing and must not be mistaken for a client disconnect.
          */
@@ -799,6 +882,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     try {
                         eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
                         lastWriteMillis = clockMillis.getAsLong();
+                        lastTurnEventMillis = lastWriteMillis;
                         turnEventSent = true;
                     } catch (Exception e) {
                         LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());

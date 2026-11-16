@@ -6,5 +6,5 @@
 /_____/  /_____/ /_____/ /___/
 
   Multi-Agent Orchestration Middleware
-  https://eddi.labs.ai
+  https://eddi.technology
 

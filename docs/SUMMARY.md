@@ -71,6 +71,7 @@
 - [MCP Client](mcp-client.md)
 - [A2A Protocol](a2a-protocol.md)
 - [Connections](connections.md)
+  - [Google Workspace — Gmail & Drive Tools](google-workspace.md)
 - [Slack Integration](slack-integration.md)
 - [Webhook Triggers (CloudEvents)](webhook-triggers.md)
 - [Email Integration](email-integration.md)

@@ -9,7 +9,6 @@ import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -33,7 +32,6 @@ class PrePostUtilsVerifyHttpCodeTest {
     void setUp() {
         prePostUtils = new PrePostUtils(
                 mock(IJsonSerialization.class),
-                mock(IMemoryItemConverter.class),
                 mock(ITemplatingEngine.class),
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
     }

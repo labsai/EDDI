@@ -1,5 +1,8 @@
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -15,7 +18,7 @@ const mockSteps = [
 
 function renderRailroad(
   props: Partial<{
-    workflowSteps: typeof mockSteps;
+    workflowSteps: ComponentProps<typeof PipelineRailroad>["workflowSteps"];
     selectedIndex: number | null;
     onSelectStage: (idx: number) => void;
   }> = {},
@@ -79,18 +82,39 @@ describe("PipelineRailroad", () => {
     expect(screen.getByTestId("stage-0")).not.toHaveAttribute("aria-current");
   });
 
-  it("displays i18n type labels", () => {
+  it("shows each step's resource descriptor NAME, keeping the id in the tooltip", async () => {
     renderRailroad();
-    // Fallback labels should be displayed (from en.json or inline fallback)
-    expect(screen.getByText("Parser")).toBeInTheDocument();
-    expect(screen.getByText("Output")).toBeInTheDocument();
+    // The MSW descriptor handler answers "Mock descriptor <id>".
+    await waitFor(() => expect(screen.getByTestId("stage-0-name")).toHaveTextContent("Mock descriptor p1"));
+    expect(screen.getByTestId("stage-1-name")).toHaveTextContent("Mock descriptor lc1");
+    expect(screen.getByTestId("stage-0")).toHaveAttribute("title", expect.stringContaining("p1 · v1"));
   });
 
-  it("displays resource IDs from URIs", () => {
+  it("falls back to the resource id while (or when) no name resolves", () => {
+    server.use(http.get("*/descriptorstore/descriptors/:id", () => new HttpResponse(null, { status: 404 })));
     renderRailroad();
-    expect(screen.getByText("p1")).toBeInTheDocument();
-    expect(screen.getByText("lc1")).toBeInTheDocument();
-    expect(screen.getByText("o1")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-2-name")).toHaveTextContent("o1");
+  });
+
+  it("names a step without a resource by its type", () => {
+    renderRailroad({ workflowSteps: [{ type: "eddi://ai.labs.templating", extensions: {}, config: {} }] });
+    expect(screen.getByTestId("stage-0-name")).toHaveTextContent("Templating");
+  });
+
+  it("gathers consecutive steps of one type under a single header with a count", () => {
+    const apiStep = (i: number) => ({
+      type: "eddi://ai.labs.httpcalls",
+      extensions: {},
+      config: { uri: `eddi://ai.labs.apicalls/apicallstore/apicalls/a${i}?version=1` },
+    });
+    renderRailroad({
+      workflowSteps: [mockSteps[0]!, apiStep(1), apiStep(2), apiStep(3), mockSteps[2]!],
+    });
+    expect(screen.getByTestId("stage-group-1")).toBeInTheDocument();
+    expect(screen.getByTestId("stage-group-1-count")).toHaveTextContent("3");
+    // Every step is still its own selectable row, numbered by pipeline position.
+    for (const i of [0, 1, 2, 3, 4]) expect(screen.getByTestId(`stage-${i}`)).toBeInTheDocument();
+    expect(screen.queryByTestId("stage-group-0")).not.toBeInTheDocument();
   });
 
   it("shows live status indicators for running events", () => {
@@ -116,13 +140,10 @@ describe("PipelineRailroad", () => {
     });
     renderRailroad();
 
-    const stage1Icon = screen.getByTestId("stage-1").querySelector(".h-9")!;
-    const stage0Icon = screen.getByTestId("stage-0").querySelector(".h-9")!;
-
-    // Stage 1 was running, then failed → error: no longer amber/running
-    expect(stage1Icon.className).not.toContain("bg-warn-500/10");
-    expect(stage1Icon.className).not.toContain("animate-pulse");
+    // Stage 1 was running, then failed → error: no longer running
+    expect(screen.getByTestId("stage-1")).toHaveAttribute("data-status", "error");
+    expect(screen.getByTestId("stage-1-status").className).not.toContain("animate-pulse");
     // The error did NOT land on the payload's index (0) — stage 0 stays idle
-    expect(stage0Icon.className).toContain("bg-muted/50");
+    expect(screen.getByTestId("stage-0")).toHaveAttribute("data-status", "idle");
   });
 });

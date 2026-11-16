@@ -13,7 +13,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -204,5 +206,33 @@ public interface HealthTurnStoreContract {
         List<HealthTurn> rows = store().findByUserId("u", 1);
         assertEquals(1, rows.size());
         assertEquals("b", rows.get(0).executionId());
+    }
+
+    @Test
+    @DisplayName("the orphan sweep reads each conversation written since the instant once — rows and markers — and respects the limit")
+    default void conversationsUpdatedSince() {
+        Instant since = T0.minusSeconds(3_600);
+        store().upsert(row("recent", 0, "a", T0, 0.1, false));
+        store().upsert(row("recent", 1, "b", T0.plusSeconds(1), 0.1, false));
+        store().upsert(row("old", 0, "c", since.minusSeconds(1), 0.1, false));
+        store().upsert(row("edge", 0, "d", since, 0.1, false));
+        // A marker whose row never arrived, written after the instant.
+        store().markDiscarded(row("marked", 1, "e", T0, 0.1, false), List.of("ghost"));
+        // An old row re-written after the instant counts by its new updatedAt.
+        store().upsert(row("resumed", 0, "f", since.minusSeconds(86_400), 0.1, true));
+        store().upsert(row("resumed", 0, "f", T0, 0.2, false));
+
+        List<String> ids = new ArrayList<>();
+        store().forEachConversationUpdatedSince(since, 100, ids::add);
+        assertEquals(Set.of("recent", "edge", "marked", "resumed"), new HashSet<>(ids));
+        assertEquals(4, ids.size(), "distinct: " + ids);
+
+        List<String> limited = new ArrayList<>();
+        store().forEachConversationUpdatedSince(since, 2, limited::add);
+        assertEquals(2, limited.size(), limited.toString());
+
+        List<String> none = new ArrayList<>();
+        store().forEachConversationUpdatedSince(T0.plusSeconds(3_600), 100, none::add);
+        assertTrue(none.isEmpty(), none.toString());
     }
 }

@@ -20,20 +20,37 @@ public class HealthSettings {
 
     /** Default {@code eddi.health.queue-capacity}. */
     static final int DEFAULT_QUEUE_CAPACITY = 10_000;
+    /** Default {@code eddi.health.orphan-sweep-window}. */
+    static final Duration DEFAULT_ORPHAN_SWEEP_WINDOW = Duration.ofHours(48);
+    /** Default {@code eddi.health.orphan-sweep-max}. */
+    static final int DEFAULT_ORPHAN_SWEEP_MAX = 50_000;
 
     private final boolean enabled;
     private final int queueCapacity;
     private final Duration factsRetention;
+    private final Duration orphanSweepWindow;
+    private final int orphanSweepMax;
 
     @Inject
     public HealthSettings(@ConfigProperty(name = "eddi.health.enabled", defaultValue = "true") boolean enabled,
             @ConfigProperty(name = "eddi.health.queue-capacity", defaultValue = "10000") int queueCapacity,
-            @ConfigProperty(name = "eddi.health.facts-retention", defaultValue = "90d") Duration factsRetention) {
+            @ConfigProperty(name = "eddi.health.facts-retention", defaultValue = "90d") Duration factsRetention,
+            @ConfigProperty(name = "eddi.health.orphan-sweep-window", defaultValue = "48h") Duration orphanSweepWindow,
+            @ConfigProperty(name = "eddi.health.orphan-sweep-max", defaultValue = "50000") int orphanSweepMax) {
         this.enabled = enabled;
         this.queueCapacity = Math.max(1, queueCapacity);
-        this.factsRetention = factsRetention == null || factsRetention.isNegative() || factsRetention.isZero()
-                ? Duration.ofDays(90)
-                : factsRetention;
+        this.factsRetention = positiveOr(factsRetention, Duration.ofDays(90));
+        this.orphanSweepWindow = positiveOr(orphanSweepWindow, DEFAULT_ORPHAN_SWEEP_WINDOW);
+        this.orphanSweepMax = Math.max(1, orphanSweepMax);
+    }
+
+    /** The orphan-sweep settings at their defaults. */
+    HealthSettings(boolean enabled, int queueCapacity, Duration factsRetention) {
+        this(enabled, queueCapacity, factsRetention, DEFAULT_ORPHAN_SWEEP_WINDOW, DEFAULT_ORPHAN_SWEEP_MAX);
+    }
+
+    private static Duration positiveOr(Duration value, Duration fallback) {
+        return value == null || value.isNegative() || value.isZero() ? fallback : value;
     }
 
     /** Defaults, for tests. */
@@ -62,5 +79,20 @@ public class HealthSettings {
     /** {@link #factsRetention()} in whole days, at least 1. */
     public long factsRetentionDays() {
         return Math.max(1L, (factsRetention.toHours() + 23) / 24);
+    }
+
+    /**
+     * How far back the daily orphan sweep looks: the conversations of rows written
+     * within it are checked against the conversation store. Covers the race of a
+     * queued write landing after its conversation was deleted, with slack for a
+     * missed day. Never zero.
+     */
+    public Duration orphanSweepWindow() {
+        return orphanSweepWindow;
+    }
+
+    /** The most conversations one orphan sweep checks, at least 1. */
+    public int orphanSweepMax() {
+        return orphanSweepMax;
     }
 }

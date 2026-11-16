@@ -13,6 +13,7 @@ import com.mongodb.MongoException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Sorts;
@@ -114,7 +115,9 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     public MongoHealthTurnStore(MongoDatabase database) {
         this(database.getCollection(COLLECTION));
         // Rollups and drill-down read an agent's days; erasure finds rows by user and
-        // by conversation; retention deletes by day and markers by discardedAt.
+        // by conversation; retention deletes by day and markers by discardedAt; the
+        // orphan sweep finds recently written rows by updatedAt (and markers by
+        // discardedAt).
         turns.createIndex(Indexes.ascending(FIELD_AGENT, FIELD_DAY), new IndexOptions().name("idx_health_turns_agent_day").background(true));
         turns.createIndex(Indexes.ascending(FIELD_CONVERSATION, FIELD_STEP),
                 new IndexOptions().name("idx_health_turns_conversation").background(true));
@@ -122,6 +125,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         turns.createIndex(Indexes.ascending(FIELD_DAY), new IndexOptions().name("idx_health_turns_day").background(true));
         turns.createIndex(Indexes.ascending(FIELD_DISCARDED_AT),
                 new IndexOptions().name("idx_health_turns_discarded_at").sparse(true).background(true));
+        turns.createIndex(Indexes.ascending(FIELD_UPDATED), new IndexOptions().name("idx_health_turns_updated").background(true));
     }
 
     /** For tests: a collection without index creation. */
@@ -278,6 +282,33 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         } catch (MongoException e) {
             throw new HealthStoreException("Could not delete a conversation's health turns", e);
         }
+    }
+
+    @Override
+    public void forEachConversationUpdatedSince(Instant since, int limit, Consumer<String> consumer) {
+        // A $group, not distinct(): distinct answers in one document (16 MB) and
+        // takes no limit. allowDiskUse lets a large window group past the in-memory
+        // stage limit.
+        try (MongoCursor<Document> cursor = turns.aggregate(updatedSincePipeline(since, limit)).allowDiskUse(true).iterator()) {
+            while (cursor.hasNext()) {
+                Object conversationId = cursor.next().get("_id");
+                if (conversationId != null) {
+                    consumer.accept(conversationId.toString());
+                }
+            }
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
+    }
+
+    /**
+     * The distinct conversations of rows written since {@code since}, and of
+     * markers written since then, at most {@code limit}.
+     */
+    static List<Bson> updatedSincePipeline(Instant since, int limit) {
+        Date at = date(since);
+        return List.of(Aggregates.match(or(gte(FIELD_UPDATED, at), gte(FIELD_DISCARDED_AT, at))), Aggregates.group("$" + FIELD_CONVERSATION),
+                Aggregates.limit(Math.max(1, limit)));
     }
 
     @Override

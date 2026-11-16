@@ -24,6 +24,11 @@ import java.util.Map;
  * their conversations, including those of their group discussions (a member
  * conversation is owned by the discussion's user).
  * <p>
+ * A row still waiting in the health queue when the erasure runs does not land
+ * after it: the erasure's step 0 raises a {@link HealthErasureFence} on every
+ * node, and {@link HealthTurnRecorder} withholds a fenced user's rows and
+ * markers, and deletes again a row it wrote while the fence went up.
+ * <p>
  * A conversation deleted on its own ({@code ConversationPurgeService}) takes
  * its rows with it. One deleted by the conversation-retention sweep does not
  * need to: rows are kept {@code eddi.health.facts-retention} (90 days by

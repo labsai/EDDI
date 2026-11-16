@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.health.HealthTurnRecorder;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -145,7 +146,10 @@ class ConversationServiceSayHitlTest {
                 jsonSerialization,
                 meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
         conversationService.hitlPauseCommittedEvent = pauseCommittedEvent;
+        conversationService.healthTurnRecorder = healthTurnRecorder;
     }
+
+    private final HealthTurnRecorder healthTurnRecorder = mock(HealthTurnRecorder.class);
 
     @SuppressWarnings("unchecked")
     private final Event<HitlPauseCommittedEvent> pauseCommittedEvent = mock(Event.class);
@@ -545,6 +549,8 @@ class ConversationServiceSayHitlTest {
             verify(pauseCommittedEvent).fireAsync(announced.capture());
             assertEquals(CONVERSATION_ID, announced.getValue().conversationId());
             assertEquals(HitlDecision.pauseIdOf(memoryRef.get().getHitlPausedAt()), announced.getValue().pauseId());
+            // Agent Health sees a committed pause: settled.
+            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(true));
         }
     }
 
@@ -640,6 +646,8 @@ class ConversationServiceSayHitlTest {
             // pause.
             verify(scheduleStore, never()).createSchedule(any());
             verify(pauseCommittedEvent, never()).fireAsync(any());
+            // (d) Agent Health is told the pause was not stored: recorded unsettled.
+            verify(healthTurnRecorder).record(any(), isNull(), isNull(), anyLong(), eq(false), eq(false));
         }
 
         @Test

@@ -8,13 +8,17 @@ import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore.StateAndRevision;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -30,6 +34,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -216,6 +221,169 @@ class HealthTurnRecorderTest {
         assertEquals(0.0, dropped(HealthMetrics.REASON_QUEUE_FULL));
         assertEquals(0.0, dropped(HealthMetrics.REASON_STORE_ERROR));
         assertEquals(0.0, registry.get("eddi.health.queue.depth").gauge().value());
+    }
+
+    @Test
+    @DisplayName("a turn whose snapshot was not stored is inserted only if absent, never as paused, and discards nothing")
+    void uncommittedIsUnsettled() {
+        ConversationMemory memory = memory();
+        memory.setConversationState(ConversationState.AWAITING_HUMAN);
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+
+        recorder.record(memory, null, null, 5L, false, false);
+
+        ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
+        verify(store, timeout(5_000)).insertIfAbsent(row.capture());
+        assertFalse(row.getValue().paused());
+        verify(store, after(300).never()).upsert(any());
+        verify(store, never()).markDiscarded(any(), any());
+    }
+
+    @Test
+    @DisplayName("a committed pause is settled: upserted as paused")
+    void committedPauseIsSettled() {
+        ConversationMemory memory = memory();
+        memory.setConversationState(ConversationState.AWAITING_HUMAN);
+
+        recorder.record(memory, null, null, 5L, false, true);
+
+        ArgumentCaptor<HealthTurn> row = ArgumentCaptor.forClass(HealthTurn.class);
+        verify(store, timeout(5_000)).upsert(row.capture());
+        assertTrue(row.getValue().paused());
+        verify(store, never()).insertIfAbsent(any());
+    }
+
+    /**
+     * A row waiting in the health queue, or being written, while its user is erased
+     * or its conversation deleted must not survive the delete.
+     */
+    @Nested
+    @DisplayName("erasure and conversation delete against queued writes")
+    class ErasureAndPurge {
+
+        private IConversationMemoryStore conversations;
+        private HealthErasureFence fence;
+        private HealthTurnRecorder guarded;
+
+        @BeforeEach
+        @SuppressWarnings("unchecked")
+        void setUp() {
+            conversations = mock(IConversationMemoryStore.class);
+            when(conversations.getStateAndRevision(any())).thenReturn(new StateAndRevision(ConversationState.READY, 3L));
+            Instance<IConversationMemoryStore> conversationInstance = mock(Instance.class);
+            when(conversationInstance.isResolvable()).thenReturn(true);
+            when(conversationInstance.get()).thenReturn(conversations);
+            fence = new HealthErasureFence();
+            guarded = new HealthTurnRecorder(instance(store), conversationInstance, fence, HealthSettings.defaults(), new HealthMetrics(registry),
+                    CLOCK);
+        }
+
+        @AfterEach
+        void tearDown() {
+            release.countDown();
+            guarded.shutdown();
+        }
+
+        /** Occupies the worker with another conversation's row until released. */
+        private CountDownLatch blockWorker() {
+            CountDownLatch busy = new CountDownLatch(1);
+            doAnswer(inv -> {
+                HealthTurn turn = inv.getArgument(0);
+                if ("conv-blocker".equals(turn.conversationId())) {
+                    busy.countDown();
+                    release.await(30, TimeUnit.SECONDS);
+                }
+                return null;
+            }).when(store).upsert(any());
+            guarded.record(new ConversationMemory("conv-blocker", "agent-1", 1, "user-other"), null, null, null, false);
+            return busy;
+        }
+
+        @Test
+        @DisplayName("erasure while the row is queued: neither the row nor its discard markers are written")
+        void erasedWhileQueued() throws Exception {
+            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+            ConversationMemory memory = memory();
+            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+            guarded.record(memory, null, null, null, false);
+            assertEquals(1, guarded.queued());
+
+            // The erasure's step 0, then its delete of the user's rows.
+            fence.stopInFlightWork("user-1");
+            store.deleteByUserId("user-1");
+            release.countDown();
+
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
+            verify(store, never()).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
+            verify(store, never()).insertIfAbsent(any());
+            verify(store, never()).markDiscarded(any(), any());
+        }
+
+        @Test
+        @DisplayName("erasure while the row is being written: it is deleted again right after the write")
+        void erasedWhileWriting() throws Exception {
+            CountDownLatch writing = new CountDownLatch(1);
+            doAnswer(inv -> {
+                writing.countDown();
+                release.await(30, TimeUnit.SECONDS);
+                return null;
+            }).when(store).upsert(any());
+            guarded.record(memory(), null, null, null, false);
+            assertTrue(writing.await(5, TimeUnit.SECONDS));
+
+            // The erasure runs (and finds nothing yet) while the write is in flight.
+            fence.stopInFlightWork("user-1");
+            release.countDown();
+
+            InOrder order = inOrder(store);
+            order.verify(store, timeout(5_000)).upsert(any());
+            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+        }
+
+        @Test
+        @DisplayName("conversation deleted while the row was queued (on any node): the row and its markers are removed after the write")
+        void purgedWhileQueued() throws Exception {
+            assertTrue(blockWorker().await(5, TimeUnit.SECONDS));
+            ConversationMemory memory = memory();
+            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.HEALTH_DISCARDED_EXECUTIONS, List.of("old-exec")));
+            guarded.record(memory, null, null, null, false);
+
+            // The purge deletes the snapshot, then the conversation's health rows.
+            when(conversations.getStateAndRevision("conv-1")).thenReturn(new StateAndRevision(null, null));
+            store.deleteByConversationId("conv-1");
+            release.countDown();
+
+            InOrder order = inOrder(store);
+            order.verify(store).deleteByConversationId("conv-1");
+            order.verify(store, timeout(5_000)).upsert(argThat(turn -> "conv-1".equals(turn.conversationId())));
+            order.verify(store, timeout(5_000)).markDiscarded(any(), eq(List.of("old-exec")));
+            order.verify(store, timeout(5_000)).deleteByConversationId("conv-1");
+            assertTrueEventually(() -> dropped(HealthMetrics.REASON_ERASED) == 1.0);
+        }
+
+        @Test
+        @DisplayName("normal writes are unaffected: a live conversation keeps its row, and a store that cannot answer deletes nothing")
+        void normalWrites() {
+            guarded.record(memory(), null, null, null, false);
+            verify(store, timeout(5_000)).upsert(any());
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
+
+            when(conversations.getStateAndRevision(any())).thenReturn(null);
+            guarded.record(new ConversationMemory("conv-2", "agent-1", 2, "user-2"), null, null, null, false);
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 2.0);
+
+            verify(store, after(300).never()).deleteByConversationId(any());
+            assertEquals(0.0, dropped(HealthMetrics.REASON_ERASED));
+        }
+
+        @Test
+        @DisplayName("a failing cleanup never reaches the worker's caller")
+        void cleanupFailure() {
+            when(conversations.getStateAndRevision(any())).thenThrow(new IllegalStateException("db down"));
+            assertDoesNotThrow(() -> guarded.record(memory(), null, null, null, false));
+            assertTrueEventually(() -> registry.counter("eddi.health.recorded").count() == 1.0);
+            verify(store, after(300).never()).deleteByConversationId(any());
+        }
     }
 
     private static void assertTrueEventually(BooleanSupplier condition) {

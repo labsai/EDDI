@@ -360,7 +360,7 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
       maxWidth="max-w-lg"
       testId="uc-create-dialog"
     >
-      <div className="space-y-4">
+      <div className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor={intentId} className="mb-1 block text-xs font-medium text-muted-foreground">

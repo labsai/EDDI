@@ -197,14 +197,17 @@ public class ConversationPurgeService {
         }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
+        // After the snapshot, never before: a health row still queued (on any node) is
+        // removed by the recorder once it sees the conversation gone.
         deleteHealthTurns(conversationId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
     }
 
     /**
      * Deletes the conversation's Agent Health turn rows. Best effort, after the
-     * conversation is gone: the rows carry ids and counts, not content, are erased
-     * by user id on a GDPR erasure and expire with
+     * conversation is gone — which is what lets {@code HealthTurnRecorder} remove a
+     * row it writes later, from its queue: the rows carry ids and counts, not
+     * content, are erased by user id on a GDPR erasure and expire with
      * {@code eddi.health.facts-retention} — a failure here is not worth keeping a
      * conversation its owner deleted.
      */

@@ -21,9 +21,9 @@ import java.util.Map;
  * ({@code eddi.tenant.quota.cost-reservation.enabled}).
  * <p>
  * A model call costs at most {@code prompt tokens x input price + max output
- * tokens x output price}. A task is a single call, or - an agent-mode task - up
- * to {@code 1 + maxToolIterations} rounds, each with a prompt that can hold, at
- * most, the opening prompt plus the in-turn tool context cap
+ * tokens x output price}. A task is a single call, or - a task that runs the
+ * tool loop - up to {@code 1 + maxToolIterations} rounds, each with a prompt
+ * that can hold, at most, the opening prompt plus the in-turn tool context cap
  * ({@code maxToolContextTokens}). A cascade is every step, one after the other.
  * <p>
  * The prompt is sized from the messages that will be sent, at a deliberately
@@ -43,6 +43,12 @@ final class ModelCallBound {
     /**
      * The most the task's model phase can cost.
      *
+     * @param toolLoop
+     *            whether the phase runs the tool loop: the task has tools this turn
+     *            ({@link IAgentOrchestrator#offersTools}, which also sees the
+     *            workflow's httpcall and mcpcall tools) or answers through the
+     *            reply tool. {@link LlmConfiguration.Task#isAgentMode()} alone
+     *            undercounts a task whose tools are the workflow's
      * @param messages
      *            what the first request carries (system, history, user)
      * @param params
@@ -54,12 +60,12 @@ final class ModelCallBound {
      * @param defaultMaxOutputTokens
      *            the cap assumed for a model that sets none
      */
-    static double phaseMaxUsd(Task task, boolean cascadeActive, List<ChatMessage> messages, Map<String, String> params, String modelType,
-                              String modelName, int defaultMaxOutputTokens) {
+    static double phaseMaxUsd(Task task, boolean cascadeActive, boolean toolLoop, List<ChatMessage> messages, Map<String, String> params,
+                              String modelType, String modelName, int defaultMaxOutputTokens) {
         long promptTokens = promptTokens(messages);
         int rounds = 1;
         long toolTokens = 0;
-        if (task.isAgentMode()) {
+        if (toolLoop) {
             rounds += ToolLoopRunner.effectiveMaxToolIterations(task);
             toolTokens = toolContextTokens(task);
         }

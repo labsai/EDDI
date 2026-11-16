@@ -121,12 +121,12 @@ This is the standard way to use the LLM task - just connect to an LLM and start 
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
 | `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format. If it is a JSON Schema it is also validated against the parsed reply and sent natively to OpenAI, Azure OpenAI, Mistral and Gemini — see [Structured Output](#shape-validation-responseschema-and-nonblankfields) | ""                |
-| `addToOutput`              | boolean | Add response to conversation output                   | false             |
+| `addToOutput`              | boolean | Add response to conversation output. A turn that ran in agent mode (tools) adds it unless this is explicitly `"false"` | false             |
 | **Logging**                |         |                                                       |                   |
 | `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
 | `logResponses`             | boolean | Log API responses (sync and streaming)                | false             |
 | **API Configuration**      |         |                                                       |                   |
-| `temperature`              | string  | Model temperature (0-1)                               | Provider-specific |
+| `temperature`              | string  | Model temperature (range is provider-specific: 0–2 on OpenAI, 0–1 on Anthropic) | Provider-specific |
 | `maxTokens`                | string  | Maximum output tokens per response — see [Output Token Limits](#output-token-limits) | Provider-specific |
 | `timeout`                  | string  | Request timeout (milliseconds) — see [Timeouts](#timeouts-and-streaming) | Provider-specific |
 
@@ -357,10 +357,9 @@ Both are exposed as parameters:
       "type": "gemini-vertex",
       "description": "Google Gemini chat",
       "parameters": {
-        "publisher": "vertex-ai",
         "projectId": "your-project-id",
         "location": "us-central1",
-        "modelId": "gemini-pro",
+        "modelId": "gemini-2.5-flash",
         "temperature": "0.7",
         "timeout": "15000",
         "systemMessage": "You are a helpful assistant",
@@ -398,7 +397,7 @@ Both are exposed as parameters:
 
 | Parameter        | Effect                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------- |
-| `baseUrl`        | Ollama's address. Default `http://localhost:11434`, overridable deployment-wide with `EDDI_OLLAMA_DEFAULT_BASE_URL`. |
+| `baseUrl`        | Ollama's address. Unset, the client uses `http://localhost:11434`. `EDDI_OLLAMA_DEFAULT_BASE_URL` (`eddi.ollama.default-base-url`) is the base URL the setup wizard and the agent-setup tools write into a new agent when none is given; it does not change a task that omits `baseUrl`. |
 | `model`          | Model tag as `ollama list` reports it, e.g. `llama3.2:3b`.                                   |
 | `think`          | `"true"` / `"false"`. Unset leaves it to Ollama and the model — see below.                    |
 | `returnThinking` | `"true"` surfaces the separate `thinking` field instead of discarding it. Off by default.     |
@@ -807,7 +806,8 @@ preset, and are judged by OpenAI's capabilities.
 each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
 pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcript-max-bytes`) the
 gating assistant message is replayed with its thinking, unless that single message exceeds its
-64 KB cap: it is then persisted without the thinking, and those two providers can reject the
+64 KB cap: it is then persisted without its text and, if still too large, without the thinking
+too, and those two providers can reject the
 resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
 
 #### Self-hosted OpenAI-compatible servers
@@ -917,6 +917,12 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableBuiltInTools`       | boolean  | Enable built-in tools                            | false                  |
 | `builtInToolsWhitelist`    | string[] | Specific tools to enable (keys: see [Built-in Tools](#built-in-tools) and [Context-bound tools](#context-bound-tools-and-their-whitelist-keys)) | the standard built-in tools, plus user memory and recall when configured |
 | `tools`                    | string[] | Legacy: entries are ignored, a non-empty list only switches the task into agent mode. HTTP call tools come from `enableHttpCallTools` | (none)                 |
+| `enableHttpCallTools` / `enableMcpCallTools` | boolean | Expose every `httpcalls` / `mcpcalls` config of the workflow as tools — see [Custom HTTP Tools](#custom-http-tools) | true |
+| `a2aAgents`                | object[] | Remote A2A agents whose skills become tools — see [A2A client](a2a-protocol.md#client--consuming-remote-a2a-agents-as-tools) | (none) |
+| `toolApprovals`            | object   | Per-task tool-approval gate. When present it fully replaces the agent's `hitlConfig.toolApprovals` for this task — see [HITL](hitl.md#tool-level-approval-gating) | (agent-level setting) |
+| `agentOps`                 | object   | Caps for the agent-operations tools (`read_team_scorecard`, `propose_team_budget_raise` / `propose_team_budget_transfer`, `schedule_followup` / `list_followups` / `cancel_followup`), which stay off unless `builtInToolsWhitelist` names their keys — see [Agent-ops tools](agent-ops-tools.md) | (built-in caps) |
+| `modelCascade`             | object   | Try a cheap model first and escalate on low confidence — see [Model Cascade](model-cascade.md) | (none) |
+| `multimodal`               | object   | Per-task capability overrides `vision`, `documents`, `audio`: each `auto`, `on` or `off` — see [Attachments](attachments-guide.md#llm-multimodal-support) | all `auto` |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
 | `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
@@ -952,7 +958,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
 | `ragDefaults`              | object   | `maxResults` / `minScore` applied under `enableWorkflowRag`; falls back to each KB's own defaults | (KB defaults) |
 | `httpCallRag`              | string   | Name of an httpCall to execute as a search, injecting its response as `## Search Results:`. Needs no vector store and no workflow step, but calls an **external** search API — it cannot query an EDDI knowledge base | (none) |
-| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters. `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
+| `maxRagContextChars`       | int      | Ceiling on the assembled RAG context, in characters, per retrieval block (vector-store RAG and `httpCallRag` are capped independently). `-1` or `0` disables it and restores the older unbounded behaviour | 20000 |
 | `markRagProvenance`        | boolean  | Wrap retrieved context in a `[retrieved context — source '…' …]` … `[end of retrieved context]` envelope that marks it as data, not instructions, before it joins the system prompt. The envelope adds about 200 characters on top of `maxRagContextChars` | true |
 | **Prompt & History Limits** |         |                                                  |                        |
 | `maxSystemPromptChars`     | int      | Hard ceiling on the whole assembled system prompt, applied after RAG context, counterweight, identity masking and response-format blocks are appended. `-1` leaves it untouched | -1 |
@@ -1000,7 +1006,7 @@ Counterweights append behavioral safety instructions to the system prompt. Three
 | `counterweight.placement` | string | `suffix` (after system prompt) or `prefix` (before) | `suffix` |
 | `counterweight.customInstructions` | string[] | Custom instruction list that overrides the preset entirely | (none) |
 
-> **Note**: Both `enabled: true` **and** a `level` other than `normal` are required for counterweight to have any effect.
+> **Note**: `enabled: true` is always required. With the presets, a `level` other than `normal` is also required; non-empty `customInstructions` are injected whatever the `level`.
 
 **Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (names `counterweight_cautious` and `counterweight_strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
 
@@ -1102,14 +1108,75 @@ A `block` is a returned value, never an exception, so a block message can never 
 | Type | Phases | Finds | Parameters |
 |---|---|---|---|
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
-| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked; a card followed by its CVV or expiry, `4111 1111 1111 1111 123`, is found by checking the digit groups of the run, never by splitting an unseparated number), phone numbers (grouped, or unspaced with a leading `+`, e.g. `+15551234567`; an unspaced number without `+` is not treated as a phone number); rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `pii-redaction` | input, output | Personal identifiers, each checked by its format and check digit (or a keyword) and rewritten to `[REDACTED:<kind>]`. By default the standard set: e-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers and IBANs. Also available: IP addresses, passport machine-readable zones, dates of birth, and national identifiers of 27 countries — see [PII kinds and countries](#pii-kinds-and-countries). Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated kinds (default: the standard set; entity names such as `CREDIT_CARD` are accepted too); `countries` — comma-separated ISO codes whose identifiers are all added; `replacement` — e.g. `***` (`{kind}` is replaced by the kind). An unknown kind or country is a deploy warning |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
 | `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
+| `disclosure` | output | An answer that does not carry a fixed label (e.g. "— AI-assisted reply"); used with `redact` only, which adds the label once (an answer already ending — or, with `prepend`, starting — with it is left alone). | `text` — the label (required, at most 500 characters); `position` — `append` (default) or `prepend`; `separator` (default a blank line) |
+
+Every type above, and `classifier`, can also screen tool-call **arguments** through `toolCallGuardrails` — see [Tool-call guardrails](tool-call-guardrails.md).
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
+
+#### PII kinds and countries
+
+`pii-redaction` looks for the kinds in `patterns` (absent: `email`, `ssn`, `creditcard`, `phone`, `iban`) plus every identifier of the countries in `countries`. National identifiers are **opt-in**: each matches only its own country's format, so turning all of them on would only add false positives in texts that never mention those countries. Mix freely — a whole country, single identifiers, or both:
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "countries": "DE,AT,CH" } }
+```
+
+keeps the standard set and adds the German, Austrian and Swiss identifiers;
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,iban,fr_nir,gb_nhs" } }
+```
+
+replaces the standard set with exactly those four kinds; and
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,phone", "countries": "IN" } }
+```
+
+finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
+
+| Kind | What | Check |
+| --- | --- | --- |
+| `email`, `phone`, `creditcard`, `iban` | Any country. Cards and IBANs (ISO 13616, per-country length) carry check digits; an IBAN is found in upper or lower case, grouped in fours or unspaced; a phone number is grouped, or unspaced with a leading `+` | Luhn, mod-97 |
+| `ip_address` | IPv4 and IPv6 addresses | octet ranges, IPv6 group rules |
+| `passport_mrz` | The second line of a passport's machine-readable zone (ICAO 9303 TD3), any issuing country | four ICAO check digits |
+| `date_of_birth` | A date next to a birth keyword (`geb.`, `born`, `DOB`, `né le`, `fecha de nacimiento`, `生年月日`, …) | plausible date, keyword |
+| `ssn`, `us_itin` (US) | Social Security Number, Individual Taxpayer ID | number ranges |
+| `ca_sin` (CA) | Social Insurance Number | Luhn, keyword |
+| `br_cpf` (BR) | CPF | two mod-11 digits |
+| `mx_curp` (MX) | CURP | date, state code, check digit |
+| `gb_nino`, `gb_nhs` (GB) | National Insurance number; NHS number | prefix rules; mod-11 and keyword `NHS` |
+| `ie_pps` (IE) | Personal Public Service number | mod-23 letter |
+| `fr_nir` (FR) | Social security number (NIR), Corsica included | mod-97 key |
+| `it_fiscal_code` (IT) | Codice fiscale, omocodia included | check letter |
+| `es_dni` (ES) | DNI and NIE | mod-23 letter |
+| `pt_nif` (PT) | NIF | mod-11, keyword |
+| `nl_bsn` (NL) | BSN | eleven test, keyword |
+| `be_national_number` (BE) | National register number | mod-97, both centuries |
+| `de_tax_id`, `de_social_security`, `de_id_card` (DE) | Steuer-ID; Rentenversicherungsnummer; ID card or passport serial | MOD 11,10 and repetition rule; check digit; ICAO digit and keyword |
+| `at_social_security` (AT) | Sozialversicherungsnummer, including the fictitious months 13–15 | mod-11, birth date, keyword |
+| `ch_ahv` (CH) | AHV/AVS number (756…) | EAN-13 |
+| `pl_pesel` (PL) | PESEL | check digit, birth date, keyword |
+| `se_personnummer` (SE) | Personnummer, coordination numbers included | Luhn, date |
+| `dk_cpr` (DK) | CPR number | date, keyword (no check digit since 2007) |
+| `fi_hetu` (FI) | Henkilötunnus | mod-31 character |
+| `in_aadhaar`, `in_pan` (IN) | Aadhaar; Permanent Account Number | Verhoeff and keyword; format |
+| `cn_resident_id` (CN) | Resident identity card number | birth date, mod-11 |
+| `jp_my_number` (JP) | My Number | check digit, keyword |
+| `kr_rrn` (KR) | Resident registration number | date and sex digit (no check digit since 2020) |
+| `sg_nric` (SG) | NRIC and FIN (S, T, F, G and M series) | check letter |
+| `au_tfn`, `au_medicare` (AU) | Tax file number; Medicare card number | mod-11 and keyword; check digit and keyword |
+| `nz_ird` (NZ) | IRD number, up to 200,000,000 | mod-11, keyword |
+| `za_id` (ZA) | Identity number | Luhn, birth date |
+
+"Keyword" means a word such as `PESEL`, `NHS`, `BSN`, `Aadhaar` or `マイナンバー` must stand at most 40 characters before the value. It is required where the check digit alone lets about one in ten random numbers of that length through. The kinds run one after another in a fixed order: e-mail first, so an address is redacted whole even when its local part is an identifier, then the longer and checked formats, and the loose card and phone patterns last, so they cannot take an identifier's digit groups. On a text with none of the newer kinds the result is exactly what the first four kinds always produced. Every pattern is fixed and bounded, so a scan is linear in the text and needs no time budget.
 
 Patterns in `parameters` are author configuration evaluated against untrusted text. Keep them free of nested quantifiers (`(a+)+`). The `regex-filter` and `prompt-injection` patterns of one guardrail get **250 ms together per text**: a pattern that backtracks past that has not checked the text, which counts as *could not decide* (reason `pattern_timeout`) — its `failMode` applies. Failing closed (the default for `block`) the text is refused. Failing open (the default for `redact`) what the finished patterns found is still used: a `redact` keeps the rewrites they made (recorded as a `redact` with reason `pattern_timeout`), a `block` whose earlier pattern matched still blocks, and only when nothing matched is it a warning with the text passing. A pattern that is not a valid regular expression **fails the deploy** (the message names its line), rather than being dropped — which would leave a block-only filter that never fires.
 
@@ -1252,7 +1319,7 @@ The judge is called exactly like a [`classifier`](#the-classifier-type-a-safety-
 
 **The answer format is EDDI's, not yours.** After your rendered template EDDI appends a fixed instruction that lists the declared codes (with their fix texts, so the judge knows what each one means) and asks for exactly `{"issues": ["CODE", ...]}` — an empty list when nothing applies. The request asks for JSON where the provider takes it per request, with the codes as an `enum` where the provider enforces a schema (`openai`, `azure-openai`, `mistral`, `gemini`); nothing is baked into the cached model. The reply is read tolerantly — a Markdown code fence or prose around the object is fine, and a code is matched case-insensitively.
 
-**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
+**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, is longer than 16,384 characters, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
 
 **Feedback without injection.** A finding carries reason `judge_failed:<CODE>[,<CODE>…]` — your codes, so they are safe in audit records and metrics — and the reprompt's corrective message is EDDI's frame around **your fix texts** for those codes:
 
@@ -1345,7 +1412,7 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer, and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer (a [`citeSources`](#traceable-summaries-citesources) retry re-sends that same screened content, and the citation check reads it too), and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks the spend gate and that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; a reached spend limit or an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.) A reprompted answer is screened by the output guardrails again from the first one, but it is **not** run through `responseValidation` a second time — a guardrail that must enforce the answer's shape belongs in `outputGuardrails` (`json-object`) itself.
 - **Tool-call arguments** are screened by a separate list, [`toolCallGuardrails`](tool-call-guardrails.md): the same types and actions, run on the arguments of each tool call the model asks for — before the approval gate, and again, block-only, on an approved or edited call.
 - An `onError` fallback is the author's own text and is not screened.
@@ -1391,17 +1458,19 @@ When `enableBuiltInTools: true`, you can use these tools:
 
 ### Context-bound tools and their whitelist keys
 
-These tools are assembled from the conversation or the group rather than from the built-in catalog above. Each is selected by its own whitelist key and has its own availability condition.
+These tools are assembled from the conversation or the group rather than from the built-in catalog above. Each is selected by its own whitelist key and has its own availability condition; all of them also need `enableBuiltInTools: true`.
 
 | Whitelist key | Tool | Available when |
 | --- | --- | --- |
 | `usermemory` | Persistent user memory tool | `enableMemoryTools` is on; see [User Memory](user-memory.md) |
 | `conversationRecall` | Recall of turns the rolling summary compressed | `conversationSummary.enabled` is true |
-| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`, and `enableBuiltInTools` is on; see [Group Conversations](group-conversations.md) |
-| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true`, and `enableBuiltInTools` is on |
+| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`; see [Group Conversations](group-conversations.md) |
+| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true` |
+| `team_handoff` | `handoff_to_team` | The task's `teamHandoff` (or the group's handoff policy) names at least one target; see [Cross-Team Handoff](team-handoff.md) |
+| `team_scorecard`, `propose_team_budget`, `schedule_followup` | Agent-operations tools | Only when the whitelist names them — an omitted whitelist does not include them; see [Agent-ops tools](agent-ops-tools.md) |
 | `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted |
 
-An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact and group-task tools when the group policy enables them (and dynamic-agent tools under a governing group policy). If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
+An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact, group-task and handoff tools when their policy enables them (and dynamic-agent tools under a governing group policy); never the agent-operations tools. If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
 
 ### Tool response limits
 
@@ -1426,6 +1495,8 @@ An omitted whitelist therefore means the standard built-in tools plus user memor
 | `directiveAppliesToSources` | all | Narrow directive handling to provenance tags (`builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`); provenance marking is never narrowed |
 | `exemptTools` | none | Dispatch names exempt from directive handling |
 
+Directive handling sees the **whole** result, before [`toolResponseLimits`](#tool-response-limits) cuts it. The pages `paginate` stores (fetched later through the built-in `fetch_page`) and the text `summarize` sends to its model are already screened under the tool's own source, and a summary is screened again before the model sees it. So `block` also withholds a result whose directive sits in the part a `headTail` or `truncate` cut drops. The `tool_result` trace entry shows the screened text, without the envelope.
+
 See also [MCP Client](mcp-client.md).
 
 Every built-in parameter carries a description in the tool schema the model receives (for example
@@ -1446,22 +1517,63 @@ Some tools require API keys or external configuration to function. These are con
 
 #### Web Search Tool
 
-By default, the tool uses **DuckDuckGo** (HTML scraping), which requires no configuration.
+`eddi.tools.websearch.provider` picks where `searchWeb` and `searchNews` go
+(`searchWikipedia` always asks Wikipedia):
 
-To use **Google Custom Search** (more reliable/structured), configure these properties:
+| Provider | Key | Default price per call | What it returns |
+| --- | --- | --- | --- |
+| `duckduckgo` (default) | none | $0.001 | DuckDuckGo's Instant Answer API — an abstract and related topics, **not** a ranked results page. Fine for definitions, thin for research |
+| `brave` | `eddi.tools.websearch.brave.api-key` | $0.005 | The [Brave Search API](https://brave.com/search/api/) web endpoint, from Brave's own index: up to 10 ranked results with title, snippet and URL |
+| `google` | `eddi.tools.websearch.google.api-key` + `.cx` | $0.005 | Google's Custom Search JSON API. **Deprecated** — see below |
+
+**Brave Search API (recommended paid provider).** Create a key in the
+[Brave Search API dashboard](https://api-dashboard.search.brave.com/) on the
+*Search* plan — $5 per 1,000 requests, with $5 of free usage each month
+(about 1,000 searches) — then:
 
 ```properties
-# In application.properties
+eddi.tools.websearch.provider=brave
+eddi.tools.websearch.brave.api-key=YOUR_BRAVE_KEY
+# or keep it in the secrets vault:
+# eddi.tools.websearch.brave.api-key=${vault:brave-search}
+```
+
+Docker: `EDDI_TOOLS_WEBSEARCH_PROVIDER=brave`, `EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...`.
+The key is sent in the `X-Subscription-Token` header, never in the URL, and is
+stripped on a cross-origin redirect. A `${vault:...}` reference that the vault
+cannot resolve fails the search rather than being sent as the key.
+
+Brave's terms allow results to be used inside your application but forbid
+storing them beyond "transient storage required for operation" and using them to
+train or fine-tune models. EDDI's 30-minute tool-result cache is transient;
+results also stay in the conversation memory like every tool result, so check
+that against your plan (Brave sells plans with storage rights) if you keep
+conversations for long.
+
+**Google Custom Search (deprecated).** Google closed the Custom Search JSON API
+to new customers and [shuts it down on 2027-01-01](https://developers.google.com/custom-search/v1/overview).
+Existing keys keep working until then, and EDDI logs a startup WARN while
+`provider=google` is set. Move to `brave` before that date.
+
+```properties
 eddi.tools.websearch.provider=google
 eddi.tools.websearch.google.api-key=YOUR_GOOGLE_API_KEY
 eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 ```
 
-**Docker Environment Variables:**
+A paid provider configured without its key falls back to DuckDuckGo, and the
+startup log names the missing property — but the call is still priced as the
+configured provider, so a budget never undercounts. An unknown provider value
+also falls back to DuckDuckGo with a startup WARN.
 
-- `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
-- `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
-- `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+**Pricing.** The default price per search is a property of the provider, not a
+constant of the build: `$0.005` for `brave` and `google`, `$0.001` for
+`duckduckgo`. If your contract differs, set `eddi.tools.websearch.price-per-call`
+(dollars per call; `0` makes searches free) and it replaces the provider default
+for whichever provider is configured. A value that is not a finite, non-negative
+number is ignored with a startup WARN. A per-agent
+[`toolPricing`](#agent-mode-parameters) entry (`{"websearch": 0.002}`) still wins
+over both.
 
 #### Web Scraper Tool
 
@@ -1557,7 +1669,7 @@ In addition to built-in tools, your agent gets access to the EDDI HTTP calls con
 
 ### Configuration
 
-Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
+Exposure is controlled by `enableHttpCallTools` (default `true`). Every `eddi://ai.labs.httpcalls` step in the agent's workflow (or its alias `eddi://ai.labs.apicalls`) is discovered automatically — there is no per-call list to maintain. Set it to `false` to expose none of them.
 
 ```json
 {
@@ -1655,7 +1767,7 @@ The LLM task supports advanced pre-request and post-response processing for fine
 - **preRequest.propertyInstructions**: Defines properties to be set before making the request to the LLM API
   - **name**: The property name
   - **valueString**: The value to be assigned (supports templating)
-  - **scope**: The scope of the property (`step`, `conversation`, `longTerm`)
+  - **scope**: The scope of the property (`step`, `conversation`, `longTerm`, or `secret`, which stores the value in the secrets vault)
 
 #### Post-Response Configuration
 
@@ -1883,8 +1995,8 @@ exactly as before.
 
 | Setting                 | Description                                                                                                                  | Default |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
-| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts). Capped at 600000 (10 minutes) | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it. Capped at 60000; a negative value means the default | 1500    |
 
 **Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
 `say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
@@ -1908,6 +2020,8 @@ HITL resume starts a turn without one.
   and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
   `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
   passed, in which case the call fails fast with a clear message.
+- **Tool calls**: once the deadline has passed, a tool call the model asks for is not run; the
+  model gets an error result saying so.
 
 Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
 deadline.
@@ -1951,6 +2065,8 @@ back into the full text through the `conversationRecall` built-in tool.
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 | `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
 | `summarizationPrompt`          | string  | Replaces the built-in summarizer instructions entirely. The built-in prompt asks for goals, decisions and their reasons, corrections and commitments, and tells the model to copy every opaque identifier (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names) exactly as written. A custom prompt gets none of that, so restate the identifier rule if your agent deals in order numbers, ticket ids or links | (built-in) |
+| `citeSources`                  | boolean | Ask for a citation on every point and check the answer before it is stored — see [Traceable summaries](#traceable-summaries-citesources). While false, nothing is checked and the prompt is unchanged | false   |
+| `onValidationFailure`          | string  | What happens to a summary that fails the `citeSources` check: `keep`, `retry_once` or `fallback_to_previous`. Ignored while `citeSources` is false | keep    |
 | `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
 Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
@@ -1961,6 +2077,75 @@ the opening (`CONVERSATION_START`) step and turn 1 the user's first message. A r
 > `conversationRecall` is one of them. Enabling the rolling summary on a task whose whitelist does
 > not include `conversationRecall` leaves the model unable to drill back into summarized turns — it
 > answers from the condensed view with no error and no log line.
+
+#### Traceable summaries (`citeSources`)
+
+A summary is prose a model wrote, and nothing in it says which turn a point came from — or whether
+a number in it was in the conversation at all. With `citeSources: true` the summary becomes
+extractive and checkable:
+
+```json
+{
+  "conversationSummary": {
+    "enabled": true,
+    "citeSources": true,
+    "onValidationFailure": "retry_once"
+  }
+}
+```
+
+**The prompt.** The summarizer is told to end every bullet point with the turns it is based on —
+`[turn 5]`, `[turns 4-7]`, `[turns 4-7, 9]` — to copy every number exactly as written, and to write
+"unclear in source" rather than guess. The rules are appended to the built-in prompt and to a
+custom `summarizationPrompt` alike. The turn numbers are the ones the summarizer input labels the
+turns with and `conversationRecall` reads: conversation step indices, 0-based, turn 0 being the
+opening step. `turn`/`turns` and `step`/`steps` are both accepted.
+
+**The check** runs after the call, without a model, on the summary split into units (a bullet with
+its continuation lines, or any other line on its own):
+
+- Every citation must lie in the summarized range: the new batch `[previous boundary, new boundary)`,
+  plus `[0, previous boundary)` when there is a previous summary. A citation of a turn still in the
+  recent window, or of an earlier turn when there is no previous summary, fails.
+- Every bullet point must carry at least one citation. Other lines (headings, prose) need one only
+  for the numbers they state.
+- Every number in a unit must appear **verbatim** in the turns the unit cites. A turn's text is its
+  user input and agent output **as the summarizer saw it** — after the input guardrails were
+  re-applied (below), and, for a turn cut to fit `maxCharsPerUpdate`, only the part of it the request
+  carried — without the `Turn N` labels. A number is a run of digits with optional `,`/`.` separators between digit groups,
+  an optional leading `-` (not after a letter or digit, so the `7` of `4-7` has none) and an optional
+  trailing `%`; `1,000` matches only `1,000` — not `1.000`, `1000` or `1,000.0` — and `10%` does not
+  match `10`. Not checked: the indices inside citations, unbracketed references such as `turn 5` or
+  `steps 3-4`, and a numbered-list marker (`1.`) at the start of a line.
+- **Points carried over from the previous summary.** An update sends the previous summary plus the
+  new turns; the old turns themselves are not sent again. A citation of a turn before the previous
+  boundary is therefore checked against the **previous summary's text** (its own citation indices
+  removed), the only source of those turns the summarizer saw. A previous summary written before
+  `citeSources` was switched on has no citations: the model is told to cite its whole range (the
+  heading names it), and its numbers are taken on trust from that summary.
+
+**On failure**, `onValidationFailure` decides; each checked summary is counted on
+`eddi.summary.citation.checks{source="conversation",outcome}` ([metrics](metrics.md#conversation-summarization-metrics)):
+
+| Value | What happens | `outcome` |
+| --- | --- | --- |
+| `keep` *(default)* | The summary is stored anyway, with a WARN listing the problems | `kept` |
+| `retry_once` | One more summarizer call, with the problems appended to the instructions. It sends the same, already screened content, is asked of the spend check (conversation ceiling and tenant budget) first like the first call, and its tokens are added to the first call's, so the step records and prices both. If it fails the check too, throws, comes back empty or is refused by the spend check, it falls back | `retried` on success, else `fallback` |
+| `fallback_to_previous` | The new summary is discarded. The previous summary and its boundary stay, so the turns past it keep reaching the model verbatim, and the next turn tries again | `fallback` |
+
+An empty answer fails the check too ("the summary is empty"), so the policy applies to it as well: `retry_once` makes its
+corrective call, and `keep`, having nothing to keep, falls back (`fallback`). With `citeSources` off an empty answer is
+neither checked nor counted, and the next turn tries again.
+
+A passing summary counts as `passed`. Note what `fallback` costs: like a failed summarizer call, it
+retries on the next turn — a model that never cites correctly pays for a summarizer call on every
+turn while the verbatim window grows (up to `maxTurnsPerUpdate` turns per attempt). That is why the
+default is `keep`, and why a steady `fallback` rate is worth an alert.
+
+The summary stays a derived view: the check reads conversation memory and never changes it, and a
+failing summary only ever replaces the previous summary property or leaves it alone. To read what a
+citation points at, the model passes it to `conversationRecall` as it stands — `[turns 4-7, 9]`
+returns turns 4 to 7 and 9 (each once, at most `maxRecallTurns`). A range that runs past the summarized turns is cut at the last one; a citation wholly outside them, or a bracket that is not a list of turn numbers (`[turn -1]`, `[turn abc]`), names no turn and returns a note saying so — it is never attributed to another turn.
 
 ### In-Turn Tool Context Budget
 
@@ -2043,7 +2228,7 @@ default: without it a result is passed through at full length.
 | `headTail` | The first 70% and the last 30% of the limit are kept, with a `[TRUNCATED: …]` note in place of the middle. The end of a result is where exit codes, error messages and totals usually are |
 | `truncate` | Only the start is kept, followed by the note. The default before 6.7; set it explicitly to keep that behaviour                                                              |
 | `paginate` | The first page is returned with a `responseId` the model pages through with `fetch_page`. Falls back to `truncate` outside a conversation or above 500,000 characters        |
-| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit                   |
+| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit. A task `type` written as `${vars:...}` is resolved first, as for the task itself |
 
 An unknown strategy name is treated as `truncate`.
 
@@ -2438,8 +2623,9 @@ The check runs *before* each call and uses `<=`, so the call that crosses the
 ceiling still completes and the next one is refused with
 `Error: Budget exceeded for conversation <id>`.
 
-Default per-call prices: `webscraper` $0.002, `websearch` $0.001, `pdfreader`
-$0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
+Default per-call prices: `webscraper` $0.002, `websearch` $0.001 with
+`duckduckgo` and $0.005 with `brave` or `google` (the
+`eddi.tools.websearch.provider` in force, or `eddi.tools.websearch.price-per-call` when set), `pdfreader` $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
 `textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
 and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
 Negative `toolPricing` values are clamped to 0.0.
@@ -2979,7 +3165,7 @@ Up to three violations are listed, joined by `; `. Reasons contain only the keyw
 
 ### Using with Output Configuration
 
-When `convertToObject=true`, the LLM's JSON response is stored in conversation memory as a parsed object. You can then reference its fields in the Output Configuration:
+When `convertToObject=true`, the LLM's JSON response is a parsed object in the task's template data, under `responseObjectName` (or the task id). To read it in a later Output Configuration, store it as a property in `postResponse` — for example `{"name": "aiOutputObject", "fromObjectPath": "aiOutput", "scope": "conversation"}` with `responseObjectName: "aiOutput"` (see [Post-Response Configuration](#post-response-configuration)). You can then reference its fields:
 
 ```json
 {
@@ -3109,7 +3295,10 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 
 | Field | Meaning | Default |
 | --- | --- | --- |
+| `enabled` | Master switch of the `on…` policies below: while it is `false` none of them runs | `false` |
 | `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
+| `onRefusal`, `refusalPatterns` | A reply that starts (trimmed, case-insensitively) with one of `refusalPatterns`; `retry` is not supported here (treated as `warn`) | `ignore`; `["i'm sorry, i can't", "i cannot", "i'm not able to", "as an ai"]` |
+| `onStreamingTimeout` | The streaming backstop fired; `retry` is not supported here (treated as `warn`) | `warn` |
 | `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `wrap` (with `wrapField`) wraps a plain-text reply into an object with no model call, see [Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call); `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
 | `onSchemaMismatch` | A reply that parses but breaks the response shape (`responseSchema` or `nonBlankFields`, see above). `retry` re-asks like `onInvalidJson`, with the violation (for example `nonBlank: $.answer` or `schema: $.answer required`) as the corrective message's `{reason}`; `ignore` and `warn` keep the parsed object; `fallback` and `error` act as usual | `ignore` |
 | `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
@@ -3171,7 +3360,7 @@ Transient provider errors, rate limits and timeouts are **never** counted (and n
 
 ### Debugging
 
-When `convertToObject=true`, the raw LLM response is **always** persisted in conversation memory (key: `langchain:data`) even if JSON parsing fails. This ensures you can inspect what the LLM actually returned via the conversation log.
+When `convertToObject=true`, the raw LLM response is **always** persisted in conversation memory (key: `langchain:<type>:<taskId>`, e.g. `langchain:openai:myChat`) even if JSON parsing fails. This ensures you can inspect what the LLM actually returned via the conversation log.
 
 ### Tips
 
@@ -3209,8 +3398,8 @@ MongoDB and imported from ZIPs — the one backward-compatibility boundary this
 codebase has. Silently ignoring a parameter an author set deliberately would be
 worse than honouring it: an agent that genuinely wants its greeting withheld
 would start sending it, with no diagnostic. So the flag keeps working exactly as
-before, and `LlmTask` logs a WARN naming the task the first time each configured
-task uses it.
+before, and `LlmTask` logs a WARN naming the task each time a configuration that
+sets it is loaded (at deploy time, not on every turn).
 
 **What to do:** delete it from the task. Keep it only if that agent must really
 withhold its opening greeting from the model — which is a presentation choice,
@@ -3264,7 +3453,7 @@ not a provider requirement.
 ### Response Not Added to Output
 
 - **Problem**: LLM response not visible to user
-- **Solution**: Set `addToOutput: "true"` in parameters, or configure `postResponse.outputBuildInstructions`
+- **Solution**: Set `addToOutput: "true"` in parameters, or configure `postResponse.outputBuildInstructions`. (A turn that ran in agent mode adds the answer by itself unless `addToOutput` is `"false"`.)
 
 ---
 
@@ -3282,7 +3471,7 @@ LlmTask.execute(memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext) — the context carries the memory
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
-      └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
+      └─→ Rate Limiter → Cache Check → Quota → Execute (timeout) → Cost Tracker → Result
 ```
 
 ### Implicit Context

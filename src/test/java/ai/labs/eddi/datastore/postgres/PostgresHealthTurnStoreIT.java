@@ -58,6 +58,6 @@ class PostgresHealthTurnStoreIT extends PostgresTestBase implements HealthTurnSt
             }
         }
         assertTrue(indexes.containsAll(List.of("health_turns_pkey", "idx_health_turns_agent_day", "idx_health_turns_user", "idx_health_turns_day",
-                "idx_health_turns_discarded_at")), indexes.toString());
+                "idx_health_turns_discarded_at", "idx_health_turns_updated")), indexes.toString());
     }
 }

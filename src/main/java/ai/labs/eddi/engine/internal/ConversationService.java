@@ -112,6 +112,7 @@ import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
@@ -232,6 +233,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     AgentConfigurationCache agentConfigurationCache;
 
     /**
+     * Titles each conversation from its first usable message (see
+     * {@link ConversationTitleService}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} means no titles are written.
+     */
+    @Inject
+    ConversationTitleService conversationTitleService;
+
+    /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
      * reason as {@link #attachmentStore}; {@code null} (a directly constructed
      * instance) means the feature is off.
@@ -348,6 +357,16 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
     boolean captureDeadLetterInput = true;
+
+    /**
+     * Strict plan binding for the whole deployment: a human HITL decision on a
+     * pause that has a plan hash must carry it ({@code HitlPlanBinding}). Off by
+     * default so clients that predate plan hashing keep working; an agent can still
+     * require it for itself with {@code hitlConfig.requirePlanHash}. Field-injected
+     * with its default for the directly constructed tests.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
 
     /**
      * Turns this node runs at once, queued or executing; one more is refused with
@@ -640,6 +659,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
+
     /**
      * Rejects new work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
@@ -652,12 +677,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
      */
-    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    final ConversationHitlService conversationHitlService;
-
-    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
-    private final ConversationStepRunner conversationStepRunner;
-
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(
@@ -1651,6 +1670,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                             reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            // Titles the conversation on the turn of its first usable message;
+                            // a model-written title is generated in the background. Never throws.
+                            if (conversationTitleService != null) {
+                                conversationTitleService.afterTurn(returnConversationMemory, rerunOnly);
+                            }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
@@ -3235,16 +3259,25 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Hands a finished turn — clean, failed or paused — to Agent Health, which
      * copies what it needs and writes on its own worker. Independent of the alert
      * hook and of {@code eddi.alerts.enabled}; never throws.
+     *
+     * @param committed
+     *            the turn's snapshot was stored; {@code false} records it unsettled
+     *            (see {@link HealthTurnRecorder#record})
      */
-    void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs) {
-        reportHealthTurn(memory, null, wait, durationMs);
+    void reportHealthTurn(IConversationMemory memory, ConversationStepRunner.TurnWait wait, long durationMs, boolean committed) {
+        reportHealthTurn(memory, null, wait, durationMs, committed);
     }
 
     /**
      * As above, naming the conversation when the memory does not carry its id yet
-     * (the start turn).
+     * (the start turn, recorded once stored).
      */
     void reportHealthTurn(IConversationMemory memory, String conversationId, ConversationStepRunner.TurnWait wait, long durationMs) {
+        reportHealthTurn(memory, conversationId, wait, durationMs, true);
+    }
+
+    void reportHealthTurn(IConversationMemory memory, String conversationId, ConversationStepRunner.TurnWait wait, long durationMs,
+                          boolean committed) {
         HealthTurnRecorder recorder = healthTurnRecorder;
         if (recorder == null || memory == null) {
             return;
@@ -3252,7 +3285,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             // An abandoned wait: the turn may still run, and what it leaves is unknown.
             boolean abandoned = wait == ConversationStepRunner.TurnWait.TIMED_OUT || wait == ConversationStepRunner.TurnWait.INTERRUPTED;
-            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned);
+            recorder.record(memory, conversationId, ConversationStepRunner.classifyTurnOutcome(memory, wait), durationMs, abandoned, committed);
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not hand a turn to Agent Health: %s", e.getMessage());
         }
@@ -3261,6 +3294,12 @@ public class ConversationService implements IConversationService, UserErasurePar
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
         return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
+    }
+
+    /** See {@link ConversationStepRunner#waitForExecutionFinishOrTimeout}. */
+    boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
+                                            IConversationMemory memory, Future<Void> future, BooleanSupplier committed) {
+        return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future, committed);
     }
 
     /** See {@link ConversationStepRunner#fenceRaised}. */

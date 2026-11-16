@@ -99,6 +99,10 @@ An SVG opened directly is a document on EDDI's own origin, so an SVG is refused 
 - a character reference (`&#…;`)
 - an `@import`
 - an `href`, `xlink:href` or CSS `url()` that points anywhere except `#fragment` or `data:image/…`
+- a CSS `image-set()`, which loads the image its string names without any `url()`
+- a backslash, anywhere. CSS decodes escapes — in a `<style>` element, a `style` attribute and every presentation attribute (`fill`, `filter`, `mask`, …) alike — so `u\72l(` is `url(` and `@\69mport` is `@import` to a browser, and none of the checks above would see them. An editor that records a Windows path in its metadata (Inkscape's `inkscape:export-filename="C:\…"`) trips this too: export the logo as a plain or optimized SVG, which leaves that metadata out
+
+The images in `eddi.branding.assets-dir` go through the same checks at startup, and a refused one fails startup with an error naming the file.
 
 Every SVG is additionally served with a sandboxing `Content-Security-Policy`, so it cannot run script even if a check were bypassed.
 

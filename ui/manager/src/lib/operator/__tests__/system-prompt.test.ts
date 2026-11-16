@@ -1213,6 +1213,20 @@ describe("batched changes: the plan shape the operator is taught", () => {
   });
 });
 
+describe("the whole prompt renders as a Qute template", () => {
+  it("names no Qute namespace but the ones EDDI registers (vault, connection, caller)", () => {
+    // The backend renders the prompt on every turn, and `{name:` is a namespace
+    // expression to Qute: with no resolver for it the whole render fails, and the
+    // model is handed the raw template (`eddi_parser_semantic_fallback_total{outcome:
+    // match, …}` did exactly that). Section tests only see their own section.
+    const lists = [READ_ENDPOINTS, WITH_A_WRITE];
+    for (const endpoints of lists) {
+      const body = buildOperatorPromptBody(endpoints);
+      expect(body.match(/\{(?!(?:vault|connection|caller):)[A-Za-z_][\w-]*\s*:/g) ?? []).toEqual([]);
+    }
+  });
+});
+
 describe("conversation ratings", () => {
   const RATING_READS = ["GET /ratings", "GET /ratings/summary", "GET /ratings/attention-count"];
 
@@ -1339,5 +1353,25 @@ describe("6.7 feature knowledge in the quick reference (no endpoint needed)", ()
     ]) {
       expect(body).toContain(page);
     }
+  });
+});
+
+describe("Qute namespace safety of the whole prompt body", () => {
+  // The backend renders the body as a Qute template on every turn. `{name: ...}`
+  // is read as a namespace expression, and a namespace the engine has no resolver
+  // for fails the render, so the model receives the prompt unrendered. #1318 wrote
+  // a metric as `eddi_..._total{outcome: match, no_match}` and broke the Operator
+  // Activation E2E on main. Describe a metric tag in words, never as `{tag: ...}`.
+  const KNOWN_NAMESPACES = new Set(["vault", "connection", "caller"]);
+
+  it.each([
+    ["read-only grants", READ_ENDPOINTS],
+    ["read and write grants", [...READ_ENDPOINTS, ...WRITE_ENDPOINTS]],
+  ])("opens no brace with an unknown `name:` namespace (%s)", (_label, endpoints) => {
+    const body = buildOperatorPromptBody(endpoints);
+    const unknown = [...body.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)]
+      .map((m) => m[1] ?? "")
+      .filter((ns) => !KNOWN_NAMESPACES.has(ns));
+    expect(unknown).toEqual([]);
   });
 });

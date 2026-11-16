@@ -322,6 +322,24 @@ describe("useConversationHistory", () => {
     );
     expect(result.current.fetchStatus).toBe("idle");
   });
+
+  // It shares its cache entry with the resume below, so it must ask the same
+  // question: the caller's own conversations, not every user's an admin is shown.
+  it("lists only the caller's own conversations", async () => {
+    const requested: URL[] = [];
+    server.use(
+      http.get("*/conversationstore/conversations", ({ request }) => {
+        requested.push(new URL(request.url));
+        return HttpResponse.json([]);
+      }),
+    );
+    const { result } = renderHook(
+      () => useConversationHistory("agent-1"),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(requested.map((url) => url.searchParams.get("mine"))).toEqual(["true"]);
+  });
 });
 
 describe("useStartConversation", () => {
@@ -1061,6 +1079,59 @@ describe("useSendMessage", () => {
       expect(
         useChatStore.getState().messages.some((m) => m.content === "Earlier answer"),
       ).toBe(true);
+    });
+
+    // An admin's listing holds every user's conversations. Resuming the newest
+    // READY one put the admin into an end user's conversation, and the next
+    // message ran as that user: their tools, properties and long-term memory.
+    it("never resumes another user's conversation, even one an admin is shown", async () => {
+      const requested: URL[] = [];
+      server.use(
+        http.get("*/conversationstore/conversations", ({ request }) => {
+          const url = new URL(request.url);
+          requested.push(url);
+          if (url.searchParams.get("mine") === "true") return HttpResponse.json([]);
+          return HttpResponse.json([
+            {
+              resource: "eddi://ai.labs.conversation/conversationstore/conversations/alice-1",
+              createdOn: Date.now() - 60_000,
+              lastModifiedOn: Date.now(),
+              agentId: "agent1",
+              agentVersion: 1,
+              userId: "alice",
+              conversationState: "READY",
+              environment: "production",
+            },
+          ]);
+        }),
+        http.get("*/agents/alice-1", () =>
+          HttpResponse.json({
+            conversationSteps: [{ conversationStep: [{ key: "input:initial", value: "alice's question" }] }],
+            conversationOutputs: [{ output: [{ type: "text", text: "alice's answer" }] }],
+          }),
+        ),
+        http.post("*/agents/agent1/start", () =>
+          HttpResponse.json(null, {
+            status: 201,
+            headers: {
+              Location: "eddi://ai.labs.conversation/conversationstore/conversations/own-1",
+            },
+          }),
+        ),
+        http.get("*/agents/own-1", () =>
+          HttpResponse.json({ conversationSteps: [], conversationOutputs: [] }),
+        ),
+      );
+
+      const { result } = renderHook(() => useResumeOrStartConversation(), {
+        wrapper: createWrapper(),
+      });
+      result.current.mutate({ agentId: "agent1", environment: "production" });
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(requested.map((url) => url.searchParams.get("mine"))).toEqual(["true"]);
+      expect(useChatStore.getState().conversationId).toBe("own-1");
+      expect(useChatStore.getState().messages.some((m) => m.content === "alice's answer")).toBe(false);
     });
 
     it("starts a new conversation when the history request fails", async () => {

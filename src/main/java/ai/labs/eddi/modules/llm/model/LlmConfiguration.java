@@ -427,9 +427,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Limits for the agent-operations tools ({@code read_team_scorecard},
-         * {@code propose_team_budget_change}, {@code schedule_followup}). The tools
-         * themselves are off unless named in {@code builtInToolsWhitelist}; this only
-         * tunes their caps. See {@link AgentOpsConfig}.
+         * {@code propose_team_budget_raise}, {@code propose_team_budget_transfer},
+         * {@code schedule_followup}). The tools themselves are off unless their keys
+         * ({@code team_scorecard}, {@code propose_team_budget},
+         * {@code schedule_followup}) are named in {@code builtInToolsWhitelist}; this
+         * only tunes their caps. See {@link AgentOpsConfig}.
          *
          * @since 6.7.0
          */
@@ -815,10 +817,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         // === Helper Methods ===
 
         /**
-         * Determines if this task should run in agent mode (with tools). Note:
-         * enableHttpCallTools is NOT a standalone trigger — it only enhances agent mode
-         * when already triggered by tools, builtInTools, or a2aAgents. Httpcall and
-         * mcpcall auto-discovery is checked at execution time.
+         * Whether the task configures tools of its own: {@code tools},
+         * {@code enableBuiltInTools} or {@code a2aAgents}. It does not say whether the
+         * task runs the tool loop: the tools a workflow's httpcalls and mcpcalls
+         * contribute (unless {@code enableHttpCallTools} / {@code enableMcpCallTools}
+         * is {@code false}) and an attachment-reading tool are offered too, and only
+         * the tool assembly of the turn sees them — at runtime ask
+         * {@code IAgentOrchestrator#offersTools}, at configuration time
+         * {@link #usesTools(boolean, boolean)}.
          * <p>
          * {@code @JsonIgnore} because this is derived state, not stored state: it is a
          * pure function of {@code tools}, {@code enableBuiltInTools} and
@@ -835,6 +841,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public boolean isAgentMode() {
             return (tools != null && !tools.isEmpty()) || (enableBuiltInTools != null && enableBuiltInTools)
                     || (a2aAgents != null && !a2aAgents.isEmpty());
+        }
+
+        /**
+         * Whether the task is offered tools in a workflow that has, or has not, an
+         * httpcalls and an mcpcalls step: its own tools ({@link #isAgentMode()}), or
+         * the workflow's, which {@code enableHttpCallTools} /
+         * {@code enableMcpCallTools} {@code false} switch off. The configuration-time
+         * approximation, for checks that run without a conversation, not the runtime
+         * assembly's answer ({@code IAgentOrchestrator.offersTools}): it may be true
+         * when discovery produces no usable tools, and it cannot see an
+         * attachment-reading tool, which depends on the turn.
+         */
+        @JsonIgnore
+        public boolean usesTools(boolean workflowHasHttpCalls, boolean workflowHasMcpCalls) {
+            return isAgentMode() || (workflowHasHttpCalls && !Boolean.FALSE.equals(enableHttpCallTools))
+                    || (workflowHasMcpCalls && !Boolean.FALSE.equals(enableMcpCallTools));
         }
 
         /**
@@ -2821,7 +2843,10 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /** Phrases indicating refusal (scored {@code refusalScore}). */
         private List<String> refusalPhrases;
 
-        /** Responses shorter than this many characters score {@code shortScore}. */
+        /**
+         * Responses shorter than this many characters score {@code shortScore}. Default
+         * 20.
+         */
         private Integer shortLengthThreshold;
 
         /** Score assigned to very short responses. Default 0.3. */
@@ -2979,6 +3004,28 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String summarizationPrompt;
 
         /**
+         * When true, the summarizer is told to end every point with the conversation
+         * steps it came from ({@code [turns 4-7]}, numbered as
+         * {@code conversationRecall} reads them), to copy numbers verbatim and to write
+         * "unclear in source" rather than guess — and its answer is checked, without a
+         * model, before it is stored: every citation must lie in the summarized range
+         * and every number must appear verbatim in the turns it cites. Off by default;
+         * while off, the check never runs and the prompt is unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What happens to a summary that fails the {@link #citeSources} check:
+         * {@code keep} (store it anyway — the default), {@code retry_once} (one more
+         * summarizer call with the problems listed, screened and spend-checked like the
+         * first; if that fails too, as {@code fallback_to_previous}) or
+         * {@code fallback_to_previous} (discard it; the previous summary and its
+         * boundary stay, and the next turn tries again). Unknown values log a WARN and
+         * act as {@code keep}. Ignored while {@code citeSources} is false.
+         */
+        private String onValidationFailure = "keep";
+
+        /**
          * Validate and sanitize configuration values. Enforces sensible floor values to
          * prevent IndexOutOfBoundsException (negative window), wasteful LLM calls (zero
          * window triggers every turn), and NPE (null provider).
@@ -3083,6 +3130,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
     }
 

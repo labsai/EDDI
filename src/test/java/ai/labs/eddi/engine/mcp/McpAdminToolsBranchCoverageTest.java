@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.mcp;
 
-import java.time.Duration;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -22,15 +21,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -55,8 +46,6 @@ import org.mockito.Mock;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import java.time.Instant;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.HashMap;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.LinkedHashMap;
@@ -64,8 +53,6 @@ import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.Map;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
@@ -90,11 +77,7 @@ class McpAdminToolsBranchCoverageTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private IScheduleStore scheduleStore;
-    @Mock
-    private ScheduleFireExecutor scheduleFireExecutor;
-    @Mock
-    private SchedulePollerService schedulePollerService;
+    private IRestScheduleStore scheduleStore;
     @Mock
     private SecurityIdentity identity;
 
@@ -106,12 +89,8 @@ class McpAdminToolsBranchCoverageTest {
         // authEnabled=false so tests don't fail on requireRole
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 strictConfigurationParser(),
-                scheduleStore, scheduleFireExecutor, schedulePollerService,
+                scheduleStore,
                 identity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
-        // fire_schedule_now claims the schedule first, exactly as the poller and the
-        // REST endpoint do. Default the claim to "won" so tests about anything else
-        // still reach the fire.
-        when(schedulePollerService.claimForManualFire(any())).thenReturn(true);
     }
 
     // ─── deployAgent ────────────────────────────────────────────────────
@@ -697,427 +676,9 @@ class McpAdminToolsBranchCoverageTest {
     }
 
     // ─── schedule tools ─────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("createSchedule")
-    class CreateSchedule {
-
-        @Test
-        @DisplayName("null agentId → error")
-        void nullAgentId() {
-            assertTrue(tools.createSchedule(null, null, null, null, null, null, null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("null name → error")
-        void nullName() {
-            assertTrue(tools.createSchedule("agent1", null, null, null, null, null, null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("CRON without cron expression → error")
-        void cronNoCron() {
-            assertTrue(tools.createSchedule("agent1", "CRON", null, null, "msg", "name", null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("CRON without message → error")
-        void cronNoMessage() {
-            assertTrue(tools.createSchedule("agent1", "CRON", "0 9 * * *", null, null, "name", null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("HEARTBEAT without interval → error")
-        void heartbeatNoInterval() {
-            assertTrue(tools.createSchedule("agent1", "HEARTBEAT", null, null, null, "name", null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("HEARTBEAT with zero interval → error")
-        void heartbeatZeroInterval() {
-            assertTrue(tools.createSchedule("agent1", "HEARTBEAT", null, 0L, null, "name", null, null, null, null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("null triggerType with heartbeatIntervalSeconds → HEARTBEAT")
-        void implicitHeartbeat() throws Exception {
-            when(scheduleStore.createSchedule(any())).thenReturn("sched-id");
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.createSchedule("agent1", null, null, 300L, null, "heartbeat-sched", null, null, null, null);
-            verify(scheduleStore).createSchedule(argThat(s -> s.getTriggerType() == ScheduleConfiguration.TriggerType.HEARTBEAT));
-        }
-
-        @Test
-        @DisplayName("HEARTBEAT description formatting — seconds")
-        void heartbeatDescSeconds() throws Exception {
-            when(scheduleStore.createSchedule(any())).thenReturn("id");
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.minScheduleIntervalSeconds = 1; // the default floor (60s) would refuse a 30s heartbeat
-            tools.createSchedule("agent1", "HEARTBEAT", null, 30L, null, "test", null, null, null, null);
-            // 30 seconds → "Every 30 seconds"
-            verify(scheduleStore).createSchedule(any());
-        }
-
-        @Test
-        @DisplayName("HEARTBEAT description formatting — minutes")
-        void heartbeatDescMinutes() throws Exception {
-            when(scheduleStore.createSchedule(any())).thenReturn("id");
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.createSchedule("agent1", "HEARTBEAT", null, 120L, null, "test", null, null, null, null);
-            // 120 seconds → "Every 2 minutes"
-            verify(scheduleStore).createSchedule(any());
-        }
-
-        @Test
-        @DisplayName("HEARTBEAT description formatting — hours")
-        void heartbeatDescHours() throws Exception {
-            when(scheduleStore.createSchedule(any())).thenReturn("id");
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.createSchedule("agent1", "HEARTBEAT", null, 7200L, null, "test", null, null, null, null);
-            // 7200 seconds → "Every 2 hours"
-            verify(scheduleStore).createSchedule(any());
-        }
-
-        @Test
-        @DisplayName("exception → error")
-        void exception() throws Exception {
-            when(scheduleStore.createSchedule(any())).thenThrow(new RuntimeException("fail"));
-            assertTrue(tools.createSchedule("agent1", "HEARTBEAT", null, 60L, null, "name", null, null, null, null).contains("error"));
-        }
-    }
-
-    @Nested
-    @DisplayName("listSchedules")
-    class ListSchedules {
-
-        @Test
-        @DisplayName("with agentId filter")
-        void withAgentId() throws Exception {
-            var sched = new ScheduleConfiguration();
-            sched.setName("test");
-            sched.setTriggerType(null); // null triggerType → defaults "CRON"
-            when(scheduleStore.readSchedulesByAgentId("agent1")).thenReturn(List.of(sched));
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.listSchedules("agent1");
-            verify(scheduleStore).readSchedulesByAgentId("agent1");
-        }
-
-        @Test
-        @DisplayName("without agentId")
-        void withoutAgentId() throws Exception {
-            when(scheduleStore.readAllSchedules(100)).thenReturn(List.of());
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.listSchedules(null);
-            verify(scheduleStore).readAllSchedules(100);
-        }
-
-        @Test
-        @DisplayName("schedule with all null fields")
-        void scheduleNullFields() throws Exception {
-            var sched = new ScheduleConfiguration();
-            sched.setTriggerType(null);
-            sched.setFireStatus(null);
-            sched.setNextFire(null);
-            sched.setLastFired(null);
-            sched.setCronExpression(null);
-            sched.setHeartbeatIntervalSeconds(null);
-            when(scheduleStore.readAllSchedules(100)).thenReturn(List.of(sched));
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.listSchedules(null);
-        }
-
-        @Test
-        @DisplayName("schedule with cron and heartbeat")
-        void scheduleWithCronAndHeartbeat() throws Exception {
-            var sched = new ScheduleConfiguration();
-            sched.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
-            sched.setCronExpression("0 9 * * *");
-            sched.setHeartbeatIntervalSeconds(300L);
-            sched.setFireStatus(ScheduleConfiguration.FireStatus.PENDING);
-            sched.setNextFire(Instant.now());
-            sched.setLastFired(Instant.now());
-            when(scheduleStore.readAllSchedules(100)).thenReturn(List.of(sched));
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.listSchedules(null);
-        }
-    }
-
-    @Nested
-    @DisplayName("readSchedule")
-    class ReadSchedule {
-
-        @Test
-        @DisplayName("null scheduleId → error")
-        void nullId() {
-            assertTrue(tools.readSchedule(null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("blank scheduleId → error")
-        void blankId() {
-            assertTrue(tools.readSchedule("  ").contains("error"));
-        }
-
-        @Test
-        @DisplayName("exception → error")
-        void exception() throws Exception {
-            when(scheduleStore.readSchedule("id")).thenThrow(new RuntimeException("fail"));
-            assertTrue(tools.readSchedule("id").contains("error"));
-        }
-    }
-
-    @Nested
-    @DisplayName("deleteSchedule")
-    class DeleteSchedule {
-
-        @Test
-        @DisplayName("null scheduleId → error")
-        void nullId() {
-            assertTrue(tools.deleteSchedule(null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("success")
-        void success() throws Exception {
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-            String result = tools.deleteSchedule("sched1");
-            verify(scheduleStore).deleteSchedule("sched1");
-        }
-
-        @Test
-        @DisplayName("the alerts-maintenance system schedule is refused with SYSTEM_SCHEDULE")
-        void systemScheduleRefused() throws Exception {
-            var system = new ScheduleConfiguration();
-            system.setName("alerts-maintenance");
-            system.setMetadata(Map.of("alertType", "alert_maintenance"));
-            when(scheduleStore.readSchedule("sys")).thenReturn(system);
-            String result = tools.deleteSchedule("sys");
-            assertTrue(result.contains("SYSTEM_SCHEDULE"), result);
-            verify(scheduleStore, never()).deleteSchedule("sys");
-        }
-    }
-
-    @Nested
-    @DisplayName("fireScheduleNow")
-    class FireScheduleNow {
-
-        @Test
-        @DisplayName("null scheduleId → error")
-        void nullId() {
-            assertTrue(tools.fireScheduleNow(null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("success with duration")
-        void successWithDuration() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-
-            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(),
-                    Instant.now(), Instant.now().plusSeconds(1), "SUCCESS", "inst1", "conv1", null, 1, 0.0);
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-            verify(scheduleFireExecutor).fire(schedule, "inst1", 1);
-        }
-
-        /**
-         * {@code fire_schedule_now} used to call the executor directly: no cluster
-         * claim, so it raced the poller — and with
-         * {@code conversationStrategy=persistent} both pushed a turn into the SAME
-         * conversation — and no {@code recordManualFireOutcome}, so the fire never
-         * reached the retry/backoff/one-shot state machine. A failure here did not
-         * increment failCount and a success did not re-arm the schedule. Routing it
-         * through the same claim/fire/finally flow as the REST endpoint is the point.
-         */
-        @Test
-        @DisplayName("claims the schedule and records the outcome, like the REST endpoint")
-        void claimsAndRecordsTheOutcome() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            schedule.setFailCount(2);
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
-                    Instant.now(), "COMPLETED", "inst1", "conv1", null, 3, 0.0);
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-
-            var inOrder = inOrder(schedulePollerService, scheduleFireExecutor);
-            inOrder.verify(schedulePollerService).claimForManualFire(schedule);
-            // The attempt this actually is, not a constant 1: a manual retry of a
-            // schedule on its third failure logged as "attempt 1" and hid the history.
-            inOrder.verify(scheduleFireExecutor).fire(schedule, "inst1", 3);
-            inOrder.verify(schedulePollerService).recordManualFireOutcome(schedule, fireLog);
-        }
-
-        @Test
-        @DisplayName("a fire past its deadline answers a timeout and leaves the claim to expire")
-        void deadlineAnswersATimeoutAndKeepsTheClaim() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-            when(schedulePollerService.manualFireDeadline()).thenReturn(Duration.ofMillis(100));
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenAnswer(inv -> {
-                Thread.sleep(10_000);
-                return null;
-            });
-
-            String result = tools.fireScheduleNow("sched1");
-
-            assertTrue(result.contains("did not finish within its bound"), result);
-            verify(schedulePollerService, never()).recordManualFireOutcome(any(), any());
-        }
-
-        @Test
-        @DisplayName("a refused claim does not fire")
-        void refusedClaimDoesNotFire() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.claimForManualFire(any())).thenReturn(false);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-
-            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
-            verify(schedulePollerService, never()).recordManualFireOutcome(any(), any());
-        }
-
-        /**
-         * REST refuses a manual fire of a HITL approval timeout for EVERYONE, because
-         * firing it applies the configured AUTO_APPROVE/AUTO_REJECT/ABORT decision with
-         * a system actor and no owner/admin/approver check. This tool must refuse too,
-         * or it is the same bypass behind a different door.
-         */
-        @Test
-        @DisplayName("refuses a HITL approval timeout")
-        void refusesHitlTimeoutSchedule() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("hitl-timeout-conv-1");
-            schedule.setMetadata(Map.of("hitlType", "hitl_timeout", "conversationId", "conv-1"));
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-
-            verify(schedulePollerService, never()).claimForManualFire(any());
-            verify(scheduleFireExecutor, never()).fire(any(), anyString(), anyInt());
-        }
-
-        @Test
-        @DisplayName("fire log with null completedAt/startedAt → duration null")
-        void nullDuration() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-
-            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(),
-                    null, null, "PENDING", "inst1", "conv1", null, 1, 0.0);
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-        }
-
-        /**
-         * The same interrupt discipline the REST endpoint got, on the tool that shares
-         * its flow.
-         * <p>
-         * {@code ScheduleFireExecutor.fire} deliberately re-asserts an interrupt that a
-         * blocking call inside it consumed, so on the interrupted path — shutdown, a
-         * cancelled tool invocation — this finally block runs with the flag set. The
-         * synchronous Mongo driver then throws {@code MongoInterruptedException} on
-         * connection checkout, {@code recordManualFireOutcome} swallows it, and the
-         * schedule stays CLAIMED with failCount never incremented until its lease
-         * expires. The flag must be parked across the write and re-asserted after it,
-         * or the cancellation signal is lost instead.
-         */
-        @Test
-        @DisplayName("an interrupted fire releases the claim with the flag parked, then restores it")
-        void interruptedFireReleasesTheClaimWithTheFlagParked() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(), Instant.now(),
-                    Instant.now(), "FAILED", "inst1", "conv1", "interrupted", 1, 0.0);
-            // Mirror ScheduleFireExecutor.restoreInterrupt: the flag is set when fire()
-            // returns on the interrupted path.
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenAnswer(inv -> {
-                Thread.currentThread().interrupt();
-                return fireLog;
-            });
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-            var flagDuringRelease = new AtomicBoolean(true);
-            doAnswer(inv -> {
-                flagDuringRelease.set(Thread.currentThread().isInterrupted());
-                return null;
-            }).when(schedulePollerService).recordManualFireOutcome(any(), any());
-
-            try {
-                tools.fireScheduleNow("sched1");
-
-                assertFalse(flagDuringRelease.get(),
-                        "the bookkeeping write must not run under a set interrupt flag — the sync Mongo "
-                                + "driver throws MongoInterruptedException on connection checkout and the claim leaks");
-                assertTrue(Thread.currentThread().isInterrupted(),
-                        "the interrupt must be re-asserted afterwards, or the cancellation signal is swallowed");
-            } finally {
-                Thread.interrupted(); // never leak a set flag into the next test
-            }
-        }
-
-        @Test
-        @DisplayName("fire log with error message")
-        void fireLogWithError() throws Exception {
-            var schedule = new ScheduleConfiguration();
-            schedule.setName("test");
-            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
-            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
-
-            var fireLog = new ScheduleFireLog("log1", "sched1", "fire1", Instant.now(),
-                    Instant.now(), Instant.now(), "FAILED", "inst1", null, "LLM unavailable", 1, 0.0);
-            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenReturn(fireLog);
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-
-            tools.fireScheduleNow("sched1");
-        }
-    }
-
-    @Nested
-    @DisplayName("retryFailedSchedule")
-    class RetryFailed {
-
-        @Test
-        @DisplayName("null scheduleId → error")
-        void nullId() {
-            assertTrue(tools.retryFailedSchedule(null).contains("error"));
-        }
-
-        @Test
-        @DisplayName("success")
-        void success() throws Exception {
-            when(jsonSerialization.serialize(any())).thenReturn("{}");
-            tools.retryFailedSchedule("sched1");
-            verify(scheduleStore).requeueDeadLetter("sched1");
-        }
-    }
+    // McpScheduleToolsTest (the adapters) and McpScheduleParityTest (the same
+    // answers as REST). The claim/fire/release flow of a manual fire is
+    // RestScheduleStore's alone, and RestScheduleStoreTest covers it.
 
     // ─── trigger tools ──────────────────────────────────────────────────
 
@@ -1209,13 +770,10 @@ class McpAdminToolsBranchCoverageTest {
         @DisplayName("serialization exception → fallback JSON")
         void serializationFallback() throws Exception {
             when(jsonSerialization.serialize(any())).thenThrow(new RuntimeException("serialize fail"));
-            // This is tested implicitly when deploy returns a result but serialization
-            // fails
-            // Let's trigger through deleteSchedule which calls resultJson
+            when(scheduleStore.deleteSchedule("sched1")).thenReturn(Response.noContent().build());
+            // deleteSchedule reports through resultJson
             String result = tools.deleteSchedule("sched1");
-            // Should still return some JSON
-            assertNotNull(result);
-            assertTrue(result.contains("schedule_deleted") || result.contains("error"));
+            assertEquals("{\"action\":\"schedule_deleted\",\"status\":\"completed\"}", result);
         }
     }
 

@@ -42,6 +42,7 @@ import java.util.Stack;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -137,7 +138,7 @@ class ConversationServiceHealthStartTest {
 
         conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of());
 
-        verify(recorder, times(1)).record(eq(memory), eq(CONVERSATION_ID), isNull(), anyLong(), eq(false));
+        verify(recorder, times(1)).record(eq(memory), eq(CONVERSATION_ID), isNull(), anyLong(), eq(false), eq(true));
     }
 
     @Test
@@ -147,6 +148,6 @@ class ConversationServiceHealthStartTest {
 
         assertThrows(RuntimeException.class, () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of()));
 
-        verify(recorder, never()).record(any(), any(), any(), any(), eq(false));
+        verify(recorder, never()).record(any(), any(), any(), any(), anyBoolean(), anyBoolean());
     }
 }

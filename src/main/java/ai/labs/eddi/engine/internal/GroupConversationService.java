@@ -292,6 +292,18 @@ public class GroupConversationService implements IGroupConversationService, User
     Instance<GroupApprovalContextRenderer> approvalContextRenderer;
 
     /**
+     * Strict plan binding for the whole deployment (see {@code HitlPlanBinding}).
+     * Field-injected with its default, like the other optional knobs here.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /** Whether every human group decision must carry the pause's plan hash. */
+    public boolean planHashStrict() {
+        return planHashStrict;
+    }
+
+    /**
      * The group approval-context renderer, or {@code null} when none is available.
      */
     public GroupApprovalContextRenderer approvalContextRenderer() {
@@ -2258,10 +2270,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2295,6 +2303,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
