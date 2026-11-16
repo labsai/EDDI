@@ -105,7 +105,9 @@ describe("i18n translation debt", () => {
     de: ["Workforce.board.title", "Workforce.boardsLabel", "knowledgeHealth.taskForces"],
     // "expert(s)" is the same word in French, and the surrounding French strings
     // already use it ("Aucun expert").
-    fr: ["Workforce.card.advisorCount", "workforce.count"],
+    // "session(s)" is likewise the French word, and the Agent Health strings
+    // around it already use it ("Sessions engagées").
+    fr: ["Workforce.card.advisorCount", "workforce.count", "health.count.sessions_one", "health.count.sessions_other"],
   };
 
   it("records a baseline for every locale", () => {

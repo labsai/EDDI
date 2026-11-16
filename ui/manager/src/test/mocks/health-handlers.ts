@@ -1,0 +1,255 @@
+import { http, HttpResponse } from "msw";
+import type { HealthProfile, HealthPreset, ProfileViolation, ReportLink } from "@/components/health/api";
+import {
+  HEALTH_AGENTS,
+  MARKERS,
+  SESSION_ROWS,
+  compareFor,
+  healthFor,
+  periodFor,
+  portfolioFixture,
+  seriesFor,
+} from "./health-fixtures";
+
+/**
+ * Agent Health mocks (planning/agent-health-api.md), in two groups.
+ *
+ * - `healthHandlers` are the operations the backend exposes today (H2b and H3:
+ *   health, series, compare, portfolio, sessions, outcome suggestions). They are
+ *   re-exported from `handlers.ts`, which is the set the OpenAPI contract test
+ *   grades against `openapi-operations.json`, so a path or method that drifts
+ *   from the backend fails there.
+ * - `healthPendingHandlers` are operations of later phases (profile and presets
+ *   H4, export H5, owner report links H4b) that the backend does not have yet.
+ *   They stay out of that set on purpose; move each into `healthHandlers` (and
+ *   refresh the snapshot) when its phase lands.
+ *
+ * Error bodies follow the backend: `{"error": "<code>", "message": "..."}`, and
+ * for the sessions 403 `{"error": "forbidden", "reason": ..., "message": "..."}`.
+ */
+
+const PRESETS: HealthPreset[] = [
+  { id: "support", label: "Support", critical: ["agentFailureRate", "resolutionRate"], thresholds: { resolutionRate: { green: 0.7, red: 0.4 } } },
+  { id: "sales", label: "Sales", critical: ["agentFailureRate"], thresholds: {} },
+  { id: "assistant", label: "Assistant", critical: ["agentFailureRate"], thresholds: {} },
+  { id: "task", label: "Task", critical: ["agentFailureRate"], thresholds: {} },
+];
+
+/** The profile an agent has before one is stored: `stored: false` and the `support` preset values. */
+const defaultProfile = (agentId: string): HealthProfile => ({
+  agentId,
+  stored: false,
+  preset: "support",
+  critical: ["agentFailureRate", "resolutionRate"],
+  thresholds: { resolutionRate: { green: 0.7, red: 0.4 }, agentFailureRate: { green: 0.01, red: 0.03 } },
+  budgets: { costPerResolvedUsd: 0.5 },
+  slo: { agentTurnSuccess: 0.99, apdexTMs: 4000, minTurnsForBurnAlert: 50 },
+  overrides: [],
+});
+
+let profiles = new Map<string, HealthProfile>();
+let reports = new Map<string, Array<ReportLink>>();
+let reportSeq = 0;
+
+/** Clears the in-memory profiles and report links; call it between tests so state never leaks. */
+export function resetHealthMockState() {
+  profiles = new Map();
+  reports = new Map();
+  reportSeq = 0;
+}
+
+/** The server-side rules the profile editor must show inline. */
+export function validateProfile(p: HealthProfile): ProfileViolation[] {
+  const out: ProfileViolation[] = [];
+  for (const [id, th] of Object.entries(p.thresholds ?? {})) {
+    if (th.green !== undefined && th.red !== undefined && th.green === th.red) {
+      out.push({ path: `thresholds.${id}.red`, message: "Red must differ from green." });
+    }
+    if (th.red !== undefined && th.red < 0) out.push({ path: `thresholds.${id}.red`, message: "Must not be negative." });
+  }
+  if (p.slo?.agentTurnSuccess !== undefined && (p.slo.agentTurnSuccess <= 0 || p.slo.agentTurnSuccess > 1)) {
+    out.push({ path: "slo.agentTurnSuccess", message: "Must be between 0 and 1." });
+  }
+  (p.overrides ?? []).forEach((o, i) => {
+    if (!o.reason.trim()) out.push({ path: `overrides[${i}].reason`, message: "A reason is required." });
+  });
+  return out;
+}
+
+const SERIES_BASE: Record<string, [number, "ratio" | "usd" | "ms" | "count" | "tokens" | "score"]> = {
+  agentFailureRate: [0.01, "ratio"],
+  resolutionRate: [0.6, "ratio"],
+  apdex: [0.9, "score"],
+  turnDurationP95: [3200, "ms"],
+  costPerSession: [0.03, "usd"],
+  sessions: [60, "count"],
+  ratingScore: [0.84, "score"],
+};
+
+/** The days of the requested `period` (7, 30 or 90; the contract's default is 30). */
+const periodDays = (url: URL): number => ({ "7d": 7, "30d": 30, "90d": 90 })[url.searchParams.get("period") ?? "30d"] ?? 30;
+
+/** Measures without daily values yet: the backend answers them with all-null points. */
+const NO_DAILY_VALUES = new Set(["costPerResolvedSession", "returningUserShare"]);
+/** Rating measures: all-null points only for a caller who may not read ratings (the restricted scenario). */
+const RATING_MEASURES = new Set(["ratingScore", "ratingResponseRate", "replyThumbsUp"]);
+const allNullSeries = (agentId: string, measureId: string): boolean =>
+  NO_DAILY_VALUES.has(measureId) || (RATING_MEASURES.has(measureId) && agentId === HEALTH_AGENTS.restricted);
+
+/**
+ * The portfolio list (`GET /health/agents`) as the backend of a phase answers it. The default handlers use H3, where
+ * every status is null; `server.use(healthPortfolioHandler("H4"))` gives the statuses of the scenarios marked H4.
+ */
+export function healthPortfolioHandler(phase: "H3" | "H4") {
+  return http.get("*/health/agents", ({ request }) => {
+    const url = new URL(request.url);
+    const statuses = url.searchParams.getAll("status");
+    const all = portfolioFixture(phase);
+    const filtered = statuses.length ? all.items.filter((i) => i.status && statuses.includes(i.status)) : all.items;
+    // `attention` is the fixture's order; `name` and `traffic` are sorted before paging, as the backend does.
+    const sort = url.searchParams.get("sort") ?? "attention";
+    const matching =
+      sort === "name"
+        ? [...filtered].sort((a, b) => a.agentName.localeCompare(b.agentName))
+        : sort === "traffic"
+          ? [...filtered].sort((a, b) => (b.sessions ?? -1) - (a.sessions ?? -1))
+          : filtered;
+    // Pages of three: the cursor is the index of the next item.
+    const at = Number(url.searchParams.get("cursor") ?? 0);
+    return HttpResponse.json({ ...all, items: matching.slice(at, at + 3), nextCursor: at + 3 < matching.length ? String(at + 3) : null });
+  });
+}
+
+/** Handlers for the operations the backend exposes (H2b, H3). They answer from fixtures. */
+export const healthHandlers = [
+  http.get("*/agents/:agentId/health/series", ({ request, params }) => {
+    const url = new URL(request.url);
+    const measures = url.searchParams.getAll("measure");
+    const days = periodDays(url);
+    // The same range the summary reports for this period, one point per day of it.
+    const { period } = periodFor(days);
+    const agentId = String(params.agentId);
+    return HttpResponse.json({
+      agentId,
+      period,
+      series: measures.map((m) => seriesFor(m, SERIES_BASE[m]?.[0] ?? 0.5, SERIES_BASE[m]?.[1] ?? "ratio", days, allNullSeries(agentId, m))),
+      // Only the changes inside the period, as the backend sends them.
+      markers: MARKERS.filter((m) => m.at.slice(0, 10) >= period.from && m.at.slice(0, 10) <= period.to),
+    });
+  }),
+
+  http.get("*/agents/:agentId/health/compare", ({ request, params }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json(compareFor(String(params.agentId), Number(url.searchParams.get("from")), Number(url.searchParams.get("to"))));
+  }),
+
+  http.get("*/agents/:agentId/health/sessions", ({ request, params }) => {
+    const id = String(params.agentId);
+    if (id === HEALTH_AGENTS.noReview) {
+      return HttpResponse.json(
+        { error: "forbidden", reason: "REVIEW_DISABLED", message: "Conversation review is disabled on version 8." },
+        { status: 403 },
+      );
+    }
+    if (id === HEALTH_AGENTS.forbidden) {
+      return HttpResponse.json(
+        { error: "forbidden", reason: "FORBIDDEN", message: "Listing sessions needs EDIT on the agent." },
+        { status: 403 },
+      );
+    }
+    const url = new URL(request.url);
+    const outcomes = url.searchParams.getAll("outcome");
+    const evidence = url.searchParams.getAll("evidence");
+    const origins = url.searchParams.getAll("origin");
+    // Sessions of origins that are not judged carry a null outcome and evidence, and are listed only when that origin is asked for.
+    const version = url.searchParams.get("version");
+    const items = SESSION_ROWS.filter((r) => {
+      if (version !== null && r.agentVersion !== Number(version)) return false;
+      // An outcome or evidence filter matches no row without an outcome: the filters are AND-ed with the origin.
+      if (r.outcome === null) return origins.includes(r.origin) && outcomes.length === 0 && evidence.length === 0;
+      return (
+        (origins.length === 0 || origins.includes(r.origin)) &&
+        (outcomes.length === 0 || outcomes.includes(r.outcome)) &&
+        (evidence.length === 0 || (r.evidence !== null && evidence.includes(r.evidence)))
+      );
+    });
+    if (id === HEALTH_AGENTS.paged) {
+      // One row per page; the cursor is the index of the next row.
+      const at = Number(url.searchParams.get("cursor") ?? 0);
+      return HttpResponse.json({ items: items.slice(at, at + 1), nextCursor: at + 1 < items.length ? String(at + 1) : null });
+    }
+    return HttpResponse.json({ items, nextCursor: null });
+  }),
+
+  http.get("*/agents/:agentId/health/outcome-suggestions", () =>
+    HttpResponse.json({
+      items: [
+        { action: "order_confirmed", suggested: "RESOLVED", sessionsEndingWith: 312, reason: "Last action of 41 % of engaged sessions" },
+        { action: "handoff_human", suggested: "ESCALATED", sessionsEndingWith: 88, reason: "Last action of 12 % of engaged sessions" },
+        // The heuristics match whole words only, so an action that matches none has no suggestion.
+        { action: "unconfirmed", suggested: null, sessionsEndingWith: 9, reason: "Last action of 1 % of engaged sessions" },
+      ],
+    }),
+  ),
+
+  // Last among the agent routes: `/agents/:agentId/health` must not swallow the sub-paths above.
+  http.get("*/agents/:agentId/health", ({ request, params }) => {
+    if (params.agentId === HEALTH_AGENTS.denied) {
+      return HttpResponse.json({ error: "forbidden", message: "No VIEW permission on this agent." }, { status: 403 });
+    }
+    if (params.agentId === HEALTH_AGENTS.missing) {
+      return HttpResponse.json({ error: "not_found", message: "Agent not found." }, { status: 404 });
+    }
+    return HttpResponse.json({ ...healthFor(String(params.agentId)), ...periodFor(periodDays(new URL(request.url))) });
+  }),
+
+  healthPortfolioHandler("H3"),
+];
+
+/**
+ * Handlers for operations of later phases (profile and presets, export, owner report links),
+ * which the backend does not have yet. Profiles and report links are kept in memory for the test run.
+ */
+export const healthPendingHandlers = [
+  http.get("*/agents/:agentId/health/profile", ({ params }) => {
+    const id = String(params.agentId);
+    return HttpResponse.json(profiles.get(id) ?? defaultProfile(id));
+  }),
+  http.put("*/agents/:agentId/health/profile", async ({ request, params }) => {
+    const body = (await request.json()) as HealthProfile;
+    const violations = validateProfile(body);
+    if (violations.length > 0) return HttpResponse.json({ violations }, { status: 400 });
+    const stored = { ...body, agentId: String(params.agentId), stored: true };
+    profiles.set(String(params.agentId), stored);
+    return HttpResponse.json(stored);
+  }),
+  http.delete("*/agents/:agentId/health/profile", ({ params }) => {
+    profiles.delete(String(params.agentId));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/agents/:agentId/health/export", ({ request }) => {
+    const format = new URL(request.url).searchParams.get("format");
+    return format === "csv"
+      ? new HttpResponse("day,measure,value\n2026-11-10,agentFailureRate,0.004\n", { headers: { "Content-Type": "text/csv" } })
+      : HttpResponse.json({ daily: [] });
+  }),
+
+  http.post("*/agents/:agentId/health/reports", async ({ request, params }) => {
+    const body = (await request.json()) as { expiresInDays: number; sections: string[] };
+    const id = `rep-${++reportSeq}`;
+    const expiresAt = new Date(Date.now() + body.expiresInDays * 86_400_000).toISOString();
+    const link: ReportLink = { id, expiresAt, sections: body.sections, createdAt: new Date().toISOString() };
+    const key = String(params.agentId);
+    reports.set(key, [...(reports.get(key) ?? []), link]);
+    return HttpResponse.json({ ...link, url: `https://eddi.example/health-report/token-${id}` }, { status: 201 });
+  }),
+  http.get("*/agents/:agentId/health/reports", ({ params }) => HttpResponse.json(reports.get(String(params.agentId)) ?? [])),
+  http.delete("*/agents/:agentId/health/reports/:id", ({ params }) => {
+    const key = String(params.agentId);
+    reports.set(key, (reports.get(key) ?? []).filter((r) => r.id !== params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/health/presets", () => HttpResponse.json(PRESETS)),
+];
