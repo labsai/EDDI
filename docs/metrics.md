@@ -303,6 +303,7 @@ eddi_group_continue_count_total             # Continuation rounds
 eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
+eddi_group_approved_action_total{outcome}   # phase.onApproved calls: succeeded|failed|outcome_unknown|skipped
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
@@ -331,6 +332,15 @@ panel shows "no refusals" rather than "no data".
 eddi_team_budget_metering_total             # Charges of root-discussion spend to the owning team; tags: outcome (recorded|unavailable|error)
 eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup|handoff), reason (exhausted|tenant|unavailable)
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
+```
+
+### Spend-Control Change Metrics
+
+Writes to the model price catalog and tenant quotas over MCP, and the decisions on the looser ones
+([Spend-Control Changes](spend-control-changes.md)).
+
+```text
+eddi_spendcontrol_changes_total             # tags: kind (MODEL_PRICES|TENANT_QUOTA), result (APPLIED|PROPOSED|APPROVED|REJECTED|WITHDRAWN|STALE|EXPIRED)
 ```
 
 ### Input Parser Metrics

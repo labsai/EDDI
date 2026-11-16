@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw, ChevronDown, ChevronUp, Info, Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {

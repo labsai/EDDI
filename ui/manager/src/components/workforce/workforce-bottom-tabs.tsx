@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Home, MessageSquare, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WORKFORCE_SUBPAGES } from "./workforce-subpages";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 
 // ─── Component ───────────────────────────────────────────────────
 
@@ -10,6 +11,7 @@ export function WorkforceBottomTabs() {
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { canAuthor } = useWorkforceAccess();
 
   const isHome = location.pathname === "/workforce";
   const isThreads = location.pathname.includes("/thread/");
@@ -74,7 +76,9 @@ export function WorkforceBottomTabs() {
       to: "/workforce/analytics",
       disabled: false,
     },
-  ] as const;
+  ];
+  // Insights reads the authoring stores — an author-only screen.
+  const visibleTabs = canAuthor ? tabs : tabs.filter((tab) => tab.key !== "insights");
 
   return (
     <nav
@@ -85,7 +89,7 @@ export function WorkforceBottomTabs() {
         "pb-[env(safe-area-inset-bottom)]",
       )}
     >
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const Icon = tab.icon;
         return (
           <button

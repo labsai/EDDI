@@ -850,6 +850,20 @@ mechanism behind DELPHI's rounds.
 approves or rejects (see [HITL](hitl.md); with `hitlConfig.review.allowResultEdits` the approver may also edit a task's result or a synthesis — see [HITL Review & Audit](hitl-review-and-audit.md#group-task-and-synthesis-edits)). A pause can show the approver the draft, the claims or the objection that matter with `hitlConfig.approvalContext` — see [HITL Approval Card Context](hitl-approval-context.md). At `TASK` granularity on an `EXECUTE`
 phase it pauses per submitted task instead.
 
+**`onApproved`** (EXECUTE phases with `requiresApproval` at `TASK` granularity)
+makes one configured `httpcalls` call with each task a person approves — the
+approved, possibly edited result goes out exactly as approved, with no member
+turn in between. It is how a team publishes only human-approved text (a member's
+own gated tool call is rejected inside a group turn). Exactly-once rules,
+credentials and a GitHub-comment example: [Group Approved-Result
+Actions](group-approved-result-actions.md).
+
+```json
+{ "name": "Draft", "type": "EXECUTE", "requiresApproval": true,
+  "onApproved": { "action": { "uri": "eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=1", "call": "postIssueComment" },
+                  "onFailure": "FAIL_TASK" } }
+```
+
 **`convergence` (I2)** ends a repeating phase early once the round stopped
 producing movement, so a group that agreed after round 2 does not pay for round
 5. A judge compares this round's contributions against the previous round's and
@@ -1294,7 +1308,7 @@ summarizer's.
 | `GET` | `/groupstore/groups/styles` | List discussion styles |
 | `POST` | `/groups/{groupId}/conversations` | Start discussion |
 | `GET` | `/groups/{groupId}/conversations/{id}` | Read transcript |
-| `GET` | `/groups/{groupId}/conversations` | List conversations |
+| `GET` | `/groups/{groupId}/conversations` | List conversations (`index`, `limit`). A non-admin sees their own; `mine=true` restricts an admin to their own as well (since 6.7.0). Each member's private conversation records the discussion as `groupConversationId` on its conversation descriptor, and `GET /conversationstore/conversations?excludeGroupMembers=true` leaves those out |
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |

@@ -560,7 +560,7 @@
         "streaming": "Streaming",
         "rawHtml": "HTML in Antworten darstellen"
       },
-      "rawHtmlNote": "Standardmäßig aus. Das Chat-Widget wendet diese Einstellung erst ab der Version an, deren Widget die Gesprächseinstellungen liest; bis dahin rendert es HTML für jeden Agenten. Schalten Sie sie schon jetzt für einen Agenten ein, dessen Antworten HTML enthalten sollen.",
+      "rawHtmlNote": "Standardmäßig aus: HTML in Antworten wird als Text gezeigt. Nur für einen Agenten einschalten, dessen Antworten HTML enthalten sollen.",
       "titles": "Gesprächstitel",
       "titlesEnable": "Gesprächstitel von einem Modell schreiben lassen",
       "titlesNote": "Sonst erhält ein Gespräch seine erste Nachricht als Titel. Das Modell läuft einmal pro Gespräch im Hintergrund und wird dem Kostenbudget belastet. Ein vom Nutzer gesetzter Titel wird nie ersetzt.",
@@ -4772,6 +4772,22 @@
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein {{productName}}-Backend für echte Daten."
   },
+  "spendControl": {
+    "title": "Ausstehende Änderungen",
+    "description": "Über MCP vorgeschlagen und nicht angewendet: Jede würde die Ausgabenkontrolle lockern. Mit der Genehmigung wird sie unter Ihrem Namen angewendet.",
+    "proposedBy": "Vorgeschlagen von {{who}} am {{when}}",
+    "loosening": "Lockert die Ausgabenkontrolle",
+    "allChanges": "Alle Änderungen",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "approveTitle": "Diese Änderung genehmigen?",
+    "rejectTitle": "Diese Änderung ablehnen?",
+    "approveDesc": "Sie wird jetzt mit Ihnen als Verantwortlichem angewendet und lockert die Ausgabenkontrolle: {{loosening}}",
+    "rejectDesc": "Es wird nichts angewendet. Der Vorschlagende kann sie erneut einreichen.",
+    "approved": "Änderung genehmigt und angewendet",
+    "rejected": "Änderung abgelehnt; nichts wurde angewendet",
+    "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
+  },
   "modelPrices": {
     "nav": "Modellpreise",
     "title": "Modellpreise",
@@ -4860,6 +4876,8 @@
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",
+    "editsDiscardedAfterRefresh": "Das Kontingent wurde neu geladen und Ihre nicht gespeicherten Änderungen wurden verworfen, damit sie die aktuellen Limits nicht überschreiben.",
+    "refreshFailedSaveBlocked":"Das Kontingent konnte nicht aktualisiert werden, daher ist das Speichern pausiert. Versuchen Sie es erneut, um zuerst die aktuellen Limits zu laden.",
     "configuration": "Konfiguration",
     "conversationsToday": "Gespräche heute",
     "description": "Konfigurieren Sie Ratenlimits, Nutzungsobergrenzen und Kostenbudgets pro Mandant.",
@@ -5595,7 +5613,48 @@
       "useStarterPrompt": "Start-Prompt einfügen",
       "yourAdvisors": "Ihre Berater"
     },
-    "workforce": "Belegschaft"
+    "workforce": "Belegschaft",
+    "operatorLink": "Plattform-Operator",
+    "catalog": {
+      "emptyTitle": "Hier gibt es noch nichts zu sehen",
+      "emptyAuthorHint": "Endnutzer sehen nur Agenten und Teams, die gelistet sind. Öffnen Sie einen Agenten oder eine Gruppe im Manager und aktivieren Sie „Im Katalog gelistet“ — oder machen Sie ihn bei aktivierten Workspaces veröffentlicht oder intern. Für die Nutzung braucht man weiterhin Zugriff.",
+      "openAgents": "Agenten im Manager öffnen",
+      "emptyUserHint": "Für Sie wurden noch keine Agenten oder Teams bereitgestellt. Schauen Sie später wieder vorbei.",
+      "agents": "Agenten",
+      "teams": "Teams",
+      "previewTitle": "Was Endnutzer sehen",
+      "previewCounts": "{{agents}} gelistete Agenten und {{teams}} gelistete Teams werden den Personen angeboten, die sie nutzen dürfen."
+    },
+    "sessions": {
+      "title": "Deine Unterhaltungen",
+      "loading": "Wird geladen…",
+      "loadError": "Unterhaltungen konnten nicht geladen werden. Erneut versuchen",
+      "empty": "Noch keine Unterhaltungen. Starte eine auf der Startseite.",
+      "pinned": "Angeheftet",
+      "today": "Heute",
+      "yesterday": "Gestern",
+      "previous7": "Letzte 7 Tage",
+      "previous30": "Letzte 30 Tage",
+      "rename": "Umbenennen",
+      "renameLabel": "Titel der Unterhaltung",
+      "pin": "Anheften",
+      "unpin": "Lösen",
+      "delete": "Löschen",
+      "deleteTitle": "Diese Unterhaltung löschen?",
+      "deleteDescription": "„{{title}}“ verschwindet aus deiner Liste. Das lässt sich hier nicht rückgängig machen.",
+      "renameFailed": "Umbenennen fehlgeschlagen: {{error}}",
+      "pinFailed": "Anheften fehlgeschlagen: {{error}}",
+      "deleteFailed": "Löschen fehlgeschlagen: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Unterhaltung beginnen",
+      "placeholder": "Frag {{agent}}…",
+      "messageLabel": "Deine Nachricht",
+      "agentLabel": "Agent",
+      "send": "Senden",
+      "starters": "Vorschläge",
+      "recent": "Zuletzt"
+    }
   },
   "operator": {
     "title": "Plattform-Operator",
@@ -7750,6 +7809,13 @@
       "lte": "ist höchstens",
       "contains": "enthält"
     }
+  },
+  "catalogListing": {
+    "label": "Im Katalog gelistet",
+    "agentDescription": "Bietet diesen Agenten Endnutzern in Workforce an. Nur wer ihn nutzen darf, sieht ihn, und erst wenn er bereitgestellt ist. Bei aktivierten Workspaces sind veröffentlichte und interne Agenten ohnehin gelistet.",
+    "groupDescription": "Bietet dieses Team Endnutzern in Workforce an. Nur wer es nutzen darf, sieht es. Bei aktivierten Workspaces sind veröffentlichte und interne Teams ohnehin gelistet.",
+    "listedToast": "Im Katalog gelistet",
+    "unlistedToast": "Aus dem Katalog entfernt"
   },
   "groupLearning": {
     "betToggle": "Als Wette anlegen",

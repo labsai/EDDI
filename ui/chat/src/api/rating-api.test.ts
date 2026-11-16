@@ -5,10 +5,10 @@ import { captureFetch } from "@/test-utils/sse";
 import { setLocale } from "@/i18n";
 
 const originalFetch = globalThis.fetch;
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   setBaseUrl("");
-  setLocale("en");
+  await setLocale("en");
 });
 
 const refusal = (status: number, code: string) =>
@@ -37,8 +37,8 @@ describe("ratingErrorMessage", () => {
     expect(ratingErrorMessage(new TypeError("Failed to fetch"))).toContain("could not be saved");
   });
 
-  it("is translated", () => {
-    setLocale("de");
+  it("is translated", async () => {
+    await setLocale("de");
     expect(ratingErrorMessage(refusal(409, "RATING_WINDOW_CLOSED"))).toContain("nicht mehr bewertet");
   });
 });

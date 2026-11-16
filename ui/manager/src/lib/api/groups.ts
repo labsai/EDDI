@@ -372,6 +372,18 @@ export interface DiscussionPhase {
   voteConfig?: VoteConfig | null;
   /** Skip this phase entirely when the condition already holds (I11). `null`/absent = never skip. */
   skipIf?: PhaseSkipCondition | null;
+  /**
+   * Approved-result action: one httpcalls call made with each task this EXECUTE
+   * phase gets approved (docs/group-approved-result-actions.md). Not editable in
+   * the phase editor — set in the group JSON; the editor carries it through
+   * unchanged. `null`/absent = nothing runs.
+   */
+  onApproved?: OnApprovedConfig | null;
+}
+
+export interface OnApprovedConfig {
+  action: { type?: "HTTPCALL"; uri: string; call: string };
+  onFailure?: "FAIL_TASK" | "KEEP_COMPLETED";
 }
 
 export interface ProtocolConfig {
@@ -587,6 +599,11 @@ export const DEFAULT_DELEGATION_TIMEOUT_SECONDS = 60;
 export interface AgentGroupConfiguration {
   name: string;
   description: string;
+  /**
+   * Offered in the end-user catalog (`GET /catalog/groups`). Opt-in, default
+   * false; who may run the group is still decided by its sharing.
+   */
+  listed?: boolean;
   members: GroupMember[];
   moderatorAgentId: string | null;
   style: DiscussionStyle;
@@ -1449,15 +1466,21 @@ export function getGroupConversation(
   );
 }
 
+/**
+ * A team's sessions, newest first. `mine` keeps the owner filter for an admin
+ * too (who otherwise sees every user's) — the Workforce sidebar is "mine".
+ */
 export function listGroupConversations(
   groupId: string,
   limit = 20,
-  index = 0
+  index = 0,
+  mine = false
 ): Promise<GroupConversation[]> {
   const params = new URLSearchParams({
     limit: String(limit),
     index: String(index),
   });
+  if (mine) params.set("mine", "true");
   return api.get<GroupConversation[]>(
     `/groups/${seg(groupId)}/conversations?${params.toString()}`
   );

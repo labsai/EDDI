@@ -27,6 +27,10 @@ The display parameters (`theme`, `title`, `hideUndo`, the colour parameters) are
 
 These parameters beat the deployment's [brand](white-labeling.md#the-chat-ui): with a brand set, the widget's default title, logo and accent come from it, and a `title` or `accentColor` parameter still overrides them.
 
+Each colour parameter sets one or more `--chat-*` CSS variables (`bgColor` → `--chat-bg`, `accentColor` → `--chat-accent`, the user bubble and the focus ring, …). Those names are stable: since the shared design tokens arrived, the ones with a shared meaning are declared as aliases of them (`--chat-bg` is `var(--color-background)`), and setting the `--chat-*` name still wins, so an existing link renders as it did. The table is `CHAT_TOKEN_ALIASES` in [`ui/packages/ui/src/chat-aliases.ts`](../ui/packages/ui/src/chat-aliases.ts).
+
+`lang` picks the widget's language — any of the eleven the Manager ships (`en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`); without it the browser's languages decide, falling back to English. `lang=ar` lays the widget out right to left. Only the widget's own text is translated, never the agent's.
+
 ## 2. Hand the widget a token (authentication on)
 
 With OIDC enabled, every API call the widget makes needs a bearer token. The widget has no login flow of its own; the host page, which has already signed the user in, passes it an access token by `postMessage`.
@@ -105,6 +109,10 @@ What the widget shows for an agent — display name, avatar, accent colour, conv
 
 ## Upgrading: HTML in replies is off by default
 
-`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until now the widget rendered HTML for every agent; the Manager never did.
+`conversationControls.rawHtml` decides whether HTML in an agent's replies is rendered (through the sanitizer) or shown as text, and it **defaults to `false`**. Until 6.7.0 the widget rendered HTML for every agent; the Manager never did.
 
-The profile reports the setting from 6.7.0 on. The widget follows it from the release that ships its side of the change (the frontend unification plan, decision D9), and until then keeps rendering HTML, so nothing changes before agents can opt in. **If an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it now**; otherwise, once the widget follows the setting, its replies show the markup as text. Agents whose replies are plain text or markdown need nothing.
+**From 6.7.0 the widget follows the setting** (decision D9 of the frontend unification plan): it reads `conversationControls` from `GET /agents/{agentId}/profile` and renders HTML only for an agent that sets `"rawHtml": true`. For every other agent — and for a profile that reports no controls — `<b>bold</b>` in a reply appears as the literal text `<b>bold</b>`, while markdown (`**bold**`) renders as before. No image in model text loads either way: a markdown image becomes a link, and a raw `<img>` is text, or a link for an agent with `rawHtml` ([section 3](#3-images-in-agent-output)).
+
+**What to do when upgrading:** if an agent's replies are meant to contain HTML, set `"conversationControls": { "rawHtml": true }` on it and deploy the new version. Agents whose replies are plain text or markdown need nothing. The HTML parser stays a separate chunk, loaded only when a reply of such an agent contains HTML.
+
+The other switches are honoured too: an agent with `undo`, `redo`, `attachments`, `quickReplies` or `rating` set to `false` gets no such control in the widget, and `streaming: false` sends its turns without streaming. The `hide*` URL parameters still hide a control for every agent; the agent's switch can only take one away, never bring back one the URL hid.

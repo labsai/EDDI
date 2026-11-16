@@ -128,6 +128,17 @@ export const chatKeys = {
     agentId === undefined ? (["chat", "history"] as const) : (["chat", "history", agentId] as const),
 } as const;
 
+/**
+ * The Workforce sidebar (T1.1): the signed-in person's chats and team sessions.
+ * Under `chatKeys.all`, so anything that sweeps the chat cache refreshes the
+ * sidebar too. A rename, pin or delete writes these optimistically.
+ */
+export const workforceKeys = {
+  sessions: ["chat", "workforce-sessions"] as const,
+  chats: ["chat", "workforce-sessions", "chats"] as const,
+  teams: ["chat", "workforce-sessions", "teams"] as const,
+} as const;
+
 export const groupKeys = {
   all: ["groups"] as const,
   conversations: ["groupConversations"] as const,

@@ -560,7 +560,7 @@
         "streaming": "流式输出",
         "rawHtml": "在回复中渲染 HTML"
       },
-      "rawHtmlNote": "默认关闭。聊天组件仅从其读取对话控制设置的版本起才应用此设置；在此之前，它会为所有代理渲染 HTML。请现在就为回复本应包含 HTML 的代理开启它。",
+      "rawHtmlNote": "默认关闭：回复中的 HTML 以文本显示。仅对回复本应包含 HTML 的代理开启。",
       "titles": "对话标题",
       "titlesEnable": "让模型撰写对话标题",
       "titlesNote": "否则以对话的第一条消息作为标题。模型每个对话在后台运行一次，费用计入成本预算。用户设置的标题永远不会被替换。",
@@ -4772,6 +4772,22 @@
   "mockBanner": {
     "message": "演示模式——显示示例数据。连接 {{productName}} 后端以获取真实数据。"
   },
+  "spendControl": {
+    "title": "待处理的更改",
+    "description": "通过 MCP 提出且尚未应用：每一项都会放宽支出控制。批准后将以您的名义应用。",
+    "proposedBy": "由 {{who}} 于 {{when}} 提出",
+    "loosening": "放宽支出控制",
+    "allChanges": "所有更改",
+    "approve": "批准",
+    "reject": "拒绝",
+    "approveTitle": "批准此更改？",
+    "rejectTitle": "拒绝此更改？",
+    "approveDesc": "将立即以您为执行人应用，并放宽支出控制：{{loosening}}",
+    "rejectDesc": "不会应用任何内容。提出者可以重新提交。",
+    "approved": "更改已批准并应用",
+    "rejected": "更改已拒绝；未应用任何内容",
+    "approveBlockedDirty": "请先保存您对配额的编辑，或重新加载页面以放弃这些编辑：在批准后再保存会覆盖已批准的配额。"
+  },
   "modelPrices": {
     "nav": "模型价格",
     "title": "模型价格",
@@ -4860,6 +4876,8 @@
   },
   "quotas": {
     "apiCallsMinute": "API 调用 / 分钟",
+    "editsDiscardedAfterRefresh": "配额已重新加载，您未保存的修改已被丢弃，以免覆盖当前限额。",
+    "refreshFailedSaveBlocked":"无法刷新配额，因此已暂停保存。请先重试以加载当前限额。",
     "configuration": "配置",
     "conversationsToday": "今日对话",
     "description": "为每个租户配置速率限制、用量上限和成本预算。",
@@ -5595,7 +5613,48 @@
       "useStarterPrompt": "插入起始提示词",
       "yourAdvisors": "您的顾问"
     },
-    "workforce": "团队"
+    "workforce": "团队",
+    "operatorLink": "平台运维助手",
+    "catalog": {
+      "emptyTitle": "这里还没有内容",
+      "emptyAuthorHint": "最终用户只能看到已上架的智能体和团队。在管理器中打开一个智能体或群组并开启“在目录中上架”——或者在启用工作区时将其设为公开或内部。使用它仍需要访问权限。",
+      "openAgents": "在管理器中打开智能体",
+      "emptyUserHint": "目前还没有向你开放任何智能体或团队。请稍后再来查看。",
+      "agents": "智能体",
+      "teams": "团队",
+      "previewTitle": "最终用户看到的内容",
+      "previewCounts": "已向有权使用的人员提供 {{agents}} 个上架智能体和 {{teams}} 个上架团队。"
+    },
+    "sessions": {
+      "title": "你的对话",
+      "loading": "加载中…",
+      "loadError": "无法加载你的对话。重试",
+      "empty": "还没有对话。在主页开始一个吧。",
+      "pinned": "已置顶",
+      "today": "今天",
+      "yesterday": "昨天",
+      "previous7": "过去 7 天",
+      "previous30": "过去 30 天",
+      "rename": "重命名",
+      "renameLabel": "对话标题",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "delete": "删除",
+      "deleteTitle": "删除此对话？",
+      "deleteDescription": "“{{title}}”将从你的列表中消失。此操作在这里无法撤销。",
+      "renameFailed": "无法重命名：{{error}}",
+      "pinFailed": "无法更改置顶：{{error}}",
+      "deleteFailed": "无法删除：{{error}}"
+    },
+    "home": {
+      "composerLabel": "开始对话",
+      "placeholder": "向 {{agent}} 提问…",
+      "messageLabel": "你的消息",
+      "agentLabel": "智能体",
+      "send": "发送",
+      "starters": "建议",
+      "recent": "最近"
+    }
   },
   "operator": {
     "title": "平台操作员",
@@ -7750,6 +7809,13 @@
       "lte": "至多为",
       "contains": "包含"
     }
+  },
+  "catalogListing": {
+    "label": "在目录中上架",
+    "agentDescription": "在 Workforce 中向最终用户提供此智能体。只有有权使用的人才能看到它，且仅在部署后可见。启用工作区时，公开和内部的智能体无论如何都会上架。",
+    "groupDescription": "在 Workforce 中向最终用户提供此团队。只有有权使用的人才能看到它。启用工作区时，公开和内部的团队无论如何都会上架。",
+    "listedToast": "已在目录中上架",
+    "unlistedToast": "已从目录中移除"
   },
   "groupLearning": {
     "betToggle": "作为押注创建",
