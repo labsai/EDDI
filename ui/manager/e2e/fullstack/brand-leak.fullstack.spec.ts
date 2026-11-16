@@ -121,7 +121,7 @@ function managerRoutes(): { manage: string[]; workforce: string[] } {
 
 /** Every resource type's list page, read from RESOURCE_TYPES. */
 function resourceListRoutes(): string[] {
-  const src = readFileSync(new URL("@eddi/app-kit/lib/api/resources", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../../packages/app-kit/src/lib/api/resources.ts", import.meta.url), "utf8");
   return [...src.matchAll(/^\s*slug: "([a-z]+)",/gm)].map((m) => `/manage/resources/${m[1]}`);
 }
 
