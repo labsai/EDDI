@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.lease.LeaseInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
@@ -50,6 +51,7 @@ import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -206,6 +208,50 @@ class GroupConversationServiceClusterLeaseTest {
         assertTrue(service.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
         verify(conversationStore, never()).read(anyString());
     }
+    @Test
+    @DisplayName("isDiscussionLegRunning: a leg on this node is running, whatever the lease says")
+    void legRunningLocally() throws Exception {
+        running(GC_ID);
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: a group lease held by another node means its leg still runs there")
+    void legRunningOnAnotherNode() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID))
+                .thenReturn(Optional.of(new LeaseInfo("node-b", "boot-b", 7, 0)));
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID),
+                "a cancel that fell back to the database has not stopped that leg");
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: no token and no lease — no leg runs")
+    void noLegRunning() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+
+        assertFalse(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: an unreadable lease store is 'running', never 'stopped'")
+    void unreadableLeaseCountsAsRunning() {
+        when(leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + GC_ID))
+                .thenThrow(new ClusterUnavailableException("NATS down"));
+
+        assertTrue(service.isDiscussionLegRunning(GC_ID));
+    }
+
+    @Test
+    @DisplayName("isDiscussionLegRunning: outside a cluster only a local leg counts")
+    void standaloneNeedsALocalLeg() {
+        when(leaseManager.isClustered()).thenReturn(false);
+
+        assertFalse(service.isDiscussionLegRunning(GC_ID));
+        verify(leaseManager, never()).peekKeyStrict(anyString());
+    }
+
     @SuppressWarnings("unchecked")
     private void running(String id) throws Exception {
         Field field = GroupConversationService.class.getDeclaredField("discussionControls");

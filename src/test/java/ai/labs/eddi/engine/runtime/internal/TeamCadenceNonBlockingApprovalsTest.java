@@ -532,6 +532,99 @@ class TeamCadenceNonBlockingApprovalsTest {
     }
 
     @Nested
+    @DisplayName("a cancel that reached the database but not the leg")
+    class RemoteLegStillRunning {
+
+        private TaskItem task;
+        private GroupWorkspace workspace;
+
+        @BeforeEach
+        void remote() {
+            task = new TaskItem("Draft the post", "", 5);
+            workspace = workspace(task);
+            // The node running the leg did not answer: the cancel's database fallback
+            // stored CANCELLED, but the leg's group lease is still held.
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(true);
+        }
+
+        private GroupConversation stored(GroupConversationState state, boolean taskVerified) {
+            var gc = new GroupConversation();
+            gc.setId(PAUSED_ID);
+            gc.setGroupId(GROUP_ID);
+            gc.setState(state);
+            var tasks = new SharedTaskList();
+            if (taskVerified) {
+                verified(tasks, "Draft the post");
+            }
+            gc.setTaskList(tasks);
+            return gc;
+        }
+
+        private TaskStatus status() {
+            return workspace.getBacklog().findById(task.id()).status();
+        }
+
+        @Test
+        @DisplayName("reclaim: a post-cancel CANCELLED read keeps the claim while the leg's lease is held")
+        void reclaimKeepsTheClaim() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(30)), task);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(stored(GroupConversationState.IN_PROGRESS, false),
+                    stored(GroupConversationState.CANCELLED, false));
+
+            assertFalse(service.reconcile(workspace));
+
+            verify(groupConversationService).cancelDiscussion(PAUSED_ID, ControlSignal.CANCEL_GRACEFUL);
+            assertEquals(PAUSED_ID, workspace.getRunningDiscussionId());
+            assertEquals(TaskStatus.IN_PROGRESS, status());
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+            assertEquals(0, meters.counter("eddi_team_cadence_claims_reclaimed_total").count());
+        }
+
+        @Test
+        @DisplayName("active run: an ended discussion is settled only once its leg has stopped")
+        void activeRunWaitsForTheLeg() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(stored(GroupConversationState.CANCELLED, false));
+
+            assertFalse(service.reconcile(workspace));
+            assertEquals(TaskStatus.IN_PROGRESS, status(), "the leg may still be working on it");
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(false);
+            assertTrue(service.reconcile(workspace));
+            assertEquals(TaskStatus.PENDING, status());
+            assertEquals(GroupWorkspace.NO_RUNNING_DISCUSSION, workspace.getRunningDiscussionId());
+        }
+
+        @Test
+        @DisplayName("parked run: an ended discussion keeps its place and its tasks while its leg runs")
+        void parkedRunWaitsForTheLeg() throws Exception {
+            workspace.setParkedRuns(List.of(new ParkedRun(PAUSED_ID, Instant.now().minus(Duration.ofHours(30)),
+                    hold(workspace, task))));
+            when(conversationStore.read(PAUSED_ID)).thenReturn(stored(GroupConversationState.CANCELLED, true));
+
+            assertTrue(service.reconcile(workspace), "the claim slot itself is free");
+
+            assertEquals(1, workspace.getParkedRuns().size());
+            assertEquals(TaskStatus.IN_PROGRESS, status());
+            verify(workspaceStore, never()).casRunningDiscussion(any());
+        }
+
+        @Test
+        @DisplayName("a completed discussion whose leg has not released its lease yet is settled at the next fire")
+        void completedWaitsForTheLeg() throws Exception {
+            claimed(workspace, PAUSED_ID, Instant.now().minus(Duration.ofHours(1)), task);
+            when(conversationStore.read(PAUSED_ID)).thenReturn(stored(GroupConversationState.COMPLETED, true));
+
+            assertFalse(service.reconcile(workspace));
+            when(groupConversationService.isDiscussionLegRunning(PAUSED_ID)).thenReturn(false);
+            assertTrue(service.reconcile(workspace));
+
+            assertEquals(TaskStatus.VERIFIED, status());
+        }
+    }
+
+    @Nested
     @DisplayName("reconciling parked runs")
     class ReconcileParked {
 

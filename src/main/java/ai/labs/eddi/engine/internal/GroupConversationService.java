@@ -2925,6 +2925,39 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
+     * Whether a leg of this discussion may still be running, on this node or any
+     * other — independent of the stored state.
+     * <p>
+     * The stored state alone cannot say: a cancel that lands on a node not running
+     * the leg (forwarding failed, the holder did not answer) compare-and-sets the
+     * document to {@code CANCELLED} while the leg goes on until its next write is
+     * fenced off ({@link RunningDiscussionWrites}). Work that leg has in flight,
+     * and its side effects, are still happening. A caller that hands the
+     * discussion's work to someone else once it reads as ended (the team cadence
+     * settling its backlog claim) must wait for this to turn {@code false} as well.
+     * <p>
+     * A leg holds a local control token, and in a cluster its group lease, from
+     * start to its {@code finally} — after its last write. A lease of a node that
+     * died expires. When the lease store cannot be read the answer is {@code true}:
+     * "unknown" must not be read as "stopped".
+     */
+    public boolean isDiscussionLegRunning(String groupConversationId) {
+        if (discussionControls.containsKey(groupConversationId)) {
+            return true;
+        }
+        if (!clustered()) {
+            return false;
+        }
+        try {
+            return leaseManager.peekKeyStrict(IConversationLeaseManager.GROUP + groupConversationId).isPresent();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not read the group lease of discussion %s (%s) — treating its leg as running",
+                    LogSanitizer.sanitize(groupConversationId), e.getClass().getSimpleName());
+            return true;
+        }
+    }
+
+    /**
      * Cancels the discussion on this node, where it runs, or reports false. Served
      * for other nodes through {@code IClusterRpc.GROUP_CONTROL}.
      */

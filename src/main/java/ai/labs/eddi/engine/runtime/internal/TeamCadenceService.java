@@ -556,6 +556,9 @@ public class TeamCadenceService {
             }
             return Settled.IN_FLIGHT;
         }
+        if (isEnded(gc.getState()) && legStillRunning(run.discussionId())) {
+            return Settled.IN_FLIGHT;
+        }
         return switch (gc.getState()) {
             // A lost settle race means another reconciler (or a fresh claim) got
             // there first — this caller must treat the workspace as busy and let
@@ -630,6 +633,12 @@ public class TeamCadenceService {
                     + "until it ends, so its writeback sees the tasks it finished", gc.getId(), after.getState());
             return Settled.IN_FLIGHT;
         }
+        if (legStillRunning(gc.getId())) {
+            // The cancel reached the database but not the leg -- its node did not
+            // answer. The stored CANCELLED fences the leg's next write, but the work
+            // it has in flight, and its side effects, go on until it stops.
+            return Settled.IN_FLIGHT;
+        }
         // The ordinary writeback for the state the run ended in, by the same rules as
         // any other ended run: a graceful cancel lets the current phase finish, so a
         // run can still end COMPLETED; a person can still have rejected it, and a
@@ -658,7 +667,24 @@ public class TeamCadenceService {
         return !Instant.now().isBefore(run.claimedAt().plus(claimTtl));
     }
 
-    /** States a discussion does not leave: no leg runs, and none will. */
+    /**
+     * Whether a leg of {@code discussionId} may still be running although the
+     * stored state says it ended. A stored terminal state does not prove it: a
+     * cancel that could not reach the node running the leg ends the document while
+     * the leg finishes what it has in flight. Handing the run's tasks to another
+     * run before that leg stops would run them twice, so the claim is kept until it
+     * has.
+     */
+    private boolean legStillRunning(String discussionId) {
+        if (!groupConversationService.isDiscussionLegRunning(discussionId)) {
+            return false;
+        }
+        LOGGER.infof("Cadence discussion %s reads as ended but a leg of it is still running — keeping the claim "
+                + "until that leg stops", discussionId);
+        return true;
+    }
+
+    /** States a discussion does not leave (stored): no further phase starts. */
     private static boolean isEnded(GroupConversationState state) {
         return state == GroupConversationState.COMPLETED || state == GroupConversationState.FAILED
                 || state == GroupConversationState.REJECTED || state == GroupConversationState.CANCELLED;

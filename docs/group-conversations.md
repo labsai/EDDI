@@ -636,7 +636,21 @@ leg, so the claim stays held until that leg ends and the run is written back fro
 its final task list by the ordinary rule for the state it ended in. A run that
 ended `COMPLETED` keeps its `VERIFIED` tasks; one that ended `CANCELLED` (what a
 signalled leg usually reaches) returns every pulled task to `PENDING` unless
-`stoppedRunKeepsFinishedTasks` is on (below). Set the TTL non-positive to disable reclaiming, for
+`stoppedRunKeepsFinishedTasks` is on (below).
+
+A stored terminal state is not enough to release a run, here or anywhere a
+cadence run is written back: the run's tasks go back to the backlog only once no
+leg of its discussion is still running. In a cluster a cancel that cannot reach
+the node running the leg (the node does not answer) stores `CANCELLED` directly;
+that stops the leg's next write, but not the work it already has in flight or its
+tool calls. Until that leg ends — its node's group lease is released, or expires
+if the node died — the claim, or the parked run, keeps its tasks `IN_PROGRESS`,
+so no later run picks them up while it is still working on them. When the lease
+store cannot be read the leg counts as running. A discussion that completed
+normally may therefore be written back one fire later than before, while its
+leg finishes releasing the lease.
+
+Set the TTL non-positive to disable reclaiming, for
 an operator who would rather wedge than risk abandoning a pause; the counter is
 `eddi_team_cadence_claims_reclaimed_total`. Creating a cadence on a group that
 combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —

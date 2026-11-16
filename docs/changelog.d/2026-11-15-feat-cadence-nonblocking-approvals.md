@@ -45,6 +45,12 @@ Two group switches on `hitlConfig`, both off by default; stored configs behave e
   so a transient store error cannot hand them to a second run; past the claim TTL the discussion is
   also cancelled, and it is written back once it reads as ended (a document that never reads again
   is released by deleting it).
+- No cadence writeback while a leg still runs: `GroupConversationService.isDiscussionLegRunning`
+  (local control token, or the group lease anywhere in the cluster; an unreadable lease store counts
+  as running) gates every cadence writeback of an ended discussion, for the claim holder, parked
+  runs and the post-cancel read of a reclaim. A cancel whose forward to the holding node got no
+  answer stores `CANCELLED` while that leg finishes its in-flight work; the run's tasks now stay
+  `IN_PROGRESS` until it stops, so a later run cannot overlap it (CodeRabbit, cross-node).
 - `HitlConfigValidation` range-checks `maxPausedCadenceRuns`.
   `TeamHandoffIntake.deleteBacklogTask` refuses a task a parked run holds (`GroupWorkspace.isHeldByRun`).
 - Platform Operator prompt learns both switches (operator revision bumped).
