@@ -82,7 +82,18 @@
       "confirmNewDescription": "A discussion is still running. Starting a new one stops it first — any work in progress is abandoned.",
       "confirmNewButton": "Stop and start new",
       "keepRunning": "Keep running",
-      "questionRequired": "Add a question for your task force — the files are shared with it when the discussion starts."
+      "questionRequired": "Add a question for your task force — the files are shared with it when the discussion starts.",
+      "humanTurnForbidden": "Only the member whose turn it is, or an administrator, can answer this turn.",
+      "announceOtherTurn": "The discussion is waiting for {{name}}.",
+      "announceYourTurn": "It's your turn in this discussion.",
+      "heldQuestion": "A discussion is already running here, so your question “{{question}}” has not started. Start it once that one has ended, or stop it first.",
+      "heldQuestionStart": "Start it",
+      "heldQuestionDiscard": "Discard",
+      "artifacts": "Shared artifacts ({{n}})",
+      "artifactsPanel": "Shared artifacts panel",
+      "artifactsTitle": "Shared artifacts",
+      "artifactsClose": "Close shared artifacts",
+      "artifactsHint": "The team's members write these with their tools. You can read every version the server still keeps."
     },
     "thread": {
       "fileTooLarge": "File must be under 20MB",
@@ -573,7 +584,11 @@
       "agentLabel": "Agent",
       "send": "Send",
       "starters": "Suggestions",
-      "recent": "Recent"
+      "recent": "Recent",
+      "placeholderTeam": "Ask the team {{team}}…",
+      "recipientLabel": "Agent or team",
+      "agentsGroup": "Agents",
+      "teamsGroup": "Teams"
     },
     "switcher": {
       "newChat": "New chat",
@@ -597,6 +612,16 @@
       "clear": "Clear search",
       "more": "More results",
       "moreFailed": "Couldn't load more. Retry"
+    },
+    "handoff": {
+      "localOnly": "Recorded in this browser only",
+      "toTeam": "You handed “{{question}}” over to the team {{name}}.",
+      "toAgent": "You handed “{{question}}” over to {{name}}.",
+      "openSession": "Open the team session",
+      "openChat": "Open that chat",
+      "notLinked": "Not linked yet.",
+      "fromChat": "Handed over from your chat with {{name}}.",
+      "backToChat": "Back to that chat"
     }
   },
   "analyticsPage": {

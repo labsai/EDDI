@@ -6,6 +6,7 @@ import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import type { DecisionRecord, DecisionType } from "@eddi/core/groups";
 import { describeDecision } from "./group-decision";
+import { decisionSummary } from "./decision-summary";
 import { formatMarkdownText } from "./group-utils";
 import { ConversationMarkdown } from "../i18next/conversation-markdown";
 
@@ -83,6 +84,13 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
           </span>
         )}
       </div>
+
+      {/* The decision in plain words first; the detail follows. */}
+      <p className="mb-1.5 text-sm font-medium text-foreground" data-testid="decision-plain">
+        {decisionSummary(decision)
+          .map(([key, fallback, values]) => t(key, fallback, values))
+          .join(" ")}
+      </p>
 
       {view.headline && (
         <p className="text-sm text-foreground" data-testid="decision-outcome">

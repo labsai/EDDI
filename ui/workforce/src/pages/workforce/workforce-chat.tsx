@@ -3,7 +3,23 @@ import { useQueryClient } from "@tanstack/react-query";
 import { markAgentUsed } from "@/hooks/use-recent-agents";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { readInitialChatMessage } from "@eddi/app-kit/lib/workforce-chat-start";
+import {
+  readInitialChatMessage,
+  workforceChatStart,
+  type InitialChatMessage,
+} from "@eddi/app-kit/lib/workforce-chat-start";
+import { lastStepIndex } from "@eddi/core";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import type { ChatMentionCandidate, ChatMentionConfig, ChatTranscriptMarker } from "@eddi/app-kit/lib/chat-mention";
+import {
+  addHandoff,
+  completeHandoff,
+  useWorkforceHandoffs,
+} from "@eddi/app-kit/lib/workforce-handoffs";
+import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
+import { workforceTeamStart } from "@/lib/workforce-team-start";
+import { mentionCandidates } from "@/lib/mention-candidates";
+import { HandoffOriginMarker, HandoffTargetMarker } from "@/components/workforce/handoff-marker";
 import { workforceKeys } from "@eddi/app-kit/lib/query-keys";
 import { useTranslation } from "react-i18next";
 import {
@@ -63,6 +79,82 @@ export function WorkforceChat() {
     void queryClient.invalidateQueries({ queryKey: workforceKeys.chats });
   }, [conversationId, isProcessing, queryClient]);
 
+  // ─── @mention hand-off (T2.2) ───────────────────────────
+  // Who may be mentioned: the catalog's agents and teams, which list only what
+  // the caller may USE — never the agent store. Not this chat's own agent.
+  const { user } = useAuth();
+  const principal = user?.username || user?.email || null;
+  const { data: catalogAgents } = useCatalogAgents();
+  const { data: catalogGroups } = useCatalogGroups();
+  const candidates = useMemo(
+    () => mentionCandidates(catalogAgents, catalogGroups, selectedAgentId),
+    [catalogAgents, catalogGroups, selectedAgentId],
+  );
+  const groupVersions = useMemo(
+    () => new Map((catalogGroups ?? []).map((g) => [g.groupId, g.version] as const)),
+    [catalogGroups],
+  );
+  const messages = useChatStore((s) => s.messages);
+
+  const handOff = useCallback(
+    (target: ChatMentionCandidate, text: string) => {
+      // Only from a running chat: the marker belongs in a conversation.
+      if (!conversationId || !selectedAgentId) return false;
+      const record = addHandoff(principal, {
+        from: {
+          agentId: selectedAgentId,
+          agentName: selectedAgentName || selectedAgentId,
+          conversationId,
+          afterStep: lastStepIndex(messages),
+        },
+        to: {
+          kind: target.kind,
+          id: target.id,
+          name: target.name,
+          version: target.kind === "team" ? (groupVersions.get(target.id) ?? null) : null,
+          conversationId: null,
+        },
+        question: text,
+      });
+      const next =
+        target.kind === "team"
+          ? workforceTeamStart(target.id, text, { version: groupVersions.get(target.id), handoffId: record.id })
+          : workforceChatStart(target.id, text, { handoffId: record.id });
+      navigate(next.to, { state: next.state });
+      return true;
+    },
+    [conversationId, selectedAgentId, selectedAgentName, principal, messages, groupVersions, navigate],
+  );
+  const mention = useMemo<ChatMentionConfig | undefined>(
+    () => (candidates.length > 0 ? { candidates, onHandOff: handOff } : undefined),
+    [candidates, handOff],
+  );
+
+  // The new chat a hand-off started: link the hand-off to it.
+  const linkHandoff = useCallback(
+    (startedId: string, message: InitialChatMessage) => {
+      if (message.handoffId) completeHandoff(principal, message.handoffId, startedId);
+    },
+    [principal],
+  );
+
+  // Markers: hand-offs made from this chat, after the turn they followed; and,
+  // at the top, the hand-off this chat was started by.
+  const handoffs = useWorkforceHandoffs(principal);
+  const transcriptMarkers = useMemo<ChatTranscriptMarker[]>(() => {
+    if (!conversationId) return [];
+    const markers: ChatTranscriptMarker[] = [];
+    for (const h of handoffs) {
+      if (h.to.kind === "agent" && h.to.conversationId === conversationId) {
+        markers.push({ id: `to-${h.id}`, afterStep: null, content: <HandoffTargetMarker handoff={h} /> });
+      }
+      if (h.from.conversationId === conversationId) {
+        markers.push({ id: `from-${h.id}`, afterStep: h.from.afterStep, content: <HandoffOriginMarker handoff={h} /> });
+      }
+    }
+    return markers;
+  }, [handoffs, conversationId]);
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       {/* Header bar */}
@@ -120,6 +212,9 @@ export function WorkforceChat() {
             urlSync
             initialMessage={initialMessage}
             onInitialMessageConsumed={dropInitialMessage}
+            onInitialConversationStarted={linkHandoff}
+            mention={mention}
+            transcriptMarkers={transcriptMarkers}
           />
         </div>
 

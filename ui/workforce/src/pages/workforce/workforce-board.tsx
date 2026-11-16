@@ -1,11 +1,11 @@
 import { AppLink } from "@eddi/app-kit/components/shared/app-link";
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronLeft, PanelRightOpen, PanelRightClose, Plus, ShieldAlert } from "lucide-react";
+import { ChevronLeft, FileStack, PanelRightOpen, PanelRightClose, Plus, ShieldAlert } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { useWorkforceGroup } from "@/hooks/use-workforce-group";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
@@ -31,7 +31,7 @@ import { DiscussionInsights } from "@eddi/conversation/team";
 import { DiscussionPanel } from "@eddi/app-kit/components/groups/overview/discussion-panel";
 import { DecisionRecordCard } from "@eddi/conversation/team";
 import { hasDisplayableDecision } from "@eddi/app-kit/lib/group-config";
-import { HumanTurnBanner } from "@eddi/conversation/team";
+import { HumanTurnBanner, decisionSummary } from "@eddi/conversation/team";
 import { TaskBoard, PersistedTaskBoard } from "@eddi/conversation/team";
 import { Button } from "@eddi/ui";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
@@ -48,7 +48,17 @@ import {
   type GroupConversationState,
 } from "@eddi/app-kit/lib/api/groups";
 import { useSubmitHumanInput } from "@eddi/app-kit/hooks/use-hitl";
-import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { useWorkforceHandoffs } from "@eddi/app-kit/lib/workforce-handoffs";
+import { readInitialTeamQuestion, type InitialTeamQuestion } from "@/lib/workforce-team-start";
+import { linkTeamHandoffWhenNamed } from "@/lib/team-handoff-link";
+import { HandoffTargetMarker } from "@/components/workforce/handoff-marker";
+
+// The artifacts side panel loads when it is first opened (T2.6).
+const ArtifactsDrawer = lazy(() =>
+  import("@/components/workforce/artifacts-drawer").then((m) => ({ default: m.ArtifactsDrawer })),
+);
 
 // ─── Icons ───────────────────────────────────────────────────────
 
@@ -157,6 +167,9 @@ function WorkforceBoard() {
   } = useWorkforceGroup(boardId, searchParams.get("version"));
   const version = resolvedVersion ?? 1;
   const { canAuthor } = useWorkforceAccess();
+  // Who is looking: a HUMAN member's turn, and the hand-off records, are theirs.
+  const { user } = useAuth();
+  const principal = user?.username || user?.email || null;
 
   // ─── Selected conversation (URL-backed) ────────────────────────
   // The selection lives in the URL so a page reload — or a shared link — lands
@@ -180,6 +193,8 @@ function WorkforceBoard() {
   // ─── State ─────────────────────────────────────────────────────
   const [showMembers, setShowMembers] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showArtifacts, setShowArtifacts] = useState(false);
+  const artifactsRef = useRef<HTMLDivElement>(null);
   const [showConfig, setShowConfig] = usePersistedBoolean("workforce-board-config-panel", true);
   const membersRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -262,19 +277,21 @@ function WorkforceBoard() {
 
   // Close slide-over panels on Escape + restore focus
   useEffect(() => {
-    if (!showMembers && !showHistory) return;
+    if (!showMembers && !showHistory && !showArtifacts) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showMembers) setShowMembers(false);
         else if (showHistory) setShowHistory(false);
+        else if (showArtifacts) setShowArtifacts(false);
         requestAnimationFrame(() => panelTriggerRef.current?.focus());
       }
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [showMembers, showHistory]);
+  }, [showMembers, showHistory, showArtifacts]);
 
-  // Auto-focus first element in slide-over panels
+  // Auto-focus first element in slide-over panels. The artifacts panel is
+  // lazy: it focuses its own close button once it has loaded.
   useEffect(() => {
     const ref = showMembers ? membersRef : showHistory ? historyRef : null;
     if (!ref) return;
@@ -415,6 +432,37 @@ function WorkforceBoard() {
     return undefined;
   }, [isStreaming, selectedConvId, selectedConversation, t]);
 
+  // ─── Shared artifacts (T2.6) ───────────────────────────────────
+  // Only the single-conversation read carries them, and it is polled while
+  // the discussion runs, so the panel follows a live session too.
+  const artifacts = selectedConversation?.artifacts ?? [];
+  const artifactCount = artifacts.length;
+  useEffect(() => {
+    if (artifactCount === 0) setShowArtifacts(false);
+  }, [artifactCount]);
+
+  // ─── A member's turn and a decision, announced (T2.1) ──────────
+  const pendingHuman =
+    selectedConversation?.state === "AWAITING_HUMAN_INPUT" ? selectedConversation.pendingHumanInput ?? null : null;
+  /** Whether the pending member is the person looking; unknown without a signed-in principal. */
+  const viewerIsMember =
+    pendingHuman && principal
+      ? pendingHuman.memberId === user?.username || pendingHuman.memberId === user?.email
+      : undefined;
+  const teamAnnouncement = useMemo(() => {
+    if (pendingHuman) {
+      return viewerIsMember === false
+        ? t("Workforce.board.announceOtherTurn", "The discussion is waiting for {{name}}.", { name: pendingHuman.displayName })
+        : t("Workforce.board.announceYourTurn", "It's your turn in this discussion.");
+    }
+    if (displayDecision && hasDisplayableDecision(displayDecision)) {
+      return decisionSummary(displayDecision)
+        .map(([key, fallback, values]) => t(key, fallback, values))
+        .join(" ");
+    }
+    return "";
+  }, [pendingHuman, viewerIsMember, displayDecision, t]);
+
   // ─── Handlers ──────────────────────────────────────────────────
   const [refusedDraft, setRefusedDraft] = useState<{
     boardId?: string;
@@ -459,6 +507,54 @@ function WorkforceBoard() {
     [boardId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t],
   );
 
+  // ─── A question handed to this team from elsewhere (T2.1, T2.2) ──
+  // Home's composer with a team picked, or an @mention hand-off from a chat,
+  // carries the question in router state (never the URL). It is taken once the
+  // board is ready and dropped from the history entry, so a reload cannot start
+  // it again. With nothing streaming here it starts a NEW session; while a
+  // discussion streams it is held, on screen, until the person starts or
+  // discards it — never started later on its own (a session costs money).
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialTeamQuestion = useMemo(() => readInitialTeamQuestion(location.state), [location.state]);
+  const takenTeamQuestionRef = useRef<typeof initialTeamQuestion>(null);
+  const [heldQuestion, setHeldQuestion] = useState<InitialTeamQuestion | null>(null);
+  const startTeamQuestion = useCallback(
+    (q: InitialTeamQuestion) => {
+      setSelectedConvId(null);
+      void startStream(q.groupId, q.text);
+      const accepted = whenStreamAccepted(q.groupId);
+      // Linked from this start's own stream, wherever the person is by then.
+      if (q.handoffId) void linkTeamHandoffWhenNamed(principal, q.handoffId, q.groupId, accepted);
+      void accepted.then((ok) => {
+        if (ok) return;
+        // As for a typed question: hand it back when the composer returns.
+        setRefusedDraft({ boardId: q.groupId, message: q.text });
+        toast.error(streamErrorOf(q.groupId) ?? t("common.error", "Something went wrong"));
+      });
+    },
+    [principal, setSelectedConvId, startStream, t],
+  );
+  useEffect(() => {
+    const q = initialTeamQuestion;
+    if (!q || takenTeamQuestionRef.current === q) return;
+    if (!boardId || q.groupId !== boardId || configLoading || !groupConfig) return;
+    takenTeamQuestionRef.current = q;
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+    if (isStreaming) setHeldQuestion(q);
+    else startTeamQuestion(q);
+  }, [initialTeamQuestion, boardId, configLoading, groupConfig, isStreaming, navigate, location.pathname, location.search, startTeamQuestion]);
+  const shownHeldQuestion = heldQuestion && heldQuestion.groupId === boardId ? heldQuestion : null;
+  // The marker above a session that a chat handed its question to.
+  const handoffs = useWorkforceHandoffs(principal);
+  const startedByHandoff = useMemo(
+    () =>
+      selectedConvId
+        ? handoffs.find((h) => h.to.kind === "team" && h.to.id === boardId && h.to.conversationId === selectedConvId)
+        : undefined,
+    [handoffs, boardId, selectedConvId],
+  );
+
   const handleSelectConversation = useCallback(
     (convId: string) => {
       setSelectedConvId(convId);
@@ -473,6 +569,7 @@ function WorkforceBoard() {
     // Whichever slide-over was open is about the discussion being left behind.
     setShowHistory(false);
     setShowMembers(false);
+    setShowArtifacts(false);
   }, [resetStream, setSelectedConvId]);
 
   /**
@@ -703,7 +800,15 @@ function WorkforceBoard() {
         { groupId: boardId, gcId: selectedConvId, memberId, content, choice },
         {
           onSuccess: () => toast.success(t("groups.humanTurnSubmitted", "Your response was recorded")),
-          onError: (err) => toast.error(getErrorMessage(err)),
+          onError: (err) =>
+            toast.error(
+              isApiError(err) && err.status === 403
+                ? t(
+                    "Workforce.board.humanTurnForbidden",
+                    "Only the member whose turn it is, or an administrator, can answer this turn.",
+                  )
+                : getErrorMessage(err),
+            ),
         },
       );
     },
@@ -794,6 +899,12 @@ function WorkforceBoard() {
               : ""}
           </span>
 
+          {/* Said politely when a member's turn opens or the team decides —
+              the two moments a person following the discussion acts on. */}
+          <span className="sr-only" role="status" data-testid="board-team-announcement">
+            {teamAnnouncement}
+          </span>
+
           {/* Ongoing indicator — the discussion is running, whether this tab is
               streaming it or only polling for it after a reload. */}
           {isOngoing && (
@@ -873,6 +984,7 @@ function WorkforceBoard() {
               if (!showMembers) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowMembers((v) => !v);
               setShowHistory(false);
+              setShowArtifacts(false);
             }}
             className={cn("h-8 w-8", showMembers && "bg-primary/10")}
             aria-label={t("Workforce.board.members", "Team")}
@@ -888,6 +1000,7 @@ function WorkforceBoard() {
               if (!showHistory) panelTriggerRef.current = document.activeElement as HTMLElement;
               setShowHistory((v) => !v);
               setShowMembers(false);
+              setShowArtifacts(false);
             }}
             className={cn("h-8 w-8", showHistory && "bg-primary/10")}
             aria-label={t("Workforce.board.sessions", "Sessions")}
@@ -896,6 +1009,25 @@ function WorkforceBoard() {
           >
             <ClockIcon />
           </Button>
+          {artifactCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (!showArtifacts) panelTriggerRef.current = document.activeElement as HTMLElement;
+                setShowArtifacts((v) => !v);
+                setShowMembers(false);
+                setShowHistory(false);
+              }}
+              className={cn("h-8 gap-1 px-2", showArtifacts && "bg-primary/10")}
+              aria-label={t("Workforce.board.artifacts", "Shared artifacts ({{n}})", { n: artifactCount })}
+              aria-expanded={showArtifacts}
+              data-testid="artifacts-toggle"
+            >
+              <FileStack className="h-4 w-4" aria-hidden="true" />
+              <span className="text-xs tabular-nums">{artifactCount}</span>
+            </Button>
+          )}
           <ExportMenu
               conversation={selectedConversation ?? null}
               groupName={groupConfig?.name}
@@ -940,6 +1072,48 @@ function WorkforceBoard() {
             per-message action thousands of pixels off-screen, where `MAIN`'s
             `overflow-hidden` clipped them away with nothing to scroll to. */}
         <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+          {shownHeldQuestion && (
+            <div
+              className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground"
+              role="status"
+              data-testid="board-held-question"
+            >
+              <span className="min-w-0 flex-1" dir="auto">
+                {t(
+                  "Workforce.board.heldQuestion",
+                  "A discussion is already running here, so your question “{{question}}” has not started. Start it once that one has ended, or stop it first.",
+                  { question: shownHeldQuestion.text },
+                )}
+              </span>
+              <Button
+                size="sm"
+                disabled={isStreaming}
+                onClick={() => {
+                  const q = shownHeldQuestion;
+                  setHeldQuestion(null);
+                  startTeamQuestion(q);
+                }}
+                data-testid="board-held-question-start"
+              >
+                {t("Workforce.board.heldQuestionStart", "Start it")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setHeldQuestion(null)}
+                data-testid="board-held-question-discard"
+              >
+                {t("Workforce.board.heldQuestionDiscard", "Discard")}
+              </Button>
+            </div>
+          )}
+          {startedByHandoff && (
+            <div className="flex justify-center px-4 pt-2 text-xs text-muted-foreground" data-testid="board-handoff-marker">
+              <div className="max-w-[min(90%,40rem)] rounded-2xl border border-border bg-muted/40 px-3 py-1">
+                <HandoffTargetMarker handoff={startedByHandoff} />
+              </div>
+            </div>
+          )}
           {/* Transcript area — BoardTranscript owns the scroll box so it can
               keep itself pinned to the newest message while streaming. */}
           {displayTranscript.length > 0 || showAnyTaskBoard ? (
@@ -1145,6 +1319,7 @@ function WorkforceBoard() {
                 selectedConversation.hitlApprovalTimeout,
                 groupConfig?.humanMemberConfig?.turnTimeout,
               )}
+              viewerIsMember={viewerIsMember}
               isSubmitting={submitHumanInputMutation.isPending}
               options={tieBreakOptions(selectedConversation.pendingHumanInput)}
               task={pendingHumanTask(selectedConversation)}
@@ -1299,6 +1474,45 @@ function WorkforceBoard() {
                 requestAnimationFrame(() => panelTriggerRef.current?.focus());
               }}
             />
+          </div>
+        </>
+      )}
+
+      {/* Shared artifacts slide-over (T2.6): a side panel on wide screens, the
+          full width on a phone. Non-modal, like the two above. */}
+      {showArtifacts && artifactCount > 0 && (
+        <>
+          <div
+            className="absolute inset-0 z-30 bg-black/30"
+            onClick={() => {
+              setShowArtifacts(false);
+              requestAnimationFrame(() => panelTriggerRef.current?.focus());
+            }}
+            aria-hidden="true"
+          />
+          <div
+            ref={artifactsRef}
+            role="dialog"
+            aria-label={t("Workforce.board.artifactsPanel", "Shared artifacts panel")}
+            data-testid="artifacts-panel-drawer"
+            className={cn(
+              "absolute inset-y-0 end-0 z-40 w-full sm:w-[28rem]",
+              "bg-card",
+              "border-s border-border",
+              "shadow-xl",
+              "animate-[br-fade-in_200ms_ease-out]",
+            )}
+          >
+            <Suspense fallback={<div className="p-4"><Skeleton className="h-6 w-1/2" /></div>}>
+              <ArtifactsDrawer
+                artifacts={artifacts}
+                memberDisplayNames={selectedConversation?.memberDisplayNames ?? rosterDisplayNames}
+                onClose={() => {
+                  setShowArtifacts(false);
+                  requestAnimationFrame(() => panelTriggerRef.current?.focus());
+                }}
+              />
+            </Suspense>
           </div>
         </>
       )}

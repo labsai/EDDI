@@ -37,7 +37,11 @@ function LocationProbe() {
 
 function renderChat(
   initialEntry: string | { pathname: string; search: string; state: unknown },
-  props: { urlSync?: boolean; initialMessage?: InitialChatMessage | null } = { urlSync: true },
+  props: {
+    urlSync?: boolean;
+    initialMessage?: InitialChatMessage | null;
+    onInitialConversationStarted?: (conversationId: string, message: InitialChatMessage) => void;
+  } = { urlSync: true },
 ) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -48,7 +52,11 @@ function renderChat(
               path="/workforce/chat"
               element={
                 <>
-                  <ChatPanel urlSync={props.urlSync} initialMessage={props.initialMessage ?? null} />
+                  <ChatPanel
+                    urlSync={props.urlSync}
+                    initialMessage={props.initialMessage ?? null}
+                    onInitialConversationStarted={props.onInitialConversationStarted}
+                  />
                   <LocationProbe />
                 </>
               }
@@ -148,6 +156,52 @@ describe("ChatPanel — the conversation in the URL (T1.15)", () => {
     });
     await waitFor(() => expect(sent.some((s) => s.includes("Where is my order?"))).toBe(true));
     expect(sent).toHaveLength(1);
+  });
+
+  it("reports the started conversation only after the first message was sent there", async () => {
+    const started = vi.fn();
+    server.use(
+      http.post("*/agents/:agentId/start", () =>
+        new HttpResponse(null, { status: 201, headers: { Location: "/agents/conv-new" } }),
+      ),
+      http.post("*/agents/:conversationId", ({ params }) =>
+        HttpResponse.json(snapshot(String(params.conversationId), "on its way")),
+      ),
+    );
+    const message = { agentId: "agent1", text: "Where is my order?", handoffId: "h1" };
+    renderChat("/workforce/chat?agentId=agent1", { urlSync: true, initialMessage: message, onInitialConversationStarted: started });
+    await waitFor(() => expect(started).toHaveBeenCalledWith("conv-new", message));
+  });
+
+  it("puts the question back into the composer when the new conversation cannot start", async () => {
+    const started = vi.fn();
+    server.use(http.post("*/agents/:agentId/start", () => new HttpResponse(null, { status: 500 })));
+    renderChat("/workforce/chat?agentId=agent1", {
+      urlSync: true,
+      initialMessage: { agentId: "agent1", text: "Where is my order?", handoffId: "h1" },
+      onInitialConversationStarted: started,
+    });
+    const input = (await screen.findByTestId("chat-input")) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe("Where is my order?"));
+    expect(started).not.toHaveBeenCalled();
+  });
+
+  it("does not report a hand-off whose first message failed, and keeps the question", async () => {
+    const started = vi.fn();
+    server.use(
+      http.post("*/agents/:agentId/start", () =>
+        new HttpResponse(null, { status: 201, headers: { Location: "/agents/conv-new" } }),
+      ),
+      http.post("*/agents/:conversationId", () => new HttpResponse(null, { status: 409 })),
+    );
+    renderChat("/workforce/chat?agentId=agent1", {
+      urlSync: true,
+      initialMessage: { agentId: "agent1", text: "Where is my order?", handoffId: "h1" },
+      onInitialConversationStarted: started,
+    });
+    const input = (await screen.findByTestId("chat-input")) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe("Where is my order?"));
+    expect(started).not.toHaveBeenCalled();
   });
 
   it("the Manager's chat (no urlSync) still clears the parameters once read", async () => {

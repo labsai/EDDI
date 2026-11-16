@@ -82,7 +82,18 @@
       "confirmNewDescription": "Eine Diskussion läuft noch. Eine neue zu beginnen stoppt sie zuerst – laufende Arbeit wird verworfen.",
       "confirmNewButton": "Stoppen und neu beginnen",
       "keepRunning": "Weiterlaufen lassen",
-      "questionRequired": "Füge eine Frage für deine Taskforce hinzu – die Dateien werden beim Start der Diskussion geteilt."
+      "questionRequired": "Füge eine Frage für deine Taskforce hinzu – die Dateien werden beim Start der Diskussion geteilt.",
+      "humanTurnForbidden": "Nur das Mitglied, das an der Reihe ist, oder ein Administrator kann diesen Zug beantworten.",
+      "announceOtherTurn": "Die Diskussion wartet auf {{name}}.",
+      "announceYourTurn": "Du bist in dieser Diskussion an der Reihe.",
+      "heldQuestion": "Hier läuft bereits eine Diskussion, daher wurde deine Frage „{{question}}“ nicht gestartet. Starte sie, wenn diese beendet ist, oder stoppe sie vorher.",
+      "heldQuestionStart": "Starten",
+      "heldQuestionDiscard": "Verwerfen",
+      "artifacts": "Geteilte Artefakte ({{n}})",
+      "artifactsPanel": "Bereich für geteilte Artefakte",
+      "artifactsTitle": "Geteilte Artefakte",
+      "artifactsClose": "Geteilte Artefakte schließen",
+      "artifactsHint": "Die Mitglieder des Teams schreiben sie mit ihren Werkzeugen. Du kannst jede Version lesen, die der Server noch aufbewahrt."
     },
     "thread": {
       "fileTooLarge": "Datei muss kleiner als 20MB sein",
@@ -573,7 +584,11 @@
       "agentLabel": "Agent",
       "send": "Senden",
       "starters": "Vorschläge",
-      "recent": "Zuletzt"
+      "recent": "Zuletzt",
+      "placeholderTeam": "Frag das Team {{team}}…",
+      "recipientLabel": "Agent oder Team",
+      "agentsGroup": "Agenten",
+      "teamsGroup": "Teams"
     },
     "switcher": {
       "newChat": "Neuer Chat",
@@ -597,6 +612,16 @@
       "clear": "Suche löschen",
       "more": "Weitere Ergebnisse",
       "moreFailed": "Weitere konnten nicht geladen werden. Erneut versuchen"
+    },
+    "handoff": {
+      "localOnly": "Nur in diesem Browser gespeichert",
+      "toTeam": "Du hast „{{question}}“ an das Team {{name}} übergeben.",
+      "toAgent": "Du hast „{{question}}“ an {{name}} übergeben.",
+      "openSession": "Teamsitzung öffnen",
+      "openChat": "Diesen Chat öffnen",
+      "notLinked": "Noch nicht verknüpft.",
+      "fromChat": "Übergeben aus deinem Chat mit {{name}}.",
+      "backToChat": "Zurück zu diesem Chat"
     }
   },
   "analyticsPage": {

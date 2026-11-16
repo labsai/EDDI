@@ -13,6 +13,7 @@ import { Button } from "@eddi/ui";
 import { getAuthConfig, type AuthConfig } from "../../lib/auth-config";
 import { api } from "../../lib/api-client";
 import { clearWorkforcePins } from "../../lib/workforce-pins";
+import { clearWorkforceHandoffs } from "../../lib/workforce-handoffs";
 import { mockRolesOverride } from "../../lib/mock-roles";
 import {
   AuthContext,
@@ -234,6 +235,8 @@ function KeycloakAuthProvider({
     // Pinned Workforce responses are agent output kept in localStorage, which
     // outlives the session. Whoever uses this browser next must not inherit them.
     clearWorkforcePins();
+    // So are the hand-off markers (the start of each handed-over question).
+    clearWorkforceHandoffs();
     // Keycloak 26 only terminates the SSO session when id_token_hint is present.
     // keycloak.idToken may have been deleted by a token refresh that didn't
     // return a new id_token — restore it from the ref so the hint is always sent.

@@ -275,7 +275,7 @@ describe("ChatMessage", () => {
 });
 
 describe("ChatMessage — guardrail notices", () => {
-  it("shows one quiet line per guardrail that fired, with phase, type and action", () => {
+  it("shows one quiet line per guardrail that fired, in plain words naming the guardrail (T2.7)", () => {
     renderWithProviders(
       <ChatMessage
         message={{
@@ -289,8 +289,8 @@ describe("ChatMessage — guardrail notices", () => {
     );
     const lines = screen.getAllByTestId("guardrail-notice").map((l) => l.textContent);
     expect(lines).toEqual([
-      "Guardrail (input): prompt-injection blocked",
-      "Guardrail (output): pii-redaction redacted",
+      "A safety check stopped your message (prompt-injection).",
+      "A safety check removed part of the answer (pii-redaction).",
     ]);
   });
 
@@ -307,7 +307,7 @@ describe("ChatMessage — guardrail notices", () => {
     renderWithProviders(
       <ChatMessage message={{ ...agentMessage, guardrails: [{ type: "t", phase: "mid", action: "quarantine" }] }} />,
     );
-    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
+    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("A safety check acted on this turn (t: mid, quarantine).");
   });
 });
 

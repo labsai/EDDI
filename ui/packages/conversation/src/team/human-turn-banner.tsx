@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Clock, AlertTriangle, UserCheck, Send } from "lucide-react";
 import { cn } from "@eddi/ui";
@@ -33,6 +33,16 @@ interface HumanTurnBannerProps {
    * must never be submitted for another.
    */
   pauseKey?: string;
+
+  /**
+   * Whether the person looking is the member whose turn it is. `false` turns
+   * "It's your turn" into "{name}'s turn" and says who may answer — the server
+   * accepts the member themself or an administrator, nobody else. Unknown
+   * (`undefined`, the default) keeps the second-person wording. The form stays
+   * either way: the client cannot always tell which claim the server reads as
+   * the principal, and the server decides.
+   */
+  viewerIsMember?: boolean;
 }
 
 function isValidDate(iso?: string | null): boolean {
@@ -60,8 +70,11 @@ function HumanTurnBannerBody({
   task,
   onSubmit,
   isSubmitting,
+  viewerIsMember,
 }: Omit<HumanTurnBannerProps, "pauseKey">) {
   const { t } = useTranslation();
+  const titleId = useId();
+  const someoneElse = viewerIsMember === false;
   const [content, setContent] = useState("");
   const [choice, setChoice] = useState<string | null>(null);
   const tieBreak = options !== undefined;
@@ -93,7 +106,8 @@ function HumanTurnBannerBody({
   }
 
   return (
-    <div
+    <section
+      aria-labelledby={titleId}
       data-testid="human-turn-banner"
       className="rounded-xl border border-primary/30 bg-primary/5 p-4 backdrop-blur-sm"
     >
@@ -102,17 +116,28 @@ function HumanTurnBannerBody({
           <UserCheck className="h-5 w-5 text-primary" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-foreground">
-            {tieBreak
-              ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
-              : task
-                ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
-                : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
+          <h3 id={titleId} className="text-sm font-semibold text-foreground">
+            {someoneElse
+              ? t("groups.humanTurnOtherTitle", "{{name}}'s turn", { name: displayName })
+              : tieBreak
+                ? t("groupTieBreak.bannerTitle", "The vote needs a decision — {{name}}, you decide", { name: displayName })
+                : task
+                  ? t("groupHumanTasks.bannerTitle", "A task is assigned to you, {{name}}", { name: displayName })
+                  : t("groups.humanTurnTitle", "It's your turn, {{name}}", { name: displayName })}
           </h3>
           {task && (
             <p className="mt-0.5 text-xs text-muted-foreground" data-testid="human-turn-task">
               <span className="font-medium text-foreground">{task.subject}</span>
               {task.description ? ` — ${task.description}` : ""}
+            </p>
+          )}
+          {someoneElse && (
+            <p className="mt-0.5 text-xs text-muted-foreground" data-testid="human-turn-who-may-answer">
+              {t(
+                "groups.humanTurnWhoMayAnswer",
+                "The discussion waits for {{name}}. Only {{name}} or an administrator can answer this turn.",
+                { name: displayName },
+              )}
             </p>
           )}
         </div>
@@ -226,6 +251,6 @@ function HumanTurnBannerBody({
         <Send className="h-4 w-4" aria-hidden="true" />
         {isSubmitting ? t("groups.humanTurnSubmitting", "Submitting…") : t("groups.humanTurnSubmit", "Submit")}
       </button>
-    </div>
+    </section>
   );
 }
