@@ -34,13 +34,18 @@ class ClusterNonceCapacityTest {
     private static final Duration WINDOW = Duration.ofSeconds(60);
 
     private final AtomicLong now = new AtomicLong(1_000_000_000L);
-    /** Milliseconds the clock moves on after every read; 0 is a frozen clock. */
+    /**
+     * Milliseconds the clock moves on after every read by the test thread; 0 is a
+     * frozen clock. Reads from Caffeine's maintenance threads never move it, so the
+     * reads inside one verify call are the only ones that do.
+     */
     private volatile long step;
+    private final Thread testThread = Thread.currentThread();
 
     private ClusterMessageSigner signer(long maxNonces) {
         return new ClusterMessageSigner(
                 ClusterSigningConfig.of(KEY, List.of(), true, WINDOW).withMaxRememberedNonces(maxNonces), new SimpleMeterRegistry())
-                .withClock(() -> now.getAndAdd(step));
+                .withClock(() -> Thread.currentThread() == testThread ? now.getAndAdd(step) : now.get());
     }
 
     private static Signed sign(ClusterMessageSigner signer, String body) {
