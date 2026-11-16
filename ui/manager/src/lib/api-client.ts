@@ -369,6 +369,51 @@ class ApiClient {
     }
   }
 
+  /**
+   * A raw `fetch` with this client's authentication, for the code that needs the
+   * `Response` itself — `@eddi/core`'s conversation API reads SSE streams and
+   * sends `text/plain` through it (`lib/api/chat.ts`).
+   *
+   * The same steps as every `ApiClient` call: the pre-flight token refresh, the
+   * `Authorization` header, one forced refresh and retry on a 401 (then the
+   * unauthorized handler), and a network failure reported as an
+   * `ApiClientError` with status 0. Unlike them it returns any status — the
+   * caller decides what a non-2xx means — and it leaves an abort an
+   * `AbortError`, which a stream reader stopping on purpose relies on. Caller
+   * headers are kept; no `Content-Type` is added.
+   */
+  async authorizedFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    await this.refreshToken(false);
+
+    const send = async (): Promise<Response> => {
+      const headers = new Headers(init.headers);
+      const auth = this.headers["Authorization"];
+      if (auth) headers.set("Authorization", auth);
+      try {
+        return await fetch(url, { ...init, headers });
+      } catch (networkError) {
+        if (init.signal?.aborted || (networkError instanceof Error && networkError.name === "AbortError")) {
+          throw networkError;
+        }
+        throw new ApiClientError(
+          0,
+          networkError instanceof Error
+            ? `Network error: ${networkError.message}`
+            : "Network error: unable to reach server",
+          url,
+        );
+      }
+    };
+
+    let response = await send();
+    if (response.status === 401 && this.tokenRefresher) {
+      const refreshed = await this.refreshToken(true);
+      if (refreshed) response = await send();
+      if (response.status === 401) this.unauthorizedHandler?.();
+    }
+    return response;
+  }
+
   /** Get current auth header (if set). Used by modules that need raw fetch (SSE, text/plain). */
   getAuthHeader(): Record<string, string> {
     const auth = this.headers["Authorization"];

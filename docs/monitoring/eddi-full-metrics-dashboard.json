@@ -10953,12 +10953,12 @@
         {
           "id": 86,
           "type": "timeseries",
-          "title": "Summarization calls vs errors",
+          "title": "Summarization calls, errors and citation checks",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_summarization_calls_total` / `eddi_summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing.",
+          "description": "`eddi_summarization_calls_total` / `eddi_summarization_errors_total` — the shared summarizer used by both Dream and conversation windowing. `eddi_summary_citation_checks_total{source,outcome}` — summaries checked under `citeSources` (zero while it is off): `passed`, `retried` (the retry passed), `kept` (failed, stored anyway) and `fallback` (failed, discarded).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -10987,6 +10987,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "errors"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (source, outcome) (rate(eddi_summary_citation_checks_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "citations {{source}} {{outcome}}"
             }
           ],
           "fieldConfig": {
@@ -15572,6 +15583,82 @@
                 ]
               }
             ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 421,
+          "type": "timeseries",
+          "title": "Conversation titles by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_conversation_titles_total` by `outcome`: `auto` titles written from the first non-secret message, `llm` model-written titles (agents with `titleGeneration`), `llm_skipped` a model title refused because the owner renamed the conversation meanwhile, `llm_refused_budget` / `llm_refused_unpriced` calls refused by the spend gates, `llm_busy` generations dropped because every slot was in use, `llm_error` / `error` failures (logged; the turn is unaffected).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 89
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_conversation_titles_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
           },
           "options": {
             "legend": {

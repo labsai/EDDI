@@ -319,13 +319,13 @@ public class ConnectionResolver {
 
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
         AuthType authType = connection.getAuthType();
-        boolean oauth = authType == AuthType.OAUTH2_CLIENT_CREDENTIALS || authType == AuthType.OAUTH2_AUTHORIZATION_CODE;
+        boolean oauth = authType != null && authType.isOAuth();
         if (!oauth || connection.getBinding() == Binding.CALLER_SUPPLIED) {
             throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
                     "Connection '" + connection.getName() + "' is " + authType
                             + (connection.getBinding() == Binding.CALLER_SUPPLIED ? " / CALLER_SUPPLIED" : "")
                             + ", which resolves to a header value, not an OAuth access token. A bare token (for example for "
-                            + "IMAP/SMTP XOAUTH2) needs an OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE connection.");
+                            + "IMAP/SMTP XOAUTH2) needs an OAUTH2_CLIENT_CREDENTIALS, OAUTH2_JWT_BEARER or OAUTH2_AUTHORIZATION_CODE connection.");
         }
     }
 
@@ -431,7 +431,7 @@ public class ConnectionResolver {
             // secret; its client secret goes to the token endpoint, not here.
             case STATIC -> staticCredential(connection, targetUrl);
             case BASIC -> basicCredential(connection, targetUrl);
-            case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
+            case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE, OAUTH2_JWT_BEARER -> oauthCredential(connection, principalOverride);
         };
     }
 

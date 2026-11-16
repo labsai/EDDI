@@ -64,7 +64,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 
 ```bash
 # Prerequisites: Node.js 22.22.2+, 24.15.0+ or 26+ (jsdom's floor for the test suite; the build pins 26.13.0), EDDI backend on localhost:7070
-npm install
+(cd .. && npm ci)  # once, at ui/: the npm workspaces root and its one lockfile
 npm run dev        # Vite dev server on http://localhost:5174
 ```
 
@@ -230,8 +230,8 @@ The main files (the full map, with the backend contract the widget relies on, is
 
 ```
 src/
-├── api/              # API layer (fetch + SSE streaming)
-│   ├── chat-api.ts       # Real EDDI backend API
+├── api/              # Widget-side API code; the backend calls themselves are @eddi/core (ui/packages/core)
+│   ├── embed-auth.ts     # Token hand-off with the embedding page
 │   └── demo-api.ts       # Mock API for demo mode
 ├── components/       # React components
 │   ├── ChatWidget.tsx    # Main orchestrator (lifecycle, SSE, query params)

@@ -52,11 +52,26 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 - **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
 - **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
+### Dependencies: one npm workspace, one lockfile
+
+`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the
+shared packages under `ui/packages/` install from **one `ui/package-lock.json`** into
+`ui/node_modules`. There is no `ui/manager/package-lock.json` any more.
+
+- **Install at `ui/`**: `cd ui && npm ci`. Scripts still run from this directory
+  (`npm run dev`, `test`, `build`, `lint`, ...), and `npx` finds the hoisted binaries.
+- **Change a dependency from `ui/` with `-w manager`**: `npm install <pkg> -w manager`
+  updates `package.json` here and the root lock.
+  A version both apps use should stay the same in both `package.json` files, so it is
+  installed once (`lucide-react`, `react`, the lint and test toolchain).
+- **`overrides` live in `ui/package.json`.** npm ignores them in a workspace's own
+  `package.json`.
+
 ### ⚠️ Dependency changes on Windows break CI's `npm ci`
 
 `@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
 on Windows never resolves its children and **prunes them from
-`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+`ui/package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
 then fails before it runs anything:
 
 ```
@@ -66,16 +81,19 @@ npm error Missing: @emnapi/core@1.11.3 from lock file
 ```
 
 Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
-After changing any dependency on Windows, check the lock still carries all four:
+After changing any dependency on Windows, check the lock at `ui/`:
 
 ```bash
-node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+npm run lockfile:check   # in ui/; CI's UI Manager Checks runs the same script
 ```
 
-Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
-`@napi-rs/wasm-runtime` nested under
-`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
-restore them from the last lockfile CI accepted rather than regenerating.
+It (`ui/scripts/check-lockfile-platforms.mjs`) expects `@emnapi/core`,
+`@emnapi/runtime`, `@emnapi/wasi-threads` and `@napi-rs/wasm-runtime` resolvable from
+`node_modules/@tailwindcss/oxide-wasm32-wasi`, and every other locked dependency
+resolvable too. If it fails, restore `ui/package-lock.json` from the last version CI
+accepted rather than regenerating, or make the dependency change on Linux (WSL or a
+`node:26` container with `ui/` copied in, then copy the lock back). Dependabot resolves
+on Linux, so its lockfile PRs are not affected.
 
 ### Quality Gates
 
@@ -156,7 +174,8 @@ src/
 │                             # secrets, connections, groups, workflows, …
 ├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …)
+│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …);
+│   │                         # chat.ts binds @eddi/core's conversation API (ui/packages/core)
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
@@ -422,7 +441,8 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
-- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- **The agent conversation protocol lives in `@eddi/core`** ([`ui/packages/core`](../packages/core/README.md), shared with the Chat UI): the SSE frame parser and reader (agent and group streams), the conversation endpoints, HITL status, attachment context, rating steps, the stream payload helpers (`UNCONSUMED_STREAM_ERROR_CODES`, `parseErrorEvent`) and the contract list, each rule with its test. `lib/api/chat.ts` is the Manager's binding of it: it keeps the signatures and message types the hooks are written against, and builds its `HttpClient` on `api.authorizedFetch` with `apiErrorFromResponse`, so a conversation call refreshes the token, retries a 401 once and fails with an `ApiClientError` like any `api.post`. The group reader in `groups.ts` is `readSseStream`. A contract change goes into the package with a test there; what the Manager *says* about it stays here
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`bearer-event-source.ts`; the conversation stream goes through `api.authorizedFetch`, above), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
 - `secrets.ts` is the exception that is *not* justified: its seven remaining raw `fetch` call sites are ordinary JSON CRUD for historical reasons (one more has already moved onto `ApiClient`). They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`

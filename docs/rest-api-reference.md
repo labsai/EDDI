@@ -486,10 +486,17 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
     "viewState": "UNSEEN",
     "conversationStepSize": 5,
     "environment": "production",
-    "conversationState": "READY"
+    "conversationState": "READY",
+    "title": "What is the weather in Vienna?",
+    "titleSource": "AUTO",
+    "pinned": false
   }
 ]
 ```
+
+`title` is the first user message that was not secret, truncated (`titleSource`
+`AUTO`), a model-written one for an agent with `titleGeneration` (`LLM`), or the
+owner's (`USER`); absent until the first such message.
 
 | Parameter | Meaning |
 | --- | --- |
@@ -517,6 +524,7 @@ listed.
 | --- | --- |
 | `GET …/simple/{conversationId}` | Same snapshot as `GET /agents/{conversationId}`, with the same query parameters |
 | `GET …/{conversationId}` | The stored conversation memory document, every step and key |
+| `PATCH …/{conversationId}` | Owner (or admin): rename and/or pin, body `{"title": "…", "pinned": true}` (either field). `200` with the updated descriptor; `400` for an empty body or a blank or longer-than-200-character title; `404` for a deleted conversation. A title set here is never replaced by a generated one — see [Conversation titles](agent-config-authoring.md#conversation-titles-titlegeneration) |
 | `DELETE …/{conversationId}` | `204`. `?deletePermanently=true` removes the document instead of marking it deleted |
 | `DELETE …/?deleteOlderThanDays=N` | Admin only: permanently delete every **ended** conversation older than `N` days (`N ≥ 1`) |
 | `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent (`?agentVersion=` restricts it to one version), `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
@@ -564,6 +572,7 @@ admin endpoints, described under
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
+| `422` | `{"error": "agent_misconfigured", "message": "API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: ...", "retryable": false}` | `POST /agents/{agentId}/start` only: the agent's own `CONVERSATION_START` turn hit a configuration it cannot run — a `${vault:…}` reference that names no secret in the tenant it is looked up in (or no vault is configured), or a secret sent to a host its [`allowedHosts`](secrets-vault.md#destination-allow-list-allowedhosts) does not name. No conversation was created; fix the configuration rather than retrying. A server-side failure (the vault could not be read, the database failed) stays a `500` |
 | `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |

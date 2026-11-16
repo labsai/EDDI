@@ -86,8 +86,9 @@ public class AgentConfiguration {
     private Integer compatibilityGeneration;
 
     /**
-     * Cryptographic identity for inter-agent trust. Auto-generated on agent
-     * creation. The public key is stored here; the private key is in SecretsVault.
+     * Cryptographic identity for inter-agent trust. Empty until an admin generates
+     * a signing key with {@code POST /agentstore/agents/{id}/signing-keys}, which
+     * adds the public key here and stores the private key in the Secrets Vault.
      *
      * @since 6.0.0
      */
@@ -478,6 +479,56 @@ public class AgentConfiguration {
     }
 
     /**
+     * How the agent presents itself in a chat window — display name, avatar, accent
+     * colour, conversation starters. Absent: the client's defaults.
+     *
+     * @since 6.7.0
+     */
+    private AgentAppearance appearance;
+
+    public AgentAppearance getAppearance() {
+        return appearance;
+    }
+
+    public void setAppearance(AgentAppearance appearance) {
+        this.appearance = appearance;
+    }
+
+    /**
+     * Which controls a chat window offers — undo, redo, attachments, rating, quick
+     * replies, streaming, and whether HTML in replies is rendered. Absent keeps
+     * every control as before, except that HTML is shown as text unless
+     * {@code rawHtml} is {@code true}.
+     *
+     * @since 6.7.0
+     */
+    private ConversationControls conversationControls;
+
+    public ConversationControls getConversationControls() {
+        return conversationControls;
+    }
+
+    public void setConversationControls(ConversationControls conversationControls) {
+        this.conversationControls = conversationControls;
+    }
+
+    /**
+     * Model-written conversation titles; absent or disabled — the default — titles
+     * a conversation with its first non-secret user message, truncated.
+     *
+     * @since 6.7.0
+     */
+    private TitleGeneration titleGeneration;
+
+    public TitleGeneration getTitleGeneration() {
+        return titleGeneration;
+    }
+
+    public void setTitleGeneration(TitleGeneration titleGeneration) {
+        this.titleGeneration = titleGeneration;
+    }
+
+    /**
      * Conversation ratings: how (and whether) the people chatting with this agent
      * are asked for feedback.
      *
@@ -757,6 +808,49 @@ public class AgentConfiguration {
 
         public void setKeys(List<AgentPublicKey> keys) {
             this.keys = keys != null ? keys : new ArrayList<>();
+        }
+
+        /**
+         * The key version this agent signs with: the highest one in {@link #keys}
+         * between 1 and {@link AgentPublicKey#MAX_VERSION}, revoked or not, or 0 — the
+         * legacy {@code publicKey} — when there is none. A revoked newest key is not
+         * skipped: the agent then cannot sign until a new key is generated, rather than
+         * falling back to an older one. The next generated key takes this plus one. Not
+         * a getter, so it stays out of the stored JSON.
+         */
+        public int signingKeyVersion() {
+            if (keys == null || keys.isEmpty()) {
+                return 0;
+            }
+            return keys.stream().mapToInt(AgentPublicKey::version).filter(v -> v >= 1 && v <= AgentPublicKey.MAX_VERSION).max().orElse(0);
+        }
+
+        /**
+         * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
+         * would sign with the legacy {@code publicKey}. When that version is declared
+         * more than once and any of its entries is revoked, the revoked one is
+         * returned, whatever the order: the version is revoked, as
+         * {@code GroupSigningGuard} treats it when it refuses to sign. Not a getter, so
+         * it stays out of the stored JSON.
+         */
+        public AgentPublicKey signingKey() {
+            int version = signingKeyVersion();
+            if (version == 0) {
+                return null;
+            }
+            AgentPublicKey first = null;
+            for (AgentPublicKey key : keys) {
+                if (key.version() != version) {
+                    continue;
+                }
+                if (key.revoked()) {
+                    return key;
+                }
+                if (first == null) {
+                    first = key;
+                }
+            }
+            return first;
         }
 
         /**
@@ -1173,6 +1267,28 @@ public class AgentConfiguration {
          * An unknown value is logged as a warning and treated as {@code keep_newest}.
          */
         private String contradictionResolution = "keep_newest";
+
+        /**
+         * When true, a consolidation numbers the group's entries, asks every
+         * consolidated entry to cite the ones it came from ({@code "sources"}) and
+         * checks each answer without a model before anything is written: every cited
+         * ref must exist and every number of the value must appear verbatim in the
+         * cited entries. A written entry records the cited originals' ids in
+         * {@code UserMemoryEntry.sourceEntryIds}. Off by default; while off the
+         * request, parsing and writes are unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What a consolidation group that fails the {@link #citeSources} check does:
+         * {@code fallback_to_previous} (the default — nothing is written, the originals
+         * stay), {@code retry_once} (one more call with the problems listed, bounded by
+         * the same cost ceilings; falls back if that fails too) or {@code keep} (write
+         * it anyway). The default is the safe one because a consolidation deletes its
+         * originals. Unknown values log a WARN and act as the default. Ignored while
+         * {@code citeSources} is false.
+         */
+        private String onValidationFailure = "fallback_to_previous";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
         private String llmProvider = "anthropic";
@@ -1325,6 +1441,22 @@ public class AgentConfiguration {
 
         public void setContradictionResolution(String contradictionResolution) {
             this.contradictionResolution = contradictionResolution;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
 
         public int getPruneStaleAfterDays() {

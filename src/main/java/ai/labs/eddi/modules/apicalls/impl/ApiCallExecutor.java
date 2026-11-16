@@ -21,12 +21,14 @@ import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretEncodings;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedFanOut;
@@ -427,14 +429,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(),
+                                SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
                         LOGGER.warn("Error Msg:" + httpCodeMessage);
 
                         // A server that rejects a credential routinely echoes it ("invalid
                         // api key sk-…"). The executor knows exactly which plaintexts it
                         // sent, so those are removed by value before the body goes
                         // anywhere — memory, template data, the tool result or a log.
-                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), resolvedSecrets);
+                        String errorBody = redactErrorBody(response.getContentAsString(), resolvedSecrets);
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -755,6 +758,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // Built here, in order, on the turn's thread — see the method comment.
         List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
+        // The first configuration refusal behind an item whose request was not built:
+        // a "fail" step carries it, so a conversation start answers 422, not 500.
+        Exception itemRefusal = null;
         for (ForEachItems.Element element : elements) {
             Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
             itemData.put(iterationName, element.value());
@@ -771,6 +777,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // that does not render): nothing of it is sent, and the others still are.
                 String reason = "request not built: " + ForEachItems.describe(e, Set.of(), MAX_ITEM_ERROR_CHARS);
                 LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(callName), element.index(), reason);
+                if (itemRefusal == null && AgentConfigurationRefusal.find(e) instanceof Exception refusal) {
+                    itemRefusal = refusal;
+                }
                 work.add(() -> ForEachItemResult.notSent(element.index(), reason));
                 continue;
             }
@@ -846,7 +855,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // After the results are stored: the work that succeeded (and was paid
             // for) stays readable; only the step reports failure.
             throw new LifecycleException("http call '" + LogSanitizer.sanitize(callName) + "': " + failureSummary
-                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'");
+                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'", itemRefusal);
         }
 
         Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, stepCode, false);
@@ -938,7 +947,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             error = "the call returned http " + code;
             if (saveResponse) {
-                String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), secrets);
+                String errorBody = redactErrorBody(response.getContentAsString(), secrets);
                 if (errorBody != null && !errorBody.isBlank()) {
                     body = SecretRedactionFilter.redact(errorBody.length() > MAX_ITEM_ERROR_BODY_CHARS
                             ? errorBody.substring(0, MAX_ITEM_ERROR_BODY_CHARS)
@@ -1550,6 +1559,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         stringOf(outgoing.get(IRequest.KEY_BODY)));
             }
             return built;
+        } catch (SecretResolver.MisconfiguredVaultReferenceException e) {
+            // Shown to the caller of a refused conversation start: say which call it is.
+            // Built from reference names only, so there is no plaintext to redact.
+            throw new SecretResolver.MisconfiguredVaultReferenceException("API call '" + call.getName() + "': " + e.getMessage(), e);
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1582,8 +1595,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return null;
         }
         String redacted = RequestRedactor.redactResolvedSecrets(String.valueOf(failure.getMessage()), secrets);
-        return new IllegalArgumentException(failure.getClass().getSimpleName() + ": " + redacted
-                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)");
+        String message = failure.getClass().getSimpleName() + ": " + redacted
+                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)";
+        // The cause chain is dropped, so a configuration refusal in it must be
+        // re-marked on the copy or a conversation start would answer 500, not 422.
+        return AgentConfigurationRefusal.find(failure) != null ? new RedactedRefusalException(message) : new IllegalArgumentException(message);
+    }
+
+    /**
+     * The secret-free copy of an exception that carried an
+     * {@link AgentConfigurationRefusal}: same marker, no cause, redacted message.
+     */
+    static final class RedactedRefusalException extends IllegalArgumentException implements AgentConfigurationRefusal {
+        private static final long serialVersionUID = 1L;
+
+        RedactedRefusalException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -1594,6 +1622,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * every length: there the value is the failure reason, not data.
      */
     static final int MIN_SUCCESS_BODY_REDACTION_LENGTH = 8;
+
+    /**
+     * A non-2xx body, redacted the same way for a single call and for every forEach
+     * item: each resolved secret verbatim, plus the encoded forms of those long
+     * enough to be unambiguous (a Basic-auth header echoed as base64, a key echoed
+     * URL-encoded). Both paths call this so they cannot diverge again.
+     */
+    static String redactErrorBody(String body, Set<String> resolvedSecrets) {
+        return RequestRedactor.redactResolvedSecrets(body, SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
+    }
 
     /**
      * A success body treated as text: only secrets long enough to be unambiguous.
@@ -1615,7 +1653,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         shortOnes.removeAll(longOnes);
         Object cleaned = longOnes.isEmpty() ? null : SecretValueScrubber.scrubDeep(tree, longOnes, RequestRedactor.REDACTED);
         Object current = cleaned != null ? cleaned : tree;
-        Object exactCleaned = shortOnes.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, shortOnes, RequestRedactor.REDACTED);
+        Object exactCleaned = shortOnes.isEmpty()
+                ? null
+                : SecretValueScrubber.scrubDeepExact(current,
+                        SecretEncodings.withEncodedForms(shortOnes, SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH), RequestRedactor.REDACTED);
         return exactCleaned != null ? exactCleaned : current;
     }
 
@@ -1629,7 +1670,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 longOnes.add(secret);
             }
         }
-        return longOnes;
+        return SecretEncodings.withEncodedForms(longOnes, MIN_SUCCESS_BODY_REDACTION_LENGTH);
     }
 
     /**
@@ -1671,7 +1712,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return headers;
         }
         var redacted = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        Set<String> needles = SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH);
+        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, needles)));
         return redacted;
     }
 
@@ -2044,9 +2086,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         resolved.append(value, copied, value.length());
         if (unresolved != null) {
-            throw new IllegalArgumentException(location + " references " + unresolved
-                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
-                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+            // Diagnosed only now, on the failure path: it names the tenant looked up and
+            // tells a configuration error (answered 422 at conversation start) from a
+            // vault outage (still a 500).
+            throw SecretResolver.unresolvedReferenceFailure(location, unresolved,
+                    secretResolver.diagnoseUnresolved(SecretReference.parse(unresolved)));
         }
         return resolved.toString();
     }

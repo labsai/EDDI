@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.agents.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.agents.AgentPresentationValidator;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
@@ -136,8 +137,9 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     /**
      * The checks {@link #create} and {@link #update} apply to the agent's own
      * settings — everything but its workflow list: the HITL config, the Dream
-     * consolidation settings and the continuation bounds. Public so that a path
-     * which writes other resources before the agent (an upgrade or a sync,
+     * consolidation settings, the continuation bounds and the presentation blocks
+     * ({@code appearance}, {@code titleGeneration}). Public so that a path which
+     * writes other resources before the agent (an upgrade or a sync,
      * {@code UpgradeExecutor}) can refuse settings the update would refuse before
      * its first write.
      *
@@ -148,6 +150,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
         validateContinuation(agentConfiguration);
+        AgentPresentationValidator.validate(agentConfiguration);
     }
 
     /**

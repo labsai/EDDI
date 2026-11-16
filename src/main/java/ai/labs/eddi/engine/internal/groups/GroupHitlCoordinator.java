@@ -732,12 +732,11 @@ public class GroupHitlCoordinator {
             String reviewerNote = request.getDecision() != null && request.getDecision().getNote() != null
                     ? request.getDecision().getNote()
                     : "Rejected by human reviewer";
+            String taskDecidedBy = request.getDecision() != null ? request.getDecision().getDecidedBy() : null;
             for (var entry : request.getTaskApprovals().entrySet()) {
                 if ("APPROVED".equalsIgnoreCase(entry.getValue())) {
-                    if (!reviewEditor.approveEdited(gc.getTaskList(), entry.getKey(), request.getDecision() != null
-                            ? request.getDecision().getDecidedBy()
-                            : null)) {
-                        gc.getTaskList().approveTask(entry.getKey());
+                    if (!reviewEditor.approveEdited(gc.getTaskList(), entry.getKey(), taskDecidedBy)) {
+                        gc.getTaskList().approveTask(entry.getKey(), taskDecidedBy);
                     }
                 } else if (retryOnReject) {
                     // RETRY policy: reset to ASSIGNED with the reviewer's feedback so
@@ -764,7 +763,10 @@ public class GroupHitlCoordinator {
                 && gc.getHitlPauseType() == HitlPauseType.TASK) {
             gc.getTaskList().all().stream()
                     .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
-                    .forEach(t -> gc.getTaskList().approveTask(t.id()));
+                    // The decider is recorded per task, so a timeout's system:timeout
+                    // stays distinguishable from a person's approve-all (cadence writeback
+                    // credits only the latter — hitlConfig.approvalCompletesBacklogTask).
+                    .forEach(t -> gc.getTaskList().approveTask(t.id(), decision.getDecidedBy()));
         }
 
         // #4: On an EXPLICIT HUMAN approval of a TASK pause, grant a fresh turn
