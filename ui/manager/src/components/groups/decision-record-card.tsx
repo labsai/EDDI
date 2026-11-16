@@ -1,8 +1,5 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, Gavel, MessageSquareWarning, Scale } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +7,7 @@ import { Button } from "@eddi/ui";
 import type { DecisionRecord, DecisionType } from "@/lib/api/groups";
 import { describeDecision } from "@/lib/group-decision";
 import { formatMarkdownText } from "./group-utils";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 /**
  * The structured conclusion of a discussion (EDDI Wave 0, F3), rendered next to
@@ -101,7 +99,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
             )}
           >
             {/* No rehypeRaw: an arbitrator's ruling is model output, so raw HTML stays escaped. */}
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(view.body)}</ReactMarkdown>
+            <ConversationMarkdown escapeRawHtml>{formatMarkdownText(view.body)}</ConversationMarkdown>
           </div>
           {bodyCollapsible && (
             <Button
@@ -178,7 +176,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
           </p>
           {/* Terms are a party's own words, markdown and all. No rehypeRaw: untrusted. */}
           <div className="prose prose-sm dark:prose-invert mt-0.5 max-w-none text-foreground">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{formatMarkdownText(view.terms)}</ReactMarkdown>
+            <ConversationMarkdown escapeRawHtml>{formatMarkdownText(view.terms)}</ConversationMarkdown>
           </div>
         </div>
       )}
@@ -210,7 +208,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
           className="prose prose-sm dark:prose-invert mt-3 max-w-none text-muted-foreground"
           data-testid="decision-details"
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>{view.details}</ReactMarkdown>
+          <ConversationMarkdown escapeRawHtml>{view.details}</ConversationMarkdown>
         </div>
       )}
 

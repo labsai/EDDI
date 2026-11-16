@@ -59,9 +59,13 @@ export function reactApp({ ecmaVersion }) {
  * and no `window.__EDDI_*__` — what the server says reaches it as props or
  * options from the app.
  *
- * @param {{ frameworkFree: boolean, react?: boolean, noApi?: boolean }} options
+ * With `routerFree: true` (`@eddi/conversation`) it imports no router — hosts
+ * pass ids and callbacks — and reads no `window.__EDDI_*__` either; it may call
+ * the backend through `@eddi/core`.
+ *
+ * @param {{ frameworkFree: boolean, react?: boolean, noApi?: boolean, routerFree?: boolean }} options
  */
-export function sharedPackage({ frameworkFree, react = false, noApi = false }) {
+export function sharedPackage({ frameworkFree, react = false, noApi = false, routerFree = false }) {
   const appImports = [
     {
       group: ["@/*", "**/manager/**", "**/chat/**", "**/workforce/**"],
@@ -81,6 +85,14 @@ export function sharedPackage({ frameworkFree, react = false, noApi = false }) {
         name,
         message: `@eddi/ui makes no API calls ('${name}'). The app fetches and passes the result in.`,
       }))
+    : [];
+  const routerImports = routerFree
+    ? [
+        {
+          group: ["react-router", "react-router/*", "react-router-dom", "react-router-dom/*"],
+          message: "@eddi/conversation is router-free: the host passes ids and callbacks (onNavigate, …) instead.",
+        },
+      ]
     : [];
   const frameworkImports = frameworkFree
     ? [
@@ -108,9 +120,9 @@ export function sharedPackage({ frameworkFree, react = false, noApi = false }) {
       plugins: react ? { "react-hooks": reactHooks } : {},
       rules: {
         "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports, ...apiImports] }],
+        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports, ...apiImports, ...routerImports] }],
         "no-restricted-globals": ["error", ...domGlobals, ...apiGlobals],
-        ...(noApi ? { "no-restricted-syntax": ["error", NO_EDDI_GLOBAL, NO_ALWAYS_TRUE_LENGTH] } : {}),
+        ...(noApi || routerFree ? { "no-restricted-syntax": ["error", NO_EDDI_GLOBAL, NO_ALWAYS_TRUE_LENGTH] } : {}),
         ...(react
           ? {
               "react-hooks/rules-of-hooks": "error",

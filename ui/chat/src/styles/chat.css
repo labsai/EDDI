@@ -351,6 +351,44 @@ a:hover { opacity: 0.85; }
   border-radius: var(--chat-radius-sm);
 }
 
+/* Files sent with a message, and the guardrails that fired on a reply. */
+.message__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.message__attachment { display: flex; flex-direction: column; gap: 2px; }
+.message__attachment-image {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--chat-radius-sm);
+  object-fit: cover;
+}
+.message__attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+}
+.message__attachment-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.message__attachment-size,
+.message__attachment-note { opacity: 0.75; font-size: 0.8em; }
+.message__guardrails {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 0.75em;
+  opacity: 0.75;
+}
+.message__guardrail { display: inline-flex; align-items: center; gap: 4px; }
+
 .message__bubble .markdown-body .table-scroll {
   overflow-x: auto;
   margin: 8px 0;

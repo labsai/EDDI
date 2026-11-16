@@ -13,9 +13,9 @@ import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { ChatProvider } from "@/store/chat-store";
-import { MessageBubble } from "@/components/MessageBubble";
-import { QuickReplies } from "@/components/QuickReplies";
-import { SecretInput } from "@/components/SecretInput";
+import { CONVERSATION_LOCALE_LOADERS, Message as MessageBubble } from "@eddi/conversation";
+import { QuickReplies } from "@eddi/conversation";
+import { SecretInput } from "@eddi/conversation";
 import { SUPPORTED_LANGUAGES } from "@eddi/ui";
 import { LOCALE_LOADERS, initLocale, t } from "@/i18n";
 import type { ChatMessage } from "@/types";
@@ -100,7 +100,9 @@ const WIDGET: Record<string, Cell> = {
       expect(["en", ...Object.keys(LOCALE_LOADERS)].sort()).toEqual([...SUPPORTED_LANGUAGES].sort());
       await initLocale("de");
       try {
-        expect(t("speaker.you")).toBe((await LOCALE_LOADERS.de()).default["speaker.you"]);
+        expect(t("conversation.speaker.you")).toBe(
+          (await CONVERSATION_LOCALE_LOADERS.de!()).default["conversation.speaker.you"],
+        );
         await initLocale("ar");
         expect(document.documentElement.dir).toBe("rtl");
       } finally {
