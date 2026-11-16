@@ -358,6 +358,6 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     const dialog = await screen.findByTestId("review-changes-dialog");
     expect(within(dialog).getByTestId("review-pending-hitl-note")).toBeInTheDocument();
     expect(within(dialog).queryAllByTestId("diff-line")).toHaveLength(0);
-    expect(within(dialog).getByText("Content identical")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("diff-identical")).toBeInTheDocument();
   });
 });
