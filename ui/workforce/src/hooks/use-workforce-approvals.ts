@@ -10,6 +10,15 @@ import { approvalItems, type ApprovalItem } from "@/lib/workforce-approvals";
  * approval decided anywhere in this tab invalidates one cache entry. Imported
  * by value would pull the HITL hooks (and the chat store) into Workforce's
  * first load for one number.
+ *
+ * Known limit: for an approver or administrator the backend answers with
+ * everyone's pauses, at most this many, so on a deployment with more open
+ * pauses than that the person's OWN pause can fall outside the page. It then
+ * neither appears under "mine" nor lets `WorkforceNotices` recognise its
+ * `approval.decided` as theirs (that check reads these caches). A plain
+ * `eddi-user` is unaffected — their answer holds only their own. The fix is an
+ * owner-scoped request beside this one, which the pending-approvals endpoints
+ * do not offer yet.
  */
 const LIMIT = 200;
 

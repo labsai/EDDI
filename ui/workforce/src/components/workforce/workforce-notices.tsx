@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -7,7 +8,7 @@ import type { PendingApprovalSummary } from "@eddi/app-kit/lib/api/hitl";
 import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 import { useUserEvent } from "@eddi/app-kit/hooks/use-user-events";
 import { approvalItems } from "@/lib/workforce-approvals";
-import { isShowing, noticeFor } from "@/lib/workforce-notices";
+import { isShowing, NoticeGate, noticeFor } from "@/lib/workforce-notices";
 import { shouldNotifyBrowser } from "@/hooks/use-browser-notices";
 
 /**
@@ -19,6 +20,8 @@ import { shouldNotifyBrowser } from "@/hooks/use-browser-notices";
  * - A toast (sonner, in the app's toaster: a polite live region, and it never
  *   takes focus), with "Open" to the conversation or team session.
  * - Nothing when that conversation is already on screen — the page shows it.
+ * - Nothing for a routine scheduled run, a repeated failure of the same
+ *   schedule, or an event delivered more than two minutes late (`NoticeGate`).
  * - Also a browser notification, only when the person opted in (the approvals
  *   menu) and the tab is in the background.
  */
@@ -28,6 +31,8 @@ export function WorkforceNotices() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user, method } = useAuth();
+  // Per tab: a recurring schedule toasts its first failure and its recovery, not every fire.
+  const gate = useRef(new NoticeGate());
 
   /** Whether a decided pause was one of the person's own, from the lists shown before it was decided. */
   function ownsApproval(event: UserEvent): boolean {
@@ -45,7 +50,7 @@ export function WorkforceNotices() {
 
   useUserEvent("*", (event) => {
     const notice = noticeFor(event, event.kind === "approval.decided" && ownsApproval(event));
-    if (!notice || isShowing(location, notice.conversationId)) return;
+    if (!notice || !gate.current.admit(event, Date.now()) || isShowing(location, notice.conversationId)) return;
     const message = t(`Workforce.notices.${notice.key}`);
     const href = notice.href;
     const options = {

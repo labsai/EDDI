@@ -182,17 +182,17 @@ describe("WorkforceNotices (T2.8)", () => {
       mount();
       await streamOpen();
       act(() => {
-        pushMockUserEvent({ kind: "job.run_completed", surface: "regular", conversationId: "c1", agentId: "a1", jobKind: "schedule" });
+        pushMockUserEvent({ kind: "job.finished", surface: "regular", conversationId: "c1", agentId: "a1", jobKind: "continuation", state: "done" });
       });
-      await screen.findByText("A scheduled run finished.");
+      await screen.findByText("A long-running job finished.");
       expect(NotificationStub).not.toHaveBeenCalled();
 
       localStorage.setItem(BROWSER_NOTICES_KEY, "on");
       act(() => {
-        pushMockUserEvent({ kind: "job.run_completed", surface: "regular", conversationId: "c2", agentId: "a1", jobKind: "schedule" });
+        pushMockUserEvent({ kind: "job.finished", surface: "regular", conversationId: "c2", agentId: "a1", jobKind: "continuation", state: "done" });
       });
       await waitFor(() => expect(NotificationStub).toHaveBeenCalledTimes(1));
-      expect(NotificationStub.mock.calls[0]?.[0]).toBe("A scheduled run finished.");
+      expect(NotificationStub.mock.calls[0]?.[0]).toBe("A long-running job finished.");
     } finally {
       visibility.mockRestore();
     }

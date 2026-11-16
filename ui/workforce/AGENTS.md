@@ -171,7 +171,10 @@ router takes it from there. The hashed chunks sit under `/assets/` beside the Ma
 - **Notices** — `components/workforce/workforce-notices.tsx` (mounted by the layout) maps an
   event to a sentence with `noticeFor` (`lib/workforce-notices.ts`) and toasts it through
   sonner (the app's polite live region; never takes focus), skipping the conversation on
-  screen (`isShowing`). Browser notifications (`hooks/use-browser-notices.ts`) are opt-in
+  screen (`isShowing`). `NoticeGate` (same file, one per tab) keeps recurring jobs quiet: a
+  routine `job.run_completed` shows nothing (only the success that ends a failure streak),
+  `job.failed` shows once per schedule until it succeeds again, and an event more than
+  `NOTICE_MAX_AGE_MS` (2 min) old by its `ts` shows nothing. Browser notifications (`hooks/use-browser-notices.ts`) are opt-in
   from the indicator's panel — the only place permission is requested — and sent only while
   the tab is hidden.
 

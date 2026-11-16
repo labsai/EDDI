@@ -71,6 +71,7 @@ function decidedKey(state: string | undefined): string {
  * The notice for `event`, or null when it deserves none:
  *
  * - `job.*` — a long job finished, stopped or failed, a scheduled run completed (T2.8).
+ *   Whether a recurring run's notice is shown is {@link NoticeGate}'s call.
  * - `team.ended`, and `team.waiting_for_human` only on the copy whose `yourTurn`
  *   is true — the owner's copy of someone else's turn is not news for them.
  * - `approval.decided` only for a pause that was the person's own (`ownsApproval`):
@@ -128,6 +129,56 @@ export function isShowing(location: { pathname: string; search: string }, conver
   if (!conversationId) return false;
   const params = new URLSearchParams(location.search);
   return params.get("conversationId") === conversationId || params.get("conversation") === conversationId;
+}
+
+/**
+ * An event older than this is not announced: it was delivered late (a slow
+ * reconnect, a backlog) and the page shows its outcome by now. Compared with
+ * the server's `ts`, so it also absorbs modest clock skew between the two.
+ */
+export const NOTICE_MAX_AGE_MS = 2 * 60_000;
+
+/** Schedules remembered as failing; the oldest is forgotten past this. */
+const MAX_TRACKED_SCHEDULES = 500;
+
+/**
+ * Decides whether a notice `noticeFor` picked is actually shown, so a
+ * recurring job does not toast (and notify the OS) on every fire:
+ *
+ * - A scheduled run that completed is shown only when it ends a failure
+ *   streak of that schedule — a 60 s heartbeat would otherwise toast every
+ *   minute. The run's own page and history say it ran.
+ * - A failed run is shown once per schedule until that schedule succeeds
+ *   again: a failed fire is retried, and each attempt raises `job.failed`.
+ * - Anything older than {@link NOTICE_MAX_AGE_MS} is not shown.
+ *
+ * One instance per tab (the layout mounts the notices once); kept in memory
+ * only, so a reload starts fresh.
+ */
+export class NoticeGate {
+  /** Schedule (or, without one, conversation) ids whose failure was shown. */
+  private readonly failing = new Set<string>();
+
+  admit(event: UserEvent, now: number): boolean {
+    if (typeof event.ts === "number" && event.ts > 0 && now - event.ts > NOTICE_MAX_AGE_MS) return false;
+    const key = event.scheduleId ?? event.conversationId ?? null;
+    switch (event.kind) {
+      case "job.run_completed":
+        // A recovery is news; a routine success is not.
+        return key !== null && this.failing.delete(key);
+      case "job.failed":
+        if (key === null) return true;
+        if (this.failing.has(key)) return false;
+        this.failing.add(key);
+        if (this.failing.size > MAX_TRACKED_SCHEDULES) {
+          const oldest = this.failing.values().next().value;
+          if (oldest !== undefined) this.failing.delete(oldest);
+        }
+        return true;
+      default:
+        return true;
+    }
+  }
 }
 
 /** localStorage key of the opt-in to browser notifications. */

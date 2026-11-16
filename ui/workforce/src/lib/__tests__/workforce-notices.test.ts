@@ -3,7 +3,7 @@ import type { UserEvent } from "@eddi/core/user-events";
 import type { PendingApprovalSummary } from "@eddi/app-kit/lib/api/hitl";
 import en from "@/i18n/locales/en.json";
 import { approvalItems, MANAGER_APPROVALS_HREF } from "@/lib/workforce-approvals";
-import { isShowing, noticeFor } from "@/lib/workforce-notices";
+import { isShowing, NOTICE_MAX_AGE_MS, NoticeGate, noticeFor } from "@/lib/workforce-notices";
 
 const event = (fields: Partial<UserEvent> & Pick<UserEvent, "kind">): UserEvent => ({ id: "e1", ts: 1, ...fields });
 
@@ -108,6 +108,38 @@ describe("noticeFor (T2.8)", () => {
       "approvalApproved", "approvalRejected", "approvalMixed", "approvalStopped", "approvalDecided",
     ];
     for (const key of keys) expect(notices[key], key).toBeTruthy();
+  });
+});
+
+describe("NoticeGate", () => {
+  const NOW = 1_800_000_000_000;
+  const fresh = (fields: Partial<UserEvent> & Pick<UserEvent, "kind">): UserEvent => event({ ts: NOW - 1_000, ...fields });
+
+  it("a routine scheduled run is not news: a 60 s heartbeat does not toast every minute", () => {
+    const gate = new NoticeGate();
+    for (let i = 0; i < 5; i++) {
+      expect(gate.admit(fresh({ kind: "job.run_completed", jobKind: "schedule", scheduleId: "s1", conversationId: "c1" }), NOW)).toBe(false);
+    }
+  });
+
+  it("a failing schedule toasts once until it succeeds again, and then its recovery", () => {
+    const gate = new NoticeGate();
+    const failed = fresh({ kind: "job.failed", jobKind: "schedule", scheduleId: "s1", conversationId: "c1" });
+    const completed = fresh({ kind: "job.run_completed", jobKind: "schedule", scheduleId: "s1", conversationId: "c1" });
+    expect(gate.admit(failed, NOW)).toBe(true);
+    expect(gate.admit(failed, NOW), "a retry of the same schedule").toBe(false);
+    expect(gate.admit(fresh({ ...failed, scheduleId: "s2" }), NOW), "another schedule").toBe(true);
+    expect(gate.admit(completed, NOW), "the recovery").toBe(true);
+    expect(gate.admit(completed, NOW), "then routine again").toBe(false);
+    expect(gate.admit(failed, NOW), "a new failure streak").toBe(true);
+  });
+
+  it("an event delivered more than two minutes late is not shown", () => {
+    const gate = new NoticeGate();
+    const finished = { kind: "job.finished" as const, conversationId: "c1", state: "done" };
+    expect(gate.admit(event({ ...finished, ts: NOW - NOTICE_MAX_AGE_MS - 1 }), NOW)).toBe(false);
+    expect(gate.admit(event({ ...finished, ts: NOW - NOTICE_MAX_AGE_MS + 1_000 }), NOW)).toBe(true);
+    expect(gate.admit(fresh({ kind: "team.ended", groupConversationId: "gc1", state: "COMPLETED" }), NOW)).toBe(true);
   });
 });
 
