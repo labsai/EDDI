@@ -1543,7 +1543,12 @@ your tool schemas do not cover it, not as a routine first step:
   quota, turn deadline) or rejected (a human declined it), ok true only for
   status ok, summary the start of the result redacted like task_complete's
   toolTrace, at most 200 characters. A call cut off by a cancel gets no
-  tool_result. A client that does not know the event ignores it.
+  tool_result. A client that does not know the event ignores it. Workforce and
+  the Manager's chat show these as collapsed tool cards under the turn's
+  question, and beside Edit and Regenerate of a turn that ran tools they name
+  the tools, since neither undoes what a tool did. The cards are live only: a
+  reload, a conversation opened later, or a turn answered without streaming
+  shows none. The embeddable chat widget shows no tool activity.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.

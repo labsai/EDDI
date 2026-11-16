@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
+import { http, HttpResponse } from "msw";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { QuickSwitcher } from "@/components/workforce/quick-switcher";
 import { isNewChatState } from "@/lib/workforce-keyboard";
@@ -50,14 +52,18 @@ describe("QuickSwitcher", () => {
     renderSwitcher();
     press({ key: "k", metaKey: true });
     const input = await screen.findByTestId("quick-switcher-input");
-    // The agents come from the mock API's deployed agents.
-    await screen.findAllByTestId("quick-switcher-item-agent");
-    const firstAgent = screen.getAllByTestId("quick-switcher-item-agent")[0]!;
-    const name = firstAgent.textContent!.replace("Chat with this agent", "").trim();
-    fireEvent.change(input, { target: { value: name } });
+    // The agents come from the mock API's deployed agents. Unfiltered, the
+    // sessions can fill every row, so the agent is reached by its name; its
+    // conversations match too (their detail is the agent's name).
+    fireEvent.change(input, { target: { value: "Contract Review Assistant" } });
+    const agent = await screen.findByTestId("quick-switcher-item-agent");
     await waitFor(() => expect(screen.queryByTestId("quick-switcher-item-new")).toBeNull());
+    const position = screen.getAllByRole("option").indexOf(agent);
+    for (let i = 0; i < position; i++) fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(agent).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/workforce/chat?agentId="));
+    expect(screen.getByTestId("where").textContent).not.toContain("conversationId");
     expect(screen.queryByTestId("quick-switcher")).toBeNull();
   });
 
@@ -99,5 +105,53 @@ describe("QuickSwitcher", () => {
     press({ key: "k" });
     press({ key: "k", ctrlKey: true, altKey: true });
     expect(screen.queryByTestId("quick-switcher")).toBeNull();
+  });
+
+  it("also finds older conversations by title on the server (T1.3), each once, titles only", async () => {
+    const queries: string[] = [];
+    server.use(
+      http.get("*/conversationstore/conversations/search", ({ request }) => {
+        queries.push(new URL(request.url).searchParams.get("q") ?? "");
+        return HttpResponse.json([
+          {
+            // Also in the sidebar: listed once, as the sidebar's row.
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
+            createdOn: 1, lastModifiedOn: 2, agentId: "agent1", conversationState: "READY",
+            title: "Where is order 1042?",
+          },
+          {
+            // Too old for the sidebar's page: only the search knows it.
+            resource: "eddi://ai.labs.conversation/conversationstore/conversations/old-order",
+            createdOn: 1, lastModifiedOn: 1, agentId: "agent1", conversationState: "ENDED",
+            title: "An old order question",
+          },
+        ]);
+      }),
+    );
+    renderSwitcher();
+    press({ key: "k", ctrlKey: true });
+    const input = await screen.findByTestId("quick-switcher-input");
+    expect(input).toHaveAttribute("maxLength", "100");
+    fireEvent.change(input, { target: { value: "  order " } });
+    expect(await screen.findByTestId("quick-switcher-search-hint")).toHaveTextContent("Searches titles only");
+    const old = await screen.findByText("An old order question");
+    expect(queries).toEqual(["order"]);
+    expect(screen.getAllByText("Where is order 1042?")).toHaveLength(1);
+    fireEvent.click(old);
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent("/workforce/chat?agentId=agent1&conversationId=old-order"),
+    );
+  });
+
+  it("says when the title search failed, politely", async () => {
+    server.use(
+      http.get("*/conversationstore/conversations/search", () => HttpResponse.json({ error: "x" }, { status: 500 })),
+    );
+    renderSwitcher();
+    press({ key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByTestId("quick-switcher-input"), { target: { value: "order" } });
+    const status = screen.getByTestId("quick-switcher-search-status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    await waitFor(() => expect(status).toHaveTextContent("Searching your older conversations failed."));
   });
 });

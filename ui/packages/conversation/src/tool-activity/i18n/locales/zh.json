@@ -1,0 +1,16 @@
+{
+  "toolActivity": {
+    "region": "工具活动",
+    "summary": "已使用的工具：{{n}}",
+    "failedCount": "{{n}} 个失败",
+    "ok": "成功",
+    "failed": "失败",
+    "noSummary": "无详细信息",
+    "more": "另外 {{n}} 个",
+    "notice": {
+      "edit": "已运行 {{tools}}。编辑会撤回回复，但不会撤销工具已执行的操作。",
+      "regenerate": "已运行 {{tools}}。它们已执行的操作会保留，新的回复可能会再次运行它们。",
+      "edited": "您的消息已回到输入框。{{tools}} 已执行的操作未被撤销。"
+    }
+  }
+}

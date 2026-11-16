@@ -495,6 +495,13 @@ describe("searchConversations", () => {
   it("surfaces the 400 for a blank text", async () => {
     await expect(searchConversations("   ")).rejects.toMatchObject({ status: 400 });
   });
+
+  it("cancels with the signal: a search box drops the request for an older text", async () => {
+    const controller = new AbortController();
+    const pending = searchConversations("order", 0, 20, controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
 });
 
 describe("getSimpleConversationLog", () => {

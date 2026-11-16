@@ -1,0 +1,16 @@
+{
+  "toolActivity": {
+    "region": "Tool activity",
+    "summary": "Tools used: {{n}}",
+    "failedCount": "{{n}} failed",
+    "ok": "Succeeded",
+    "failed": "Failed",
+    "noSummary": "No details",
+    "more": "+{{n}} more",
+    "notice": {
+      "edit": "Ran {{tools}}. Editing takes back the reply, not what the tools did.",
+      "regenerate": "Ran {{tools}}. What they did stays, and a new reply may run them again.",
+      "edited": "Your message is back in the composer. What {{tools}} did was not undone."
+    }
+  }
+}
