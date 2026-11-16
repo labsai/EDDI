@@ -1477,6 +1477,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
       variant="card"
       modified={modified}
       defaultOpen={enabled}
+      toggleTestId="hitl-config-toggle"
     >
       <div className="space-y-4" data-testid="hitl-config-section">
         <p className="text-[10px] text-muted-foreground leading-relaxed">

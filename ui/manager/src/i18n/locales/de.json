@@ -587,6 +587,7 @@
     "hitlNotifyRecipients": "Empfänger (durch Komma getrennt oder einer pro Zeile)",
     "hitlNotifyPlaceholder": "freigabe@example.com, ops-leitung@example.com",
     "hitlNotifyHint": "Eine E-Mail pro Pause, versendet über den System-Mailer dieser Installation (eddi.mail.smtp.*, vom Betreiber konfiguriert), nur an Domains, die der Betreiber zulässt. Sie verlinkt die Seite Genehmigungen und kann nichts genehmigen. Sie enthält keine Nachrichten der Nutzer und keine Antworten des Agenten; bei einer Pause für einen Tool-Aufruf listet sie die ausstehenden Tools mit geschwärzten, gekürzten Argumenten auf.",
+    "reviewPendingHitl": "Ein nicht speicherbarer Human-in-the-Loop-Wert steht aus (siehe das markierte Feld). Er ist nicht Teil des Dokuments unten.",
     "hitlNotifyFixBeforeSave": "Korrigiere die markierten Human-in-the-Loop-Einstellungen (Empfänger der Genehmigungs-E-Mail, Name der Slack-Integration, Freigabekontext) oder schalte sie aus, bevor du speicherst.",
     "hitlNotifyEmpty": "Mindestens eine Adresse eintragen oder die E-Mail-Benachrichtigung ausschalten.",
     "hitlNotifyTooMany": "Höchstens {{max}} Adressen — für mehr eine Verteilerliste verwenden.",

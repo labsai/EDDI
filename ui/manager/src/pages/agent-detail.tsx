@@ -1324,9 +1324,17 @@ export function AgentDetailPage() {
         testId="review-changes-dialog"
       >
         <div className="space-y-4 p-5">
+          {!draft && hitlNotifyInvalid && (
+            <p className="rounded-md border border-warn-300 bg-warn-50 px-3 py-2 text-xs text-warn-800" data-testid="review-pending-hitl-note">
+              {t(
+                "agentDetail.reviewPendingHitl",
+                "A Human-in-the-Loop value that cannot be saved is pending (see the highlighted field). It is not part of the document below.",
+              )}
+            </p>
+          )}
           <ResourceDiffViewer
             targetContent={agentJson(agent)}
-            sourceContent={agentJson(draft)}
+            sourceContent={agentJson(draft ?? agent)}
             labels={{
               target: t("agentDetail.savedVersion", "Saved v{{version}}", { version: resolvedVersion }),
               source: t("agentDetail.yourChanges", "Your changes"),

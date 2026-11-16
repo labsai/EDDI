@@ -588,6 +588,7 @@
     "hitlNotifyRecipients": "Destinataires (séparés par des virgules ou un par ligne)",
     "hitlNotifyPlaceholder": "approbateurs@example.com, responsable-ops@example.com",
     "hitlNotifyHint": "Un e-mail par pause, envoyé par le service d'envoi système de ce déploiement (eddi.mail.smtp.*, configuré par l'exploitant), uniquement vers les domaines que l'exploitant autorise. Il renvoie vers la page Approbations et ne peut rien approuver. Il ne contient ni les messages des utilisateurs ni les réponses de l'agent ; pour une pause d'appel d'outil, il liste les outils en attente avec leurs arguments masqués et raccourcis.",
+    "reviewPendingHitl": "Une valeur Human-in-the-Loop qui ne peut pas être enregistrée est en attente (voir le champ signalé). Elle ne fait pas partie du document ci-dessous.",
     "hitlNotifyFixBeforeSave": "Corrigez les réglages Human-in-the-Loop signalés (destinataires de l'e-mail d'approbation, nom de l'intégration Slack, contexte d'approbation), ou désactivez-les, avant d'enregistrer.",
     "hitlNotifyEmpty": "Ajoutez au moins une adresse, ou désactivez les notifications par e-mail.",
     "hitlNotifyTooMany": "{{max}} adresses au maximum — utilisez une liste de diffusion pour davantage.",

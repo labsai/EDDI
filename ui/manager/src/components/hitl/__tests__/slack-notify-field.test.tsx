@@ -90,13 +90,13 @@ describe("HitlConfigSection — notify.slack beside notify.email", () => {
     fireEvent.change(screen.getByTestId("hitl-notify-slack-integration"), { target: { value: "ops|slack" } });
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
+    fireEvent.click(screen.getByTestId("hitl-config-toggle"));
 
     expect(screen.queryByTestId("hitl-notify-slack-integration")).not.toBeInTheDocument();
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
 
     // reopening shows the unsavable draft again, still blocking the save
-    fireEvent.click(screen.getByRole("button", { name: /Human-in-the-Loop/ }));
+    fireEvent.click(screen.getByTestId("hitl-config-toggle"));
     expect(screen.getByTestId("hitl-notify-slack-integration")).toHaveValue("ops|slack");
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
   });
