@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "กำลังใช้ {{tool}}…",
   "conversation.indicator.escalating": "กำลังตรวจสอบให้ละเอียดขึ้น…",
   "conversation.indicator.thinking": "กำลังคิด…",
+  "conversation.indicator.guardrail": "กำลังตรวจสอบคำตอบ…",
   "conversation.message.noResponse": "ไม่มีคำตอบ",
   "conversation.speaker.you": "คุณพูดว่า:",
   "conversation.speaker.agent": "{{name}} พูดว่า:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "ความคิดเห็น",
   "conversation.rating.comment.placeholder": "มีอะไรอีกไหม? (ไม่บังคับ)",
   "conversation.rating.send": "ส่ง",
-  "conversation.rating.skip": "ข้าม"
+  "conversation.rating.skip": "ข้าม",
+  "conversation.guardrail.notice": "การ์ดเรล ({{phase}}): {{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "อินพุต",
+  "conversation.guardrail.phaseOutput": "เอาต์พุต",
+  "conversation.guardrail.actionBlock": "ถูกบล็อก",
+  "conversation.guardrail.actionRedact": "ถูกปกปิด",
+  "conversation.guardrail.actionReprompt": "ถามโมเดลซ้ำ",
+  "conversation.guardrail.actionWarn": "ถูกเตือน"
 }

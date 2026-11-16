@@ -1,6 +1,6 @@
 import { useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ConversationTextProvider, MarkdownContent, type Translate } from "@eddi/conversation";
+import { ConversationTextProvider, MarkdownContent, type MarkdownContentProps, type Translate } from "@eddi/conversation";
 
 /**
  * The Manager's translator for the shared conversation components, following
@@ -24,11 +24,11 @@ export function ManagerConversationText({ children }: { children: ReactNode }) {
  * `eddi-markdown` wrapper picks up the renderer's own styles
  * (`@eddi/conversation/markdown.css`, imported by index.css).
  */
-export function ConversationMarkdown({ children }: { children: string }) {
+export function ConversationMarkdown({ children, ...options }: MarkdownContentProps) {
   return (
     <ManagerConversationText>
       <div className="eddi-markdown">
-        <MarkdownContent>{children}</MarkdownContent>
+        <MarkdownContent {...options}>{children}</MarkdownContent>
       </div>
     </ManagerConversationText>
   );

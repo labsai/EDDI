@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
@@ -298,5 +298,37 @@ describe("ChatMessage — guardrail notices", () => {
       <ChatMessage message={{ ...agentMessage, guardrails: [{ type: "t", phase: "mid", action: "quarantine" }] }} />,
     );
     expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
+  });
+});
+
+describe("ChatMessage — designer images", () => {
+  it("renders image output items as images, without a \"No response\" placeholder", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentNoContent, images: [{ uri: "https://cdn.example/chart.png", alt: "Chart" }] }} />,
+    );
+    const images = within(screen.getByTestId("message-images")).getAllByRole("img");
+    expect(images.map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("message-no-response")).toBeNull();
+  });
+});
+
+describe("ChatMessage — controller notices", () => {
+  it("renders a notice as a system line, not as an agent bubble with a copy button", () => {
+    // makeNotice writes role "agent" + kind "notice": the client talking
+    // ("…was not sent"), which is not something the agent said.
+    const notice: ChatMessageType = {
+      id: "n-1",
+      role: "agent",
+      kind: "notice",
+      content: "**Not** markdown. Your message was not sent.",
+      timestamp: new Date("2024-01-15T10:30:20Z").getTime(),
+    };
+    renderWithProviders(<ChatMessage message={notice} />);
+    const line = screen.getByTestId("chat-notice");
+    expect(line).toHaveAttribute("role", "note");
+    // Plain text: the asterisks stay, no <strong>.
+    expect(line).toHaveTextContent("**Not** markdown. Your message was not sent.");
+    expect(line.querySelector("strong")).toBeNull();
+    expect(screen.queryByTestId("copy-message")).toBeNull();
   });
 });
