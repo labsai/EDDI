@@ -150,6 +150,31 @@ describe("package boundaries", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("keeps @eddi/conversation router-free, off server globals and unimported by core and ui", () => {
+    // Hosts pass ids and callbacks; what the server says reaches it as options.
+    const conversation = modules.filter((m) => m.pkg === "@eddi/conversation");
+    const offenders = conversation.flatMap((m) => {
+      const found = m.imports
+        .filter((spec) => /^react-router(-dom)?(\/|$)/.test(spec))
+        .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`);
+      const source = readFileSync(m.file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      if (/__EDDI_\w*__/.test(source)) found.push(`${relative(PACKAGES_ROOT, m.file)}: window.__EDDI_*__`);
+      return found;
+    });
+    const importers = modules
+      .filter((m) => m.pkg === "@eddi/core" || m.pkg === "@eddi/ui")
+      .flatMap((m) =>
+        m.imports
+          .filter((spec) => /^@eddi\/conversation(\/|$)/.test(spec))
+          .map((spec) => `${relative(PACKAGES_ROOT, m.file)} → ${spec}`),
+      );
+    expect(conversation.length).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+    expect(importers).toEqual([]);
+  });
+
   it("has no import cycle", () => {
     // Edges: relative imports inside a package, and `@eddi/x` imports to that
     // package's entry point.

@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@eddi/core";
-import { t } from "@/i18n";
+import { useConversationText } from "../react/hooks";
 
 interface RatingCardProps {
   profile: RatingProfile;
@@ -25,6 +25,7 @@ type Phase = "rate" | "details" | "thanks";
 const STARS = [1, 2, 3, 4, 5] as const;
 
 export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: RatingCardProps) {
+  const t = useConversationText();
   const [phase, setPhase] = useState<Phase>(current ? "thanks" : "rate");
   const [score, setScore] = useState<number | null>(current?.score ?? null);
   const [tags, setTags] = useState<string[]>(current?.tags ?? []);
@@ -104,16 +105,16 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
     starRefs.current[next]?.focus();
   };
 
-  const question = profile.promptText ?? t("rating.card.question");
+  const question = profile.promptText ?? t("conversation.rating.card.question");
 
   return (
-    <section className="rating-card" aria-label={t("rating.card.label")} data-testid="rating-card">
+    <section className="rating-card" aria-label={t("conversation.rating.card.label")} data-testid="rating-card">
       <button
         type="button"
         className="rating-card__close"
         onClick={onClose}
-        aria-label={t("rating.card.close")}
-        title={t("rating.card.close")}
+        aria-label={t("conversation.rating.card.close")}
+        title={t("conversation.rating.card.close")}
         data-testid="rating-card-close"
       >
         <X size="1em" aria-hidden="true" />
@@ -122,15 +123,15 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
       {phase === "thanks" ? (
         <div data-testid="rating-card-thanks">
           <p className="rating-card__title" tabIndex={-1} ref={headingRef}>
-            {t("rating.card.thanks")}
+            {t("conversation.rating.card.thanks")}
           </p>
-          <p className="rating-card__note">{t("rating.card.sharedWithTeam")}</p>
+          <p className="rating-card__note">{t("conversation.rating.card.sharedWithTeam")}</p>
           <div className="rating-card__actions">
             <button type="button" className="rating-btn" onClick={() => setPhase("rate")} disabled={busy} data-testid="rating-card-change">
-              {t("rating.card.change")}
+              {t("conversation.rating.card.change")}
             </button>
             <button type="button" className="rating-btn rating-btn--quiet" onClick={withdraw} disabled={busy} data-testid="rating-card-withdraw">
-              {t("rating.card.withdraw")}
+              {t("conversation.rating.card.withdraw")}
             </button>
           </div>
         </div>
@@ -150,7 +151,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
                     type="button"
                     role="radio"
                     aria-checked={score === value}
-                    aria-label={t("rating.card.stars", { n: value })}
+                    aria-label={t("conversation.rating.card.stars", { n: value })}
                     tabIndex={focusable ? 0 : -1}
                     className={`rating-stars__star${selected ? " rating-stars__star--on" : ""}`}
                     onClick={() => void pick(value)}
@@ -172,7 +173,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
                 type="button"
                 className="rating-thumbs__btn"
                 aria-pressed={score === 1}
-                aria-label={t("rating.card.up")}
+                aria-label={t("conversation.rating.card.up")}
                 onClick={() => void pick(1)}
                 disabled={busy}
                 data-testid="rating-thumb-up"
@@ -183,7 +184,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
                 type="button"
                 className="rating-thumbs__btn"
                 aria-pressed={score === 0}
-                aria-label={t("rating.card.down")}
+                aria-label={t("conversation.rating.card.down")}
                 onClick={() => void pick(0)}
                 disabled={busy}
                 data-testid="rating-thumb-down"
@@ -196,7 +197,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
           {phase === "details" && hasDetails && (
             <div className="rating-card__details" data-testid="rating-card-details">
               {profile.reasonTags.length > 0 && (
-                <div className="rating-tags" role="group" aria-label={t("rating.tags.label")}>
+                <div className="rating-tags" role="group" aria-label={t("conversation.rating.tags.label")}>
                   {profile.reasonTags.map((tag) => (
                     <button
                       key={tag}
@@ -213,8 +214,8 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
               {showComment && (
                 <textarea
                   className="rating-comment"
-                  aria-label={t("rating.comment.label")}
-                  placeholder={t("rating.comment.placeholder")}
+                  aria-label={t("conversation.rating.comment.label")}
+                  placeholder={t("conversation.rating.comment.placeholder")}
                   maxLength={profile.commentMaxLength}
                   value={comment}
                   onChange={(e) => {
@@ -227,16 +228,16 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
               )}
               <div className="rating-card__actions">
                 <button type="button" className="rating-btn rating-btn--primary" onClick={send} disabled={busy} data-testid="rating-card-send">
-                  {t("rating.send")}
+                  {t("conversation.rating.send")}
                 </button>
                 <button type="button" className="rating-btn" onClick={() => setPhase("thanks")} disabled={busy} data-testid="rating-card-skip">
-                  {t("rating.skip")}
+                  {t("conversation.rating.skip")}
                 </button>
               </div>
             </div>
           )}
 
-          <p className="rating-card__note">{t("rating.card.disclosure")}</p>
+          <p className="rating-card__note">{t("conversation.rating.card.disclosure")}</p>
         </>
       )}
     </section>

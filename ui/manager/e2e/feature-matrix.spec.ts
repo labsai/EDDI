@@ -82,21 +82,51 @@ const i18nCell: Cell = {
   },
 };
 
-const NO_RICH = "renders markdown without the widget's KaTeX/highlight.js/output-image pipeline (phase 3 brings the shared renderer)";
+const NO_RICH = "renders markdown without the shared renderer's KaTeX/highlight.js (phase 6 moves the operator; the member thread is still its own)";
+
+/**
+ * Mirrors RICH_MARKDOWN_TRIGGER in src/test/mocks/handlers.ts: a message that
+ * contains it gets a reply with display math and a fenced code block.
+ */
+const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** Send the trigger in the chat panel; the reply goes through the one markdown renderer. */
+async function askForRichMarkdown(page: Page) {
+  await startSupportChat(page);
+  const input = page.getByTestId("chat-input");
+  await input.fill(`Please ${RICH_MARKDOWN_TRIGGER}`);
+  await input.press("Enter");
+}
 
 const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
   katex: {
-    "chat-panel": { status: "no", reason: NO_RICH },
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await askForRichMarkdown(page);
+        // The KaTeX chunk loads the first time a reply contains $$…$$.
+        await expect(page.locator(".katex").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
     operator: { status: "no", reason: NO_RICH },
     "workforce-thread": { status: "no", reason: NO_RICH },
   },
   highlight: {
-    "chat-panel": { status: "no", reason: NO_RICH },
+    "chat-panel": {
+      status: "yes",
+      check: async (page) => {
+        await askForRichMarkdown(page);
+        await expect(page.locator("code.hljs").first()).toBeVisible({ timeout: 15_000 });
+      },
+    },
     operator: { status: "no", reason: NO_RICH },
     "workforce-thread": { status: "no", reason: NO_RICH },
   },
   "output-images": {
-    "chat-panel": { status: "no", reason: NO_RICH },
+    "chat-panel": {
+      status: "no",
+      reason: "the Manager's bubble renders text parts only; image output items arrive with ChatPanel's move onto AgentConversation and Message",
+    },
     operator: { status: "no", reason: NO_RICH },
     "workforce-thread": { status: "no", reason: NO_RICH },
   },

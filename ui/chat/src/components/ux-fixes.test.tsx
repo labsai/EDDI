@@ -4,12 +4,12 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
-import { ChatInput } from "./ChatInput";
-import { SecretInput } from "./SecretInput";
-import { MessageBubble } from "./MessageBubble";
-import { PausedCard } from "./PausedCard";
+import { Composer as ChatInput } from "@eddi/conversation";
+import { SecretInput } from "@eddi/conversation";
+import { Message as MessageBubble } from "@eddi/conversation";
+import { PausedCard } from "@eddi/conversation";
 import { ChatProvider } from "@/store/chat-store";
-import { isImeComposing } from "@/ime";
+import { isImeComposing } from "@eddi/conversation";
 import type { ApprovalStatus } from "@eddi/core";
 
 afterEach(() => {

@@ -1,4 +1,5 @@
-/* The raw-HTML parser loads lazily (markdown-plugins.ts). That is only safe if
+/* The raw-HTML parser loads lazily (markdown-plugins.ts), and GFM is parsed
+   without its serialiser (remark-gfm-parse.ts). That is only safe if
    leaving it out changes nothing for a message without HTML, and if every
    message WITH HTML is detected — these pin both. */
 
@@ -11,7 +12,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 
 import { looksLikeHtml } from "./markdown-plugins";
-import { MessageBubble } from "./MessageBubble";
+import { Message as MessageBubble } from "../components/Message";
+import { remarkGfmParse } from "./remark-gfm-parse";
 
 const WITHOUT_HTML = [
   "Plain text.",
@@ -89,5 +91,16 @@ describe("raw-HTML parser is loaded only for HTML", () => {
       </ReactMarkdown>,
     );
     expect(body).toBe(expected);
+  });
+});
+
+describe("GFM without the serialiser", () => {
+  it.each([...WITHOUT_HTML, ...WITH_HTML])("renders exactly as remark-gfm: %s", (text) => {
+    const withParse = renderToStaticMarkup(
+      <ReactMarkdown remarkPlugins={[remarkGfmParse]} rehypePlugins={[rehypeRaw, rehypeSanitize]}>
+        {text}
+      </ReactMarkdown>,
+    );
+    expect(withParse).toBe(html(text, [rehypeRaw, rehypeSanitize]));
   });
 });

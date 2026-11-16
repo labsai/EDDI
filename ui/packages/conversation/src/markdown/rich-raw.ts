@@ -8,7 +8,7 @@
    ────────────────────────────────────────────── */
 
 import rehypeRaw from "rehype-raw";
-import type { RawHtmlPlugins } from "./markdown-plugins";
+import type { RawHtmlPlugins } from "./plugin-types";
 
 const plugins: RawHtmlPlugins = { rehypeRaw };
 

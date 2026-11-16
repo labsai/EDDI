@@ -5,8 +5,9 @@
    ────────────────────────────────────────────── */
 
 import { Brain, Wrench } from "lucide-react";
-import { t } from "@/i18n";
 import { humanizeToolName, type ToolActivity } from "@eddi/core";
+import { englishText, type Translate } from "../i18n/text";
+import { useConversationText } from "../react/hooks";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
@@ -57,13 +58,19 @@ export function TypingIndicator() {
  * state here exists only mid-turn — so the widget announces this text from a
  * status region outside the transcript instead.
  */
-export function indicatorStatusText(escalating: boolean, tool: ToolActivity | null): string {
+export function indicatorStatusText(
+  escalating: boolean,
+  tool: ToolActivity | null,
+  t: Translate = englishText,
+): string {
   if (tool) {
     // An identifier is put into words ("Using Get agent descriptors…"); a
     // designer's toolDisplay phrase ("Creating an action: …") stands alone.
-    return tool.phrase ? `${tool.text}…` : t("indicator.tool", { tool: humanizeToolName(tool.text) });
+    return tool.phrase
+      ? `${tool.text}…`
+      : t("conversation.indicator.tool", { tool: humanizeToolName(tool.text) });
   }
-  return escalating ? t("indicator.escalating") : t("indicator.thinking");
+  return escalating ? t("conversation.indicator.escalating") : t("conversation.indicator.thinking");
 }
 
 export function ThinkingIndicator({
@@ -73,6 +80,7 @@ export function ThinkingIndicator({
   escalating?: boolean;
   tool?: ToolActivity | null;
 }) {
+  const t = useConversationText();
   const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
   // Hidden from assistive technology: the transcript is aria-busy while this is
   // on screen, so ChatWidget announces indicatorStatusText() from a status
@@ -89,7 +97,7 @@ export function ThinkingIndicator({
           ) : (
             <Brain className="indicator__brain" size="1em" />
           )}
-          <span>{indicatorStatusText(escalating, tool)}</span>
+          <span>{indicatorStatusText(escalating, tool, t)}</span>
         </div>
       </div>
     </div>
