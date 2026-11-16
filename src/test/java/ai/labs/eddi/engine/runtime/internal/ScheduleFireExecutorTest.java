@@ -1529,6 +1529,31 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_scheduledRun_announcesRunCompleted_butNotWhenTheTurnPausedForAHuman() throws Exception {
+        var publisher = mock(UserEventPublisher.class);
+        setField(executor, "userEventPublisher", publisher);
+        when(publisher.conversationOwner(any())).thenReturn(new UserEventPublisher.ConversationOwner("owner-1", "agent-1"));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-run", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(makeCronSchedule("sched-hitl", "new"), "instance-1", 1).status());
+        // The run is not over; its approval.pending says so.
+        verify(publisher, never()).publish(any(), any());
+
+        snapshot.setConversationState(ConversationState.READY);
+        executor.fire(makeCronSchedule("sched-done", "new"), "instance-1", 1);
+        var event = ArgumentCaptor.forClass(UserEvent.class);
+        verify(publisher).publish(event.capture(), any());
+        assertEquals(UserEvent.KIND_JOB_RUN_COMPLETED, event.getValue().kind());
+    }
+
+    @Test
     void fire_continuation_parksAnInterruptAcrossTheFireLogWriteAndRestoresIt() throws Exception {
         var handler = mock(ContinuationFireHandler.class);
         setField(executor, "continuationFireHandler", handler);

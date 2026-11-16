@@ -49,9 +49,15 @@ class UserEventPublisherTest {
         final List<Consumer<ClusterEvent>> handlers = new ArrayList<>();
         FakeBus peer;
         final List<Map<String, Object>> published = new ArrayList<>();
+        final List<Map<String, Object>> durable = new ArrayList<>();
 
         @Override
         public void publish(String type, Map<String, Object> payload) {
+            durable.add(payload);
+        }
+
+        @Override
+        public void publishTransient(String type, Map<String, Object> payload) {
             published.add(payload);
             // Round-trip through JSON, as JetStream does.
             Map<String, Object> wire;
@@ -131,6 +137,8 @@ class UserEventPublisherTest {
         assertTrue(aliceOnB.userEvents().getFirst().data().contains(event.id()), "the same event, by id");
         Thread.sleep(50);
         assertEquals(0, bobOnB.userEvents().size(), "the other user on node B must not get it");
+        assertEquals(1, busA.published.size(), "published transiently");
+        assertTrue(busA.durable.isEmpty(), "never on the durable stream the cache invalidations share");
     }
 
     @Test
@@ -163,6 +171,7 @@ class UserEventPublisherTest {
 
         verify(hub).dispatch(event, audience);
         verify(bus, never()).publish(anyString(), anyMap());
+        verify(bus, never()).publishTransient(anyString(), anyMap());
     }
 
     @Test

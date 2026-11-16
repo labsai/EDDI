@@ -295,6 +295,9 @@ public class ScheduleFireExecutor {
         double cost = 0.0;
         boolean interrupted = false;
         double costBefore = 0.0;
+        // The turn ran but ended paused on a human approval: the run is not over, and
+        // the pause announces itself (approval.pending), so no run_completed.
+        boolean awaitingHuman = false;
 
         try {
             Environment env = resolveEnvironment(schedule.getEnvironment());
@@ -389,6 +392,7 @@ public class ScheduleFireExecutor {
                         schedule.getId(), conversationId, state);
             } else {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                awaitingHuman = state == ConversationState.AWAITING_HUMAN;
                 LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(),
                         schedule.getId(), schedule.getTriggerType(), schedule.getAgentId(), conversationId);
             }
@@ -437,7 +441,9 @@ public class ScheduleFireExecutor {
         // Before the fire log: recordFire re-asserts a remembered interrupt, which
         // would
         // fail the owner lookup.
-        announceFire(schedule, conversationId, status, UserEvent.JOB_SCHEDULE);
+        if (!awaitingHuman) {
+            announceFire(schedule, conversationId, status, UserEvent.JOB_SCHEDULE);
+        }
 
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
         return recordFire(fireLogId, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, cost, "conversation",
@@ -451,7 +457,9 @@ public class ScheduleFireExecutor {
      * check reads — never taken from the schedule. A completed continuation turn
      * announces nothing here: whether the job goes on is decided when that turn
      * commits ({@code job.finished}, from {@code ConversationContinuations}). A
-     * skipped fire announces nothing. Never throws.
+     * skipped fire announces nothing, and neither does a scheduled run whose turn
+     * ended paused on a human approval (its {@code approval.pending} says so; the
+     * run has not completed). Never throws.
      */
     private void announceFire(ScheduleConfiguration schedule, String conversationId, String status, String jobKind) {
         UserEventPublisher publisher = userEventPublisher;

@@ -26,15 +26,22 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * mode, tells the other nodes so a user whose tab is connected elsewhere gets
  * it too.
  *
- * <h3>Cross-pod delivery</h3> Through the cluster event bus that already
- * carries cache invalidations ({@link IClusterEventBus}, JetStream with
- * {@code eddi.messaging.type=nats}), as {@link ClusterEvent#USER_EVENT}
- * carrying the event and its {@link UserEventAudience}. The publishing node
- * delivers to its own streams synchronously and ignores its own event when it
- * comes back, as with every other cluster event. Each receiving node scopes the
- * event against its own connections — the audience is data, the decision is the
- * receiver's. Single-node ({@code in-memory}), the bus is a no-op and only the
- * local delivery happens.
+ * <h3>Cross-pod delivery</h3> Through the cluster event bus
+ * ({@link IClusterEventBus}, with {@code eddi.messaging.type=nats}) as a
+ * <em>transient</em> event ({@link IClusterEventBus#publishTransient}, core
+ * NATS): {@link ClusterEvent#USER_EVENT} carrying the event and its
+ * {@link UserEventAudience}. Not on the JetStream stream that carries cache
+ * invalidations: a burst of user events would evict invalidations from its
+ * message cap sooner, and during an outage would fill the shared outbox and
+ * force a cluster-wide cache resync on reconnect — all to replay hints up to an
+ * hour late. A user event raised while this node is disconnected from NATS
+ * reaches only this node's streams; the other nodes' clients refetch when they
+ * reconnect, as after any missed event. The publishing node delivers to its own
+ * streams synchronously and ignores its own event when it comes back, as with
+ * every other cluster event. Each receiving node scopes the event against its
+ * own connections — the audience is data, the decision is the receiver's.
+ * Single-node ({@code in-memory}), the bus is a no-op and only the local
+ * delivery happens.
  *
  * <h3>Never in the way</h3> Every method is best effort: it never throws and
  * never blocks on a slow client. Whatever raised the event — a pause, a fire, a
@@ -73,7 +80,7 @@ public class UserEventPublisher {
                 Map<String, Object> payload = new LinkedHashMap<>();
                 payload.put("event", event.toMap());
                 payload.put("audience", audience.toMap());
-                clusterEvents.publish(ClusterEvent.USER_EVENT, payload);
+                clusterEvents.publishTransient(ClusterEvent.USER_EVENT, payload);
             }
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not raise user event %s: %s", event.kind(), e.getMessage());

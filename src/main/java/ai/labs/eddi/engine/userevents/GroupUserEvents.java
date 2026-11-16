@@ -41,9 +41,13 @@ public final class GroupUserEvents {
     private GroupUserEvents() {
     }
 
-    /** A leg started fresh (round 1) or as a continuation round. */
+    /**
+     * A leg started fresh (round 1) or as a continuation round. A nested discussion
+     * (depth above 0) announces nothing: it is a step of its parent, whose owner
+     * already heard {@code team.started}.
+     */
     public static void started(UserEventPublisher publisher, GroupConversation gc, AgentGroupConfiguration config) {
-        if (publisher == null || gc == null) {
+        if (publisher == null || gc == null || nested(gc)) {
             return;
         }
         try {
@@ -55,7 +59,9 @@ public final class GroupUserEvents {
 
     /**
      * A leg ended, or a paused discussion was cancelled: announces what its state
-     * now is. A state that is still running announces nothing.
+     * now is. A state that is still running announces nothing, and neither does the
+     * end of a nested discussion: the parent's {@code team.ended} is the one its
+     * owner waits for.
      */
     public static void afterLeg(UserEventPublisher publisher, GroupConversation gc, AgentGroupConfiguration config) {
         if (publisher == null || gc == null || gc.getState() == null) {
@@ -76,8 +82,11 @@ public final class GroupUserEvents {
                     publisher.publish(event(UserEvent.KIND_TEAM_WAITING_FOR_HUMAN, gc),
                             UserEventAudience.principals(principals).withYourTurn(waitingFor));
                 }
-                case COMPLETED, FAILED, REJECTED, CANCELLED, CLOSED -> publisher
-                        .publish(event(UserEvent.KIND_TEAM_ENDED, gc).withState(state.name()), participants(gc, config));
+                case COMPLETED, FAILED, REJECTED, CANCELLED, CLOSED -> {
+                    if (!nested(gc)) {
+                        publisher.publish(event(UserEvent.KIND_TEAM_ENDED, gc).withState(state.name()), participants(gc, config));
+                    }
+                }
                 default -> {
                     // still running: nothing to say
                 }
@@ -89,6 +98,10 @@ public final class GroupUserEvents {
 
     private static UserEvent event(String kind, GroupConversation gc) {
         return UserEvent.of(kind).withSurface(UserEvent.SURFACE_GROUP).withGroup(gc.getGroupId(), gc.getId());
+    }
+
+    private static boolean nested(GroupConversation gc) {
+        return gc.getDepth() > 0;
     }
 
     private static String stateOf(GroupConversation gc) {

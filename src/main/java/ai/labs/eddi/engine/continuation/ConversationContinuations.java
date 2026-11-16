@@ -378,6 +378,9 @@ public class ConversationContinuations {
             return true;
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
+            // The job stops here as surely as at its limit: nothing will fire the next
+            // turn, so its owner hears that it ended, and why.
+            announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
             return false;
         }
     }
@@ -387,19 +390,30 @@ public class ConversationContinuations {
      * it finished its work, reached its limit or its cost ceiling. Raises
      * {@code job.finished} for the conversation's owner, with the refusal reason as
      * its state when there is one ({@code limit}, {@code cost_ceiling}, …) and
-     * {@code done} otherwise. Never throws.
+     * {@code done} otherwise. A next turn that was decided but whose schedule could
+     * not be written ends the job too, with state {@code schedule_failed}. Never
+     * throws.
      */
     private void announceFinished(String conversationId, IConversationMemory memory, IWritableConversationStep step) {
+        String reason;
+        try {
+            IData<Object> refused = step.getData(STEP_REFUSED);
+            reason = refused != null && refused.getResult() instanceof String r && !r.isBlank() ? r : null;
+        } catch (RuntimeException e) {
+            reason = null;
+        }
+        announceFinished(conversationId, memory, reason != null ? reason : "done");
+    }
+
+    private void announceFinished(String conversationId, IConversationMemory memory, String state) {
         UserEventPublisher publisher = userEventPublisher;
         if (publisher == null) {
             return;
         }
         try {
-            IData<Object> refused = step.getData(STEP_REFUSED);
-            String reason = refused != null && refused.getResult() instanceof String r && !r.isBlank() ? r : null;
             publisher.publish(UserEvent.of(UserEvent.KIND_JOB_FINISHED).withSurface(UserEvent.SURFACE_REGULAR)
-                    .withConversation(conversationId, memory.getAgentId()).withJob(UserEvent.JOB_CONTINUATION, null)
-                    .withState(reason != null ? reason : "done"), UserEventAudience.principal(memory.getUserId()));
+                    .withConversation(conversationId, memory.getAgentId()).withJob(UserEvent.JOB_CONTINUATION, null).withState(state),
+                    UserEventAudience.principal(memory.getUserId()));
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not announce the end of the job of conversation %s: %s", sanitize(conversationId), e.getMessage());
         }

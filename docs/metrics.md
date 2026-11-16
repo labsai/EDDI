@@ -1133,6 +1133,8 @@ eddi_cluster_events_published_total         # Cluster events published {type}
 eddi_cluster_events_consumed_total          # Cluster events handled from other nodes {type}
 eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
+eddi_cluster_events_transient_published_total # Transient events (core NATS, never stored or queued — the user event stream) published {type}
+eddi_cluster_events_transient_dropped_total   # Transient events dropped because NATS was unreachable {type}
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
