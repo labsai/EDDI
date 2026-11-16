@@ -24,7 +24,7 @@
    The token is kept in memory only — never in the URL, storage or a cookie.
    ────────────────────────────────────────────── */
 
-import { getAuthToken, setAuthToken, setUnauthorizedHandler } from "./http";
+import { getAuthToken, setAuthToken, setUnauthorizedHandler } from "@eddi/core";
 
 export const EMBED_PROTOCOL_VERSION = 1;
 export const MSG_READY = "eddi-chat-ready";

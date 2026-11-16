@@ -9,7 +9,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { indicatorStatusText } from "./Indicators";
 import { ChatProvider, useChatDispatch } from "@/store/chat-store";
-import { stepsToMessages } from "@/api/snapshot";
+import { stepsToMessages } from "@eddi/core";
 import { setLocale } from "@/i18n";
 
 afterEach(() => {

@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { agentReplyCount, lastStepIndex, ratableSteps, stepIndexes } from "./rating-steps";
-import { stepsToMessages } from "@/api/snapshot";
-import type { ChatMessage } from "@/types";
+import { stepsToMessages } from "./snapshot";
+import type { SnapshotMessage } from "./snapshot";
+import type { StepMessage } from "./rating-steps";
+
+type ChatMessage = SnapshotMessage & StepMessage & { kind?: "notice" };
 
 let n = 0;
 const msg = (role: "user" | "agent", content: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
