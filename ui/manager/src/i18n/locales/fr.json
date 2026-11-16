@@ -4822,6 +4822,22 @@
   "mockBanner": {
     "message": "Mode démo — Affichage de données d'exemple. Connectez un backend {{productName}} pour des données réelles."
   },
+  "spendControl": {
+    "title": "Modifications en attente",
+    "description": "Proposées via MCP et non appliquées : chacune assouplirait le contrôle des dépenses. L'approbation l'applique en votre nom.",
+    "proposedBy": "Proposée par {{who}} le {{when}}",
+    "loosening": "Assouplit le contrôle des dépenses",
+    "allChanges": "Toutes les modifications",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "approveTitle": "Approuver cette modification ?",
+    "rejectTitle": "Rejeter cette modification ?",
+    "approveDesc": "Elle est appliquée maintenant, avec vous comme auteur, et assouplit le contrôle des dépenses : {{loosening}}",
+    "rejectDesc": "Rien n'est appliqué. L'auteur de la proposition peut la soumettre à nouveau.",
+    "approved": "Modification approuvée et appliquée",
+    "rejected": "Modification rejetée ; rien n'a été appliqué",
+    "approveBlockedDirty": "Enregistrez d'abord vos modifications du quota, ou rechargez la page pour les abandonner : les enregistrer après une approbation écraserait le quota approuvé."
+  },
   "modelPrices": {
     "nav": "Prix des modèles",
     "title": "Prix des modèles",
@@ -4911,6 +4927,8 @@
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",
+    "editsDiscardedAfterRefresh": "Le quota a été rechargé et vos modifications non enregistrées ont été annulées, afin qu'elles n'écrasent pas les limites actuelles.",
+    "refreshFailedSaveBlocked":"Impossible d'actualiser le quota, l'enregistrement est donc suspendu. Réessayez pour charger d'abord les limites actuelles.",
     "configuration": "Configuration",
     "conversationsToday": "Conversations aujourd'hui",
     "description": "Configurez les limites de débit, les plafonds d'usage et les budgets de coût par locataire.",
