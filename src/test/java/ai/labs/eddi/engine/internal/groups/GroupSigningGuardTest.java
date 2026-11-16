@@ -311,6 +311,67 @@ class GroupSigningGuardTest {
         assertEquals("sig-xyz", result.signature());
     }
 
+    /**
+     * Revoking a key deletes its private half from the vault, but only best effort:
+     * when that delete fails the vault still holds the key, and the signer used to
+     * sign with it — signatures a peer still accepted. A revoked newest key stops
+     * signing; nothing falls back to an older key either.
+     */
+    @Test
+    void signOutgoingMessage_newestKeyRevoked_unsignedWithoutFallingBack() throws Exception {
+        var resId = mockResourceId();
+        var config = new AgentConfiguration();
+        var security = new SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        config.setSecurity(security);
+        var identity = new AgentIdentity();
+        identity.setKeys(List.of(
+                new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(2, KEY_V2_B64, 0L, 0L).revoke()));
+        config.setIdentity(identity);
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenReturn(resId);
+        when(agentStore.read(AGENT_A, resId.getVersion())).thenReturn(config);
+        var signed = new SignedEnvelope(AGENT_A, GROUP_ID, Map.of("content", "hi", "phase", "OPINION"),
+                "nonce-xyz", Instant.now().toEpochMilli(), "sig-xyz", 2);
+        when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), any(), anyInt())).thenReturn(signed);
+        when(agentSigningService.verifyEnvelope(any(), any())).thenReturn(true);
+        when(nonceCacheService.validate(any(), anyLong())).thenReturn(NonceCacheService.NonceValidation.VALID);
+
+        var result = guard().signOutgoingMessage(AGENT_A, GROUP_ID, "hi", "OPINION");
+
+        assertEquals(GroupSigningGuard.SigningResult.UNSIGNED, result);
+        verify(agentSigningService, never()).signEnvelope(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void signOutgoingMessage_revokedOutOfRangeKey_signsWithTheInRangeKeyTheValidatorPicks() throws Exception {
+        var resId = mockResourceId();
+        var config = new AgentConfiguration();
+        var security = new SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        config.setSecurity(security);
+        var identity = new AgentIdentity();
+        // A legacy entry above MAX_VERSION: signingKeyVersion() ignores it, so the
+        // guard must too, or this revoked entry would silence a usable v1.
+        identity.setKeys(List.of(
+                new AgentPublicKey(1, KEY_V1_B64, 0L, 0L),
+                new AgentPublicKey(AgentPublicKey.MAX_VERSION + 1, KEY_V2_B64, 0L, 0L).revoke()));
+        config.setIdentity(identity);
+        when(agentStore.getCurrentResourceId(AGENT_A)).thenReturn(resId);
+        when(agentStore.read(AGENT_A, resId.getVersion())).thenReturn(config);
+        var signed = new SignedEnvelope(AGENT_A, GROUP_ID, Map.of("content", "hi", "phase", "OPINION"),
+                "nonce-xyz", Instant.now().toEpochMilli(), "sig-xyz", 1);
+        when(agentSigningService.signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(1))).thenReturn(signed);
+        when(agentSigningService.verifyEnvelope(any(), eq(KEY_V1_B64))).thenReturn(true);
+        when(nonceCacheService.validate(any(), anyLong())).thenReturn(NonceCacheService.NonceValidation.VALID);
+
+        var result = guard().signOutgoingMessage(AGENT_A, GROUP_ID, "hi", "OPINION");
+
+        assertEquals(Integer.valueOf(identity.signingKeyVersion()), result.keyVersion());
+        assertEquals("sig-xyz", result.signature());
+        verify(agentSigningService).signEnvelope(eq(TENANT), eq(AGENT_A), any(), eq(1));
+    }
+
     // =================================================================
     // forgetConversation
     // =================================================================

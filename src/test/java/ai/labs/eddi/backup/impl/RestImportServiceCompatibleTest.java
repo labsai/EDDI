@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -259,6 +260,67 @@ class RestImportServiceCompatibleTest {
             try (var ignored = stubCdi()) {
                 return importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
             }
+        }
+    }
+
+    // ==================== strategy=merge, signing ====================
+
+    /**
+     * A merge keeps the local agent's identity — updateAgent never takes one from
+     * the body — so the archive's signing flag can only be honoured with the local
+     * agent's own key. Carried onto an agent that cannot sign, the save was refused
+     * with 400 and the whole import rolled back.
+     */
+    @Nested
+    @DisplayName("strategy=merge, an archive that signs")
+    class MergeSigning {
+
+        @BeforeEach
+        void archiveThatSigns() throws Exception {
+            doAnswer(inv -> {
+                File dir = inv.getArgument(1);
+                assertTrue(dir.mkdirs() || dir.isDirectory());
+                Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                        "{\"workflows\":[],\"security\":{\"signInterAgentMessages\":true}}");
+                return null;
+            }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
+            stubExistingAgent();
+        }
+
+        private AgentConfiguration writtenAgent() {
+            var captor = ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(restAgentStore).updateAgent(eq(TARGET_AGENT_ID), eq(4), captor.capture(), any());
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("turns signing off, and says why, when the local agent cannot sign")
+        void turnsSigningOffWhereTheLocalAgentCannotSign() throws Exception {
+            when(restAgentStore.signingKeyProblem(TARGET_AGENT_ID)).thenReturn("Signing key v1 has no private key in the secrets vault.");
+
+            Response response;
+            try (var ignored = stubCdi()) {
+                response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null, false);
+            }
+
+            assertEquals(201, response.getStatus());
+            assertFalse(writtenAgent().getSecurity().isSignInterAgentMessages());
+            assertEquals("signInterAgentMessages was turned off: Signing key v1 has no private key in the secrets vault.",
+                    response.getHeaderString(RestImportService.HEADER_SIGNING_TURNED_OFF));
+        }
+
+        @Test
+        @DisplayName("keeps signing on when the local agent can sign")
+        void keepsSigningWhereTheLocalAgentCanSign() throws Exception {
+            when(restAgentStore.signingKeyProblem(TARGET_AGENT_ID)).thenReturn(null);
+
+            Response response;
+            try (var ignored = stubCdi()) {
+                response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null, false);
+            }
+
+            assertTrue(writtenAgent().getSecurity().isSignInterAgentMessages());
+            assertNull(response.getHeaderString(RestImportService.HEADER_SIGNING_TURNED_OFF));
         }
     }
 
