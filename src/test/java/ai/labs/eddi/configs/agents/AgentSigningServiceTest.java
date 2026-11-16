@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents;
 
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -31,6 +32,9 @@ import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 
 class AgentSigningServiceTest {
 
@@ -763,11 +767,189 @@ class AgentSigningServiceTest {
         assertNoForgedRecordBoundary(captured, "AgentSigningService.deleteKeyPair's nothing-to-clean DEBUG");
     }
 
+    // ─── generateKey / checkSigningKey: provisioning, and the save-time check ───
+
+    @Test
+    void generateKey_storesAPrivateKeyThatSignsForTheReturnedPublicKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(1, generated.version());
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "the private key is in the vault under v1");
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), generated.publicKeyB64()));
+    }
+
+    /**
+     * The vault entry and the agent's {@code identity.keys} are two writes. A
+     * version the vault already holds — a concurrent provisioning, or one whose
+     * config write never landed — may have a published public key, so it is never
+     * replaced.
+     */
+    @Test
+    void generateKey_neverReplacesAKeyAlreadyInTheVault() throws Exception {
+        String existingPublicKey = provisionKey("tenant-1", "agent-1", 1);
+
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(2, generated.version(), "v1 is taken, so the new key is v2");
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), existingPublicKey),
+                "the key that was already at v1 still signs as v1");
+    }
+
+    /** A "no key" remembered for the version just generated must not outlive it. */
+    @Test
+    void generateKey_isUsedAtOnceAfterTheVaultWasFoundEmpty() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        var envelope = SignedEnvelope.forSigning("agent-1", "group-1", Map.of("content", "hello"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-1", envelope, 1));
+
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertTrue(signingService.verifyEnvelope(signingService.signEnvelope("tenant-1", "agent-1", envelope, 1), generated.publicKeyB64()),
+                "the clock has not moved: only the eviction lets the new key sign");
+    }
+
+    @Test
+    void generateKey_reportsAVaultFailure() throws Exception {
+        ISecretProvider failing = SigningTestSupport.inMemoryVault();
+        doThrow(new ISecretProvider.SecretProviderException("Secrets Vault is not available")).when(failing).storeIfAbsent(any(), anyString(),
+                any(), any());
+        var service = new AgentSigningService(failing, new SimpleMeterRegistry());
+
+        var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> service.generateKey("t1", "a1", 1));
+        assertTrue(e.getMessage().contains("Secrets Vault is not available"), e.getMessage());
+    }
+
+    /**
+     * "fromVersion + attempts" overflowed for a version near Integer.MAX_VALUE: the
+     * loop never ran and a declared bogus version turned Generate into a 503 that
+     * blamed the vault. Versions now stop at MAX_VERSION.
+     */
+    @Test
+    void generateKey_neverGoesPastTheHighestVersion() throws Exception {
+        provisionKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION);
+
+        var e = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION));
+        assertTrue(e.getMessage().contains("versions 1000000 to 1000000"), e.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", AgentPublicKey.MAX_VERSION + 1));
+        assertThrows(IllegalArgumentException.class, () -> signingService.generateKey("tenant-1", "agent-1", Integer.MAX_VALUE));
+    }
+
+    @Test
+    void discardKey_removesTheVersionFromTheVault() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        signingService.discardKey("tenant-1", "agent-1", generated.version());
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"));
+    }
+
+    @Test
+    void discardKey_ofVersionZeroRemovesTheLegacyKey() throws Exception {
+        provisionKey("tenant-1", "agent-1");
+        signingService.generateKey("tenant-1", "agent-1", 1);
+
+        signingService.discardKey("tenant-1", "agent-1", 0);
+
+        assertFalse(secretProvider.contains("tenant-1", "agent-signing-key:agent-1"));
+        assertTrue(secretProvider.contains("tenant-1", "agent-signing-key:agent-1:v1"), "only the legacy key goes");
+    }
+
+    @Test
+    void isEd25519PublicKey_acceptsOnlyAnEd25519PublicKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+        String rsaPublicKey = Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("RSA").generateKeyPair().getPublic().getEncoded());
+
+        assertTrue(AgentSigningService.isEd25519PublicKey(generated.publicKeyB64()));
+        assertFalse(AgentSigningService.isEd25519PublicKey(rsaPublicKey));
+        assertFalse(AgentSigningService.isEd25519PublicKey("not base64 !"));
+        assertFalse(AgentSigningService.isEd25519PublicKey(null));
+    }
+
+    @Test
+    void checkSigningKey_isUsableForAGeneratedKey() throws Exception {
+        var generated = signingService.generateKey("tenant-1", "agent-1", 1);
+
+        assertEquals(AgentSigningService.SigningKeyStatus.USABLE, signingService.checkSigningKey("tenant-1", "agent-1", 1, generated.publicKeyB64()));
+    }
+
+    @Test
+    void checkSigningKey_coversTheLegacyUnversionedKey() throws Exception {
+        String publicKey = provisionKey("tenant-1", "agent-1");
+
+        assertEquals(AgentSigningService.SigningKeyStatus.USABLE, signingService.checkSigningKey("tenant-1", "agent-1", 0, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_rejectsAPublicKeyThatIsNotEd25519() throws Exception {
+        signingService.generateKey("tenant-1", "agent-1", 1);
+        String rsaPublicKey = Base64.getEncoder().encodeToString(KeyPairGenerator.getInstance("RSA").generateKeyPair().getPublic().getEncoded());
+
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, "MCowBQYDK2VwAyEA-not-a-real-key"));
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY, signingService.checkSigningKey("tenant-1", "agent-1", 1, rsaPublicKey));
+        assertEquals(AgentSigningService.SigningKeyStatus.INVALID_PUBLIC_KEY, signingService.checkSigningKey("tenant-1", "agent-1", 1, null));
+    }
+
+    @Test
+    void checkSigningKey_reportsAKeyMissingFromTheVault() throws Exception {
+        String publicKeyOfAnotherAgent = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.NOT_IN_VAULT,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKeyOfAnotherAgent));
+    }
+
+    /**
+     * The declared public key is someone else's: the vault key signs, but not as
+     * it.
+     */
+    @Test
+    void checkSigningKey_reportsAPublicKeyThatDoesNotMatchTheVault() throws Exception {
+        signingService.generateKey("tenant-1", "agent-1", 1);
+        String publicKeyOfAnotherAgent = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.MISMATCH,
+                signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKeyOfAnotherAgent));
+    }
+
+    @Test
+    void checkSigningKey_reportsAVaultEntryThatIsNotAPrivateKey() throws Exception {
+        secretProvider.store(new SecretReference("tenant-1", "agent-signing-key:agent-1:v1"), "bm90LWEta2V5", null, List.of("agent-1"));
+        String publicKey = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+
+        assertEquals(AgentSigningService.SigningKeyStatus.UNREADABLE, signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_throwsWhenTheVaultCannotAnswer() throws Exception {
+        String publicKey = signingService.generateKey("tenant-1", "agent-2", 1).publicKeyB64();
+        secretProvider.resolveUnreachable = true;
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.checkSigningKey("tenant-1", "agent-1", 1, publicKey));
+    }
+
+    @Test
+    void checkSigningKey_leavesTheVerifyMetricsAlone() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var service = new AgentSigningService(secretProvider, registry);
+        service.initMetrics();
+        var generated = service.generateKey("tenant-1", "agent-1", 1);
+
+        service.checkSigningKey("tenant-1", "agent-1", 1, generated.publicKeyB64());
+
+        assertEquals(0.0, registry.counter("eddi.agent.identity.verify.success").count());
+        assertEquals(0.0, registry.counter("eddi.agent.identity.verify.fail").count());
+    }
+
     /**
      * Writes a signing key into the vault in the one shape this service reads: an
      * Ed25519 keypair whose PKCS#8 private key goes in Base64-encoded under
-     * {@code agent-signing-key:{agentId}}. Nothing in EDDI writes one, so the test
-     * stands in for whatever provisions it. Writing it again replaces the key.
+     * {@code agent-signing-key:{agentId}}. {@link AgentSigningService#generateKey}
+     * writes only versioned keys, so the test stands in for a legacy unversioned
+     * one — and, through the overload below, for a version already taken in the
+     * vault. Writing it again replaces the key.
      *
      * @return the Base64 X.509 public key, as {@code identity.publicKey} holds it
      */
