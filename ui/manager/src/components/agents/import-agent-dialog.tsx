@@ -14,6 +14,7 @@ import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api
 import { Button } from "@/components/ui/button";
 import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
+import { ResultWarnings } from "@/components/agents/result-warnings";
 import { parseResourceUri } from "@/lib/api/backup";
 import { UploadStep, StrategyStep, PreviewStep } from "@/components/agents/import-steps";
 
@@ -57,6 +58,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   const [dragging, setDragging] = useState(false);
   const [outcome, setOutcome] = useState<SyncExecution | null>(null);
   const [schedulesSkipped, setSchedulesSkipped] = useState<number | null>(null);
+  /** What the write did differently from the archive or source (see ResultWarnings). */
+  const [warnings, setWarnings] = useState<string[]>([]);
   /**
    * The operator declared the agent version this writes compatible with the one it
    * replaces, so running conversations follow it. Unticked by default, always, and
@@ -101,6 +104,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     setDragging(false);
     setOutcome(null);
     setSchedulesSkipped(null);
+    setWarnings([]);
     setCompatible(false);
     setTargetAgentId(null);
     setSyncUrl("");
@@ -159,7 +163,15 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
       // Direct import
       setStep("importing");
       importMutation.mutate(file, {
-        onSuccess: () => { onSuccess(); handleClose(); },
+        onSuccess: (result) => {
+          onSuccess();
+          if (result.signingTurnedOff !== null) {
+            setWarnings([result.signingTurnedOff]);
+            setStep("outcome");
+            return;
+          }
+          handleClose();
+        },
         onError: (err) => { setError(err.message); setStep("strategy"); },
       });
     } else if (strategy === "merge" && file) {
@@ -245,8 +257,10 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
      */
     function settle(execution: SyncExecution) {
       onSuccess();
-      if (execution.outcome === "partial") {
+      const written = execution.result?.warnings ?? [];
+      if (execution.outcome === "partial" || written.length > 0) {
         setOutcome(execution);
+        setWarnings(written);
         setStep("outcome");
         return;
       }
@@ -259,11 +273,12 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
         {
           onSuccess: (result) => {
             onSuccess();
-            if (result.schedulesSkipped !== null) {
+            if (result.schedulesSkipped !== null || result.signingTurnedOff !== null) {
               // `selectedResources` is one flat list over every preview row, so
               // selecting extensions alone drops every schedule in the archive.
-              // The header is the only place that is stated.
+              // The headers are the only place that, or signing turned off, is stated.
               setSchedulesSkipped(result.schedulesSkipped);
+              setWarnings(result.signingTurnedOff !== null ? [result.signingTurnedOff] : []);
               setStep("outcome");
               return;
             }
@@ -507,6 +522,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
                   </p>
                 </>
               )}
+
+              <ResultWarnings warnings={warnings} />
 
               {schedulesSkipped !== null && (
                 <div
