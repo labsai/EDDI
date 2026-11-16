@@ -507,6 +507,7 @@ owner's (`USER`); absent until the first such message.
 | `viewState` | `UNSEEN`, `SEEN`, … |
 | `filter` | Free-text filter |
 | `mine` | `true`: only the caller's own conversations (default `false`) |
+| `excludeGroupMembers` | `true`: leave out the private conversations a group discussion started for its members — those whose descriptor records `groupConversationId`. Member conversations started before 6.7.0 record none and are still listed (since 6.7.0) |
 
 Results are newest first. A non-admin sees only their own conversations, plus,
 with `agentId`, those of an agent they review; an admin sees everybody's.
@@ -519,6 +520,9 @@ someone else's. The owner is an exact match on the descriptor's `userId`, so a
 conversation from before v5.1.6 that records no owner there is left out. With
 authorization disabled there is no caller to match and every conversation is
 listed.
+
+A member conversation of a group discussion carries `groupConversationId` on
+its descriptor.
 
 | Call | Notes |
 | --- | --- |

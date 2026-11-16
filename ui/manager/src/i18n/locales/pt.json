@@ -561,7 +561,7 @@
         "streaming": "Streaming",
         "rawHtml": "Renderizar HTML nas respostas"
       },
-      "rawHtmlNote": "Desativado por padrão. O widget de chat só aplica esta configuração a partir da versão cujo widget lê os controles de conversa; até lá, ele renderiza HTML para todos os agentes. Ative agora para um agente cujas respostas devam conter HTML.",
+      "rawHtmlNote": "Desativado por padrão: o HTML nas respostas é mostrado como texto. Ative apenas para um agente cujas respostas devam conter HTML.",
       "titles": "Títulos das conversas",
       "titlesEnable": "Deixar um modelo escrever os títulos das conversas",
       "titlesNote": "Caso contrário, a conversa recebe a primeira mensagem como título. O modelo é executado uma vez por conversa, em segundo plano, e cobrado do orçamento de custos. Um título definido pelo usuário nunca é substituído.",
@@ -5661,6 +5661,36 @@
       "teams": "Equipas",
       "previewTitle": "O que os utilizadores finais veem",
       "previewCounts": "{{agents}} agentes listados e {{teams}} equipas listadas são oferecidos às pessoas autorizadas a usá-los."
+    },
+    "sessions": {
+      "title": "Suas conversas",
+      "loading": "Carregando…",
+      "loadError": "Não foi possível carregar suas conversas. Tentar novamente",
+      "empty": "Nenhuma conversa ainda. Comece uma no Início.",
+      "pinned": "Fixadas",
+      "today": "Hoje",
+      "yesterday": "Ontem",
+      "previous7": "Últimos 7 dias",
+      "previous30": "Últimos 30 dias",
+      "rename": "Renomear",
+      "renameLabel": "Título da conversa",
+      "pin": "Fixar",
+      "unpin": "Desafixar",
+      "delete": "Excluir",
+      "deleteTitle": "Excluir esta conversa?",
+      "deleteDescription": "“{{title}}” sai da sua lista. Isso não pode ser desfeito aqui.",
+      "renameFailed": "Não foi possível renomear: {{error}}",
+      "pinFailed": "Não foi possível alterar a fixação: {{error}}",
+      "deleteFailed": "Não foi possível excluir: {{error}}"
+    },
+    "home": {
+      "composerLabel": "Iniciar uma conversa",
+      "placeholder": "Pergunte a {{agent}}…",
+      "messageLabel": "Sua mensagem",
+      "agentLabel": "Agente",
+      "send": "Enviar",
+      "starters": "Sugestões",
+      "recent": "Recentes"
     }
   },
   "operator": {
