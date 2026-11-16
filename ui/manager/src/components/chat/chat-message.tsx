@@ -192,7 +192,9 @@ export const ChatMessage = memo(function ChatMessage({
               ) : message.isStreaming ? (
                 <TypingIndicator />
               ) : message.images?.length ? null : (
-                <p className="text-muted-foreground italic">{t("groups.noResponse", "No response")}</p>
+                <p className="text-muted-foreground italic" data-testid="message-no-response">
+                  {t("groups.noResponse", "No response")}
+                </p>
               )}
               {message.images?.length ? (
                 /* Images the agent designer put in the output (never ones from

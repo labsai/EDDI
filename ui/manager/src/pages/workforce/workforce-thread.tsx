@@ -632,6 +632,7 @@ function ThreadInput({
             "disabled:bg-primary/50 disabled:text-primary-foreground/60",
           )}
           aria-label={t("Workforce.thread.send", "Send")}
+          data-testid="thread-send"
         >
           <SendIcon />
         </Button>
@@ -1395,7 +1396,11 @@ function WorkforceThread() {
                       );
                     }
                     const parsed = parseTranscriptContent(msg.content);
-                    if (!parsed.trim()) return <p className="italic text-muted-foreground">{t("Workforce.thread.noResponse", "No response")}</p>;
+                    if (!parsed.trim()) return (
+                        <p className="italic text-muted-foreground" data-testid="thread-no-response">
+                          {t("Workforce.thread.noResponse", "No response")}
+                        </p>
+                      );
                     return (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
                         <ConversationMarkdown escapeRawHtml>

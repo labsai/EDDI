@@ -67,18 +67,18 @@ describe("WorkforceThread – a pause resolved elsewhere, then a second pause", 
     });
 
     renderPage("/workforce/board1/thread/agent1", <WorkforceThread />, "/workforce/:boardId/thread/:memberId");
-    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByTestId("thread-input")).not.toBeDisabled());
     const user = userEvent.setup();
 
-    await user.type(screen.getByRole("textbox"), "first question");
+    await user.type(screen.getByTestId("thread-input"), "first question");
     await user.keyboard("{Enter}");
     await waitFor(() => expect(screen.getByTestId("thread-pause-banner")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "resolved elsewhere" }));
     await waitFor(() => expect(screen.queryByTestId("thread-pause-banner")).toBeNull());
 
-    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
-    await user.type(screen.getByRole("textbox"), "second question");
+    await waitFor(() => expect(screen.getByTestId("thread-input")).not.toBeDisabled());
+    await user.type(screen.getByTestId("thread-input"), "second question");
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(call).toBe(2));
@@ -96,13 +96,13 @@ describe("WorkforceThread – a pause resolved elsewhere, then a second pause", 
       yield pausedDone("Awaiting approval");
     });
     renderPage("/workforce/board1/thread/agent1", <WorkforceThread />, "/workforce/:boardId/thread/:memberId");
-    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByTestId("thread-input")).not.toBeDisabled());
     const user = userEvent.setup();
-    await user.type(screen.getByRole("textbox"), "one");
+    await user.type(screen.getByTestId("thread-input"), "one");
     await user.keyboard("{Enter}");
     await waitFor(() => expect(screen.getByTestId("thread-pause-banner")).toBeInTheDocument());
     // Sent again while still paused (the composer stays enabled in the thread).
-    await user.type(screen.getByRole("textbox"), "two");
+    await user.type(screen.getByTestId("thread-input"), "two");
     await user.keyboard("{Enter}");
 
     const notice = await screen.findByTestId("chat-notice");

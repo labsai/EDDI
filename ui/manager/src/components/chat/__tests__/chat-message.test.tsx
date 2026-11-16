@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ChatMessage } from "@/components/chat/chat-message";
 import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
@@ -306,8 +306,9 @@ describe("ChatMessage — designer images", () => {
     renderWithProviders(
       <ChatMessage message={{ ...agentNoContent, images: [{ uri: "https://cdn.example/chart.png", alt: "Chart" }] }} />,
     );
-    expect(screen.getByRole("img", { name: "Chart" })).toHaveAttribute("src", "https://cdn.example/chart.png");
-    expect(screen.queryByText("No response")).toBeNull();
+    const images = within(screen.getByTestId("message-images")).getAllByRole("img");
+    expect(images.map((i) => i.getAttribute("src"))).toEqual(["https://cdn.example/chart.png"]);
+    expect(screen.queryByTestId("message-no-response")).toBeNull();
   });
 });
 
@@ -328,7 +329,6 @@ describe("ChatMessage — controller notices", () => {
     // Plain text: the asterisks stay, no <strong>.
     expect(line).toHaveTextContent("**Not** markdown. Your message was not sent.");
     expect(line.querySelector("strong")).toBeNull();
-    expect(screen.queryByRole("button", { name: /copy/i })).toBeNull();
     expect(screen.queryByTestId("copy-message")).toBeNull();
   });
 });

@@ -22,6 +22,12 @@ Phase 3c of the frontend unification plan (`planning/frontend-unification-plan.m
 - **Controller notices are system lines.** A `kind: "notice"` message (the controller's "…was not sent", "Undo is not possible right now") rendered as an agent markdown bubble with a copy button. `ChatMessage` and the member thread render it through the new `ChatNotice` ([`chat-message.tsx`](../../ui/manager/src/components/chat/chat-message.tsx)): a centred, plain-text `role="note"` line, no avatar, no copy, no rating.
 - **Secrets do not outlive the conversation.** `reset()` now drops the raw texts of secret turns, and `forgetSecrets()` does it alone; the Manager's app-wide `chatConversation` kept every secret typed in a session across agent switches and logout. The chat store's `setSelectedAgent`, `clearMessages` and `reset` call it ([`use-chat-forget-secrets.test.ts`](../../ui/manager/src/hooks/__tests__/use-chat-forget-secrets.test.ts)).
 
+### Merged with #1280's final fixes (2026-11-16)
+
+- **`main` merged after #1280 was squash-merged.** Both sides' controller behaviour is kept: #1280's `turnsSent` guard reaches the extracted `readStream` (a late re-read no longer writes undo/redo over a newer turn's), `resume()` aborts the running turn and takes a generation first (read through `currentGeneration`, so a host generation still governs), the local transport's stale-turn checks return the turn result, and the restored-step state comment covers both the ERROR and the resolved-pause case.
+- **The live tool is a `ToolActivity` in the Manager too.** `use-chat.ts`'s `activeTool` and `recordDebugEvent` follow `@eddi/core`'s `ToolActivity`: `tool_call` goes through `parseToolCallEvent` / `toolCallActivity` (the designer's `toolDisplay` label), and `tool_result` settles the newest call. `ThinkingIndicator` keeps #1283's guardrail state with #1280's tool phrasing.
+- **Test ids for the CodeRabbit nitpicks.** `message-no-response` ([`chat-message.tsx`](../../ui/manager/src/components/chat/chat-message.tsx)), `thread-no-response` and `thread-send` ([`workforce-thread.tsx`](../../ui/manager/src/pages/workforce/workforce-thread.tsx)); the image and pause-resolution tests use them instead of copy.
+
 ### Not done
 
 - **The member thread renders no quick replies, requested field or secret input yet.** The controller tracks them for it; rendering them (the Manager's quick-reply buttons and `SecretInputField`) and an MSW reply that offers them are what flip those cells. Its history cell stays `no` (a thread is one pinned conversation).
