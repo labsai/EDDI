@@ -265,15 +265,24 @@ public class SlackPauseNotifier {
         }
     }
 
+    /**
+     * The agent's configuration. An unreadable agent is NOT the same as an agent
+     * without an override: falling back to the deployment default there could post
+     * to an integration the agent's own config never chose, so this throws and the
+     * observer skips the card (the failure is logged there).
+     */
     private AgentConfiguration readAgent(String agentId, Integer agentVersion) {
         if (agentId == null) {
-            return null;
+            throw new IllegalStateException("The pause names no agent, so its Slack notify setting is unknown");
         }
         try {
-            return agentStore.read(agentId, agentVersion);
+            AgentConfiguration agent = agentStore.read(agentId, agentVersion);
+            if (agent == null) {
+                throw new IllegalStateException("Agent " + sanitize(agentId) + " v" + agentVersion + " read as empty");
+            }
+            return agent;
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            LOGGER.debugf("Agent %s v%s not readable for its Slack approval card: %s", sanitize(agentId), agentVersion, e.getMessage());
-            return null;
+            throw new IllegalStateException("Agent " + sanitize(agentId) + " v" + agentVersion + " could not be read: " + e.getMessage(), e);
         }
     }
 
@@ -369,15 +378,20 @@ public class SlackPauseNotifier {
 
     /** The group's current version, as the discussion engine reads it. */
     private AgentGroupConfiguration readCurrentGroup(String groupId) {
+        // As for agents: unreadable is not "no override" (that would mean the
+        // deployment default).
         if (groupId == null) {
-            return null;
+            throw new IllegalStateException("The group conversation names no group, so its Slack notify setting is unknown");
         }
         try {
             IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
-            return current == null ? null : groupStore.read(groupId, current.getVersion());
+            AgentGroupConfiguration group = current == null ? null : groupStore.read(groupId, current.getVersion());
+            if (group == null) {
+                throw new IllegalStateException("Group " + sanitize(groupId) + " read as empty");
+            }
+            return group;
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            LOGGER.debugf("Group %s not readable for its Slack approval card: %s", sanitize(groupId), e.getMessage());
-            return null;
+            throw new IllegalStateException("Group " + sanitize(groupId) + " could not be read: " + e.getMessage(), e);
         }
     }
 

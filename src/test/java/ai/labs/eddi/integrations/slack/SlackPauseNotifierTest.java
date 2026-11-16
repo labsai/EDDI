@@ -277,6 +277,17 @@ class SlackPauseNotifierTest {
         }
 
         @Test
+        @DisplayName("an agent that cannot be read gets no card: unreadable is not 'no override', so the deployment default must not apply")
+        void unreadableAgentSkipsCard() throws Exception {
+            when(agentStore.read("agent-1", 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            notifier(INT).onPauseCommitted(new HitlPauseCommittedEvent(CONV, PAUSE_ID));
+
+            verify(slackApi, never()).postBlocksMessage(anyString(), anyString(), any(), any(), anyString());
+            assertEquals(0, records.size());
+        }
+
+        @Test
         @DisplayName("the deployment default applies when the agent names no integration")
         void deploymentDefault() throws Exception {
             when(agentStore.read("agent-1", 3)).thenReturn(agentNotifying(null));
@@ -462,6 +473,18 @@ class SlackPauseNotifierTest {
         }
 
         @Test
+        @DisplayName("a group that cannot be read gets no card, not the deployment default")
+        void unreadableGroupSkipsCard() throws Exception {
+            groupPaused(PAUSED_AT);
+            when(groupStore.read("group-1", 2)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            notifier(INT).onGroupPauseCommitted(new GroupHitlPauseCommittedEvent(GC, PAUSE_ID));
+
+            verify(slackApi, never()).postBlocksMessage(anyString(), anyString(), any(), any(), anyString());
+            assertEquals(0, records.size());
+        }
+
+        @Test
         @DisplayName("a group without notify uses the deployment default; without one it is off")
         void groupDefault() throws Exception {
             groupPaused(PAUSED_AT);
@@ -630,10 +653,10 @@ class SlackPauseNotifierTest {
             Instant base = Instant.parse("2026-11-15T09:00:00Z");
             for (int i = 0; i < SlackPauseNotifier.SWEEP_BATCH; i++) {
                 records.add(new SlackApprovalRecord(INT, "pending-" + i, PAUSE_ID, "card-" + i, "C_APPROVALS", base.plusSeconds(i),
-                        base.plus(Duration.ofDays(30)), "ts-" + i));
+                        Instant.now().plus(Duration.ofDays(30)), "ts-" + i));
             }
             records.add(new SlackApprovalRecord(INT, "done", PAUSE_ID, "card-done", "C_APPROVALS", base.plusSeconds(1000),
-                    base.plus(Duration.ofDays(30)), "ts-done"));
+                    Instant.now().plus(Duration.ofDays(30)), "ts-done"));
 
             notifier().sweepOnce();
 

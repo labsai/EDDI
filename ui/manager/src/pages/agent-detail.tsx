@@ -361,7 +361,7 @@ export function AgentDetailPage() {
       toast.error(
         t(
           "agentDetail.hitlNotifyFixBeforeSave",
-          "Fix the approval email recipients, or switch email notifications off, before saving.",
+          "Fix the highlighted Human-in-the-Loop settings (approval email recipients, Slack integration name, approval context), or switch them off, before saving.",
         ),
       );
       return false;

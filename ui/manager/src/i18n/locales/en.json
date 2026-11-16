@@ -616,7 +616,7 @@
     "hitlNotifyRecipients": "Recipients (comma or one per line)",
     "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
     "hitlNotifyHint": "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page and cannot approve anything. It carries no user messages or agent replies; for a tool-call pause it lists the pending tools with their arguments redacted and shortened.",
-    "hitlNotifyFixBeforeSave": "Fix the approval email recipients, or switch email notifications off, before saving.",
+    "hitlNotifyFixBeforeSave": "Fix the highlighted Human-in-the-Loop settings (approval email recipients, Slack integration name, approval context), or switch them off, before saving.",
     "hitlNotifyEmpty": "Add at least one address, or switch email notifications off.",
     "hitlNotifyTooMany": "At most {{max}} addresses — use a distribution list for more.",
     "hitlNotifyInvalid": "Entry {{position}} is not a plain address like name@example.com.",
