@@ -10,7 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./groups": "./src/groups.ts",
-    "./tool-events": "./src/tool-events.ts"
+    "./tool-events": "./src/tool-events.ts",
+    "./user-events": "./src/user-events.ts"
   },
   "scripts": {
     "test": "vitest run",

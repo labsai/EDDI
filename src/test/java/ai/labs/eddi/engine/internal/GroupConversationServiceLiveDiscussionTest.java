@@ -15,6 +15,8 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -22,6 +24,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -124,6 +127,41 @@ class GroupConversationServiceLiveDiscussionTest {
         verify(registry).register(gc);
         verify(registry).unregister("gc-2");
         assertTrue(registry.get("gc-2").isEmpty());
+    }
+
+    @Test
+    void executeDiscussion_announcesStartAndEndOnTheUserEventStream() throws Exception {
+        var publisher = mock(UserEventPublisher.class);
+        service.userEventPublisher = publisher;
+        var gc = gc("gc-4");
+        gc.setUserId("owner");
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of());
+
+        service.executeDiscussion(gc, config, List.of(), "Q?", null, 0);
+
+        var events = ArgumentCaptor.forClass(UserEvent.class);
+        verify(publisher, times(2)).publish(events.capture(), any());
+        assertEquals(UserEvent.KIND_TEAM_STARTED, events.getAllValues().get(0).kind());
+        assertEquals(UserEvent.KIND_TEAM_ENDED, events.getAllValues().get(1).kind());
+        assertEquals("COMPLETED", events.getAllValues().get(1).state());
+        assertEquals("gc-4", events.getAllValues().get(1).groupConversationId());
+    }
+
+    @Test
+    void executeDiscussion_resumedLeg_isNoStart_butStillAnnouncesHowItEnded() throws Exception {
+        var publisher = mock(UserEventPublisher.class);
+        service.userEventPublisher = publisher;
+        var gc = gc("gc-5");
+        gc.setUserId("owner");
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of());
+
+        service.executeDiscussion(gc, config, List.of(), "Q?", null, 1);
+
+        var events = ArgumentCaptor.forClass(UserEvent.class);
+        verify(publisher).publish(events.capture(), any());
+        assertEquals(UserEvent.KIND_TEAM_ENDED, events.getValue().kind());
     }
 
     @Test
