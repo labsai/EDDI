@@ -4865,7 +4865,8 @@
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
-    "refreshFailedSaveBlocked": "Could not refresh the quota, so saving is paused. Retry to load the current limits first.",
+    "editsDiscardedAfterRefresh": "The quota was reloaded and your unsaved edits were discarded, so they cannot overwrite the current limits.",
+    "refreshFailedSaveBlocked":"Could not refresh the quota, so saving is paused. Retry to load the current limits first.",
     "configuration": "Configuration",
     "conversationsToday": "Conversations Today",
     "description": "Configure rate limits, usage caps, and cost budgets per tenant.",

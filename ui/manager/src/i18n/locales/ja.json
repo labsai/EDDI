@@ -4824,7 +4824,8 @@
   },
   "quotas": {
     "apiCallsMinute": "API 呼び出し / 分",
-    "refreshFailedSaveBlocked": "クォータを更新できなかったため、保存を一時停止しています。再試行して、まず現在の上限を読み込んでください。",
+    "editsDiscardedAfterRefresh": "クォータを再読み込みし、現在の上限を上書きしないよう未保存の編集を破棄しました。",
+    "refreshFailedSaveBlocked":"クォータを更新できなかったため、保存を一時停止しています。再試行して、まず現在の上限を読み込んでください。",
     "configuration": "設定",
     "conversationsToday": "本日の会話数",
     "description": "テナントごとにレート制限、使用上限、コスト予算を設定します。",

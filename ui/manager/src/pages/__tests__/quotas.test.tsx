@@ -17,6 +17,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
   },
 }));
 
@@ -491,7 +492,7 @@ describe("QuotasPage", () => {
     }
   });
 
-  it("blocks Save when the refresh after an approval fails, until a refetch succeeds", async () => {
+  it("blocks Save when the refresh after an approval fails, until the refetch reloads the form", async () => {
     seedSpendControlMock([{ ...sampleSpendControlChange, id: "q-2", kind: "TENANT_QUOTA", tenantId: "default" }]);
     let putCalled = false;
     try {
@@ -521,7 +522,13 @@ describe("QuotasPage", () => {
       server.resetHandlers();
       fireEvent.click(within(screen.getByTestId("refetch-error-notice")).getByRole("button"));
       await waitFor(() => expect(screen.queryByTestId("refetch-error-notice")).not.toBeInTheDocument());
-      await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeEnabled());
+      // The form is re-initialised from the fresh quota: the stale edit is gone and
+      // there is nothing left to save over the approved limits.
+      await waitFor(() => expect(screen.getByTestId("quota-max-conversations")).not.toHaveValue(123));
+      await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeDisabled());
+      expect(screen.queryByTestId("quotas-dirty-indicator")).not.toBeInTheDocument();
+      expect(toast.info).toHaveBeenCalled();
+      expect(putCalled).toBe(false);
     } finally {
       seedSpendControlMock();
     }

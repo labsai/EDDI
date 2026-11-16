@@ -4875,7 +4875,8 @@
   },
   "quotas": {
     "apiCallsMinute": "Appels API / minute",
-    "refreshFailedSaveBlocked": "Impossible d'actualiser le quota, l'enregistrement est donc suspendu. Réessayez pour charger d'abord les limites actuelles.",
+    "editsDiscardedAfterRefresh": "Le quota a été rechargé et vos modifications non enregistrées ont été annulées, afin qu'elles n'écrasent pas les limites actuelles.",
+    "refreshFailedSaveBlocked":"Impossible d'actualiser le quota, l'enregistrement est donc suspendu. Réessayez pour charger d'abord les limites actuelles.",
     "configuration": "Configuration",
     "conversationsToday": "Conversations aujourd'hui",
     "description": "Configurez les limites de débit, les plafonds d'usage et les budgets de coût par locataire.",
