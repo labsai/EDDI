@@ -279,6 +279,18 @@ class WebSearchToolProviderTest {
         }
 
         @Test
+        void keyWithInvisibleCharacterIsRefusedWithoutEchoingItAndNeverSent() throws Exception {
+            String key = "secret-brave-key​";
+            brave(key);
+
+            String result = textOf(() -> tool.searchWeb("q", 5));
+
+            assertTrue(result.contains("not allowed in an HTTP header"), result);
+            assertFalse(result.contains("secret-brave-key"), result);
+            verify(client, never()).send(any(OutboundRequest.class), any());
+        }
+
+        @Test
         void plainTextDecodesEntitiesOnce() {
             assertEquals("a & <b> \"c\" 'd' &lt;", WebSearchTool.plainText("<em>a</em> &amp; &lt;b&gt; &quot;c&quot; &#x27;d&#39; &amp;lt;"));
         }

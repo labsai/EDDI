@@ -266,6 +266,16 @@ public class WebSearchTool {
                 throw new IOException("eddi.tools.websearch.brave.api-key names a vault secret that could not be resolved");
             }
         }
+        key = key.strip();
+        // The key goes into a header, and the JDK's refusal of an invalid header value
+        // quotes that value. Check it here so the message never carries the credential.
+        for (int i = 0; i < key.length(); i++) {
+            char c = key.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                throw new IOException("eddi.tools.websearch.brave.api-key contains a character that is not allowed in an HTTP header "
+                        + "(only visible ASCII is accepted); re-enter the key without surrounding whitespace or invisible characters");
+            }
+        }
         return key;
     }
 
