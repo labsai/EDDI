@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────
-   EDDI Chat — conversation snapshot → transcript
+   @eddi/core — conversation snapshot → transcript
 
    The wire shape here is NOT `{input, output}` per step. That shape was
    invented by this client and the backend cannot produce it. What GET
@@ -12,8 +12,23 @@
    "quickReplies*", "actions*" (ConversationMemoryUtilities:186-207).
    ────────────────────────────────────────────── */
 
-import { extractOutputImages, extractOutputTexts } from "./sse-events";
-import type { ChatMessage, ConversationOutput, ConversationStep } from "@/types";
+import { extractOutputImages, extractOutputTexts } from "./stream-events";
+import type { ConversationOutput, ConversationStep } from "./types";
+
+/**
+ * A message rebuilt from a snapshot. A client whose message type has these
+ * fields (and only optional others) stores them directly.
+ */
+export interface SnapshotMessage {
+  id: string;
+  role: "user" | "agent";
+  content: string;
+  timestamp: number;
+  /** `image` output items, rendered by the client rather than as markdown. */
+  images?: { uri: string; alt?: string }[];
+  /** The server step this message belongs to (see `stepsToMessages`). */
+  stepIndex?: number;
+}
 
 const INPUT_INITIAL = "input:initial";
 const OUTPUT_PREFIX = "output";
@@ -31,8 +46,8 @@ export const SECRET_MASK = "●●●●●●●●";
  * remounting them, replaying their entrance animation and re-parsing their
  * markdown.
  */
-function makeMessage(id: string, role: "user" | "agent", content: string, stepIndex?: number): ChatMessage {
-  const message: ChatMessage = { id: `snap-${id}-${role}`, role, content, timestamp: Date.now() };
+function makeMessage(id: string, role: "user" | "agent", content: string, stepIndex?: number): SnapshotMessage {
+  const message: SnapshotMessage = { id: `snap-${id}-${role}`, role, content, timestamp: Date.now() };
   if (stepIndex !== undefined) message.stepIndex = stepIndex;
   return message;
 }
@@ -71,10 +86,10 @@ export function stepsToMessages(
   secretTexts: ReadonlySet<string> = new Set(),
   outputs?: ConversationOutput[] | null,
   fullHistory = false,
-): ChatMessage[] {
+): SnapshotMessage[] {
   if (!Array.isArray(steps)) return [];
 
-  const messages: ChatMessage[] = [];
+  const messages: SnapshotMessage[] = [];
   steps.forEach((step, index) => {
     const data = step?.conversationStep;
     if (!Array.isArray(data)) return;

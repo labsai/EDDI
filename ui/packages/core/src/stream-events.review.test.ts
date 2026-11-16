@@ -12,10 +12,10 @@ import {
   extractOutputImages,
   extractOutputTexts,
   isSafeUri,
-} from "./sse-events";
+} from "./stream-events";
 
-// Vitest runs from ui/chat (where its config lives); the Java is two levels up.
-const JAVA_ROOT = resolve(process.cwd(), "../../src/main/java/ai/labs/eddi/engine");
+// Vitest runs from ui/packages/core (where its config lives); the Java is three levels up.
+const JAVA_ROOT = resolve(process.cwd(), "../../../src/main/java/ai/labs/eddi/engine");
 const STREAMING_JAVA = resolve(JAVA_ROOT, "internal/RestAgentEngineStreaming.java");
 const INPUT_TOO_LARGE_JAVA = resolve(JAVA_ROOT, "exception/InputTooLargeExceptionMapper.java");
 
