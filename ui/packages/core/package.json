@@ -19,11 +19,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
-    "eslint": "^10.14.0",
-    "globals": "^17.13.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
     "jsdom": "~30.1.2",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.72.1",
+    "typescript-eslint": "^8.72.2",
     "vitest": "^5.0.5"
   }
 }
