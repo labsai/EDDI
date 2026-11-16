@@ -16,6 +16,22 @@ export const MOCK_CATALOG_AGENTS = [
     reviewNotice: null,
     rating: null,
     callerLevel: "USE",
+    // B4, as `IRestAgentProfile.AppearanceProfile` serves it.
+    appearance: {
+      displayName: "Ada from Support",
+      avatar: null,
+      accentColor: "#0a7d55",
+      starters: ["Where is my order?", "I want to return an item"],
+    },
+    conversationControls: {
+      undo: true,
+      redo: true,
+      attachments: true,
+      rating: true,
+      quickReplies: true,
+      streaming: true,
+      rawHtml: false,
+    },
   },
   {
     agentId: "aaaaaaaaaaaaaaaaaaaaaa02",
@@ -24,6 +40,17 @@ export const MOCK_CATALOG_AGENTS = [
     reviewNotice: null,
     rating: null,
     callerLevel: "USE",
+    // No appearance set: the backend sends null and the default controls.
+    appearance: null,
+    conversationControls: {
+      undo: true,
+      redo: true,
+      attachments: true,
+      rating: true,
+      quickReplies: true,
+      streaming: true,
+      rawHtml: false,
+    },
   },
 ] as const;
 

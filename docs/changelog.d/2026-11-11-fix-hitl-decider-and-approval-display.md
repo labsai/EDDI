@@ -81,7 +81,7 @@ replay and self-continuation.
   (switched off, or no record of the owner) the owner's own access is still checked without teams; a
   denial stops the chain unless the agent is shared with a team (`ResourceAccessGuard.someTeamMayUse`).
 - The Platform Operator prompt separates `argsTruncated` (never executed) from the Slack/email cards'
-  300-character display limit (their Approve runs the whole call); operator revision 77.
+  300-character display limit (their Approve runs the whole call); operator revision 78.
 - The Slack/email approval card says when a call's arguments are longer than the card shows and points
   to the full view (Manager approval inbox, `approval-status`).
 - Manager: `ToolApprovalsConfig` gains the three fields (the editor already preserves them — it commits

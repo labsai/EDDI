@@ -75,10 +75,10 @@ describe("raw-HTML parser is loaded only for HTML", () => {
     expect(looksLikeHtml(text)).toBe(true);
   });
 
-  it("renders a reply's HTML exactly as before once the parser is in", async () => {
+  it("renders a reply's HTML exactly as before once the parser is in, for an agent with rawHtml", async () => {
     const text = "Hello <b data-x=1>world</b> <script>alert(1)</script>";
     const { container } = render(
-      <MessageBubble message={{ id: "m1", role: "agent", content: text, timestamp: 0 }} />,
+      <MessageBubble message={{ id: "m1", role: "agent", content: text, timestamp: 0 }} enableRawHtml />,
     );
     const bold = await screen.findByText("world", { selector: "b" });
     // Sanitised as always: the script and the unknown attribute are gone.
@@ -91,6 +91,16 @@ describe("raw-HTML parser is loaded only for HTML", () => {
       </ReactMarkdown>,
     );
     expect(body).toBe(expected);
+  });
+
+  it("shows a reply's HTML as text by default (rawHtml off, D9)", () => {
+    const text = "Hello <b>world</b> <script>alert(1)</script>";
+    const { container } = render(<MessageBubble message={{ id: "m2", role: "agent", content: text, timestamp: 0 }} />);
+    const body = container.querySelector(".markdown-body")!;
+    expect(body.querySelector("b")).toBeNull();
+    expect(body.querySelector("script")).toBeNull();
+    expect(body.textContent).toContain("<b>world</b>");
+    expect(body.textContent).toContain("<script>alert(1)</script>");
   });
 });
 

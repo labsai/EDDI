@@ -1,7 +1,10 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { markAgentUsed } from "@/hooks/use-recent-agents";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { readInitialChatMessage } from "@/lib/workforce-chat-start";
+import { workforceKeys } from "@/lib/query-keys";
 import { useTranslation } from "react-i18next";
 import {
   ChevronLeft,
@@ -40,6 +43,25 @@ export function WorkforceChat() {
     if (urlAgentId && urlAgentId !== selectedAgentId) return;
     markAgentUsed(selectedAgentId);
   }, [selectedAgentId, urlAgentId]);
+
+  // A first message from Home travels in router state. It is dropped from the
+  // history entry as soon as the chat takes it, so a reload cannot send it again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialMessage = useMemo(() => readInitialChatMessage(location.state), [location.state]);
+  const conversationId = useChatStore((s) => s.conversationId);
+  const dropInitialMessage = useCallback(() => {
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+  }, [navigate, location.pathname, location.search]);
+
+  // The sidebar lists this conversation with the title its first turn gives
+  // it: re-read the list when a conversation opens and after each turn.
+  const queryClient = useQueryClient();
+  const isProcessing = useChatStore((s) => s.isProcessing);
+  useEffect(() => {
+    if (!conversationId || isProcessing) return;
+    void queryClient.invalidateQueries({ queryKey: workforceKeys.chats });
+  }, [conversationId, isProcessing, queryClient]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -94,7 +116,11 @@ export function WorkforceChat() {
             line sizes this column to its content and pushes the details panel
             out of the window. */}
         <div className="flex-1 min-w-0 min-h-0">
-          <ChatPanel />
+          <ChatPanel
+            urlSync
+            initialMessage={initialMessage}
+            onInitialMessageConsumed={dropInitialMessage}
+          />
         </div>
 
         {/* Right details panel */}

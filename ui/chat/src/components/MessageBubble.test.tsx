@@ -16,10 +16,10 @@ describe("looksLikeMath", () => {
 import { ChatProvider } from "@/store/chat-store";
 import type { ChatMessage } from "@/types";
 
-function renderBubble(message: ChatMessage) {
+function renderBubble(message: ChatMessage, props: { enableRawHtml?: boolean } = {}) {
   return render(
     <ChatProvider>
-      <MessageBubble message={message} />
+      <MessageBubble message={message} {...props} />
     </ChatProvider>,
   );
 }
@@ -189,15 +189,31 @@ describe("MessageBubble", () => {
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
   });
 
-  it("renders a raw <img> tag as a link, not a live <img>", () => {
+  it("renders a raw <img> tag as a link, not a live <img>, for an agent that enables raw HTML", async () => {
+    const { container } = renderBubble(
+      {
+        id: "19",
+        role: "agent",
+        content: '<img src="https://attacker.example/beacon.gif" alt="b">',
+        timestamp: 0,
+      },
+      { enableRawHtml: true },
+    );
+    expect(container.querySelector("img")).toBeNull();
+    const link = await screen.findByRole("link", { name: "b" });
+    expect(link).toHaveAttribute("href", "https://attacker.example/beacon.gif");
+  });
+
+  it("shows raw HTML as text by default (conversationControls.rawHtml off, D9)", () => {
     const { container } = renderBubble({
-      id: "19",
+      id: "20",
       role: "agent",
-      content: '<img src="https://attacker.example/beacon.gif" alt="b">',
+      content: 'Plain <b>bold</b> <img src="https://attacker.example/beacon.gif" alt="b">',
       timestamp: 0,
     });
     expect(container.querySelector("img")).toBeNull();
-    const link = screen.getByRole("link", { name: "b" });
-    expect(link).toHaveAttribute("href", "https://attacker.example/beacon.gif");
+    expect(container.querySelector(".markdown-body b")).toBeNull();
+    expect(container.querySelector(".markdown-body")?.textContent).toContain("<b>bold</b>");
+    expect(screen.queryByRole("link", { name: "b" })).toBeNull();
   });
 });
