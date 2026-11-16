@@ -188,6 +188,9 @@ without being re-created.
 - **Gmail:** IMAP with XOAUTH2 needs a per-user grant. A polling job has no conversation and so no `VERIFIED`
   principal, so it depends on the RAG plan's run-as-principal mechanism for scheduled sources. Gmail therefore
   ships after that exists (Phase 6), never through domain-wide delegation.
+  *Amended 2026-11-16 by [`email-channel-v2-plan.md`](email-channel-v2-plan.md) §2.2: Workspace mailboxes use a
+  mailbox-scoped grant (`Binding.MAILBOX`) for dedicated mailboxes instead of run-as-principal; still no
+  domain-wide delegation.*
 - **Inbound:** poll one configured folder (default `INBOX`, which is after the server's own spam filtering) on a
   schedule tagged like `RagIngestionSchedules` (default every 60 s). The cursor is `UIDVALIDITY` + last processed
   UID per folder. A changed `UIDVALIDITY` triggers a rescan, deduplicated by the ledger. After the ledger records
@@ -270,6 +273,9 @@ Size: **M**, mostly the test corpus (§21).
   `Reply-To` address (none or several → the authenticated `From`); the address is still checked against the
   suppression list, never widened to `Cc`, and saving the integration with the flag raises a warning, because a
   sender who passes DMARC chooses that recipient.
+  *Amended 2026-11-16 by [`email-channel-v2-plan.md`](email-channel-v2-plan.md) §2.2 and §9: with
+  `replyAudience: thread` a reply may also Cc the answered mail's To/Cc recipients that match an explicit internal
+  allowlist; the model still chooses no recipient.*
 
 ---
 
@@ -536,7 +542,7 @@ the Manager, and that answer goes out through the same ledger from the integrati
 | **3 — Conversation mode** | SMTP replies through the ledger, threading + hijack guard, `replyTemplate` / `aiDisclosure`, reply-recipient rules, per-thread reply budget, bounce handling → suppression, HITL in-thread notice + continuation, takeover replies, group targets | **L** | 2 |
 | **4 — Graph transport** | Delta polling, `/$value`, `/reply`, RBAC-for-Applications setup guide. Build together with the RAG M365 transport, and only if customers refuse IMAP | **M** | 2 |
 | **5 — Relay webhooks** | Push endpoint `POST /integrations/email/{id}` (permit path, size cap, signature first), Mailgun (single-use token) and SES (SNS signature, pinned cert URL, S3 for large mail) | **M** | 2 |
-| **6 — Gmail** | XOAUTH2 IMAP or Gmail API, on the RAG plan's run-as-principal and shared-mailbox safeguards | **M** | 2 + RAG run-as-principal |
+| **6 — Gmail** | XOAUTH2 IMAP or Gmail API, on the RAG plan's run-as-principal and shared-mailbox safeguards. *Superseded by [`email-channel-v2-plan.md`](email-channel-v2-plan.md) Phase 4 (mailbox-scoped grant)* | **M** | 2 + RAG run-as-principal |
 | **7 — Extras, on demand** | HTML replies (S) · IMAP IDLE (S) · ARC (M) · an allowlisted, approval-gated `sendEmail` tool (M) | — | 3 |
 
 Phases 0–2 are the first useful release. Phase 1 can ship before Phase 2 on its own.
