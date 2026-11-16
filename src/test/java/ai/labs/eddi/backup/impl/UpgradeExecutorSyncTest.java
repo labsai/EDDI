@@ -47,6 +47,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -315,6 +316,53 @@ class UpgradeExecutorSyncTest {
         verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
         assertEquals("promoted from staging", agent.getValue().getDescription());
         assertEquals("did:target", agent.getValue().getIdentity().getAgentDid());
+    }
+
+    /**
+     * The identity stays the target's, so the source's "sign" could only be
+     * honoured with the target's own key. Carried onto a target that cannot sign,
+     * the agent save was refused with 400 — and with it every workflow change the
+     * run wrote.
+     */
+    @Test
+    @DisplayName("the source's signing flag is turned off, with a warning, when the target cannot sign")
+    void signingFlagIsTurnedOffWhereTheTargetCannotSign() throws Exception {
+        when(agentStore.signingKeyProblem(AGENT)).thenReturn("signInterAgentMessages needs a signing key, and this agent declares none.");
+        UpgradeResult result = syncAgentThatSigns();
+
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertFalse(agent.getValue().getSecurity().isSignInterAgentMessages());
+        assertEquals("promoted from staging", agent.getValue().getDescription(), "the rest of the settings still travel");
+        assertEquals(1, result.warnings().size(), result.warnings().toString());
+        assertTrue(result.warnings().get(0).contains("signInterAgentMessages was turned off: signInterAgentMessages needs a signing key"),
+                result.warnings().get(0));
+        assertFalse(result.hasFailures());
+    }
+
+    @Test
+    @DisplayName("the source's signing flag travels when the target can sign")
+    void signingFlagTravelsWhereTheTargetCanSign() throws Exception {
+        when(agentStore.signingKeyProblem(AGENT)).thenReturn(null);
+        UpgradeResult result = syncAgentThatSigns();
+
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertTrue(agent.getValue().getSecurity().isSignInterAgentMessages());
+        assertTrue(result.warnings().isEmpty(), result.warnings().toString());
+    }
+
+    private UpgradeResult syncAgentThatSigns() throws Exception {
+        var adopted = new AgentConfiguration();
+        adopted.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        adopted.setDescription("promoted from staging");
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        adopted.setSecurity(security);
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
+        givenPreview(agentRow(DiffAction.UPDATE, mapper.writeValueAsString(adopted)),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0));
+        return inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
     }
 
     @Test
