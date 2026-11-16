@@ -149,7 +149,11 @@ public class ErasedSubjects {
         return ledger.pseudonymOf(userId);
     }
 
-    static boolean isPersonalIdentity(String identity) {
+    /**
+     * Whether {@code identity} can name a person: not null, blank, {@code unknown},
+     * {@code anonymous}, {@code system:*} or a pseudonym.
+     */
+    public static boolean isPersonalIdentity(String identity) {
         return identity != null && !identity.isBlank() && !"unknown".equals(identity) && !"anonymous".equals(identity)
                 && !identity.startsWith("system:") && !identity.startsWith(AuditHmac.GDPR_PSEUDONYM_PREFIX);
     }

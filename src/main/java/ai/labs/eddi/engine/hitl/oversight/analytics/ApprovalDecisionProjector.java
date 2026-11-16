@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -28,27 +29,29 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * and position, so the event and a later rebuild from the ledger store it once.
  * A failed write is logged and counted; a rebuild repairs it.
  * <p>
- * <b>Erased identities.</b> Before a row is stored, each identity it carries —
- * the conversation owner ({@code userId}) and the decider ({@code decidedBy}) —
- * is checked against {@link ErasedSubjects}. For a decision made no later than
- * that person's erasure the row gets what erasure leaves in a stored row
+ * <b>Erased identities.</b> A row carries two identities, the conversation
+ * owner ({@code userId}) and the decider ({@code decidedBy}). A ledger entry
+ * names a decider that erasure does not rewrite, so for a decision made no
+ * later than that person's erasure ({@link ErasedSubjects}) the row must hold
+ * what erasure leaves in a stored row
  * ({@link IApprovalDecisionStore#eraseUser}): no {@code userId}, the ledger's
- * pseudonym as decider. Without this a rebuild re-inserted, from ledger entries
- * erasure does not rewrite, rows naming a decider who had been erased. When the
- * record cannot be read the unit is not stored (counted as a failed projection)
- * rather than stored with an identity that may be erased.
+ * pseudonym as decider.
  * <p>
- * <b>After the insert.</b> A row that kept an identity is stored <em>pending
- * check</em> and checked again, with a fresh read, after the insert: the store
- * then gets what the second check says
- * ({@link IApprovalDecisionStore#markChecked}, this row only, compare-and-set
- * so an erasure's own pass is never overwritten). Erasure records the person
- * before it pseudonymises the stored rows, so a row inserted in that window is
- * reached by one side or the other (see {@link ErasedSubjects}). If the second
- * check or the confirmation fails, the row is deleted so the next rebuild
- * projects it again; if even that fails, or the process dies after the insert,
- * the row stays pending and {@link #reconcilePending} (hourly maintenance)
- * checks it.
+ * <b>The stored state is always the safe one.</b> A row with an identity is
+ * inserted <em>masked</em> (no {@code userId}, decider pseudonymised) and
+ * <em>pending</em>, which hides it from every read. Then it is settled
+ * ({@link #settle}): a fresh check says which identities may be kept; they are
+ * written back with a compare-and-set on this row only, still pending; a second
+ * fresh check confirms them, or reverts the row (again by compare-and-set) when
+ * an erasure was recorded in between; only then is the pending mark cleared.
+ * Erasure records the person before it pseudonymises the stored rows, so a raw
+ * identity written back before the record is reached by erasure's own pass, and
+ * one written back after it is seen by the confirming check.
+ * <p>
+ * A failure or a crash at any step leaves the row pending, hidden from reads,
+ * and in the masked state unless it failed between writing an identity back and
+ * confirming it. {@link ApprovalBackfillService#reconcilePending} settles
+ * pending rows again from the ledger, hourly and after every rebuild.
  *
  * @since 6.7.0
  */
@@ -88,30 +91,45 @@ public class ApprovalDecisionProjector {
      * @param evaluate
      *            whether newly stored rejections are handed to earned autonomy
      *            (false for a rebuild of history)
-     * @return how many rows were new
+     * @return how many rows were new (a row left pending counts: it is stored)
      */
     public int project(List<HitlDecisionUnit> units, boolean evaluate) {
         if (units == null || units.isEmpty()) {
             return 0;
         }
-        List<ApprovalDecision> inserted = new ArrayList<>();
+        int stored = 0;
+        List<ApprovalDecision> settled = new ArrayList<>();
         for (int i = 0; i < units.size(); i++) {
             HitlDecisionUnit unit = units.get(i);
             if (unit == null || unit.decisionId() == null || unit.decisionOutcome() == null) {
                 continue;
             }
             try {
-                ApprovalDecision row = withoutErasedIdentities(ApprovalDecision.of(unit, i));
-                if (store.insertIfAbsent(row)) {
-                    ApprovalDecision stored = row;
-                    try {
-                        row = confirm(row);
-                    } catch (RuntimeException e) {
-                        withdraw(stored, e);
+                ApprovalDecision row = ApprovalDecision.of(unit, i);
+                if (erasedSubjects == null || masked(row).equals(row)) {
+                    if (!store.insertIfAbsent(row)) {
                         continue;
                     }
-                    inserted.add(row);
+                    stored++;
+                    settled.add(row);
                     metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
+                    continue;
+                }
+                ApprovalDecision safe = masked(row);
+                if (!store.insertPendingIfAbsent(safe)) {
+                    continue;
+                }
+                stored++;
+                metrics.decisionProjected(row.surface(), row.pauseType(), row.latencyMs());
+                try {
+                    ApprovalDecision now = settle(row, safe);
+                    if (now != null) {
+                        settled.add(now);
+                    }
+                } catch (RuntimeException e) {
+                    metrics.projectionFailed();
+                    LOGGER.warnf("Approval decision %s#%d is stored but not yet checked against the erased-subject record; it stays "
+                            + "hidden until maintenance settles it: %s", sanitize(unit.decisionId()), i, e.getMessage());
                 }
             } catch (RuntimeException e) {
                 metrics.projectionFailed();
@@ -119,14 +137,78 @@ public class ApprovalDecisionProjector {
                         i, e.getMessage());
             }
         }
-        if (evaluate && !inserted.isEmpty() && autonomy != null && autonomy.isResolvable()) {
+        if (evaluate && !settled.isEmpty() && autonomy != null && autonomy.isResolvable()) {
             try {
-                autonomy.get().onDecisions(inserted);
+                autonomy.get().onDecisions(settled);
             } catch (RuntimeException e) {
                 LOGGER.warnf("Earned autonomy could not evaluate decision %s: %s", sanitize(units.getFirst().decisionId()), e.getMessage());
             }
         }
-        return inserted.size();
+        return stored;
+    }
+
+    /**
+     * Settles a pending row: decides from fresh reads of the erased-subject record
+     * which identities of {@code raw} it may hold, writes them back and confirms
+     * them, each step a compare-and-set on this row alone.
+     *
+     * @param raw
+     *            the row as the ledger has it
+     * @param current
+     *            the row as it is stored now (its identities are what the first
+     *            compare-and-set expects)
+     * @return the row as finally stored, or null when another writer changed it
+     *         first (it stays pending and is settled again later)
+     * @throws RuntimeException
+     *             the record or the store could not be read or written; the row
+     *             stays pending
+     */
+    ApprovalDecision settle(ApprovalDecision raw, ApprovalDecision current) {
+        ApprovalDecision allowed = withoutErasedIdentities(raw);
+        if (!sameIdentities(allowed, current)) {
+            if (!store.updateIdentities(current.id(), current.userId(), current.decidedBy(), allowed.userId(), allowed.decidedBy(), true)) {
+                return null;
+            }
+        }
+        // Confirm with a second fresh read: an erasure recorded since the first one
+        // reverts what was written back.
+        ApprovalDecision confirmed = withoutErasedIdentities(raw);
+        if (!store.updateIdentities(current.id(), allowed.userId(), allowed.decidedBy(), confirmed.userId(), confirmed.decidedBy(), false)) {
+            return null;
+        }
+        return confirmed;
+    }
+
+    /**
+     * Settles a pending row whose ledger entry is gone or no longer names anyone
+     * (redacted): it keeps the masked identities, and the pending mark is cleared.
+     *
+     * @return whether the row was settled
+     */
+    boolean settleMasked(ApprovalDecision current) {
+        ApprovalDecision safe = masked(current);
+        return store.updateIdentities(current.id(), current.userId(), current.decidedBy(), safe.userId(), safe.decidedBy(), false);
+    }
+
+    /** Up to {@code limit} rows still pending. */
+    List<ApprovalDecision> pendingRows(int limit) {
+        return store.pendingCheck(limit);
+    }
+
+    /**
+     * The row with every personal identity replaced as erasure would replace it: no
+     * {@code userId}, the ledger's pseudonym as decider. Identities that are not a
+     * person ({@code system:*}, {@code unknown}, existing pseudonyms) stay.
+     */
+    ApprovalDecision masked(ApprovalDecision row) {
+        if (erasedSubjects == null) {
+            return row;
+        }
+        String userId = ErasedSubjects.isPersonalIdentity(row.userId()) ? null : row.userId();
+        String decidedBy = ErasedSubjects.isPersonalIdentity(row.decidedBy()) ? erasedSubjects.pseudonymOf(row.decidedBy()) : row.decidedBy();
+        return Objects.equals(userId, row.userId()) && Objects.equals(decidedBy, row.decidedBy())
+                ? row
+                : row.withPersonalFields(userId, decidedBy);
     }
 
     /**
@@ -152,66 +234,7 @@ public class ApprovalDecisionProjector {
         return changed ? row.withPersonalFields(userId, decidedBy) : row;
     }
 
-    /**
-     * The second check of an inserted row: what the erased-subject record says now
-     * is written to this row only, and its pending mark is cleared. A row without
-     * an identity is not pending.
-     *
-     * @return the row as now stored
-     * @throws RuntimeException
-     *             the record could not be read or the row not confirmed
-     */
-    private ApprovalDecision confirm(ApprovalDecision row) {
-        if (erasedSubjects == null || row.userId() == null && row.decidedBy() == null) {
-            return row;
-        }
-        ApprovalDecision now = withoutErasedIdentities(row);
-        // False when the row changed under us: an erasure's own pass pseudonymised it.
-        // That is already what must be stored; it stays pending and the next
-        // reconciliation confirms what is there now.
-        store.markChecked(row.id(), row.userId(), row.decidedBy(), now.userId(), now.decidedBy());
-        return now;
-    }
-
-    /**
-     * Takes back a row whose second check failed, so the next rebuild projects it
-     * again through the check. If that fails too, the row stays pending for
-     * {@link #reconcilePending}.
-     */
-    private void withdraw(ApprovalDecision row, RuntimeException cause) {
-        metrics.projectionFailed();
-        try {
-            store.deleteById(row.id());
-            LOGGER.warnf("Approval decision %s could not be checked against the erased-subject record after it was stored, so it was "
-                    + "removed again (a rebuild repairs it): %s", sanitize(row.id()), cause.getMessage());
-        } catch (RuntimeException e) {
-            LOGGER.errorf("Approval decision %s could not be checked after it was stored, nor removed; it stays pending and the next "
-                    + "maintenance run checks it: %s / %s", sanitize(row.id()), cause.getMessage(), e.getMessage());
-        }
-    }
-
-    /**
-     * Checks rows left pending (a projection that failed or was interrupted after
-     * its insert) against the erased-subject record, at most {@code limit} per
-     * call. Idempotent; a row that cannot be checked now stays pending.
-     *
-     * @return how many rows were confirmed
-     */
-    public int reconcilePending(int limit) {
-        if (erasedSubjects == null) {
-            return 0;
-        }
-        int confirmed = 0;
-        for (ApprovalDecision row : store.pendingCheck(limit)) {
-            try {
-                ApprovalDecision now = withoutErasedIdentities(row);
-                if (store.markChecked(row.id(), row.userId(), row.decidedBy(), now.userId(), now.decidedBy())) {
-                    confirmed++;
-                }
-            } catch (RuntimeException e) {
-                LOGGER.warnf("Pending approval decision %s could not be checked yet: %s", sanitize(row.id()), e.getMessage());
-            }
-        }
-        return confirmed;
+    private static boolean sameIdentities(ApprovalDecision a, ApprovalDecision b) {
+        return Objects.equals(a.userId(), b.userId()) && Objects.equals(a.decidedBy(), b.decidedBy());
     }
 }

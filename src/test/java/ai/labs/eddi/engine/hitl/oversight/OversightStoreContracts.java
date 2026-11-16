@@ -4,19 +4,35 @@
  */
 package ai.labs.eddi.engine.hitl.oversight;
 
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.IAuditStore;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.ErasedSubjects;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
+import ai.labs.eddi.engine.gdpr.IErasedSubjectStore;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalBackfillService;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecision;
+import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecisionProjector;
 import ai.labs.eddi.engine.hitl.oversight.analytics.DecisionFilter;
 import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyService;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyState;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.AutonomyState.Suspension;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
 import ai.labs.eddi.engine.hitl.oversight.samples.AuditSample;
 import ai.labs.eddi.engine.hitl.oversight.samples.IAuditSampleStore;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampleFilter;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static ai.labs.eddi.engine.hitl.oversight.OversightFixtures.AGENT;
@@ -28,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * The contracts of the three oversight stores, run against a real database by
@@ -95,54 +116,130 @@ public final class OversightStoreContracts {
         }
 
         @Test
-        default void aRowWithAnIdentityIsPendingUntilChecked_andOnlyThatRowIsChanged() {
+        default void aPendingRowIsHiddenFromEveryReadUntilSettled() {
+            ApprovalDecision masked = decision("APPROVED", NOW).withPersonalFields(null, "gdpr:alice");
+            DecisionFilter all = new DecisionFilter(null, null, null, null, null, null, null, null, null);
+            assertTrue(decisions().insertPendingIfAbsent(masked));
+            assertFalse(decisions().insertPendingIfAbsent(masked));
+            assertFalse(decisions().insertIfAbsent(masked), "one id, one row, pending or not");
+
+            assertTrue(decisions().query(all, 0, 10).isEmpty(), "analytics never read a pending row");
+            assertEquals(0, decisions().count(all));
+            assertTrue(decisions().readByUser("gdpr:alice", 10).isEmpty(), "nor does the export");
+            assertEquals(List.of(masked), decisions().pendingCheck(10));
+
+            // Write the confirmed identity back, still pending: still hidden.
+            assertTrue(decisions().updateIdentities(masked.id(), null, "gdpr:alice", "user-1", "alice", true));
+            assertTrue(decisions().query(all, 0, 10).isEmpty());
+            assertTrue(decisions().readByUser("alice", 10).isEmpty());
+
+            assertTrue(decisions().updateIdentities(masked.id(), "user-1", "alice", "user-1", "alice", false));
+            assertEquals(List.of(decision("APPROVED", NOW)), decisions().query(all, 0, 10));
+            assertEquals(1, decisions().readByUser("alice", 10).size());
+            assertTrue(decisions().pendingCheck(10).isEmpty());
+        }
+
+        @Test
+        default void updateIdentitiesIsCompareAndSet_andTouchesOnlyItsRow() {
             ApprovalDecision first = decision("APPROVED", NOW.minusSeconds(60));
             ApprovalDecision second = decision("REJECTED", NOW);
-            ApprovalDecision anonymous = decision("APPROVED", NOW.minusSeconds(120)).withPersonalFields(null, null);
             decisions().insertIfAbsent(first);
             decisions().insertIfAbsent(second);
-            decisions().insertIfAbsent(anonymous);
-            assertEquals(List.of(first.id(), second.id()).stream().sorted().toList(),
-                    decisions().pendingCheck(10).stream().map(ApprovalDecision::id).sorted().toList(), "the anonymous row is not pending");
 
-            assertTrue(decisions().markChecked(first.id(), "user-1", "alice", null, "gdpr:alice"));
+            assertFalse(decisions().updateIdentities(first.id(), "someone-else", "alice", null, "gdpr:alice", false), "stale expectation");
+            assertTrue(decisions().updateIdentities(first.id(), "user-1", "alice", null, "gdpr:alice", false));
 
-            assertEquals(List.of(second.id()), decisions().pendingCheck(10).stream().map(ApprovalDecision::id).toList());
             var rows = decisions().query(DecisionFilter.ofCategory(AGENT, CATEGORY, null, null), 0, 10);
-            ApprovalDecision checked = rows.stream().filter(r -> r.id().equals(first.id())).findFirst().orElseThrow();
+            ApprovalDecision changed = rows.stream().filter(r -> r.id().equals(first.id())).findFirst().orElseThrow();
             ApprovalDecision untouched = rows.stream().filter(r -> r.id().equals(second.id())).findFirst().orElseThrow();
-            assertNull(checked.userId());
-            assertEquals("gdpr:alice", checked.decidedBy());
+            assertNull(changed.userId());
+            assertEquals("gdpr:alice", changed.decidedBy());
             assertEquals("user-1", untouched.userId(), "another row of the same people is not touched");
             assertEquals("alice", untouched.decidedBy());
         }
 
         @Test
-        default void markCheckedIsCompareAndSet_neverOverwritingAnErasure() {
-            ApprovalDecision row = decision("APPROVED", NOW);
-            decisions().insertIfAbsent(row);
+        default void erasureReachesPendingRows_andAStaleSettlementCannotUndoIt() {
+            ApprovalDecision raw = decision("APPROVED", NOW);
+            decisions().insertPendingIfAbsent(raw);
             decisions().eraseUser("alice", "gdpr:alice");
 
-            assertFalse(decisions().markChecked(row.id(), "user-1", "alice", "user-1", "alice"), "a stale check must not restore the raw id");
-
-            ApprovalDecision stored = decisions().query(DecisionFilter.ofCategory(AGENT, CATEGORY, null, null), 0, 1).getFirst();
+            assertFalse(decisions().updateIdentities(raw.id(), "user-1", "alice", "user-1", "alice", false),
+                    "a settlement that read before the erasure must not restore the raw id");
+            ApprovalDecision stored = decisions().pendingCheck(10).getFirst();
             assertEquals("gdpr:alice", stored.decidedBy());
-            assertEquals(List.of(row.id()), decisions().pendingCheck(10).stream().map(ApprovalDecision::id).toList(), "still pending");
-            assertTrue(decisions().markChecked(row.id(), "user-1", "gdpr:alice", "user-1", "gdpr:alice"));
-            assertTrue(decisions().pendingCheck(10).isEmpty());
         }
 
+        /**
+         * The projector and reconciliation against this store: interruption after the
+         * insert, a failed confirmation, reads before reconciliation, and
+         * reconciliation upgrading a person who was not erased.
+         */
         @Test
-        default void deleteByIdRemovesOneRow() {
-            ApprovalDecision row = decision("APPROVED", NOW);
-            ApprovalDecision other = decision("REJECTED", NOW);
-            decisions().insertIfAbsent(row);
-            decisions().insertIfAbsent(other);
+        default void projectionInterruptedOrFailed_isHiddenAndReconciled() {
+            Map<String, Instant> erased = new HashMap<>();
+            IErasedSubjectStore erasedStore = new IErasedSubjectStore() {
+                @Override
+                public void record(String token, Instant at) {
+                    erased.merge(token, at, (a, b) -> a.isAfter(b) ? a : b);
+                }
 
-            assertTrue(decisions().deleteById(row.id()));
-            assertFalse(decisions().deleteById(row.id()));
-            assertEquals(1, decisions().count(new DecisionFilter(null, null, null, null, null, null, null, null, null)));
-            assertTrue(decisions().insertIfAbsent(row), "a deleted row can be projected again");
+                @Override
+                public Optional<Instant> erasedAt(Collection<String> tokens) {
+                    return tokens.stream().map(erased::get).filter(Objects::nonNull).max(Instant::compareTo);
+                }
+            };
+            GdprPseudonymizer pseudonymizer = mock(GdprPseudonymizer.class);
+            when(pseudonymizer.stableTokenFor(anyString())).thenAnswer(inv -> "tok:" + inv.getArgument(0));
+            AuditLedgerService ledger = mock(AuditLedgerService.class);
+            when(ledger.pseudonymOf(anyString())).thenAnswer(inv -> "gdpr-erased:k1:" + inv.getArgument(0));
+            ErasedSubjects subjects = new ErasedSubjects(erasedStore, pseudonymizer, ledger);
+            @SuppressWarnings("unchecked")
+            Instance<AutonomyService> autonomy = mock(Instance.class);
+            var projector = new ApprovalDecisionProjector(decisions(), mock(OversightMetrics.class), autonomy, subjects);
+
+            AuditEntry carolEntry = legacyEntry("e-carol", "carol");
+            AuditEntry bobEntry = legacyEntry("e-bob", "bob");
+            IAuditStore auditStore = mock(IAuditStore.class);
+            when(auditStore.getEntries(eq("conv-e-carol"), anyInt(), anyInt())).thenReturn(List.of(carolEntry));
+            when(auditStore.getEntries(eq("conv-e-bob"), anyInt(), anyInt())).thenReturn(List.of(bobEntry));
+            var backfill = new ApprovalBackfillService(auditStore, projector);
+            ApprovalDecision carol = ApprovalDecision.of(HitlApprovalAudit.parse(carolEntry).getFirst(), 0);
+            ApprovalDecision bob = ApprovalDecision.of(HitlApprovalAudit.parse(bobEntry).getFirst(), 0);
+
+            // Interrupted right after the insert: only the masked row rests in the store.
+            assertTrue(decisions().insertPendingIfAbsent(carol.withPersonalFields(null, "gdpr-erased:k1:carol")));
+            // Failed between write-back and confirmation: the identity is back, still
+            // pending.
+            assertTrue(decisions().insertPendingIfAbsent(bob.withPersonalFields(null, "gdpr-erased:k1:bob")));
+            assertTrue(decisions().updateIdentities(bob.id(), null, "gdpr-erased:k1:bob", "user-1", "bob", true));
+
+            DecisionFilter all = new DecisionFilter(null, null, null, null, null, null, null, null, null);
+            assertTrue(decisions().query(all, 0, 10).isEmpty(), "reads before reconciliation see neither row");
+            assertEquals(0, decisions().count(all));
+            assertTrue(decisions().readByUser("bob", 10).isEmpty(), "nor does the export");
+            assertTrue(decisions().readByUser("user-1", 10).isEmpty());
+
+            subjects.record("bob", NOW.plusSeconds(3600));
+            assertEquals(2, backfill.reconcilePending());
+
+            List<ApprovalDecision> settled = decisions().query(all, 0, 10);
+            ApprovalDecision carolNow = settled.stream().filter(r -> r.id().equals(carol.id())).findFirst().orElseThrow();
+            ApprovalDecision bobNow = settled.stream().filter(r -> r.id().equals(bob.id())).findFirst().orElseThrow();
+            assertEquals("carol", carolNow.decidedBy(), "not erased: upgraded to the identity in the ledger");
+            assertEquals("user-1", carolNow.userId());
+            assertEquals("gdpr-erased:k1:bob", bobNow.decidedBy(), "erased meanwhile: reverted to the erased form");
+            assertTrue(decisions().pendingCheck(10).isEmpty());
+            assertTrue(decisions().readByUser("bob", 10).isEmpty());
+        }
+
+        private static AuditEntry legacyEntry(String id, String decider) {
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("verdict", "APPROVED");
+            output.put("decidedBy", decider);
+            output.put("automated", false);
+            return new AuditEntry(id, "conv-" + id, AGENT, 2, "user-1", "production", -1, HitlApprovalAudit.TASK_ID, "hitl", -1, 0L, Map.of(),
+                    output, null, null, List.of(), 0.0, NOW, null, null);
         }
     }
 

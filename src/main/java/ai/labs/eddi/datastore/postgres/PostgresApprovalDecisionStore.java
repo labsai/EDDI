@@ -70,6 +70,9 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
             "CREATE INDEX IF NOT EXISTS idx_approval_decisions_pending_check ON approval_decisions (id) WHERE pending_check"
     };
 
+    /** Rows that are not pending — what every read sees. */
+    static final String SETTLED = "pending_check IS NOT TRUE";
+
     private static final String COLUMNS = "id, agent_id, group_id, category, decided_at, surface, pause_type, channel, agent_version, "
             + "user_id, decided_by, data";
 
@@ -99,6 +102,15 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
 
     @Override
     public boolean insertIfAbsent(ApprovalDecision d) {
+        return insert(d, false);
+    }
+
+    @Override
+    public boolean insertPendingIfAbsent(ApprovalDecision d) {
+        return insert(d, true);
+    }
+
+    private boolean insert(ApprovalDecision d, boolean pending) {
         ensureSchema();
         String sql = "INSERT INTO approval_decisions (" + COLUMNS + ", pending_check) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 + "ON CONFLICT (id) DO NOTHING";
@@ -119,7 +131,7 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
             ps.setString(10, d.userId());
             ps.setString(11, d.decidedBy());
             ps.setString(12, OversightJson.write(d.withoutPersonalFields()));
-            if (d.userId() != null || d.decidedBy() != null) {
+            if (pending) {
                 ps.setBoolean(13, true);
             } else {
                 ps.setNull(13, Types.BOOLEAN);
@@ -165,7 +177,7 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public List<ApprovalDecision> readByUser(String userId, int limit) {
         ensureSchema();
-        return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE user_id = ? OR decided_by = ? LIMIT ?",
+        return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE (user_id = ? OR decided_by = ?) AND " + SETTLED + " LIMIT ?",
                 List.of(userId, userId, Math.max(0, limit)));
     }
 
@@ -178,7 +190,8 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
     }
 
     @Override
-    public boolean markChecked(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy) {
+    public boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy,
+                                    boolean pending) {
         ensureSchema();
         List<Object> params = new ArrayList<>();
         params.add(userId);
@@ -186,8 +199,8 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
         params.add(id);
         params.add(expectedUserId);
         params.add(expectedDecidedBy);
-        return update("UPDATE approval_decisions SET user_id = ?, decided_by = ?, pending_check = NULL WHERE id = ? "
-                + "AND user_id IS NOT DISTINCT FROM ? AND decided_by IS NOT DISTINCT FROM ?", params) > 0;
+        return update("UPDATE approval_decisions SET user_id = ?, decided_by = ?, pending_check = " + (pending ? "TRUE" : "NULL")
+                + " WHERE id = ? AND user_id IS NOT DISTINCT FROM ? AND decided_by IS NOT DISTINCT FROM ?", params) > 0;
     }
 
     @Override
@@ -196,15 +209,10 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
         return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE pending_check LIMIT ?", List.of(Math.max(0, limit)));
     }
 
-    @Override
-    public boolean deleteById(String id) {
-        ensureSchema();
-        return update("DELETE FROM approval_decisions WHERE id = ?", List.of(id)) > 0;
-    }
-
-    /** The WHERE clause of a filter; appends its parameters. */
+    /** The WHERE clause of a filter (settled rows only); appends its parameters. */
     public static String where(DecisionFilter f, List<Object> params) {
         List<String> parts = new ArrayList<>();
+        parts.add(SETTLED);
         addEq(parts, params, "agent_id", f.agentId());
         addEq(parts, params, "group_id", f.groupId());
         addEq(parts, params, "category", f.category());

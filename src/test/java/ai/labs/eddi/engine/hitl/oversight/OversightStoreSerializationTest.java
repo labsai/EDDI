@@ -104,11 +104,14 @@ class OversightStoreSerializationTest {
     void postgresWhere() {
         List<Object> params = new ArrayList<>();
         String where = PostgresApprovalDecisionStore.where(new DecisionFilter("a", null, "c", NOW, null, "regular", null, "SLACK", 3), params);
-        assertEquals(" WHERE agent_id = ? AND category = ? AND decided_at >= ? AND surface = ? AND channel = ? AND agent_version = ?", where);
+        assertEquals(" WHERE pending_check IS NOT TRUE AND agent_id = ? AND category = ? AND decided_at >= ? AND surface = ? AND channel = ? "
+                + "AND agent_version = ?", where);
         assertEquals(List.of("a", "c", NOW.toEpochMilli(), "regular", "SLACK", 3), params);
 
         List<Object> none = new ArrayList<>();
-        assertEquals("", PostgresApprovalDecisionStore.where(new DecisionFilter(null, null, null, null, null, null, null, null, null), none));
+        assertEquals(" WHERE pending_check IS NOT TRUE",
+                PostgresApprovalDecisionStore.where(new DecisionFilter(null, null, null, null, null, null, null, null, null), none),
+                "pending rows are never read");
 
         List<Object> sp = new ArrayList<>();
         assertEquals(" WHERE agent_id = ? AND status = ?", PostgresAuditSampleStore.where(SampleFilter.pending("a"), sp));

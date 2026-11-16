@@ -29,6 +29,7 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.lt;
+import static com.mongodb.client.model.Filters.ne;
 import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.set;
@@ -64,6 +65,8 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     static final String DECIDED_BY = "decidedBy";
     static final String DATA = "data";
     static final String PENDING_CHECK = "pendingCheck";
+    /** Rows that are not pending — what every read sees. */
+    private static final Bson SETTLED = ne(PENDING_CHECK, true);
 
     private final MongoCollection<Document> collection;
 
@@ -83,11 +86,20 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public boolean insertIfAbsent(ApprovalDecision decision) {
         try {
-            Document doc = toDocument(decision);
-            if (decision.userId() != null || decision.decidedBy() != null) {
-                doc.put(PENDING_CHECK, true);
+            collection.insertOne(toDocument(decision));
+            return true;
+        } catch (MongoException e) {
+            if (e.getCode() == DUPLICATE_KEY) {
+                return false;
             }
-            collection.insertOne(doc);
+            throw e;
+        }
+    }
+
+    @Override
+    public boolean insertPendingIfAbsent(ApprovalDecision decision) {
+        try {
+            collection.insertOne(toDocument(decision).append(PENDING_CHECK, true));
             return true;
         } catch (MongoException e) {
             if (e.getCode() == DUPLICATE_KEY) {
@@ -120,7 +132,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public List<ApprovalDecision> readByUser(String userId, int limit) {
         List<ApprovalDecision> rows = new ArrayList<>();
-        for (Document doc : collection.find(or(eq(USER_ID, userId), eq(DECIDED_BY, userId))).limit(Math.max(0, limit))) {
+        for (Document doc : collection.find(and(or(eq(USER_ID, userId), eq(DECIDED_BY, userId)), SETTLED)).limit(Math.max(0, limit))) {
             rows.add(fromDocument(doc));
         }
         return rows;
@@ -134,9 +146,11 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     }
 
     @Override
-    public boolean markChecked(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy) {
+    public boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy,
+                                    boolean pending) {
+        Bson mark = pending ? set(PENDING_CHECK, true) : unset(PENDING_CHECK);
         return collection.updateOne(and(eq(ID, id), eq(USER_ID, expectedUserId), eq(DECIDED_BY, expectedDecidedBy)),
-                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), unset(PENDING_CHECK))).getMatchedCount() > 0;
+                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), mark)).getMatchedCount() > 0;
     }
 
     @Override
@@ -146,11 +160,6 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
             rows.add(fromDocument(doc));
         }
         return rows;
-    }
-
-    @Override
-    public boolean deleteById(String id) {
-        return collection.deleteOne(eq(ID, id)).getDeletedCount() > 0;
     }
 
     public static Document toDocument(ApprovalDecision d) {
@@ -178,6 +187,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
 
     static Bson toBson(DecisionFilter f) {
         List<Bson> parts = new ArrayList<>();
+        parts.add(SETTLED);
         if (f.agentId() != null) {
             parts.add(eq(AGENT_ID, f.agentId()));
         }
@@ -205,6 +215,6 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
         if (f.agentVersion() != null) {
             parts.add(eq(AGENT_VERSION, f.agentVersion()));
         }
-        return parts.isEmpty() ? new Document() : and(parts);
+        return and(parts);
     }
 }

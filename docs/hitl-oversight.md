@@ -272,12 +272,17 @@ erased person again. Erasure now writes the person to the `gdpr_erased_subjects`
 [GDPR Compliance](gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105)), and the projector checks both
 identities of every row against it: for a decision made no later than the erasure it stores what erasure leaves — no
 `userId`, the same keyed pseudonym as decider — so the rebuilt counts match the erased ones. A decision made after the
-erasure (a returning user) keeps its id. When the record cannot be read the unit is not stored and counts as a failed
-projection, which the next rebuild repairs. A "not erased" answer is never cached. A row inserted with an identity kept is
-stored pending and checked again after the insert; the result is written to that row alone (compare-and-set, so an
-erasure's own pass is never undone). If that second check fails the row is removed so the next rebuild projects it
-again; a row left pending by a failure or a crash is checked by the hourly maintenance run (at most 1,000 per run) and
-after every rebuild.
+erasure (a returning user) keeps its id. A "not erased" answer is never cached.
+
+The stored state is always the safe one. A row with an identity is inserted **masked** (no `userId`, decider
+pseudonymised) and **pending**, and a pending row is left out of every read: the analytics queries and counts, and the
+GDPR export (`readByUser`). It is then settled: a fresh check says which identities may be kept, they are written back to
+that row alone with a compare-and-set (still pending), a second fresh check confirms them or reverts the row if an
+erasure was recorded in between, and only then is the pending mark cleared. A failure or a crash at any step leaves the
+row pending and hidden; the hourly maintenance run and every rebuild settle pending rows again (at most 1,000 per run),
+reading their identities back from the ledger entry of their conversation. A pending row whose entry is gone or redacted
+settles in its masked form. Only a failure in the moment between writing an identity back and confirming it leaves that
+identity at rest, still pending and hidden, until the next maintenance run.
 
 ## Metrics and properties
 

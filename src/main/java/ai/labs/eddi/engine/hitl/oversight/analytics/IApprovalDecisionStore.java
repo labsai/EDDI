@@ -22,42 +22,45 @@ import java.util.List;
 public interface IApprovalDecisionStore {
 
     /**
-     * Stores a row unless one with its id exists. A row that carries an identity
-     * ({@code userId} or {@code decidedBy}) is stored <em>pending check</em> until
-     * {@link #markChecked} confirms it against the erased-subject record, so a
-     * projection interrupted between the two is found again by
-     * {@link #pendingCheck}.
+     * Stores a row unless one with its id exists.
      *
      * @return whether it was inserted
      */
     boolean insertIfAbsent(ApprovalDecision decision);
 
     /**
-     * Confirms one row after the erased-subject check: sets its personal fields and
-     * clears its pending mark, but only if they still hold the values the check
-     * started from. A row that changed meanwhile (an erasure pseudonymised it) is
-     * left as it is, still pending, and is checked again by the next
-     * reconciliation. Only this row is touched.
+     * Stores a row <em>pending</em> unless one with its id exists. A pending row is
+     * left out of {@link #query}, {@link #count} and {@link #readByUser} until
+     * {@link #updateIdentities} settles it; {@link #pendingCheck} finds it again
+     * after an interruption. The projector stores rows this way with their
+     * identities masked, so what rests in the store is the erased form.
      *
+     * @return whether it was inserted
+     */
+    boolean insertPendingIfAbsent(ApprovalDecision decision);
+
+    /**
+     * Sets the two personal fields of one row, but only if they still hold the
+     * expected values (compare-and-set), and sets or clears its pending mark. A row
+     * that changed meanwhile (an erasure pseudonymised it) is left as it is. Only
+     * this row is touched.
+     *
+     * @param pending
+     *            whether the row stays pending
      * @return whether the row was updated
      */
-    boolean markChecked(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy);
+    boolean updateIdentities(String id, String expectedUserId, String expectedDecidedBy, String userId, String decidedBy, boolean pending);
 
-    /** Up to {@code limit} rows still pending the erased-subject check. */
+    /** Up to {@code limit} pending rows. */
     List<ApprovalDecision> pendingCheck(int limit);
 
     /**
-     * Deletes one row by id, so the next rebuild projects it again through the
-     * check.
-     *
-     * @return whether a row was deleted
+     * Matching settled rows (pending ones are left out), newest {@code decidedAt}
+     * first.
      */
-    boolean deleteById(String id);
-
-    /** Matching rows, newest {@code decidedAt} first. */
     List<ApprovalDecision> query(DecisionFilter filter, int skip, int limit);
 
-    /** How many rows match. */
+    /** How many settled rows match. */
     long count(DecisionFilter filter);
 
     /** Deletes rows decided before the cutoff (retention). */
@@ -65,7 +68,11 @@ public interface IApprovalDecisionStore {
 
     // === GDPR ===
 
-    /** Rows of conversations owned by the user, or decided by them. */
+    /**
+     * Settled rows of conversations owned by the user, or decided by them. Pending
+     * rows are left out: they hold masked identities, or for the moment between the
+     * two checks of a settlement, an identity not yet confirmed.
+     */
     List<ApprovalDecision> readByUser(String userId, int limit);
 
     /**
