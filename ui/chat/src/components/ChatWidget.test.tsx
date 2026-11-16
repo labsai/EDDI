@@ -1122,20 +1122,20 @@ describe("ChatWidget — live tool calls", () => {
     expect(screen.getByTestId("tool-indicator")).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("ignores tool_result: nothing of its payload reaches the page, the status stays", async () => {
-    // tool_result (B6) is additive. The widget shows no tool cards, so the
-    // event is ignored like any it does not handle: the summary — tool output,
-    // even if redacted — must never appear as transcript text, and the status
-    // line keeps waiting for the next token as before.
+  it("keeps tool_result's payload off the page: the tool line clears, nothing of it is rendered", async () => {
+    // tool_result (B6) only ends the call on screen: the controller clears the
+    // tool line and goes back to "Thinking…" (see "clears the tool status when
+    // its tool_result arrives"). The widget shows no tool cards, so whatever
+    // the payload carries — even a summary of the tool's output, which a
+    // non-conforming server might send — must never appear as page text.
     mockOpenStream([
       'event: tool_call\ndata: {"tool":"calculator"}\n\n',
       'event: tool_result\ndata: {"tool":"calculator","ok":true,"summary":"SUMMARY-MARKER 4"}\n\n',
     ]);
     await sendOnOpenStream();
 
-    await waitFor(() =>
-      expect(screen.getByTestId("tool-indicator")).toHaveTextContent("Using calculator…"),
-    );
+    await waitFor(() => expect(screen.getByTestId("thinking-indicator")).toBeInTheDocument());
+    expect(screen.queryByTestId("tool-indicator")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/SUMMARY-MARKER/);
   });
 
