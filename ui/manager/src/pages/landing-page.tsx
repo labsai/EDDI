@@ -138,8 +138,8 @@ export function LandingPage() {
   // place to go: Workforce (decision D6). The chooser offers the Manager, whose
   // building screens they cannot use, so it is skipped — even with `?choose`
   // and whatever preference an older visit stored. `/` reaches this page for
-  // everyone but a remembered Workforce visitor (`landing-redirect.js` cannot
-  // read roles), so this is where the role decides.
+  // everyone (`landing-redirect.js` cannot read roles, so it sends every visitor
+  // here, remembered preference or not), so this is where the role decides.
   //
   // Workforce reads `/catalog/*`, which admits only admin, editor and user. A
   // dedicated `eddi-viewer` or `eddi-approver` would get nothing but 403s

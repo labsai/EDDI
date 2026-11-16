@@ -27,8 +27,10 @@ may use, and chat, without any page answering 403.
   `ListedFlagSerializationTest` pins the round trip and the default.
 - **B5.** `RestUserMemoryStoreCrossUserTest` runs the real `OwnershipValidator` and pins that
   `eddi-user` A gets 403 on every read and write of user B's memories, before the store is touched.
-- `landing-redirect.js` now shortcuts only a remembered `workforce` preference. Everything else
-  goes to `/welcome`, which knows the roles (D6).
+- `landing-redirect.js` now sends everyone to `/welcome`, which knows the roles (D6). It used to
+  shortcut a remembered `workforce` preference straight to `/workforce`, which let a dedicated
+  `eddi-viewer` or `eddi-approver` reach the end-user catalog; `LandingPage` now applies the role
+  decision to those visitors too.
 - Docs: new `docs/catalog.md` (plus SUMMARY), a pointer from `workspaces.md`, and a section in the
   `eddi-admin` Claude Code skill. `openapi-operations.json` gains the two operations.
 

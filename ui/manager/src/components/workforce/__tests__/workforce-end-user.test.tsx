@@ -138,6 +138,21 @@ describe("LandingPage (D6)", () => {
     renderAs(["eddi-approver"], "/welcome?choose", [["/welcome", <LandingPage />]]);
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/approvals$/);
   });
+
+  // `landing-redirect.js` sends every visitor here, so a remembered Workforce
+  // preference must not let these roles through to the end-user catalog.
+  it("ignores a remembered Workforce preference for a viewer or approver", () => {
+    localStorage.setItem("eddi-landing-preference", "workforce");
+    try {
+      const viewer = renderAs(["eddi-viewer"], "/welcome", [["/welcome", <LandingPage />]]);
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage$/);
+      viewer.unmount();
+      renderAs(["eddi-approver"], "/welcome", [["/welcome", <LandingPage />]]);
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/approvals$/);
+    } finally {
+      localStorage.clear();
+    }
+  });
 });
 
 describe("CatalogListingToggle", () => {

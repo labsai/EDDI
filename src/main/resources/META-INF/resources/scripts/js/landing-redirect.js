@@ -1,17 +1,11 @@
-// Returning Workforce users go straight there; everyone else goes to the
-// welcome chooser, which is part of the Manager app and knows the signed-in
-// user's roles: it sends an eddi-user straight on to /workforce, and an editor
-// or admin on to a remembered "manage" preference. This script runs before
-// sign-in and cannot read roles, so it must not send anyone to /manage itself.
+// Everyone goes to the welcome chooser, which is part of the Manager app and
+// knows the signed-in user's roles: it sends an eddi-user straight on to
+// /workforce, an editor or admin on to a remembered "workforce" or "manage"
+// preference, and a dedicated viewer or approver to the Manager. This script
+// runs before sign-in and cannot read roles, so it must not send anyone to
+// /workforce or /manage itself: a remembered Workforce preference would let a
+// viewer or approver reach the end-user catalog, whose endpoints refuse them.
+// (/welcome loads the same bundle as /workforce, so going through it is free.)
 (function () {
-  var pref = null;
-  // Reading localStorage throws in private mode, with site data blocked, or
-  // inside a sandboxed iframe. There is nothing to recover — the visitor simply
-  // has no stored preference — so fall through to the welcome chooser below.
-  try { pref = localStorage.getItem('eddi-landing-preference'); } catch (e) { /* no stored preference available */ }
-  if (pref === 'workforce') {
-    window.location.replace('/workforce');
-  } else {
-    window.location.replace('/welcome');
-  }
+  window.location.replace('/welcome');
 })();
