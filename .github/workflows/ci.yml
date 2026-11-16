@@ -2827,7 +2827,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: node scripts/install-playwright-chromium.mjs
+        run: node ../scripts/install-playwright-chromium.mjs
 
       # Against the Manager EDDI serves on :7070 — the bundle in this image.
       - name: Activate the Platform Operator
