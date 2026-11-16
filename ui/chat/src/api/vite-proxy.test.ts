@@ -15,9 +15,11 @@ const ROOT = process.cwd();
 const SERVED_BY_DEV_PLUGIN = new Set(["/branding"]);
 
 function apiPrefixes(): Set<string> {
-  const dir = resolve(ROOT, "src/api");
+  // The widget's own API modules, and @eddi/core, which holds the conversation,
+  // HITL, attachment and rating calls the widget makes.
+  const dirs = [resolve(ROOT, "src/api"), resolve(ROOT, "../packages/core/src")];
   const prefixes = new Set<string>();
-  for (const file of readdirSync(dir)) {
+  for (const dir of dirs) for (const file of readdirSync(dir)) {
     // demo-api.ts only shows sample code as text; it calls nothing.
     if (!file.endsWith(".ts") || file.endsWith(".test.ts") || file === "demo-api.ts") continue;
     // Comment lines name routes too (`/chat/{environment}/…`); only code counts.

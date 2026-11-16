@@ -7,7 +7,7 @@ import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { render } from "@testing-library/react";
 
 // Monaco doesn't render in JSDOM, so we mock it

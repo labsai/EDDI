@@ -88,7 +88,7 @@ out. Longer, each area applies its policy:
 | Area | Default | Alternative |
 |---|---|---|
 | Turns | run with node-local ordering only, **unfenced**: steps appended concurrently on different nodes merge, but the conversation properties a turn writes are last-writer-wins, so concurrent turns can overwrite each other's properties and miss each other's context | `degraded.turns=reject`: 409 + `Retry-After` |
-| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide, so a signature that needs a fresh one is refused. Inter-agent signing in group discussions then records the entry **unsigned** (the discussion carries on). That is the only user of the shared nonce store (`NONCES`): the [signed control plane](#signed-control-plane) remembers its nonces per node and is unaffected, and webhook delivery de-duplication, a separate bucket, follows the same `degraded.nonces` policy (see its row below) | `degraded.nonces=local` |
+| Replay nonces | **reject** (fail closed): a nonce can only be registered cluster-wide. Nothing registers signed-envelope nonces in the shared nonce store (`NONCES`) any more: inter-agent signing in group discussions does not use NATS, so an outage leaves it unaffected, and the [signed control plane](#signed-control-plane) remembers its nonces per node and is unaffected too. The policy still governs webhook delivery de-duplication, a separate bucket (see its row below) | `degraded.nonces=local` |
 | Tool rate limits | `local-share`: this node enforces the global limit ÷ known members, the per-conversation limit in full | `degraded.rate-limits=reject` |
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks, RAG ingestion status | node-local copy. A write made during the outage is published to the bucket on the writing node's next read of the key, by compare-and-set against the revision that node last saw; if another node wrote or deleted the key meanwhile, the bucket wins and the local copy is dropped. A value the bucket refuses as too large is never retried | — |
@@ -214,8 +214,10 @@ replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2
 `A2A_CONTEXTS`, `DEPLOYMENTS` (the `autoDeploy=false` deployments and their undeploy tombstones), `ERASED` (the GDPR erasure marker of a conversation: written before its dead letters are purged, and checked by a node that forwards a dead letter it kept locally; it expires after `eddi.cluster.erasure-marker-ttl`, `P7D`), `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
 principal's writes on every node), `A2A_INDEX` (per principal, the task and context ids it
 holds — how a GDPR sweep or export on one node reaches records another node wrote, since
-bucket keys are hashed and cannot be enumerated by principal), `TOOL_PAGES`, `DEDUP`,
-`CHANNEL` and `RAG_INGESTION`; object store: `ARCHIVES`;
+bucket keys are hashed and cannot be enumerated by principal; split into 16 entries per
+principal of at most 625 task and 625 context ids each, about 330 KB at the 256-character
+id limit, so no entry nears the NATS payload limit of 1 MB that would keep it on the writing
+node only), `TOOL_PAGES`, `DEDUP`, `CHANNEL` and `RAG_INGESTION`; object store: `ARCHIVES`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
 `eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
 
@@ -506,7 +508,12 @@ hand. None of them is part of the normal build or a required check.
   node's A2A task store reads before it writes, and the erasing node sweeps `A2A_TASKS` and
   `A2A_CONTEXTS` several steps later, through the per-principal `A2A_INDEX` so records other
   nodes wrote are reached (the index is kept with a revision-checked compare-and-set on the
-  bucket, so concurrent writers on any nodes all land their ids). One gap remains, and it is
+  bucket, so concurrent writers on any nodes all land their ids). The sweep counts what it
+  removed from the buckets, so the `a2aTasks` entry of the erasure result includes records
+  other nodes wrote. It also reads and removes the single per-principal index entry that
+  releases before the 16-entry split kept, so during a rolling upgrade an erasure on an
+  upgraded node reaches what the older nodes wrote; one run on an older node reads only that
+  single entry, and misses what upgraded nodes wrote. One gap remains, and it is
   narrow: on the erasing node the check and the write are serialised against the sweep; on
   another node they are not, so a write that read the marker as absent an instant before it
   was set and whose `put` reaches the bucket only after the sweep survives, until the 24 h

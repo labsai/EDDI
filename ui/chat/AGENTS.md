@@ -17,6 +17,7 @@
 | Vite           | 8       | Build tool + dev server        |
 | Vitest         | 5.x     | Unit testing (jsdom)           |
 | react-markdown | 10.x    | Markdown rendering in messages |
+| i18next        | 26      | Widget text in 11 locales, set up by `@eddi/ui` |
 
 ### Ecosystem
 
@@ -29,147 +30,118 @@
 
 ```
 src/
-├── api/            # API layer
-│   ├── http.ts             # Status-aware fetch core, ApiError, errorPayload, auth token, 401 retry hook
+├── api/            # The widget's own API layer — the backend contract itself is @eddi/core
 │   ├── embed-auth.ts       # postMessage token hand-off with the host page (docs/chat-ui-embedding.md)
-│   ├── chat-api.ts         # Conversation lifecycle (start, read, send, stream, undo, redo)
-│   ├── hitl-api.ts         # Approval status, cancel, deadline maths, poll cadence
-│   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
-│   ├── sse-events.ts       # Pure interpretation of SSE payloads
-│   ├── snapshot.ts         # Snapshot steps → messages (masks secret input)
-│   ├── rating-api.ts       # Conversation/reply ratings, profile `rating` parsing, error-code copy
-│   ├── brand.ts            # Deployment brand from `window.__EDDI_BRAND__` (/branding/__brand__.js)
 │   ├── chat-config.ts      # Operator settings from `window.__EDDI_CHAT__` (/chat/__config__.js), `?token=` gate
+│   ├── brand.ts            # Deployment brand from `window.__EDDI_BRAND__` (/branding/__brand__.js)
+│   ├── rating-api.ts       # RATING_CHANNEL, httpRatingClient, ratingErrorMessage() (the widget's copy)
 │   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
 │   ├── ChatApp.tsx         # Picks the screen for the URL; unknown paths → /chat/production/default
 │   ├── ChatLocationProvider.tsx # The address bar (or, with initialPath, an in-memory one for tests)
 │   ├── ChatRoute.tsx       # `/chat/:environment/:agentId[/:userId]` route; neutral state for the demo under a brand
-│   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
-│   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
-│   ├── MessageBubble.tsx   # User/agent messages with markdown
-│   ├── markdown-plugins.ts # On-demand KaTeX / highlight.js / raw-HTML loading (rich-math.ts, rich-highlight.ts, rich-raw.ts)
-│   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
-│   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
-│   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
-│   ├── RatingCard.tsx      # "How did we do?" — stars/thumbs, tags, comment, thanks state
-│   ├── StepRating.tsx      # Thumbs under an agent reply, optional reason/comment form
-│   ├── QuickReplies.tsx    # Pill buttons for suggested replies
-│   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade), Using {tool}
-│   └── ScrollToBottom.tsx  # Floating scroll button
+│   ├── ChatWidget.tsx      # Route, embedding (token, colours, config), profile → the shared AgentConversation and components
+│   └── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
 ├── hooks/
-│   ├── useTheme.ts         # Dark/light/system theme with localStorage
+│   ├── useTheme.ts         # Dark/light/system theme; storage and data-theme marking from @eddi/ui
 │   ├── useHitlPolling.ts   # Polls approval-status while a turn is paused
 │   └── useRatings.ts       # Restore, optimistic rate/withdraw, when the rating card offers itself
 ├── store/
-│   └── chat-store.tsx  # Context + useReducer state management
+│   └── chat-store.tsx  # ChatProvider: one AgentConversation + the widget's own state (config, name, notice, ratings)
 ├── styles/
-│   ├── variables.css   # CSS custom properties (dark/light tokens)
+│   ├── variables.css   # The shared tokens' widget values, and the --chat-* aliases of them
 │   └── chat.css        # All component styles (BEM naming)
 ├── test-utils/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
-├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
-├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
+├── i18n/
+│   ├── index.ts        # t(), initLocale() on i18next via @eddi/ui — ALL widget-owned text goes through t()
+│   └── locales/        # en.json (bundled) + 10 lazily loaded locales, the Manager's eleven
 ├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
-├── rating-steps.ts     # Which conversation step a message belongs to (reply ratings are keyed by step)
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```
 
-### Backend contract (verified against EDDI source — do not guess these)
+### What comes from `@eddi/conversation`
 
-- **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
-  `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Fourteen SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
-  `task_failed`, `token`, `tool_call`, `tool_result`, `cascade_step_start`,
-  `cascade_escalation`, `guardrail_triggered`, `llm_retry`, `approval_required`
-  (just before `done` when the turn pauses), `hitl_resume` (resume streams only),
-  `done`, `error`. The widget ignores `tool_result`, `guardrail_triggered`,
-  `llm_retry`, `approval_required` and `hitl_resume` (of these, the Manager's
-  `use-chat.ts` handles only `guardrail_triggered`). There is **no `thinking` event** — the backend never emits one.
-- **`tool_call` is `{"tool":"<name>","callId":…}`, sent right before each tool runs**
-  (plus `displayName`/`display` only when the designer configured `toolDisplay`;
-  `display` then holds the selected argument values, redacted and truncated) —
-  never the full arguments; those reach the client later, redacted, in
-  `task_complete`'s `toolTrace`. A `tool_result` (`tool`, `callId`, `status`,
-  `durationMs`, never the result) follows when it finishes, but the widget does not
-  read it: it shows "Using {tool}…" (the Manager's wording) until the next `token`,
-  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
-  model can write a sentence and then call a tool.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
-  refused BEFORE it ran — every condition the non-streaming endpoint answers with a
-  typed status (409, 410, 404, 413, 429, 403, 503) — also carries a `code`
-  (`awaiting_approval`, `conversation_ended`, …, pinned in
-  `UNCONSUMED_STREAM_ERROR_CODES` against `RestAgentEngineStreaming`): treat it like
-  a 409 — withdraw the bubble and restore the draft. Branch on `code`, show `message`.
-- **Every `data:` line carries one delimiter space** —
-  `RestAgentEngineStreaming.padDataLines` writes it. Strip exactly one; a
-  token's own leading space follows it.
-- **`inputField` arrives on `done` too.** Read it from every transport, not
-  only the non-streaming snapshot.
-- **The route's environment must be sent** as `?environment=` on start; the
-  backend defaults a missing one to production.
-- **The turn output's `input` is the masked display copy** — `<secret input>`
-  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
-  a secret turn when it ends and masks older stored ones on read, so
-  `input:initial` also reads `<secret input>`; the client-side mask is a
-  second line of defence, not the only one.
-- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
-- **`done` is a trimmed snapshot** — only `conversationState` and
-  `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
-  the snapshot to refresh them.
-- **`output[]` entries are not uniformly objects** — HITL writes its
-  pending-approval placeholder and rejection message as bare strings.
-- **Attachments reach the model ONLY via `attachment_N` context keys** whose
-  `value` is an object carrying `storageRef`. A ref in the message text is
-  silently ignored. Omit `fileName` when empty — the extractor backfills the
-  stored name only when the key is **absent** (`getFileName() == null`); `""` is
-  a String and suppresses the fallback.
-- **The per-turn cap of 5 is a default, not a contract** —
-  `eddi.attachments.max-per-turn` is a `@ConfigProperty` and no endpoint exposes
-  the effective value. Same for the 20 MiB upload / 10 MiB forward caps. Do not
-  write client code that treats any of them as fixed truth.
-- **Upload cap ≠ forward cap.** A file in between is stored, returns 201, and is
-  skipped at forward time — but the model is **not** left unaware: the forwarder
-  substitutes a text note (`AttachmentForwarder` → `TextContent.from(...)`)
-  saying the file was not sent and that `readAttachment` can fetch it. Surface
-  `forwardableInline` so the user knows the bytes were not inlined, but do not
-  claim the agent cannot see the file. Note it is an incomplete signal: a
-  separate `max-forward-aggregate-bytes` cap can skip a file that reported
-  `true`.
-- **`setPublic(false)` is NOT a wire filter.** `isPublic()` is never read as a
-  predicate anywhere in the backend — it is only copied into the snapshot. What
-  actually keeps a key out of the response is the key-prefix allowlist in
-  `ConversationMemoryUtilities.convertSimpleConversationMemory`, and
-  `returnDetailed=true` bypasses it entirely. This client asks for
-  `returnDetailed=false`, which is a client choice.
-- **Failures answer `{error, code}`** — parse both (`errorPayload` in `http.ts`).
-  `ATTACHMENT_REJECTED` is a catch-all: a declared-vs-detected MIME **mismatch**
-  (there is no type allowlist — an unknown type passes), the per-conversation
-  file/byte quotas, empty files, and on Postgres any wrapped `SQLException`, so
-  a database outage also arrives as a 400 "rejection". Only `error` says which.
-  A body-less 413 from Quarkus is possible but not the normal path — this repo
-  raises `quarkus.http.limits.max-body-size` to 60M, and `RequestBodyLimitGuard`
-  lifts the 25M default request limit to fit a base64-encoded attachment at
-  `eddi.attachments.max-size-bytes`, precisely so in-cap uploads do not hit it.
-- **A 409 means the input was never consumed** — restore it, do not leave it in
-  the transcript as if sent.
-- **The rating endpoints answer `{error: "<CODE>", message}`** — the stable code is
-  in `error` (`RATING_WINDOW_CLOSED`, `RATING_DISABLED`, …), unlike the `{error,
-  code}` envelope above; `rating-api.ts` parses it. Reply ratings are keyed by
-  **step** (`/agents/{conversationId}/steps/{stepIndex}/rating`), step 0 being the
-  greeting — see `rating-steps.ts`.
+[`ui/packages/conversation`](../packages/conversation/README.md) holds the agent kind of
+conversation, shared with every other agent surface (phase 3b):
+
+- **`AgentConversation`** — the turn state machine that was `ChatWidget`'s: open, send
+  (streamed, plain or managed), the 409 that restores the draft, dropped vs paused turns,
+  `inputField` on `done`, undo/redo, rerun, stop, cancel, the refresh after a pause.
+  `ChatProvider` owns one; `ChatWidget` gives it the route as a transport
+  (`createConversationTransport`, `createManagedTransport`, the demo's
+  `createDemoTransport`) and calls its methods. `useChatState()` merges its state with
+  the widget's own (config, agent name, review notice, rating profile);
+  `useChatDispatch()` routes each action to its owner. A turn rule changes in the
+  package, with a case in `agent-conversation.test.ts`, never here.
+- **The components** — `Message` (the one markdown renderer, `MarkdownContent`: KaTeX,
+  highlight.js and the raw-HTML parser each a lazy chunk; images in model text become
+  links; a reply's guardrail notes and a sent message's attachments under the bubble),
+  `MessageList` (the transcript that follows new content), `Composer`, `SecretInput`,
+  `QuickReplies`, `ThinkingIndicator` (thinking, tool, cascade, and "Checking the
+  reply…" while a guardrail that fired is at work — `guardrailActive`) /
+  `TypingIndicator`, `PausedCard`, `RatingCard`, `StepRating`, `ScrollToBottom`. They
+  keep their BEM class names, styled by `chat.css` here. The controller's host hooks
+  (README → Host hooks) are the Manager's; the widget uses none of them.
+- **The `conversation.*` strings** — every string those render, in the eleven locales,
+  merged into the widget's bundles by `withConversationLocales` (`src/i18n`).
+  `ChatProvider` hands the widget's `t` to the components (`ConversationTextProvider`)
+  and the controller. A new string of the widget's own goes into `src/i18n/locales`; a
+  string a shared component shows goes into the package.
+
+The component tests still live here (`ChatInput.test.tsx`, `MessageBubble.test.tsx`, …)
+and import from `@eddi/conversation`: they render the components inside `ChatProvider`,
+as the widget does.
+
+### What comes from `@eddi/ui`
+
+[`ui/packages/ui`](../packages/ui/README.md) holds the foundations both apps share: the
+design-token names, the theme helpers, and the i18next setup. The widget uses three of them:
+
+- **i18n.** `src/i18n` sets up an i18next instance through `setupI18n`: English bundled, the
+  other ten locales one chunk each, only the active one loaded, `dir`/`lang` on `<html>` from
+  the RESOLVED language, `{{productName}}` from the brand. There is no react-i18next — the
+  locale is chosen once before the first render (`main.tsx` awaits `initLocale`), and `t()`
+  works outside React. Strings use i18next's `{{name}}` placeholders and flat keys
+  (`keySeparator: false`).
+- **Theme.** `useTheme` uses the package's storage, resolution and `data-theme` helpers.
+- **Tokens.** `variables.css` gives the shared tokens the widget's own values and declares the
+  `--chat-*` names as documented aliases of them (`CHAT_TOKEN_ALIASES`). The names and the
+  URL colour parameters are a public contract; `src/styles/chat-aliases.test.ts` pins both.
+
+Per-locale script fonts (`@eddi/ui/fonts`) are the Manager's: the widget keeps the Noto Sans
+faces `chat.html` declares and does not import that entry, which would add the font chunks
+to `dist/`.
+
+### Where the API and SSE code lives: `@eddi/core`
+
+HTTP (`ApiError`, `errorPayload`, the auth token and the 401 hook), the SSE parser and
+reader, the conversation API (start, read, send, stream, undo, redo, rerun, managed,
+profile), HITL status and cancel, attachments, ratings, rating steps, snapshot → messages
+and the contract types are in [`ui/packages/core`](../packages/core/README.md), shared with
+the Manager. Import them from `@eddi/core`; `@/types` re-exports the contract types next
+to the widget's own `ChatMessage` and `ChatConfig`. The widget drives core's default
+client: `setBaseUrl`, `setAuthToken` and `setUnauthorizedHandler` (installed by
+`embed-auth.ts`).
+
+**The backend contract list — the rules verified against EDDI's source (six states, fourteen SSE
+events, `inputField` on `done`, the 409 that restores the draft, the attachment context
+keys, the rating envelope, …) — is now [`ui/packages/core/README.md`](../packages/core/README.md),
+each rule with the test that pins it.** Read it before touching the turn loop. A contract
+change goes into `@eddi/core`, with a test there; what the widget *says* about it (copy
+through `t()`) stays here.
 
 ---
 
 ## 3. Key Conventions
 
-1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind.
-2. **State** — `ChatProvider` → `useChatState()` / `useChatDispatch()`. No prop drilling.
-3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
-4. **Testing** — Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
+1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind yet: the plan (D3) moves the widget onto Tailwind with the shared components (phase 3b). Colours come from the `--chat-*` variables, which alias the shared tokens — add a colour as a token value plus an alias where it has a shared meaning, and never give an aliased name a literal in a theme block (the alias would lose).
+2. **State** — `ChatProvider` → `useChatState()` / `useChatDispatch()`, over the shared `AgentConversation` (`useChatController()` for its methods). No prop drilling.
+3. **API** — `@eddi/core` (see above). SSE streaming uses its `AsyncGenerator` (`sendMessageStreaming`). Tests that need the network replace `globalThis.fetch` (`src/test-utils/sse.ts`); a test that mocks an API function mocks `@eddi/core` with `importActual` and overrides only that function (see `ChatInput.test.tsx`).
+4. **Testing** — A test that switches language awaits it (`await setLocale("de")`, and `await setLocale("en")` in `afterEach`): a locale other than English is a chunk. Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
 4a. **No router** — react-router was 92 KB of first load for three path shapes. `src/location.ts` parses `/chat/managed/:intent/:userId`, `/chat/:environment/:agentId/:userId` and `/chat/:environment/:agentId` with react-router's matching rules (case-insensitive literals, `managed` beats `:environment`, trailing slashes ignored, params decoded); `location.test.tsx` pins them — these URLs are a public contract for embedders. Do not add a router back for a fourth shape; extend `parseChatPath`.
-4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts`); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is still rendered (sanitised) for every agent until the per-agent `rawHtml` setting exists (frontend unification plan, D9).
+4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts` in `@eddi/conversation`), and GFM is parsed without its serialiser (`remark-gfm-parse.ts`, about 4 KB of gzip); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is rendered (sanitised) only for an agent whose profile sets `conversationControls.rawHtml: true` (frontend unification plan, D9); for every other agent, and when the profile reports no controls, it is shown as text. `ChatWidget` reads `conversationControls` with `parseConversationControls` (`@eddi/core`) and also drops undo, redo, attachments, quick replies and ratings the agent switched off, and streaming when `streaming: false`; the `hide*` URL parameters can only hide more. `ChatWidget.controls.test.tsx` pins it.
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
 6. **Query params** — parsed in `ChatWidget.tsx` (`parseConfigFromQuery`, `COLOR_PARAM_MAP`); read those rather than this list. Behaviour: `hideUndo`, `hideRedo`, `hideNewConversation`, `hideQuickReplies`, `hideStreaming`, `hideLogo`, `hideAgentName`, `theme`, `title`, `lang` (`en`/`de`/`fr`/`es`, read in `i18n.ts`), `apiServer`, `token` (read once, then removed from the address bar; honoured only when the operator sets `eddi.chat.url-token.enabled`, default `false`), `tokenOrigin` (exact host origins for the postMessage token hand-off, `embed-auth.ts`), `userId`. `theme` must be `dark`/`light`/`system`; every colour must pass `isSafeCssColor` and `fontFamily` `isSafeFontFamily`, or it is ignored. Colours (URL-encode `#` as `%23`): `accentColor`, `accentHover`, `bgColor`, `surfaceColor`, `textColor`, `textMuted`, `agentBg`, `agentBorder`, `agentText`, `userBg`, `userText`, `inputBg`, `inputBorder`, `borderColor`, `headerBg`, `fontFamily`.
 7. **HITL is read-only here** — the widget surfaces a paused turn and offers cancel, but never Approve/Reject. Deciding belongs to a reviewer in the Manager's approvals page (`/manage/approvals`), which reads the backend's pending-approvals endpoint.
@@ -187,9 +159,16 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 npm run build    # Outputs to dist/
 ```
 
+Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
+shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).
+Change a dependency from `ui/` with `npm install <pkg> -w chat`, keep a version the Manager also
+uses identical in both `package.json` files, and put any `overrides` in
+`ui/package.json`. On Windows, run `npm run lockfile:check` in `ui/` afterwards — the
+`oxide-wasm32-wasi` trap described in `ui/manager/AGENTS.md` now applies to this lock too.
+
 ### Quality gates
 
-CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
+CI's `UI Chat` job runs `npm ci` (at `ui/`, the npm workspaces root), `npm run typecheck`, `npm run lint` and `npm test` on every
 PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
 no CI at all), then builds and runs `npm run budget`. Run them all before pushing.
 
@@ -203,6 +182,8 @@ no CI at all), then builds and runs `npm run budget`. Run them all before pushin
 
 ### DO NOT
 
-- Add external state libraries (zustand, redux) — use Context + useReducer
-- Add CSS frameworks — use CSS custom properties
+- Add external state libraries (zustand, redux) — the conversation is `AgentConversation`; the widget's own state is Context + useReducer
+- Add CSS frameworks in this phase — use the CSS custom properties (Tailwind arrives with the shared components, plan D3)
+- Add a string to only some locales — `en.json` and all ten others change together
+- Import `@eddi/ui/fonts` — it adds every script font chunk to the widget's `dist/`
 - Duplicate logic from `demo-api.ts` into components

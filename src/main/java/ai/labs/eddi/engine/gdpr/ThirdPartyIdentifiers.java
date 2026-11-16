@@ -176,7 +176,8 @@ public final class ThirdPartyIdentifiers {
                             ? HumanTurnSkipReasons.maskTimedOutName(entry.errorReason(), OTHER_PERSON)
                             : entry.errorReason(),
                     targetMasked ? OTHER_PERSON : entry.targetAgentId(),
-                    entry.signature(), entry.signatureNonce(), entry.signatureTimestampMs(), entry.signatureKeyVersion()));
+                    entry.signature(), entry.signatureNonce(), entry.signatureTimestampMs(), entry.signatureKeyVersion(),
+                    entry.signatureRound()));
         }
         return masked;
     }

@@ -1,9 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ArrowDown, ChevronDown, ChevronUp, Check } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { PhaseHeader } from "./phase-header";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { HumanTurnBanner } from "./human-turn-banner";
@@ -20,10 +17,11 @@ import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 import { STYLE_THEME } from "./discussion-style-theme";
+import { ConversationMarkdown } from "@/components/chat/conversation-markdown";
 
 interface DiscussionTranscriptProps {
   conversation: GroupConversation | null;
@@ -686,9 +684,9 @@ export function DiscussionTranscript({
                 {isAgentFailurePlaceholder(effectiveSynthesis) ? (
                   <AgentFailedNotice />
                 ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                  <ConversationMarkdown escapeRawHtml>
                     {parsedSynthesis}
-                  </ReactMarkdown>
+                  </ConversationMarkdown>
                 )}
               </div>
               {/* Fade gradient when collapsed */}

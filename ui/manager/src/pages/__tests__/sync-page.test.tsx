@@ -361,6 +361,43 @@ describe("SyncPage", () => {
     ).toBeInTheDocument();
   });
 
+  // EDDI turns signInterAgentMessages off on a target that cannot sign rather
+  // than refusing the sync, and says so only in the result's warnings. The page
+  // showed a plain "Sync complete", and the agent ran unsigned unnoticed.
+  it("shows, per agent, what a sync wrote differently from the source", async () => {
+    const warning = "signInterAgentMessages was turned off: the imported agent is new and has no signing key yet.";
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<{ sourceAgentId: string; targetAgentId: string | null }>;
+        return HttpResponse.json(
+          requests.map((r) => ({
+            sourceAgentId: r.sourceAgentId,
+            targetAgentId: r.targetAgentId,
+            result: {
+              agentUri: "eddi://ai.labs.agent/agentstore/agents/new-1?version=1",
+              agentUpdated: true, updated: 0, created: 3, skipped: 0, failures: [],
+              warnings: r.sourceAgentId === "remote-agent1" ? [warning] : undefined,
+            },
+            error: null,
+          }))
+        );
+      })
+    );
+
+    renderPage();
+    const user = await connectAndWaitForMapping();
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getByTestId("sync-execute-btn")).not.toBeDisabled();
+    });
+    await user.click(screen.getByTestId("sync-execute-btn"));
+
+    const warnings = await screen.findByTestId("result-warnings");
+    expect(warnings).toHaveTextContent(`Support Agent: ${warning}`);
+    expect(warnings.querySelectorAll("li")).toHaveLength(1);
+    expect(screen.getByTestId("sync-outcome")).toHaveAttribute("data-outcome", "ok");
+  });
+
   it("reports a batch in which every agent failed", async () => {
     // EDDI answers 500 when no mapping succeeded, and the body still carries the
     // reasons — which is why the client resolves rather than throwing here.

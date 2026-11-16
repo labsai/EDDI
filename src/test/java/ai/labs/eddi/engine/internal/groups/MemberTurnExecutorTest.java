@@ -15,8 +15,9 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
-import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.HumanTurnSkipReasons;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
@@ -27,6 +28,7 @@ import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -65,7 +68,7 @@ class MemberTurnExecutorTest {
         return new MemberTurnExecutor(
                 Mockito.mock(IConversationService.class),
                 Mockito.mock(IAgentFactory.class),
-                new GroupSigningGuard(null, null, null, "default"),
+                new GroupSigningGuard(null, null, "default"),
                 new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"),
@@ -251,8 +254,8 @@ class MemberTurnExecutorTest {
      * 9-arg constructor, so a signing-enabled agent produced an <em>unsigned</em>
      * contribution whenever its tool call was auto-rejected — while the normal
      * path, three lines away, signed identically-shaped entries. Peers read both
-     * through the same {@code verifyPriorEntriesIfRequired}, so the unsigned one
-     * simply had nothing to verify.
+     * through the same {@code GroupSigningGuard.visibleTo}, so a peer requiring
+     * verification withheld the unsigned one.
      */
     @Test
     void tryResolveMemberToolPause_gracefulContribution_isSigned() throws Exception {
@@ -268,8 +271,11 @@ class MemberTurnExecutorTest {
             return null;
         }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
         when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
-        when(signingGuard.signOutgoingMessage(eq(AGENT_A), eq("group-1"), eq("tool-less answer"), anyString()))
-                .thenReturn(new GroupSigningGuard.SigningResult("sig-abc", "nonce-1", 1234L, 7));
+        when(signingGuard.sign(any(), any())).thenAnswer(inv -> {
+            TranscriptEntry e = inv.getArgument(1);
+            return new TranscriptEntry(e.speakerAgentId(), e.speakerDisplayName(), e.content(), e.phaseIndex(), e.phaseName(),
+                    e.type(), e.timestamp(), e.errorReason(), e.targetAgentId(), "sig-abc", "nonce-1", 1234L, 7, 1);
+        });
 
         var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
                 signingGuard, contextBuilder, Mockito.mock(GroupConversationService.class),
@@ -284,6 +290,7 @@ class MemberTurnExecutorTest {
 
         assertNotNull(entry, "a completed resume yields a real contribution, not a fallback");
         assertEquals("tool-less answer", entry.content());
+        verify(signingGuard).sign(eq(gc), argThat(e -> AGENT_A.equals(e.speakerAgentId()) && "tool-less answer".equals(e.content())));
         assertEquals("sig-abc", entry.signature());
         assertEquals("nonce-1", entry.signatureNonce());
         assertEquals(1234L, entry.signatureTimestampMs());
@@ -291,10 +298,9 @@ class MemberTurnExecutorTest {
     }
 
     /**
-     * The signing call must stay a no-op for agents that do not sign —
-     * {@code signOutgoingMessage} returns
-     * {@link GroupSigningGuard.SigningResult#UNSIGNED} then, and the entry keeps
-     * null envelope fields exactly as before the fix.
+     * The signing call must stay a no-op for agents that do not sign — {@code sign}
+     * returns the entry unchanged then, and the entry keeps null envelope fields
+     * exactly as before the fix.
      */
     @Test
     void tryResolveMemberToolPause_signingDisabled_entryStaysUnsigned() throws Exception {
@@ -309,8 +315,7 @@ class MemberTurnExecutorTest {
             return null;
         }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
         when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
-        when(signingGuard.signOutgoingMessage(any(), any(), any(), any()))
-                .thenReturn(GroupSigningGuard.SigningResult.UNSIGNED);
+        when(signingGuard.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
 
         var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
                 signingGuard, contextBuilder, Mockito.mock(GroupConversationService.class),
@@ -354,7 +359,7 @@ class MemberTurnExecutorTest {
         }).when(conversationService).resumeConversation(anyString(), any(), any(), eq(true), eq(true), any());
 
         var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
-                new GroupSigningGuard(null, null, null, "default"), contextBuilder, Mockito.mock(GroupConversationService.class),
+                new GroupSigningGuard(null, null, "default"), contextBuilder, Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
         var gc = new GroupConversation();
         gc.setId("gc-1");
@@ -367,6 +372,115 @@ class MemberTurnExecutorTest {
         assertTrue(gc.getCreatedAgentIds().contains("sub-agent-1"), "the resumed run's creation must reach the cleanup registry");
         assertEquals(1.5, gc.getMemberCosts().get("conv-key"), 1e-9, "the resumed run's spend is attributed to the turn's key");
         assertEquals(1.5, gc.getTotalCost(), 1e-9);
+    }
+
+    /**
+     * The {@code groupTranscript} context a member's own workflow receives is the
+     * transcript as {@link GroupSigningGuard#viewFor} lets that member see it — for
+     * a member requiring peer verification, with unverified peer entries withheld —
+     * never the raw transcript.
+     */
+    @Test
+    void executeAgentTurn_groupTranscriptContext_isWhatTheSigningGuardLetsTheMemberSee() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        var sent = new InputData[1];
+        doAnswer(inv -> {
+            sent[0] = inv.getArgument(6);
+            inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+        var gc = newGc();
+        gc.getTranscript().add(new TranscriptEntry("agent-b", "Agent B", "tampered opinion", 0, "P-OPINION",
+                TranscriptEntryType.OPINION, Instant.now(), null, null));
+        var placeholder = new TranscriptEntry("agent-b", "Agent B", "[withheld]", 0, "P-OPINION",
+                TranscriptEntryType.OPINION, Instant.now(), GroupSigningGuard.WITHHELD_MARKER, null);
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any()))
+                .thenReturn(new GroupSigningGuard.View(GroupSigningGuard.Requirement.REQUIRED, List.of(placeholder)));
+        when(signingGuard.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        assertEquals(List.of(placeholder), sent[0].getContext().get("groupTranscript").getValue());
+    }
+
+    /**
+     * A member whose peer-verification setting cannot be read, and was never read
+     * on this node, does not take its turn: neither a fully withheld transcript
+     * (wrong if it never asked for verification) nor an unverified one (wrong if it
+     * did) is a fair basis for a reply that stays in the transcript.
+     */
+    @Test
+    void executeAgentTurn_peerVerificationSettingUnknown_turnSkippedAndAgentNotAsked() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var gc = newGc();
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any()))
+                .thenReturn(new GroupSigningGuard.View(GroupSigningGuard.Requirement.UNKNOWN, List.of()));
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var entry = executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, entry.type());
+        assertTrue(entry.errorReason().contains("peer-verification setting"), entry.errorReason());
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * A first turn skipped because the member's peer-verification setting cannot be
+     * read starts no member conversation. The discussion's attachments are shared
+     * on a member's first turn only, and that is decided by whether its member
+     * conversation exists, so starting one for a skipped turn would cost the member
+     * the attachments for the rest of the discussion.
+     */
+    @Test
+    void executeAgentTurn_firstTurnSkippedForAnUnknownSetting_theNextTurnStillGetsTheAttachments() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        var gc = newGc();
+        var signingGuard = Mockito.mock(GroupSigningGuard.class);
+        when(signingGuard.viewFor(eq(AGENT_A), eq(gc), any())).thenReturn(
+                new GroupSigningGuard.View(GroupSigningGuard.Requirement.UNKNOWN, List.of()),
+                new GroupSigningGuard.View(GroupSigningGuard.Requirement.NOT_REQUIRED, List.of()));
+        when(signingGuard.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        var facade = Mockito.mock(GroupConversationService.class);
+        var executor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, new GroupContextBuilder(null), facade,
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+        var skipped = executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals(TranscriptEntryType.SKIPPED, skipped.type());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        assertTrue(gc.getMemberConversationIds().isEmpty(), "no member conversation is recorded for a skipped turn");
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        verify(facade).grantAndInjectAttachments(eq(gc), eq("conv-1"), any());
     }
 
     // =================================================================
@@ -390,7 +504,7 @@ class MemberTurnExecutorTest {
             handler.onComplete(snapshot);
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
-        return new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, null, "default"),
+        return new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
                 new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
     }
@@ -476,7 +590,7 @@ class MemberTurnExecutorTest {
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
 
         var executor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
 
@@ -510,7 +624,7 @@ class MemberTurnExecutorTest {
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
         var executor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
         var gc = newGc();
@@ -548,7 +662,7 @@ class MemberTurnExecutorTest {
             return null;
         }).when(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
         var executor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
         var gc = new GroupConversation();
         gc.setId("gc-1");
@@ -585,7 +699,7 @@ class MemberTurnExecutorTest {
             return null;
         }).when(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
         var executor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
         var gc = new GroupConversation();
         gc.setId("gc-1");
@@ -613,7 +727,7 @@ class MemberTurnExecutorTest {
         doThrow(new IConversationService.ConversationEndedException("ended"))
                 .when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
         var executor = new MemberTurnExecutor(conversationService, agentFactory,
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 0);
         var gc = new GroupConversation();
         gc.setId("gc-1");
@@ -641,7 +755,7 @@ class MemberTurnExecutorTest {
                 .thenReturn(subConversation);
 
         var executor = new MemberTurnExecutor(Mockito.mock(IConversationService.class), Mockito.mock(IAgentFactory.class),
-                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                new GroupSigningGuard(null, null, "default"), new GroupContextBuilder(null),
                 groupConversationService, new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
 
         var gc = new GroupConversation();

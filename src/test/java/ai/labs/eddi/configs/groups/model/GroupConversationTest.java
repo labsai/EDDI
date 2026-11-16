@@ -136,12 +136,13 @@ class GroupConversationTest {
                     "agent-1", "Agent One", "Signed content",
                     0, "Opinions", TranscriptEntryType.OPINION, now,
                     null, null, "sig-base64",
-                    "nonce-uuid", 1715800000000L, 2);
+                    "nonce-uuid", 1715800000000L, 2, 3);
 
             assertEquals("sig-base64", entry.signature());
             assertEquals("nonce-uuid", entry.signatureNonce());
             assertEquals(1715800000000L, entry.signatureTimestampMs());
             assertEquals(2, entry.signatureKeyVersion());
+            assertEquals(3, entry.signatureRound());
         }
 
         @Test
@@ -150,7 +151,7 @@ class GroupConversationTest {
             var entry = new TranscriptEntry(
                     "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
                     Instant.now(), null, null, "sig",
-                    "nonce", 1000L, 1);
+                    "nonce", 1000L, 1, null);
 
             assertTrue(entry.hasEnvelopeData());
         }
@@ -161,7 +162,7 @@ class GroupConversationTest {
             var entry = new TranscriptEntry(
                     "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
                     Instant.now(), null, null, null,
-                    "nonce", 1000L, 1);
+                    "nonce", 1000L, 1, null);
 
             assertFalse(entry.hasEnvelopeData());
         }
@@ -172,7 +173,7 @@ class GroupConversationTest {
             var entry = new TranscriptEntry(
                     "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
                     Instant.now(), null, null, "sig",
-                    null, 1000L, 1);
+                    null, 1000L, 1, null);
 
             assertFalse(entry.hasEnvelopeData());
         }
@@ -183,7 +184,7 @@ class GroupConversationTest {
             var entry = new TranscriptEntry(
                     "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
                     Instant.now(), null, null, "sig",
-                    "nonce", null, 1);
+                    "nonce", null, 1, null);
 
             assertFalse(entry.hasEnvelopeData());
         }

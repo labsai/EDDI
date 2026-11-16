@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { AgentStat } from "@/hooks/use-workforce-analytics";
 
 // ─── Types ───────────────────────────────────────────────────────

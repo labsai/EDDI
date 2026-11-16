@@ -27,7 +27,7 @@ and replace **every character that is not a letter or a digit** with `_`. Both
 eddi.schedule.poll-interval         →  EDDI_SCHEDULE_POLL_INTERVAL
 eddi.vault.master-key               →  EDDI_VAULT_MASTER_KEY
 eddi.openai-compat.api-key          →  EDDI_OPENAI_COMPAT_API_KEY
-eddi.tools.websearch.google.api-key →  EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY
+eddi.tools.websearch.brave.api-key  →  EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY
 ```
 
 > **Getting this wrong fails silently.** An unrecognised environment variable is
@@ -165,7 +165,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` — **recommended for production** (Helm: `cluster.degradedTurns` in the chart's `eddi:` block; the Kustomize `nats` component sets it) |
-| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — signed-envelope nonces and the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes): `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
+| `eddi.cluster.degraded.nonces` | `reject` | Replay protection when NATS is down — the webhook delivery de-duplication (the only replay protection of the `github` and `generic-hmac` schemes); group-transcript signing does not use NATS: `reject` refuses with `503` (fail closed; a webhook sender retries); `local` checks node-locally only |
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
 | `eddi.cluster.readiness.require-first-connect` | `true` | Not ready until the node has connected to NATS once since boot: one that never connected cannot take a lease, so every turn it served ran unfenced. A later outage keeps it ready. `false` serves degraded from boot |
@@ -200,6 +200,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are ended after this many days without a turn. A daily sweep does it, first run five minutes after boot; it only changes the state to `ENDED` and deletes nothing, and a conversation paused for human approval is never ended. **`-1` (or `0`) disables it**: no conversation is ended for idleness, and startup logs that it is off. The same sweep still undeploys an old agent version once no conversation on it is active, whatever this is set to |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
+| `eddi.conversations.title-max-length` | `80` | Longest default conversation title, in characters (clamped to 10–200). A conversation is titled with its first user message that was not secret (no `secretInput`, nothing vaulted by a `scope: "secret"` property, not withheld by a guardrail), whitespace collapsed and cut at a word. An owner's rename (`PATCH /conversationstore/conversations/{conversationId}`) and an agent's model-written title (`titleGeneration`, see [agent-config-authoring.md](agent-config-authoring.md#conversation-titles-titlegeneration)) are not bound by it |
 | `eddi.expressions.max-length` | `32768` | Longest expression string, in characters, the expression parser accepts — a `context` entry of type `expressions`, a dictionary's `expressions`, a rule's `inputmatcher`/`contextmatcher` text. A client-sent context entry over it is refused with **413** `input_too_large` (the same refusal as a too-long input); one the engine meets inside a turn fails that task. `0` or negative disables the bound. See [security.md](security.md#parser-and-matcher-bounds) |
 | `eddi.expressions.max-depth` | `32` | Deepest parenthesis nesting the expression parser accepts, counted the same way and refused the same way as `eddi.expressions.max-length`. Each level is one recursion; the shipped agent configs use three |
 | `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
@@ -402,7 +403,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds one under `agent-signing-key:{agentId}` — nothing in EDDI writes one today, see [architecture.md](architecture.md#cryptographic-agent-identity). Each node keeps the vault's answer for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute |
+| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds the unversioned one under `agent-signing-key:{agentId}`. Generating a key (`POST /agentstore/agents/{id}/signing-keys`) writes versioned keys only, so audit entries carry no agent signature; see [architecture.md](architecture.md#cryptographic-agent-identity). Each node keeps the vault's answer for 60 s — the key, or that there is none — so a key added, replaced or removed in the vault is picked up within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
@@ -465,9 +466,11 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
 | `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
-| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
-| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
-| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID |
+| `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key), `brave` (Brave Search API, $5 per 1,000 requests) or `google` (deprecated — Google shuts the Custom Search JSON API down on 2027-01-01; a startup WARN says so). A paid provider without its key falls back to `duckduckgo`. See [langchain.md → Web Search Tool](langchain.md#web-search-tool) |
+| `eddi.tools.websearch.brave.api-key` | *(empty)* | Required for the `brave` provider. A plain key or a `${vault:...}` reference; sent in the `X-Subscription-Token` header |
+| `eddi.tools.websearch.price-per-call` | *(empty)* | Dollars one `websearch` call costs in cost tracking, replacing the provider default (`0.005` for `brave` and `google`, `0.001` for `duckduckgo`). Empty uses the provider default; a negative or non-numeric value is ignored with a startup WARN. A per-agent `toolPricing` still wins |
+| `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the deprecated `google` provider |
+| `eddi.tools.websearch.google.cx` | *(empty)* | Google Programmable Search engine ID, for the deprecated `google` provider |
 | `eddi.tools.weather.openweathermap.api-key` | *(empty)* | Required by the weather tool |
 | `eddi.httpcalls.default-timeout-millis` | `30000` | Per-call timeout when the httpCall does not set one. Without it a call can occupy the conversation thread indefinitely |
 | `eddi.httpcalls.batch.default-max-size` | `100` | Most requests a fire-and-forget `batchRequests` may expand into when the call sets no `maxBatchSize`. A larger target array refuses the whole call. See [httpcalls.md](httpcalls.md) |
@@ -587,8 +590,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions, and on every text inside a peer tool's parameter schema |
 | `eddi.a2a.tool-schema.max-bytes` | `32768` | As `eddi.mcp.tool-schema.max-bytes`, for A2A peer tools |
 | `eddi.a2a.tool-schema.max-bytes-per-agent` | `524288` (512 KB) | As `eddi.mcp.tool-schema.max-bytes-per-server`, per A2A peer |
-| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
-| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
+| `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Unused: nothing registers signed-envelope nonces any more. Group-transcript entries are checked for duplicate nonces within their own transcript, and A2A requests are not signed |
+| `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Unused, as `eddi.a2a.signing.nonce.max-age-ms` |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
 | `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
