@@ -24,4 +24,10 @@
   follows; an edit made meanwhile built a draft on the version before it and hid the key change. The
   sections, `editAgent` and the fieldset are now locked while either key mutation is pending.
 
+- **The revoke endpoint's OpenAPI text no longer overclaims.** It said a revoked key's signature
+  "proves nothing"; peer verification (`GroupSigningGuard`, via `getKeyForVersion`) does not check
+  the revoked flag yet. It now says revocation stops the agent signing, and what verification still
+  accepts, as the Manager's confirmation dialog already did.
+- The Generate button uses the shared `Button` (outline, small) instead of a hand-styled one.
+
 No new UI strings.

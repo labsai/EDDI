@@ -48,6 +48,7 @@ import { ApprovalContextEditor } from "./approval-context-editor";
 import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 /** What every agent-detail section takes from the page. */
@@ -319,16 +320,18 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
         {signingKeyAction && (
           <div className="flex items-start gap-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={signingKeyAction.onGenerate}
               disabled={keyButtonsDisabled}
-              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+              className="shrink-0 gap-1"
               data-testid="generate-signing-key"
             >
               <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
               {t("agentDetail.generateSigningKey", "Generate signing key")}
-            </button>
+            </Button>
             <p className="text-[10px] text-muted-foreground" data-testid="generate-signing-key-hint">
               {signingKeyAction.disabledReason ??
                 t(

@@ -213,8 +213,9 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @RolesAllowed("eddi-admin")
     @Operation(operationId = "revokeAgentSigningKey", summary = "Revoke one of this agent's signing keys",
                description = "Marks identity.keys entry keyVersion revoked (every entry of that version, if it is declared twice) and "
-                       + "saves the agent as a new, compatible version; the private key is then deleted from the secrets vault. A "
-                       + "revoked key is valid at no time, so a signature under it proves nothing, however old it claims to be. "
+                       + "saves the agent as a new, compatible version; the private key is then deleted from the secrets vault. "
+                       + "Revocation stops this agent signing with the key; peer verification does not refuse it yet, so a "
+                       + "message signed with it, by anyone holding a copy of its private key, can still verify. "
                        + "keyVersion 0 is the legacy unversioned key (identity.publicKey), which has no revoked flag and is removed "
                        + "instead; an identity.keys entry declared as version 0 is revoked with it. Revoking the newest key stops the agent signing — it does not fall back to an older key — so "
                        + "generate its replacement first; until then a save with signInterAgentMessages on is refused. Revoking a key "
