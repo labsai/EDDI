@@ -110,6 +110,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 discarded BOOLEAN NOT NULL DEFAULT FALSE,
                 discarded_at_ms BIGINT,
                 self_reported_outcome VARCHAR(32),
+                refs TEXT[],
                 written_at_ms BIGINT,
                 PRIMARY KEY (conversation_id, execution_id)
             )
@@ -152,12 +153,16 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             + "AND attname = 'self_reported_outcome' AND NOT attisdropped";
     static final String ADD_SELF_REPORTED_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)";
 
+    /** Added in H5 (business references), checked like the column above. */
+    static final String HAS_REFS_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') AND attname = 'refs' AND NOT attisdropped";
+    static final String ADD_REFS_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS refs TEXT[]";
+
     /** The columns a row write binds, in bind order. */
     static final List<String> WRITTEN = List.of("conversation_id", "execution_id", "step_index", "agent_id", "agent_version",
             "previous_agent_version", "user_id", "origin", "day", "recorded_at_ms", "updated_at_ms", "cost_usd", "discarded_cost_usd",
             "input_tokens", "output_tokens", "total_tokens", "duration_ms", "error_kind", "paused", "failures", "fallback_served", "tool_calls",
             "tool_failures", "tool_refusals", "guardrail_trips", "user_input", "agent_output", "last_output_question", "actions", "discarded",
-            "self_reported_outcome");
+            "self_reported_outcome", "refs");
 
     /** Columns a replace does not overwrite with the written value. */
     private static final Set<String> NOT_REPLACED = Set.of("conversation_id", "execution_id", "day", "recorded_at_ms", "discarded");
@@ -248,6 +253,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             // Before the indexes: one of them is on written_at_ms.
             addColumnIfMissing(statement, HAS_WRITTEN_AT_COLUMN, ADD_WRITTEN_AT_COLUMN);
             addColumnIfMissing(statement, HAS_SELF_REPORTED_COLUMN, ADD_SELF_REPORTED_COLUMN);
+            addColumnIfMissing(statement, HAS_REFS_COLUMN, ADD_REFS_COLUMN);
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
             }
@@ -312,7 +318,8 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         s.setBoolean(i++, turn.lastOutputWasQuestion());
         s.setArray(i++, connection.createArrayOf("text", turn.actions().toArray(new String[0])));
         s.setBoolean(i++, turn.discarded());
-        s.setString(i, turn.selfReportedOutcome());
+        s.setString(i++, turn.selfReportedOutcome());
+        s.setArray(i, connection.createArrayOf("text", turn.refs().toArray(new String[0])));
     }
 
     private static Long millis(Instant instant) {
@@ -871,7 +878,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 r.getString("error_kind"), r.getBoolean("paused"), failuresOf(r.getString("failures")), r.getBoolean("fallback_served"),
                 r.getInt("tool_calls"), r.getInt("tool_failures"), r.getInt("tool_refusals"), r.getInt("guardrail_trips"), r.getBoolean("user_input"),
                 r.getBoolean("agent_output"), r.getBoolean("last_output_question"), actions, r.getBoolean("discarded"),
-                r.getString("self_reported_outcome"));
+                r.getString("self_reported_outcome"), textArray(r, "refs"));
+    }
+
+    private static List<String> textArray(ResultSet r, String column) throws SQLException {
+        List<String> values = new ArrayList<>();
+        Array array = r.getArray(column);
+        if (array != null && array.getArray() instanceof Object[] entries) {
+            for (Object value : entries) {
+                if (value != null) {
+                    values.add(String.valueOf(value));
+                }
+            }
+        }
+        return values;
     }
 
     private static Integer integer(ResultSet r, String column) throws SQLException {

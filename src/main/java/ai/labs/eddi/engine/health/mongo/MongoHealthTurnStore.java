@@ -125,6 +125,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
     static final String FIELD_DISCARDED = "discarded";
     static final String FIELD_DISCARDED_AT = "discardedAt";
     static final String FIELD_SELF_REPORTED = "selfReportedOutcome";
+    static final String FIELD_REFS = "refs";
     static final String FIELD_WRITTEN_LATE = "writtenAt";
 
     private final MongoCollection<Document> turns;
@@ -736,6 +737,7 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
         d.put(FIELD_ACTIONS, turn.actions());
         d.put(FIELD_DISCARDED, turn.discarded());
         d.put(FIELD_SELF_REPORTED, turn.selfReportedOutcome());
+        d.put(FIELD_REFS, turn.refs());
         return d;
     }
 
@@ -767,7 +769,19 @@ public class MongoHealthTurnStore implements IHealthTurnStore {
                 d.getString(FIELD_ERROR_KIND), flag(d.get(FIELD_PAUSED)), failures, flag(d.get(FIELD_FALLBACK)), intValue(d.get(FIELD_TOOL_CALLS)),
                 intValue(d.get(FIELD_TOOL_FAILURES)), intValue(d.get(FIELD_TOOL_REFUSALS)), intValue(d.get(FIELD_GUARDRAIL_TRIPS)),
                 flag(d.get(FIELD_USER_INPUT)), flag(d.get(FIELD_AGENT_OUTPUT)), flag(d.get(FIELD_QUESTION)), actions, flag(d.get(FIELD_DISCARDED)),
-                d.getString(FIELD_SELF_REPORTED));
+                d.getString(FIELD_SELF_REPORTED), strings(d.get(FIELD_REFS)));
+    }
+
+    private static List<String> strings(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object entry : list) {
+                if (entry != null) {
+                    out.add(String.valueOf(entry));
+                }
+            }
+        }
+        return out;
     }
 
     private static Instant instant(Date date) {

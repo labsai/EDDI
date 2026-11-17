@@ -783,7 +783,7 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
 
 /**
  * Agent Health — gated on {@link grantsHealthReads}: every line names one of the
- * seven health reads, so the section is absent rather than wrong when they are
+ * eight health reads, so the section is absent rather than wrong when they are
  * not granted. Self-contained on purpose (many changes touch this file).
  */
 const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, over time):
@@ -806,7 +806,9 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   until the window passes) or the agent ended it (final at once); when it closes
   it gets an outcome — RESOLVED, ASSUMED_RESOLVED, ESCALATED, ABANDONED, FAILED,
   DEFLECTED or ENDED_QUIETLY — with its evidence, highest
-  first: \`agent_action\` (an action mapped in \`healthConfig.outcomes\`),
+  first: \`external_event\` / \`conversation_id_event\` (a business event
+  matched to the session, see below — it overrides everything else),
+  \`agent_action\` (an action mapped in \`healthConfig.outcomes\`),
   \`self_reported\` (the model's own \`report_conversation_outcome\`, opt-in
   with \`healthConfig.selfReportTool\`, weak), \`agent_closed\`
   (CONVERSATION_END / STOP_CONVERSATION after a successful turn),
@@ -825,6 +827,31 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   \`GET /agents/{agentId}/health/outcome-suggestions\` (actions that often end
   sessions and are not mapped, with a suggested outcome) and suggest a
   \`healthConfig.outcomes\` mapping; never apply it unasked.
+- Business outcome events: an external system (CRM, shop, ticketing) reports
+  what happened after a conversation ("order.placed", "ticket.reopened") through
+  a webhook channel integration whose target has \`"kind": "health-outcomes"\`
+  and \`agentIds\` (the agents it may report for — an event for any other agent
+  is refused; saving needs EDIT on each). Events name a reference
+  (\`"ref": {"orderId": "A-123"}\`) or a \`conversationId\`. A reference must
+  be declared in the agent's \`healthConfig.externalRefs\` (property names whose
+  value the agent sets, e.g. orderId); \`healthConfig.outcomeEvents\` maps event
+  types to outcomes (\`"order.placed": "RESOLVED"\`, \`"NONE"\` = counted
+  only). Refs are stored plain by default; identifier-like names (email, phone,
+  iban, address, …) are refused unless \`healthConfig.hashRefs: true\` (salted
+  hashes, the value never stored). An event is matched to the session that set
+  the reference (or the conversation's session before the event), the last
+  event wins, and the outcome counts as confirmed. Unmatched events wait 72 h
+  for a late match, then are dropped; events of users with restricted processing
+  (GDPR Art. 18) are dropped. The business section shows one \`event:<type>\`
+  measure per declared type (matched count, \`byReference\` /
+  \`byConversationId\`, \`valueSum\`). You cannot create integrations or send
+  events: an admin creates the target with POST /channelstore/channels (the
+  Channels page keeps kind and agentIds but has no fields for them); point to the
+  "agent-health" and "webhook-triggers" docs pages.
+- \`GET /agents/{agentId}/health/export\` (\`format=json|csv\`,
+  \`kind=daily|sessions\`, \`period\`) returns the data for a BI tool:
+  \`daily\` needs VIEW; \`sessions\` follows the drill-down rule below. No user
+  ids, no content.
 - \`GET /agents/{agentId}/health/sessions\` lists single sessions (filters
   \`outcome\`, \`evidence\`, \`origin\`, \`version\`, \`limit\` ≤ 100,
   \`cursor\`) — no user ids, no content. It needs EDIT on the agent and

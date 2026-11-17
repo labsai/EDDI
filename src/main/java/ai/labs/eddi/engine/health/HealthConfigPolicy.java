@@ -15,7 +15,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -46,15 +49,40 @@ public class HealthConfigPolicy {
      *            action → declared outcome, only valid entries
      * @param windowHours
      *            origin → window override in hours, only valid entries
+     * @param externalRefs
+     *            the reference property names, only valid ones (identifier-like
+     *            names only with {@code hashRefs})
+     * @param outcomeEvents
+     *            declared business event type → outcome, or
+     *            {@link HealthConfig#NO_OUTCOME} for a type counted without one
+     * @param hashRefs
+     *            references are recorded and matched as salted hashes
      */
     public record Resolved(Map<String, String> outcomes, boolean assumeResolvedOnSilence, Map<String, Integer> windowHours,
-            boolean selfReportTool) {
+            boolean selfReportTool, List<String> externalRefs, Map<String, String> outcomeEvents, boolean hashRefs) {
 
         public static final Resolved DEFAULTS = new Resolved(Map.of(), true, Map.of(), false);
 
         public Resolved {
             outcomes = outcomes == null ? Map.of() : Map.copyOf(outcomes);
             windowHours = windowHours == null ? Map.of() : Map.copyOf(windowHours);
+            externalRefs = externalRefs == null ? List.of() : List.copyOf(externalRefs);
+            // Declaration order is kept: it is the order of the business measures.
+            outcomeEvents = outcomeEvents == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(outcomeEvents));
+        }
+
+        /** Without business references (H3). */
+        public Resolved(Map<String, String> outcomes, boolean assumeResolvedOnSilence, Map<String, Integer> windowHours, boolean selfReportTool) {
+            this(outcomes, assumeResolvedOnSilence, windowHours, selfReportTool, List.of(), Map.of(), false);
+        }
+
+        /**
+         * The outcome a matched event of {@code eventType} declares, or {@code null}
+         * when the type is undeclared or declared without one.
+         */
+        public String outcomeOfEvent(String eventType) {
+            String outcome = eventType == null ? null : outcomeEvents.get(eventType);
+            return outcome == null || HealthConfig.NO_OUTCOME.equals(outcome) ? null : outcome;
         }
 
         /** Resolves a stored configuration; {@code null} gives the defaults. */
@@ -80,7 +108,27 @@ public class HealthConfigPolicy {
                     }
                 });
             }
-            return new Resolved(outcomes, config.isAssumeResolvedOnSilence(), windows, config.isSelfReportTool());
+            List<String> refs = new ArrayList<>();
+            if (config.getExternalRefs() != null) {
+                for (String ref : config.getExternalRefs()) {
+                    if (ref != null && HealthConfigValidator.REF_NAME.matcher(ref).matches() && !refs.contains(ref)
+                            && (config.isHashRefs() || !HealthConfigValidator.looksLikeIdentifier(ref))
+                            && refs.size() < HealthConfigValidator.MAX_EXTERNAL_REFS) {
+                        refs.add(ref);
+                    }
+                }
+            }
+            Map<String, String> events = new LinkedHashMap<>();
+            if (config.getOutcomeEvents() != null) {
+                config.getOutcomeEvents().forEach((type, outcome) -> {
+                    if (type != null && HealthConfigValidator.EVENT_TYPE.matcher(type).matches()
+                            && events.size() < HealthConfigValidator.MAX_OUTCOME_EVENTS) {
+                        events.put(type, outcome != null && HealthConfig.DECLARABLE_OUTCOMES.contains(outcome) ? outcome : HealthConfig.NO_OUTCOME);
+                    }
+                });
+            }
+            return new Resolved(outcomes, config.isAssumeResolvedOnSilence(), windows, config.isSelfReportTool(), refs, events,
+                    config.isHashRefs());
         }
     }
 
@@ -158,6 +206,24 @@ public class HealthConfigPolicy {
     /** Whether the version offers {@code report_conversation_outcome}. */
     public boolean selfReportToolEnabled(String agentId, Integer version) {
         return of(agentId, version).selfReportTool();
+    }
+
+    /**
+     * The resolved settings of the agent's current (newest) version — what an
+     * inbound event is checked against before any session is known; the defaults
+     * when the agent cannot be read.
+     */
+    public Resolved current(String agentId) {
+        if (agentId == null) {
+            return Resolved.DEFAULTS;
+        }
+        try {
+            var id = agentStore.getCurrentResourceId(agentId);
+            return id == null || id.getVersion() == null ? Resolved.DEFAULTS : of(agentId, id.getVersion());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the current version of agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return Resolved.DEFAULTS;
+        }
     }
 
     /** For tests: whether a version's setting is cached. */

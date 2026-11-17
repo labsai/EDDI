@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.health.HealthConfigValidator;
+import ai.labs.eddi.engine.health.HealthRefDeclarations;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -39,6 +40,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
@@ -84,6 +86,26 @@ public class RestAgentStore implements IRestAgentStore {
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
+
+    /** Response header of save-time warnings, as the channel store answers them. */
+    static final String WARNINGS_HEADER = "X-Eddi-Warnings";
+
+    /**
+     * The save-time check of {@code healthConfig.externalRefs} against the agent's
+     * property setters — a warning only. Field-injected and null-checked: tests
+     * build this class by hand.
+     */
+    @Inject
+    Instance<HealthRefDeclarations> healthRefDeclarations;
+
+    /** The response with the health warnings of {@code configuration}, if any. */
+    private Response withHealthWarnings(Response response, AgentConfiguration configuration) {
+        if (healthRefDeclarations == null || !healthRefDeclarations.isResolvable() || response == null || response.getStatus() >= 300) {
+            return response;
+        }
+        List<String> warnings = healthRefDeclarations.get().warnings(configuration);
+        return warnings.isEmpty() ? response : Response.fromResponse(response).header(WARNINGS_HEADER, String.join(",", warnings)).build();
+    }
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -198,7 +220,7 @@ public class RestAgentStore implements IRestAgentStore {
         requireWorkflowsExist(agentConfiguration);
         Response response = updateWithCompatibility(id, version, agentConfiguration, Boolean.TRUE.equals(compatible));
         capabilityRegistryService.register(id, agentConfiguration);
-        return response;
+        return withHealthWarnings(response, agentConfiguration);
     }
 
     /**
@@ -350,8 +372,8 @@ public class RestAgentStore implements IRestAgentStore {
             log.debugf("Could not register capabilities for new agent: %s", sanitize(e.getMessage()));
         }
 
-        return Response.created(createdUri).location(createdUri)
-                .header("X-Resource-URI", createdUri.toString()).build();
+        return withHealthWarnings(Response.created(createdUri).location(createdUri)
+                .header("X-Resource-URI", createdUri.toString()).build(), agentConfiguration);
     }
 
     @Override

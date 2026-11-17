@@ -22,6 +22,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -92,6 +93,18 @@ public class HealthTurnRecorder {
     private final AtomicLong lastQueueWarning = new AtomicLong();
     private final AtomicLong lastStoreWarning = new AtomicLong();
     private final AtomicLong lastCleanupWarning = new AtomicLong();
+
+    /**
+     * The agent version's {@code healthConfig} — which properties are business
+     * references and whether they are hashed (H5). Field-injected and null-checked:
+     * tests build this class by hand, and then record no references.
+     */
+    @Inject
+    Instance<HealthConfigPolicy> configPolicy;
+
+    /** Hashes references of agents with {@code hashRefs}; null-checked. */
+    @Inject
+    Instance<HealthRefHasher> refHasher;
 
     @Inject
     public HealthTurnRecorder(Instance<IHealthTurnStore> store, Instance<IConversationMemoryStore> conversations,
@@ -181,13 +194,44 @@ public class HealthTurnRecorder {
         if (capture == null) {
             return;
         }
-        submit(capture);
+        HealthConfigPolicy.Resolved config = config(capture.turn());
+        Map<String, String> refs = Map.of();
+        if (config != null && !config.externalRefs().isEmpty()) {
+            try {
+                // On the turn's thread: the live properties must not reach the worker.
+                refs = HealthRefs.rawValues(memory, config.externalRefs());
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not read the business references of a turn: %s", e.getMessage());
+            }
+        }
+        submit(capture, refs, config != null && config.hashRefs());
+    }
+
+    /** The {@code healthConfig} of the turn's version, or null when unknown. */
+    private HealthConfigPolicy.Resolved config(HealthTurn turn) {
+        if (configPolicy == null || !configPolicy.isResolvable() || turn == null) {
+            return null;
+        }
+        try {
+            return configPolicy.get().of(turn.agentId(), turn.agentVersion());
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** Queues the write of {@code capture}; {@code false} when it was dropped. */
     boolean submit(Capture capture) {
+        return submit(capture, Map.of(), false);
+    }
+
+    /**
+     * Queues the write of {@code capture} with the business references {@code refs}
+     * (raw values), stored hashed when {@code hash} — the hashing runs on the
+     * worker.
+     */
+    boolean submit(Capture capture, Map<String, String> refs, boolean hash) {
         try {
-            executor.execute(() -> write(capture));
+            executor.execute(() -> write(refs == null || refs.isEmpty() ? capture : withRefs(capture, refs, hash)));
             return true;
         } catch (RejectedExecutionException e) {
             if (executor.isShutdown()) {
@@ -202,6 +246,12 @@ public class HealthTurnRecorder {
             }
             return false;
         }
+    }
+
+    private Capture withRefs(Capture capture, Map<String, String> refs, boolean hash) {
+        HealthRefHasher hasher = refHasher != null && refHasher.isResolvable() ? refHasher.get() : null;
+        List<String> stored = HealthRefs.stored(refs, hash, hasher);
+        return stored.isEmpty() ? capture : new Capture(capture.turn().withRefs(stored), capture.discardedExecutionIds(), capture.settled());
     }
 
     void write(Capture capture) {

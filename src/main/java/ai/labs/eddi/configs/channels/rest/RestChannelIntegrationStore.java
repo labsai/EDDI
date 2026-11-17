@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -235,6 +236,16 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             return;
         }
         for (var target : configuration.getTargets()) {
+            if (target != null && target.healthOutcomes() && target.getAgentIds() != null) {
+                // Feeding an agent's outcomes is a change to how the agent is judged:
+                // the author must maintain every agent the target binds.
+                for (String agentId : target.getAgentIds()) {
+                    if (agentId != null && !agentId.isBlank()) {
+                        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+                    }
+                }
+                continue;
+            }
             if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
                 continue;
             }
@@ -501,6 +512,40 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
     }
 
+    /** The most agents one {@code health-outcomes} target may bind. */
+    static final int MAX_HEALTH_AGENTS = 50;
+
+    /**
+     * A target with a {@code kind}: only
+     * {@value ChannelTarget#KIND_HEALTH_OUTCOMES} exists, on webhook integrations,
+     * bound to 1 to {@value #MAX_HEALTH_AGENTS} agents, without {@code targetId},
+     * group type or observe mode.
+     */
+    static void validateKind(ChannelTarget target, boolean webhook) {
+        String name = target.getName();
+        if (!target.healthOutcomes()) {
+            throw new BadRequestException("Target '" + name + "': unknown kind '" + target.getKind() + "' — the only kind is '"
+                    + ChannelTarget.KIND_HEALTH_OUTCOMES + "'.");
+        }
+        if (!webhook) {
+            throw new BadRequestException("Target '" + name + "': kind '" + ChannelTarget.KIND_HEALTH_OUTCOMES
+                    + "' is supported for webhook integrations only.");
+        }
+        if (target.getType() == ChannelTarget.TargetType.GROUP || target.isObserveMode()) {
+            throw new BadRequestException("Target '" + name + "': a '" + ChannelTarget.KIND_HEALTH_OUTCOMES
+                    + "' target starts no conversation — no GROUP type, no observeMode.");
+        }
+        if (target.getTargetId() != null && !target.getTargetId().isBlank()) {
+            throw new BadRequestException("Target '" + name + "': a '" + ChannelTarget.KIND_HEALTH_OUTCOMES
+                    + "' target names its agents in agentIds, not targetId.");
+        }
+        List<String> agents = target.getAgentIds();
+        if (agents == null || agents.isEmpty() || agents.size() > MAX_HEALTH_AGENTS || agents.stream().anyMatch(a -> a == null || a.isBlank())) {
+            throw new BadRequestException("Target '" + name + "': a '" + ChannelTarget.KIND_HEALTH_OUTCOMES + "' target needs agentIds — 1 to "
+                    + MAX_HEALTH_AGENTS + " agent ids whose outcome events it may report.");
+        }
+    }
+
     void validateConfiguration(ChannelIntegrationConfiguration config) {
         // A document read through the redacted view must not be stored with the
         // marker in place of the credential — see RedactionMarkerGuard.
@@ -579,7 +624,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         "Duplicate target name: '" + target.getName()
                                 + "'. Each target must have a unique name.");
             }
-            if (target.getTargetId() == null || target.getTargetId().isBlank()) {
+            if (target.getKind() != null) {
+                validateKind(target, webhook);
+            } else if (target.getTargetId() == null || target.getTargetId().isBlank()) {
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }

@@ -303,6 +303,16 @@ public interface HealthTurnStoreContract {
     }
 
     @Test
+    @DisplayName("business references round-trip and are replaced with the row (H5)")
+    default void refsRoundTrip() {
+        HealthTurn first = row("c1", 1, "e1", T0, 0.10, false).withRefs(List.of("orderId=A-1", "ticketId#ab12"));
+        store().upsert(first);
+        assertEquals(List.of("orderId=A-1", "ticketId#ab12"), only("c1").refs());
+        store().upsert(row("c1", 1, "e1", T0.plusSeconds(5), 0.10, false));
+        assertTrue(only("c1").refs().isEmpty(), "replaced by the newer capture");
+    }
+
+    @Test
     @DisplayName("H3: a full page of conversations sharing one newest write continues after the (time, conversation) pair — no repeat, no gap")
     default void conversationsUpdatedBetweenSameInstant() {
         for (String c : List.of("d", "a", "c", "b", "e")) {

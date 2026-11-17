@@ -93,6 +93,16 @@ public class HealthTurnRetention {
     @Inject
     Instance<IHealthOutcomeStore> outcomeStore;
 
+    /**
+     * The business events (H5), which share the retention; null when built by hand.
+     */
+    @Inject
+    Instance<IHealthEventStore> eventStore;
+
+    private IHealthEventStore events() {
+        return eventStore != null && eventStore.isResolvable() ? eventStore.get() : null;
+    }
+
     private IHealthOutcomeStore outcomes() {
         return outcomeStore != null && outcomeStore.isResolvable() ? outcomeStore.get() : null;
     }
@@ -145,6 +155,17 @@ public class HealthTurnRetention {
                 }
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Failed to delete expired Agent Health session outcomes; the next daily sweep retries");
+            }
+        }
+        IHealthEventStore businessEvents = events();
+        if (businessEvents != null) {
+            try {
+                long deleted = businessEvents.deleteOlderThan(cutoff);
+                if (deleted > 0) {
+                    LOGGER.infof("Deleted %d Agent Health business event(s) from before %s", deleted, cutoff);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Failed to delete expired Agent Health business events; the next daily sweep retries");
             }
         }
         LocalDate dailyCutoff = dailyCutoff();
@@ -274,6 +295,14 @@ public class HealthTurnRetention {
                     // marks no day, and a failure here cannot skip the turn rows' marks.
                     try {
                         removed += sessions.deleteByConversationId(conversationId);
+                    } catch (RuntimeException e) {
+                        counts[FAILED_DELETES]++;
+                    }
+                }
+                IHealthEventStore businessEvents = events();
+                if (businessEvents != null) {
+                    try {
+                        removed += businessEvents.deleteByConversationId(conversationId);
                     } catch (RuntimeException e) {
                         counts[FAILED_DELETES]++;
                     }

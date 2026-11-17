@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.api.IRestAgentHealth;
 import ai.labs.eddi.engine.health.HealthAccess;
 import ai.labs.eddi.engine.health.HealthDrillDownAccess;
+import ai.labs.eddi.engine.health.HealthExport;
 import ai.labs.eddi.engine.health.HealthOutcomeViews;
 import ai.labs.eddi.engine.health.HealthOutcomes;
 import ai.labs.eddi.engine.health.HealthPeriods;
@@ -20,6 +21,8 @@ import ai.labs.eddi.engine.health.report.HealthReports.OutcomeSuggestions;
 import ai.labs.eddi.engine.health.report.HealthReports.SessionPage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -46,18 +49,53 @@ public class RestAgentHealth implements IRestAgentHealth {
     private final HealthReportService reports;
     private final HealthDrillDownAccess drillDown;
     private final HealthOutcomeViews outcomes;
+    private final HealthExport exports;
+
+    static final Set<String> EXPORT_FORMATS = Set.of("json", "csv");
+    static final Set<String> EXPORT_KINDS = Set.of("daily", "sessions");
 
     /** Without the session views — for tests of the other endpoints. */
     public RestAgentHealth(HealthAccess access, HealthReportService reports) {
-        this(access, reports, null, null);
+        this(access, reports, null, null, null);
+    }
+
+    /** Without the export — for tests of the other endpoints. */
+    public RestAgentHealth(HealthAccess access, HealthReportService reports, HealthDrillDownAccess drillDown, HealthOutcomeViews outcomes) {
+        this(access, reports, drillDown, outcomes, null);
     }
 
     @Inject
-    public RestAgentHealth(HealthAccess access, HealthReportService reports, HealthDrillDownAccess drillDown, HealthOutcomeViews outcomes) {
+    public RestAgentHealth(HealthAccess access, HealthReportService reports, HealthDrillDownAccess drillDown, HealthOutcomeViews outcomes,
+            HealthExport exports) {
         this.access = access;
         this.reports = reports;
         this.drillDown = drillDown;
         this.outcomes = outcomes;
+        this.exports = exports;
+    }
+
+    @Override
+    public Response export(String agentId, String format, String kind, String period, String from, String to, Integer version,
+                           List<String> origins) {
+        access.requireView(agentId);
+        String f = format == null || format.isBlank() ? "json" : format.trim();
+        String k = kind == null || kind.isBlank() ? "daily" : kind.trim();
+        if (!EXPORT_FORMATS.contains(f)) {
+            throw HealthPeriods.badRequest("format must be json or csv — was '" + sanitize(f) + "'");
+        }
+        if (!EXPORT_KINDS.contains(k)) {
+            throw HealthPeriods.badRequest("kind must be daily or sessions — was '" + sanitize(k) + "'");
+        }
+        Window window = HealthPeriods.window(period, from, to, "30d", reports.today());
+        Integer v = HealthPeriods.version("version", version);
+        List<String> effective = reports.effectiveOrigins(agentId, window, HealthPeriods.origins(origins));
+        HealthExport.Body body = "sessions".equals(k)
+                ? exports.sessions(agentId, window, drillDown.reviewableVersions(agentId, v), effective, f)
+                : exports.daily(agentId, window, v, effective, f);
+        StreamingOutput stream = body::write;
+        String file = "agent-health-" + k + "-" + window.from() + "-" + window.to() + "." + f;
+        return Response.ok(stream, "csv".equals(f) ? "text/csv; charset=utf-8" : "application/json")
+                .header("Content-Disposition", "attachment; filename=\"" + file + "\"").header("Cache-Control", "no-store").build();
     }
 
     @Override

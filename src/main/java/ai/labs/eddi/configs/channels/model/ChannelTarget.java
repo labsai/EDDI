@@ -35,6 +35,14 @@ public class ChannelTarget {
     private String targetId;
     private boolean observeMode;
     private ObserveConfig observeConfig;
+    private String kind;
+    private List<String> agentIds;
+
+    /**
+     * {@link #getKind()} of a webhook target whose events are Agent Health business
+     * events, not conversation input ({@code docs/agent-health.md}).
+     */
+    public static final String KIND_HEALTH_OUTCOMES = "health-outcomes";
 
     public ChannelTarget() {
         this.triggers = new ArrayList<>();
@@ -113,5 +121,38 @@ public class ChannelTarget {
 
     public void setObserveConfig(ObserveConfig observeConfig) {
         this.observeConfig = observeConfig;
+    }
+
+    /**
+     * What the target does with what it receives: absent (the default) starts or
+     * continues a conversation with {@link #getTargetId()};
+     * {@value #KIND_HEALTH_OUTCOMES} (webhook integrations only) stores the
+     * request's events as Agent Health business events of the agents in
+     * {@link #getAgentIds()} — no conversation, no {@code targetId}.
+     */
+    public String getKind() {
+        return kind;
+    }
+
+    public void setKind(String kind) {
+        this.kind = kind;
+    }
+
+    /** Whether this is a {@value #KIND_HEALTH_OUTCOMES} target. */
+    public boolean healthOutcomes() {
+        return KIND_HEALTH_OUTCOMES.equals(kind);
+    }
+
+    /**
+     * The agents a {@value #KIND_HEALTH_OUTCOMES} target may report events for — an
+     * event naming any other agent is refused, so a leaked signing secret can only
+     * feed the agents it was set up for. The author needs {@code EDIT} on each.
+     */
+    public List<String> getAgentIds() {
+        return agentIds != null ? new ArrayList<>(agentIds) : null;
+    }
+
+    public void setAgentIds(List<String> agentIds) {
+        this.agentIds = agentIds;
     }
 }

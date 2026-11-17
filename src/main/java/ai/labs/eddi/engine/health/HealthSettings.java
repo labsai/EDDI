@@ -52,6 +52,13 @@ public class HealthSettings {
     private Duration emailSessionWindow = DEFAULT_EMAIL_SESSION_WINDOW;
     private double minOutcomeCoverage = DEFAULT_MIN_OUTCOME_COVERAGE;
     private Duration outcomeFeedOverlap = DEFAULT_OUTCOME_FEED_OVERLAP;
+    private Duration eventMatchWindow = DEFAULT_EVENT_MATCH_WINDOW;
+    private int maxEventsPerRequest = DEFAULT_MAX_EVENTS_PER_REQUEST;
+    private int maxPendingEventsPerAgent = DEFAULT_MAX_PENDING_EVENTS_PER_AGENT;
+
+    static final Duration DEFAULT_EVENT_MATCH_WINDOW = Duration.ofHours(72);
+    static final int DEFAULT_MAX_EVENTS_PER_REQUEST = 100;
+    static final int DEFAULT_MAX_PENDING_EVENTS_PER_AGENT = 10_000;
 
     @Inject
     public HealthSettings(@ConfigProperty(name = "eddi.health.enabled", defaultValue = "true") boolean enabled,
@@ -105,6 +112,43 @@ public class HealthSettings {
      */
     public Duration outcomeFeedOverlap() {
         return outcomeFeedOverlap;
+    }
+
+    /** The business-event settings (H5), injected like the settings above. */
+    @Inject
+    void eventSettings(@ConfigProperty(name = "eddi.health.event-match-window", defaultValue = "72h") Duration matchWindow,
+                       @ConfigProperty(name = "eddi.health.events.max-per-request", defaultValue = "100") int maxPerRequest,
+                       @ConfigProperty(name = "eddi.health.events.max-pending-per-agent", defaultValue = "10000") int maxPendingPerAgent) {
+        this.eventMatchWindow = positiveOr(matchWindow, DEFAULT_EVENT_MATCH_WINDOW);
+        this.maxEventsPerRequest = maxPerRequest > 0 ? maxPerRequest : DEFAULT_MAX_EVENTS_PER_REQUEST;
+        this.maxPendingEventsPerAgent = maxPendingPerAgent > 0 ? maxPendingPerAgent : DEFAULT_MAX_PENDING_EVENTS_PER_AGENT;
+    }
+
+    /**
+     * How long a business event that matches no session yet is kept for a late
+     * match ({@code eddi.health.event-match-window}, 72 h) — the session that set
+     * its reference may not have been evaluated yet, or the event may arrive before
+     * the conversation's turn row. Then it is counted and deleted.
+     */
+    public Duration eventMatchWindow() {
+        return eventMatchWindow;
+    }
+
+    /**
+     * The most events one webhook request may carry
+     * ({@code eddi.health.events.max-per-request}, 100).
+     */
+    public int maxEventsPerRequest() {
+        return maxEventsPerRequest;
+    }
+
+    /**
+     * The most unmatched events one agent may have waiting
+     * ({@code eddi.health.events.max-pending-per-agent}, 10 000); beyond, a request
+     * is refused with 429.
+     */
+    public int maxPendingEventsPerAgent() {
+        return maxPendingEventsPerAgent;
     }
 
     /** Collection settings; everything else at its default — for tests. */

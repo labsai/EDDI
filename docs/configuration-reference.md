@@ -305,6 +305,9 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 | `eddi.health.email-session-window` | `72h` | The same for e-mail conversations |
 | `eddi.health.outcome-feed-overlap` | `15m` | How far behind its watermark the outcome evaluation re-reads conversations every pass. Turn rows are ordered by their capture time, set before they wait on a node's health queue, so a row can land after the watermark passed it; the overlap catches one up to this late, at the cost of re-judging that many minutes of conversations each pass. A later row is judged with its conversation's next change or when its session is due. `0` re-reads nothing |
 | `eddi.health.min-outcome-coverage` | `0.5` | The outcome coverage (closed sessions with an outcome other than `ENDED_QUIETLY`) below which the effectiveness rates are withheld — `value: null` with a hint |
+| `eddi.health.event-match-window` | `72h` | How long a business event of a `health-outcomes` webhook target that matches no session yet is kept for a late match (its session may not be evaluated yet); then it is deleted and counted `eddi_health_events_total{outcome="expired"}` |
+| `eddi.health.events.max-per-request` | `100` | The most business events one `health-outcomes` webhook request may carry; more is a 413 |
+| `eddi.health.events.max-pending-per-agent` | `10000` | The most unmatched business events one agent may have waiting; past it further events are refused (`agent_backlog_full`, 429 when every event of a request was) |
 
 ---
 

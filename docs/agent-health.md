@@ -338,6 +338,7 @@ signal wins:
 
 | # | Signal | Outcome | Evidence | When |
 | --- | --- | --- | --- | --- |
+| 0 | A [business event](#business-outcomes) matched to the session whose type the version's `healthConfig.outcomeEvents` maps to an outcome; of several, the one that happened last | as mapped | `external_event` (matched by reference) or `conversation_id_event` | when matched, `provisional` until the window passes |
 | 1 | The last action of the session mapped in [`healthConfig.outcomes`](agent-config-authoring.md#healthconfig--how-agent-health-judges-conversations) | as mapped (`RESOLVED`, `ESCALATED`, `DEFLECTED`, `FAILED`, `ABANDONED`) | `agent_action` | at once, `provisional` until the window passes |
 | 2 | The session's last [`report_conversation_outcome`](#the-self-report-tool) claim | as claimed | `self_reported` | at once, `provisional` |
 | 3 | `CONVERSATION_END` or `STOP_CONVERSATION` on a last turn that did not fail | `ASSUMED_RESOLVED` | `agent_closed` | at once, final — the conversation is over |
@@ -350,9 +351,9 @@ signal wins:
 Without signal 1–3 an open session is `OPEN`. A mapped action on a turn that
 also ended the conversation is final at once. The conversation's `endReason`
 (`idle`, `agent-version-retired`) is never evidence — it is not even read.
-External outcome events (`external_event`, `conversation_id_event`, H5) and a
-sampled judge (`judged`, H6) will rank above signal 1; they are reserved values
-today.
+A matched business event (signal 0) outranks the agent's own word — a
+`ticket.reopened` mapped to `FAILED` overrides the agent's `order_confirmed`
+mapped to `RESOLVED`. A sampled judge (`judged`, H6) is a reserved value today.
 
 **Both assumptions are on by default and kept apart** (decision 3): agent closed
 and silence each count as `ASSUMED_RESOLVED`, but under their own evidence, and
@@ -481,6 +482,124 @@ session's first turn) are deleted, never one outside it; when every turn of the
 range was undone, the previous session is judged again (an undo back into it).
 Idempotent: judging the same rows again writes the same rows.
 
+## Business outcomes
+
+What the business says happened after a conversation — the order was placed, the
+ticket was reopened — is the strongest evidence of an outcome there is (plan §5).
+It reaches Agent Health as **business events** through a signed webhook, is
+**matched** to the session it is about, and then decides that session's outcome
+above every other source and feeds the business section.
+
+### References
+
+An agent names the properties that identify its business objects in
+[`healthConfig.externalRefs`](agent-config-authoring.md#healthconfig--how-agent-health-judges-conversations)
+(`["orderId", "ticketId"]`). Whenever a turn ends with one of them set — by
+`property.json`, an HTTP call's `postResponse` or the model — the turn's row
+records it as `name=value` (`orderId=A-123`), and its session row carries the
+references of its turns. At most 10 per turn and 50 per session; a value longer
+than 128 characters, a blank one and any secret (`scope: secret`, vaulted) are
+never recorded. Only the declared names are read — no other property value ever
+reaches a health row.
+
+**Privacy.** References are **plain by default** (decision 6): a plain `orderId`
+is what an export can join on, and a reference to a business object is not a
+person. Names that look like personal identifiers — `email`, `phone`, `mobile`,
+`iban`, `ssn`, `passport`, `address`, `first_name`, … matched as whole words, so
+`customerEmail` is refused and `addressable` is not — are refused at save unless
+the agent sets **`hashRefs: true`**: references are then stored and matched only
+as `name#<HMAC-SHA256>` under a per-deployment random salt kept in the vault's
+metadata store (`health-ref-salt`), and nothing in Agent Health holds the value.
+Without a salt (no metadata store) a reference meant to be hashed is not
+recorded at all — never in plain. Rows carrying references are personal data
+like every health row: erased and exported with the user ([GDPR](#gdpr)).
+
+### Sending events — the `health-outcomes` webhook target
+
+Events arrive through the existing [signed inbound webhook](webhook-triggers.md#business-outcome-events-health-outcomes-targets)
+with a target of `"kind": "health-outcomes"` bound to `agentIds` — so they get the
+endpoint, the HMAC verification, the replay cache, the delivery budget, the vault
+secret rules and CloudEvents of every other
+webhook, and nothing new to secure. (The Manager's Channels page keeps a
+target's `kind` and `agentIds` when it is edited there but has no fields for them
+yet: create the target through `POST /channelstore/channels`.)
+
+```json
+{ "agentId": "…", "ref": { "orderId": "A-123" }, "event": "order.placed", "value": 49.90, "at": "2026-11-10T09:12:00Z" }
+```
+
+One event, an array, or `{"events": [...]}` per request (at most 100);
+`conversationId` may replace `ref`. An event for an agent the target does not bind
+is refused (a leaked secret can only feed the agents it was set up for); a
+reference name the agent's current version does not declare is refused; every
+stored event records the integration it came through. Each refused event is
+named in the answer with its reason; see the webhook page for the full answer.
+
+### Matching
+
+A pass of the `health-rollup` job matches pending events right before it
+evaluates outcomes, so a match is judged in the same pass:
+
+- **By conversation id** (`conversation_id_event`): the conversation's session
+  that started last at or before the event's `at` (plus 5 minutes of clock
+  skew) — the first session when all started later. A conversation of another
+  agent never matches.
+- **By reference** (`external_event`): of the agent's sessions carrying the
+  reference, the one that **set** it — per conversation the earliest session
+  carrying it, because a conversation-scoped property is carried into the later
+  sessions of its conversation — and of those, the one that started last at or
+  before `at` (plus the skew): the most recent conversation about that business
+  object before the event happened. A plain event reference also finds sessions
+  that recorded it hashed, so switching `hashRefs` on loses no match. A
+  `longTerm` reference is loaded into every later conversation of the user: the
+  latest one then matches — use conversation or step scope for references.
+
+An event that matches nothing yet is **kept pending** — its session may not be
+evaluated yet (outcomes run every rollup interval) — and tried again every pass
+until `eddi.health.event-match-window` (72 h) after it arrived; then it is
+deleted and counted `eddi_health_events_total{outcome="expired"}`. At most
+10 000 unmatched events wait per agent (`eddi.health.events.max-pending-per-agent`).
+
+A match marks its session due, and the evaluation judges it again: the event's
+outcome under the `outcomeEvents` of the session's **last version** (a type
+mapped to `NONE`, or not declared, decides nothing but is still counted). **Of
+several events, the one that happened last decides** (by `at`, then by
+receipt) — a business object's latest state is its truth: `order.placed` then
+`order.refunded` is a refund. The outcome counts as **confirmed** in the
+resolution breakdown.
+
+**GDPR on a match.** The match names the session's user. When that user's
+processing is **restricted** (Art. 18) the event is dropped
+(`outcome="restricted"`) — nothing new is derived from a restricted user's
+conversations, as ratings are refused for them; a restriction that cannot be
+read keeps the event pending (fail closed). An event for a user being erased is
+dropped (`outcome="erased"`). An event for a deleted conversation finds no
+session and expires.
+
+### Business measures and export
+
+The **business** section has one `event:<eventType>` measure per type the
+agent's current version declares in `outcomeEvents`: the matched events of that
+type in the period (by the day of their `at`), with a baseline scaled to the
+period's exposure and a significance test like the count measures, and a
+breakdown `byReference` · `byConversationId` · `valueSum` (the sum of the events'
+`value`s, `n` the events that carried one). Only **matched** events count — an
+event no session of the agent can be tied to is not the agent's business — and
+the measure is informational: it says what happened after the agent's sessions,
+never that the agent caused it (plan §5.4).
+
+`GET /agents/{agentId}/health/export` writes the same data for a BI tool:
+`kind=daily` (default; needs `VIEW`) one row per UTC day — turns, failed turns
+(agent / platform), cost, tokens, sessions, engaged and closed sessions, the
+resolution in its four parts, escalated, abandoned, deflected, failed, ended
+quietly, and per declared event type its matched count and value sum;
+`kind=sessions` (the drill-down rule: `EDIT` and conversation review enabled)
+one row per session that ended in the period — the drill-down's columns plus its
+references in the form stored, at most 10 000 (`truncated` in JSON). `format=csv`
+has a header and a fixed column order (formula-looking cells get a leading
+`'`); `format=json` the same rows as objects. Neither carries a user id or
+conversation content.
+
 ## Change markers
 
 Charts carry markers of what changed, because a deployment record has no
@@ -515,6 +634,7 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/agents/{agentId}/health/compare` | `from=<version>&to=<version>[&days=14]`: both sides' sections and per-measure `deltas` |
 | `GET` | `/health/agents` | The portfolio: every agent the caller may view (at most 5,000; `agentsTruncated: true` when there are more), `sort=attention\|name\|traffic`, `limit` (default 100, ≤ 500), `cursor` (`nextCursor`, `null` on the last page), plus `platformIncidents` |
 | `GET` | `/agents/{agentId}/health/sessions` | The drill-down: one row per session — conversation id, `sessionNo`, start and end, version, origin, engaged, outcome, evidence, `provisional`, turns, cost, failed turns — newest first. Filters `outcome=` and `evidence=` (repeatable), `origin`, `version`, `period`/`from`/`to`; `limit` 1–100 (default 50), `cursor` |
+| `GET` | `/agents/{agentId}/health/export` | The [export](#business-measures-and-export): `kind=daily\|sessions`, `format=json\|csv`, `period`/`from`/`to`, `version`, `origin` |
 | `GET` | `/agents/{agentId}/health/outcome-suggestions` | The actions that most often end engaged, closed sessions and are not mapped in the current version's `healthConfig.outcomes`, with `sessionsEndingWith`, a `suggested` outcome from the action's name (`*confirm*`, `*done*`, `*complete*`, `*booked*` → `RESOLVED`; `*handoff*`, `*human*`, `*escalat*` → `ESCALATED`; `*out_of_scope*`, `*not_supported*` → `DEFLECTED`; else none) and a `reason`. At most 20; reserved actions are left out. Never applies anything |
 
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
@@ -556,6 +676,7 @@ daily granularity, because that is what the rollup keeps.
 | Portfolio | Only agents the caller may `VIEW`; platform incidents are computed over those agents only |
 | Session drill-down | The [conversation-review rule](workspaces.md): the caller **maintains** the agent (`EDIT`), else `403 {"reason": "FORBIDDEN"}`, and conversation review is enabled on the version asked for — without `version`, on the agent's current version — else `403 {"reason": "REVIEW_DISABLED"}`. Without `version` the page lists only sessions of versions that have review enabled (of the 100 newest). The version checked is the one of the session's **last** turn: a session that moved from a version without review to one with it is listed. The rows carry ids, counts and outcomes, no content; reading the conversation itself goes through the conversation endpoints, which apply the review rule to the conversation's own version |
 | Outcome suggestions | `VIEW`, like the report |
+| Export | `kind=daily`: `VIEW`, like the report. `kind=sessions`: the session drill-down rule above, with its `403` reasons; its rows carry the sessions' business references as stored (hashed when the agent hashes them) |
 
 No view but the drill-down carries a conversation id, and none carries
 conversation content or a user id.
@@ -588,7 +709,7 @@ intent); health profiles will override them per agent.
 | | `distinctUsers` | Distinct user ids of the period's turn rows | Informational |
 | | `returningUserShare` | Users of the period who also had a turn in the 30 days before it (clipped to the turn-row retention) ÷ distinct users. Never called significant: the look-back of a baseline near the retention is shorter. No daily series | Informational |
 | | `turnsPerSession` | The sessions' turns ÷ sessions | Informational |
-| Business | — | Empty until outcome events (H5) | — |
+| Business | `event:<eventType>` | Business events of a type the current version declares in `outcomeEvents`, **matched** to the agent's sessions in the period (by the day of their `at`). `breakdown`: `byReference`, `byConversationId`, `valueSum` (`n` = events with a value). Baseline scaled to the exposure, like the adoption counts | Informational |
 
 Ratings count production ratings only, unless `agent-test` is among the origins;
 ratings have no origin, so the origin filter does not narrow them further.
@@ -667,6 +788,9 @@ the review rule applies to the MCP caller exactly as over REST) and
 | `eddi.health.email-session-window` | `72h` | The same for e-mail conversations |
 | `eddi.health.outcome-feed-overlap` | `15m` | How far behind its watermark the outcome evaluation re-reads conversations every pass, so a turn row that reached the store late is still judged (see [the evaluation](#the-evaluation)) |
 | `eddi.health.min-outcome-coverage` | `0.5` | The outcome coverage below which the effectiveness rates are withheld (`value: null` with a hint) |
+| `eddi.health.event-match-window` | `72h` | How long a business event that matches no session yet is kept for a late match; then it is deleted (`eddi_health_events_total{outcome="expired"}`) |
+| `eddi.health.events.max-per-request` | `100` | The most business events one webhook request may carry (413 beyond) |
+| `eddi.health.events.max-pending-per-agent` | `10000` | The most unmatched business events one agent may have waiting (`agent_backlog_full` beyond) |
 
 ## Retention
 
@@ -745,6 +869,14 @@ Turn rows are personal data about a user's use of an agent:
   fencing, and deletes again what it wrote while the fence went up; outcomes
   are derived from turn rows, which the erasure deletes, so nothing re-creates
   them. A conversation delete removes its sessions too.
+- **Business events** (`agentHealthEvents`): a matched event carries the
+  session's user and is erased and exported with them (at most 10,000 under
+  `agentHealthEvents.events`, the reference as stored). A pending event names no
+  user; once the erasure deleted the user's conversations and sessions it can no
+  longer match and expires with the match window. A match found while the
+  erasure's fence is up is dropped, and a match for a user whose processing is
+  restricted (Art. 18) is dropped too — see [Matching](#matching). Events share
+  the turn rows' retention and go with a deleted conversation.
 - **Deleting a conversation** deletes its rows (best effort — a failure is
   logged and the rows expire with the retention).
 - **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health
@@ -805,6 +937,7 @@ eddi_health_rollup_lag_seconds       # Gauge: age of the oldest waiting agent da
 eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluation wrote (each re-evaluation counts)
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
+eddi_health_events_total             # Business events; tag: outcome (accepted|duplicate|refused|matched|expired|restricted|erased)
 eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
 

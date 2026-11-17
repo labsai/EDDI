@@ -90,6 +90,7 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     static final String FIELD_LAST_ACTIONS = "lastActions";
     static final String FIELD_EVALUATED = "evaluatedAt";
     static final String FIELD_AT = "at";
+    static final String FIELD_REFS = "refs";
     static final String FIELD_AFTER = "afterId";
     static final String FIELD_REPLAY_AT = "replayAt";
     static final String FIELD_REPLAY_AFTER = "replayAfterId";
@@ -110,6 +111,10 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         outcomes.createIndex(Indexes.ascending(FIELD_DAY), new IndexOptions().name("idx_health_outcomes_day").background(true));
         outcomes.createIndex(Indexes.ascending(FIELD_DUE), new IndexOptions().name("idx_health_outcomes_due").sparse(true).background(true));
         outcomes.createIndex(Indexes.ascending(FIELD_EVALUATED), new IndexOptions().name("idx_health_outcomes_evaluated").background(true));
+        // Outcome events are matched by reference (H5); sparse: most sessions carry
+        // none.
+        outcomes.createIndex(Indexes.ascending(FIELD_AGENT, FIELD_REFS),
+                new IndexOptions().name("idx_health_outcomes_refs").sparse(true).background(true));
     }
 
     /** For tests: collections without index creation. */
@@ -146,8 +151,10 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
      */
     static List<Bson> replacePipeline(HealthOutcome row) {
         Document set = new Document();
+        // Absent, not empty, when a session carries no reference: the index is sparse.
+        set.put(FIELD_REFS, row.refs().isEmpty() ? "$$REMOVE" : new Document("$literal", row.refs()));
         toDocument(row).forEach((field, value) -> {
-            if (!FIELD_DUE.equals(field)) {
+            if (!FIELD_DUE.equals(field) && !FIELD_REFS.equals(field)) {
                 set.put(field, new Document("$literal", value));
             }
         });
@@ -328,6 +335,15 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
+    public List<HealthOutcome> findByRefs(String agentId, Collection<String> refs, int limit) {
+        if (agentId == null || refs == null || refs.isEmpty()) {
+            return List.of();
+        }
+        return find(and(eq(FIELD_AGENT, agentId), in(FIELD_REFS, List.copyOf(refs))), Sorts.descending(FIELD_STARTED), 0, Math.max(1, limit),
+                "Could not read the health sessions of a reference");
+    }
+
+    @Override
     public List<HealthOutcome> findByUserId(String userId, int limit) {
         return find(eq(FIELD_USER, userId), Sorts.descending(FIELD_ENDED), 0, limit, "Could not read a user's health outcomes");
     }
@@ -463,6 +479,9 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         d.put(FIELD_FIRST_OUTPUT, o.firstOutputStep());
         d.put(FIELD_LAST_ACTIONS, o.lastActions());
         d.put(FIELD_EVALUATED, date(o.evaluatedAt()));
+        if (!o.refs().isEmpty()) {
+            d.put(FIELD_REFS, o.refs());
+        }
         return d;
     }
 
@@ -481,7 +500,20 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
                 instant(d.getDate(FIELD_STARTED)), instant(d.getDate(FIELD_ENDED)), intValue(d.get(FIELD_TURNS)),
                 d.get(FIELD_COST) instanceof Number n ? n.doubleValue() : 0.0, intValue(d.get(FIELD_FAILURES)), d.getString(FIELD_OUTCOME),
                 d.getString(FIELD_EVIDENCE), Boolean.TRUE.equals(d.get(FIELD_PROVISIONAL)), day == null ? null : LocalDate.parse(day),
-                instant(d.getDate(FIELD_DUE)), integer(d.get(FIELD_FIRST_OUTPUT)), actions, instant(d.getDate(FIELD_EVALUATED)));
+                instant(d.getDate(FIELD_DUE)), integer(d.get(FIELD_FIRST_OUTPUT)), actions, instant(d.getDate(FIELD_EVALUATED)),
+                strings(d.get(FIELD_REFS)));
+    }
+
+    private static List<String> strings(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object entry : list) {
+                if (entry != null) {
+                    out.add(String.valueOf(entry));
+                }
+            }
+        }
+        return out;
     }
 
     private static int intValue(Object value) {

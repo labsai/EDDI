@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.health.HealthEventIngest;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -37,6 +38,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -167,6 +169,12 @@ public class WebhookEventHandler {
      */
     public static final String REASON_AWAITING_APPROVAL = "awaiting_approval";
 
+    /**
+     * Prefix of the replay-cache value of an accepted {@code health-outcomes}
+     * delivery: a repeat is answered 200 {@code duplicate} without conversation.
+     */
+    static final String HEALTH_MARKER = "health:";
+
     /** Marker for an event whose first delivery is still being processed. */
     static final String IN_FLIGHT = "";
 
@@ -192,6 +200,7 @@ public class WebhookEventHandler {
     private final Map<String, Long> lastCapacityWarn = new ConcurrentHashMap<>();
     private LongSupplier clock = System::currentTimeMillis;
     private final AtomicInteger capacityWarnings = new AtomicInteger();
+    private final Instance<HealthEventIngest> healthIngest;
 
     @Inject
     public WebhookEventHandler(ChannelTargetRouter router,
@@ -200,9 +209,22 @@ public class WebhookEventHandler {
             IUserConversationStore userConversationStore,
             ITemplatingEngine templatingEngine,
             ICacheFactory cacheFactory,
+            MeterRegistry meterRegistry,
+            Instance<HealthEventIngest> healthIngest) {
+        this(router, conversationService, groupConversationService, userConversationStore, templatingEngine, cacheFactory, meterRegistry,
+                DEDUP_REFUSE_AT, healthIngest);
+    }
+
+    /** Without Agent Health business events — for tests. */
+    public WebhookEventHandler(ChannelTargetRouter router,
+            IConversationService conversationService,
+            IGroupConversationService groupConversationService,
+            IUserConversationStore userConversationStore,
+            ITemplatingEngine templatingEngine,
+            ICacheFactory cacheFactory,
             MeterRegistry meterRegistry) {
         this(router, conversationService, groupConversationService, userConversationStore, templatingEngine, cacheFactory, meterRegistry,
-                DEDUP_REFUSE_AT);
+                DEDUP_REFUSE_AT, null);
     }
 
     WebhookEventHandler(ChannelTargetRouter router,
@@ -213,6 +235,20 @@ public class WebhookEventHandler {
             ICacheFactory cacheFactory,
             MeterRegistry meterRegistry,
             long dedupRefuseAt) {
+        this(router, conversationService, groupConversationService, userConversationStore, templatingEngine, cacheFactory, meterRegistry,
+                dedupRefuseAt, null);
+    }
+
+    WebhookEventHandler(ChannelTargetRouter router,
+            IConversationService conversationService,
+            IGroupConversationService groupConversationService,
+            IUserConversationStore userConversationStore,
+            ITemplatingEngine templatingEngine,
+            ICacheFactory cacheFactory,
+            MeterRegistry meterRegistry,
+            long dedupRefuseAt,
+            Instance<HealthEventIngest> healthIngest) {
+        this.healthIngest = healthIngest;
         this.dedupRefuseAt = dedupRefuseAt;
         this.hardStopAt = (long) (dedupRefuseAt * 2 * HARD_STOP_FRACTION);
         this.router = router;
@@ -368,8 +404,18 @@ public class WebhookEventHandler {
      *            machine-readable discriminator for a status that has more than one
      *            cause (409: {@link #REASON_IN_PROGRESS} or
      *            {@link #REASON_AWAITING_APPROVAL}); null otherwise
+     * @param details
+     *            further answer fields — a {@code health-outcomes} delivery's
+     *            {@code accepted}, {@code duplicates} and {@code refused}; null
+     *            otherwise
      */
-    public record Dispatch(int status, String conversationId, String groupConversationId, boolean duplicate, String error, String reason) {
+    public record Dispatch(int status, String conversationId, String groupConversationId, boolean duplicate, String error, String reason,
+            Map<String, Object> details) {
+
+        public Dispatch(int status, String conversationId, String groupConversationId, boolean duplicate, String error, String reason) {
+            this(status, conversationId, groupConversationId, duplicate, error, reason, null);
+        }
+
         static Dispatch error(int status, String error) {
             return new Dispatch(status, null, null, false, error, null);
         }
@@ -463,6 +509,9 @@ public class WebhookEventHandler {
                 return new Dispatch(409, null, null, true, IN_PROGRESS, REASON_IN_PROGRESS);
             }
             count("duplicate");
+            if (previous.startsWith(HEALTH_MARKER)) {
+                return new Dispatch(200, null, null, true, null, null);
+            }
             boolean group = previous.startsWith("group:");
             return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null, null);
         }
@@ -479,7 +528,7 @@ public class WebhookEventHandler {
                 if (outcome.status() == 202) {
                     dedup.put(key, outcome.groupConversationId() != null
                             ? "group:" + outcome.groupConversationId()
-                            : outcome.conversationId());
+                            : outcome.conversationId() != null ? outcome.conversationId() : HEALTH_MARKER + integrationId);
                 } else {
                     // A refused event was not processed: its retry must be, so the
                     // reservation is released rather than remembered.
@@ -501,6 +550,9 @@ public class WebhookEventHandler {
     private Dispatch route(String integrationId, ChannelIntegrationConfiguration integration,
                            WebhookChannelSettings settings, InboundEvent event) {
         ResolvedTarget resolved = router.resolveEventTarget(integration, event.type());
+        if (resolved != null && resolved.target() != null && resolved.target().healthOutcomes()) {
+            return healthOutcomes(integrationId, resolved.target(), event);
+        }
         if (resolved == null || resolved.target() == null || resolved.target().getTargetId() == null) {
             return Dispatch.error(422, "No target of this integration accepts event type '" + event.type() + "'.");
         }
@@ -534,6 +586,22 @@ public class WebhookEventHandler {
             LOGGER.errorf(e, "Webhook %s: could not start the turn", sanitize(integrationId));
             return Dispatch.error(500, "The event could not be processed.");
         }
+    }
+
+    /**
+     * A {@code health-outcomes} target: the request's events become Agent Health
+     * business events of the target's agents — no conversation, no turn. The
+     * signature, replay cache and delivery budget above apply unchanged.
+     */
+    private Dispatch healthOutcomes(String integrationId, ChannelTarget target, InboundEvent event) {
+        if (healthIngest == null || !healthIngest.isResolvable()) {
+            return Dispatch.error(503, "Agent Health business events are not available on this node.");
+        }
+        Object data = event.event() == null ? null : event.event().get("data");
+        HealthEventIngest.Result result = healthIngest.get().ingest(integrationId, target.getAgentIds(), event.type(), data);
+        LOGGER.infof("Webhook %s: %d Agent Health event(s) accepted, %d duplicate, %d refused", sanitize(integrationId), result.accepted(),
+                result.duplicates(), result.refused().size());
+        return new Dispatch(result.status(), null, null, false, result.error(), null, result.body());
     }
 
     private Dispatch refusal(String integrationId, RuntimeException e) {

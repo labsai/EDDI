@@ -87,6 +87,7 @@ public class HealthOutcomeGdprParticipant implements IGdprParticipant {
         row.put("evidence", o.evidence());
         row.put("provisional", o.provisional());
         row.put("lastActions", o.lastActions());
+        row.put("refs", o.refs());
         return row;
     }
 }

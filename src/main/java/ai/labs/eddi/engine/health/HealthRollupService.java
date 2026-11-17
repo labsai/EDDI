@@ -99,6 +99,12 @@ public class HealthRollupService {
     static final Duration OUTCOME_BUDGET = Duration.ofSeconds(45);
 
     /**
+     * How much of a pass the business-event matcher may take (before the outcome
+     * evaluation).
+     */
+    static final Duration EVENT_BUDGET = Duration.ofSeconds(15);
+
+    /**
      * What one pass did; {@link #isEmpty()} when nothing at all.
      *
      * @param sessions
@@ -121,6 +127,14 @@ public class HealthRollupService {
      */
     @Inject
     Instance<HealthOutcomeEvaluator> outcomeEvaluator;
+
+    /**
+     * The business-event matcher (H5), run right before the outcome evaluation so a
+     * matched session is judged in the same pass. Field-injected and null-checked
+     * like the evaluator.
+     */
+    @Inject
+    Instance<HealthEventMatcher> eventMatcher;
 
     private final IHealthTurnStore turnStore;
     private final IHealthDailyStore dailyStore;
@@ -149,6 +163,9 @@ public class HealthRollupService {
     public Result run() {
         Instant started = clock.instant();
         int sessions = 0;
+        if (eventMatcher != null && eventMatcher.isResolvable()) {
+            eventMatcher.get().run(started.plus(EVENT_BUDGET));
+        }
         if (outcomeEvaluator != null && outcomeEvaluator.isResolvable()) {
             sessions = outcomeEvaluator.get().run(started.plus(OUTCOME_BUDGET)).sessions();
         }
