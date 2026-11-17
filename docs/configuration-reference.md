@@ -306,6 +306,13 @@ Full narrative: [agent-health.md](agent-health.md#configuration). Independent of
 | `eddi.health.outcome-feed-overlap` | `15m` | How far behind its watermark the outcome evaluation re-reads conversations every pass. Turn rows are ordered by their capture time, set before they wait on a node's health queue, so a row can land after the watermark passed it; the overlap catches one up to this late, at the cost of re-judging that many minutes of conversations each pass. A later row is judged with its conversation's next change or when its session is due. `0` re-reads nothing |
 | `eddi.health.min-outcome-coverage` | `0.5` | The outcome coverage (closed sessions with an outcome other than `ENDED_QUIETLY`) below which the effectiveness rates are withheld — `value: null` with a hint |
 
+Thresholds, critical measures, budgets, the SLO (including a per-agent Apdex T, which overrides `eddi.health.apdex-t` for that
+agent) and overrides are **not** properties: they are each agent's [health profile](agent-health.md#health-profiles-and-presets),
+stored per agent over `PUT /agents/{agentId}/health/profile` and not part of agent export or sync. `HEALTH` alerts follow
+`eddi.alerts.enabled`. The unauthenticated owner report endpoint is opened by the permit rule
+`quarkus.http.auth.permission.health-report.*` (`GET`/`HEAD` of `/health/reports/*` only) in `application.properties` —
+see [security.md](security.md#agent-health-owner-reports).
+
 ---
 
 ## Knowledge bases (RAG)

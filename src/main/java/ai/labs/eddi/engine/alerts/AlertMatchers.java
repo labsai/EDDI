@@ -82,7 +82,7 @@ public final class AlertMatchers {
         if (match.errorKind() != null) {
             return rule.name() + ": " + describe(match.errorKind()) + " (agent " + agent + ")";
         }
-        if (rule.source() == AlertSource.OUTPUT_MATCH) {
+        if (rule.source() == AlertSource.OUTPUT_MATCH || rule.source() == AlertSource.HEALTH) {
             return rule.name() + ": " + String.join(", ", match.matched()) + " (agent " + agent + ")";
         }
         String what = match.stepIndex() != null && match.stepIndex() >= 0 ? "reply rating" : "conversation rating";

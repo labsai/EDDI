@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.HealthDefaults.Definition;
 import ai.labs.eddi.engine.health.HealthDefaults.Direction;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
+import ai.labs.eddi.engine.health.model.HealthProfile.MeasureOverride;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.report.HealthReports.BreakdownEntry;
@@ -15,6 +16,7 @@ import ai.labs.eddi.engine.health.report.HealthReports.EffectivenessSection;
 import ai.labs.eddi.engine.health.report.HealthReports.Interval;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
 import ai.labs.eddi.engine.health.report.HealthReports.Section;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -278,6 +280,14 @@ public final class HealthMeasures {
      *            {@code restricted} and empty
      */
     public static Map<String, Object> sections(PeriodData current, PeriodData baseline, boolean qualityRestricted) {
+        return sections(current, baseline, qualityRestricted, null);
+    }
+
+    /**
+     * Every section with its measures, banded and flagged critical by the agent's
+     * effective health profile ({@code null}: the measure definitions' defaults).
+     */
+    public static Map<String, Object> sections(PeriodData current, PeriodData baseline, boolean qualityRestricted, EffectiveHealthProfile profile) {
         Map<String, List<Measure>> bySection = new LinkedHashMap<>();
         for (String section : HealthDefaults.SECTIONS) {
             bySection.put(section, new ArrayList<>());
@@ -286,7 +296,7 @@ public final class HealthMeasures {
             if (qualityRestricted && HealthDefaults.QUALITY.equals(definition.section())) {
                 continue;
             }
-            bySection.get(definition.section()).add(measure(definition.id(), current, baseline));
+            bySection.get(definition.section()).add(measure(definition.id(), current, baseline, profile));
         }
         Map<String, Object> sections = new LinkedHashMap<>();
         for (Map.Entry<String, List<Measure>> entry : bySection.entrySet()) {
@@ -310,10 +320,24 @@ public final class HealthMeasures {
 
     /** One measure; {@code baseline} may be null. Unknown ids answer null. */
     public static Measure measure(String id, PeriodData current, PeriodData baseline) {
-        Definition d = HealthDefaults.of(id);
-        if (d == null) {
+        return measure(id, current, baseline, null);
+    }
+
+    /**
+     * One measure under an agent's effective health profile: its thresholds, its
+     * critical flag and its kind (a budget makes a cost measure scored). A measure
+     * an active override ignores keeps its band and says so in its hint. With
+     * {@code profile == null} the definitions' defaults apply.
+     */
+    public static Measure measure(String id, PeriodData current, PeriodData baseline, EffectiveHealthProfile profile) {
+        Definition base = HealthDefaults.of(id);
+        if (base == null) {
             return null;
         }
+        Definition d = profile == null
+                ? base
+                : new Definition(base.id(), base.section(), base.label(), profile.kind(base), profile.critical(base.id()), base.unit(),
+                        base.direction(), base.minSample(), base.sampleNoun(), profile.thresholds(base.id()));
         Stat now = stat(id, current);
         Stat before = baseline == null ? null : stat(id, baseline);
         Double baselineValue = before == null ? null : before.value();
@@ -334,8 +358,71 @@ public final class HealthMeasures {
                 band = HealthDefaults.band(now.value(), d.thresholds());
             }
         }
+        MeasureOverride ignored = profile == null ? null : profile.ignored(d.id());
+        if (ignored != null) {
+            String note = "Ignored in the status until " + ignored.until() + ": " + ignored.reason();
+            hint = hint == null ? note : hint + ". " + note;
+        }
         return new Measure(d.id(), label(d, current), d.kind(), d.critical(), d.unit(), now.value(), now.n(), now.interval(), baselineValue, delta,
-                significant, band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);
+                significant, TESTED.contains(d.id()), band, HealthDefaults.SCORED.equals(d.kind()) ? d.thresholds() : null, now.breakdown(), hint);
+    }
+
+    /**
+     * The measures that have a significance test at all — derived, not listed: each
+     * measure is built once over {@link #probe()}, a period in which every source
+     * has data and the outcome coverage is complete, and it counts as tested when
+     * that build carries a test ({@link Proportion}, {@link Mean}, {@link Count})
+     * rather than {@link NoTest}. So a measure is tested exactly when the way it is
+     * computed can ever be tested, whatever a given period holds.
+     */
+    static final Set<String> TESTED;
+
+    static {
+        TESTED = derivedTested();
+    }
+
+    /**
+     * {@link #TESTED}, derived; a measure whose probe build fails counts as not
+     * tested (and is logged) rather than failing the class's initialisation — which
+     * would take every health view down with it.
+     */
+    static Set<String> derivedTested() {
+        Set<String> tested = new TreeSet<>();
+        PeriodData probe;
+        try {
+            probe = probe();
+        } catch (RuntimeException e) {
+            Logger.getLogger(HealthMeasures.class).errorf("Could not build the significance probe; no measure is marked tested: %s",
+                    e.getMessage());
+            return Set.of();
+        }
+        for (String id : HealthDefaults.MEASURES.keySet()) {
+            try {
+                if (!(stat0(id, probe).test() instanceof NoTest)) {
+                    tested.add(id);
+                }
+            } catch (RuntimeException e) {
+                Logger.getLogger(HealthMeasures.class).errorf("Could not probe measure %s for a significance test; marked untested: %s", id,
+                        e.getMessage());
+            }
+        }
+        return Set.copyOf(tested);
+    }
+
+    /** A period in which every measure can be computed. */
+    static PeriodData probe() {
+        List<Long> buckets = new ArrayList<>();
+        for (int i = 0; i <= HealthTurnAggregator.DURATION_BOUNDS_MS.length; i++) {
+            buckets.add(10L);
+        }
+        Totals totals = new Totals(1000, 10, 20, 5, Map.of("TRANSIENT", 3L), Map.of("TURN_ERROR", 10L), 12.5, 50_000, 3, 900, 700, 150, buckets,
+                Set.of(4000L));
+        HealthUsage usage = new HealthUsage(200, 150, 1000, 120, 40);
+        RatingStats ratings = new RatingStats(60, 0.8, 50, 10);
+        OutcomeStats outcomes = OutcomeStats
+                .of(List.of(new HealthOutcomeCount(null, null, HealthOutcomes.RESOLVED, "agent_action", true, false, 100, 600),
+                        new HealthOutcomeCount(null, null, HealthOutcomes.ESCALATED, "agent_action", true, false, 50, 300)), 0.5);
+        return new PeriodData(totals, usage, ratings, 7.0, outcomes);
     }
 
     /**

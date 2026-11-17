@@ -155,6 +155,17 @@ than sampling conversations:
   `evidence`); needs EDIT on the agent and conversation review on the version, else the
   error says `FORBIDDEN` or `REVIEW_DISABLED`.
 
+Lead with the `status` (`NEEDS_ATTENTION`, `WATCH`, `HEALTHY`, `NOT_ENOUGH_DATA`) and its
+`reasons`; an INFO reason "rests mostly on silence" must be passed on whenever you quote the
+resolution rate. How the status is judged is the agent's health profile:
+
+- `read_agent_health_profile` — preset, critical measures, thresholds, budgets, SLO and
+  overrides (`stored: false` means only the preset's defaults); `list_health_presets` lists
+  `support`, `sales`, `assistant`, `task`.
+- `update_agent_health_profile` — stores a profile (EDIT on the agent). Read it first and send
+  back the whole of it with your change; never loosen thresholds to make an agent look
+  healthy, only when the admin asks.
+
 `read_docs("agent-health")` has every measure's definition.
 
 **Alerts.** Alert rules (written over REST; the Manager has no Alerts page yet) report low ratings,

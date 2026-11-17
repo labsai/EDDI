@@ -211,6 +211,35 @@ public interface HealthOutcomeStoreContract {
     }
 
     @Test
+    @DisplayName("countsForAgents counts per agent and origin, within the days and origins (H4 portfolio)")
+    default void countsForAgents() {
+        store().upsert(List.of(closed("c1", 0, Instant.parse("2026-11-08T10:00:00Z"), "FAILED", "structural"),
+                closed("c2", 0, Instant.parse("2026-11-09T10:00:00Z"), "FAILED", "structural"),
+                closed("c3", 0, Instant.parse("2026-11-01T10:00:00Z"), "FAILED", "structural"),
+                session("c4", 0, "agent", "u", Instant.parse("2026-11-09T10:00:00Z"), "schedule", false, null, null, false, null),
+                session("c5", 0, "other", "u", Instant.parse("2026-11-09T10:00:00Z"), "email", true, "RESOLVED", "agent_action", false, null),
+                session("c6", 0, "third", "u", Instant.parse("2026-11-09T10:00:00Z"), "agent-test", true, "RESOLVED", "agent_action", false,
+                        null)));
+        Map<String, List<HealthOutcomeCount>> counts = store().countsForAgents(List.of("agent", "other", "third", "none"),
+                LocalDate.of(2026, 11, 7), LocalDate.of(2026, 11, 13), List.of("api", "email", "schedule"));
+        assertEquals(Set.of("agent", "other"), counts.keySet());
+        List<HealthOutcomeCount> agent = counts.get("agent");
+        HealthOutcomeCount api = agent.stream().filter(c -> "api".equals(c.group())).findFirst().orElseThrow();
+        assertEquals(2, api.sessions());
+        assertEquals(8, api.turns());
+        assertEquals("FAILED", api.outcome());
+        assertTrue(api.engaged());
+        assertNull(api.day());
+        HealthOutcomeCount schedule = agent.stream().filter(c -> "schedule".equals(c.group())).findFirst().orElseThrow();
+        assertNull(schedule.outcome());
+        assertEquals(1, schedule.sessions());
+        assertEquals("RESOLVED", counts.get("other").get(0).outcome());
+        assertEquals("email", counts.get("other").get(0).group());
+        assertTrue(store().countsForAgents(List.of(), LocalDate.of(2026, 11, 7), LocalDate.of(2026, 11, 13), List.of("api")).isEmpty());
+        assertTrue(store().countsForAgents(List.of("agent"), LocalDate.of(2026, 11, 7), LocalDate.of(2026, 11, 13), List.of()).isEmpty());
+    }
+
+    @Test
     @DisplayName("GDPR: by user found newest first and deleted; by conversation deleted")
     default void gdpr() {
         store().upsert(List.of(session("c1", 0, "agent", "alice", T0, "api", true, "FAILED", "structural", false, null),

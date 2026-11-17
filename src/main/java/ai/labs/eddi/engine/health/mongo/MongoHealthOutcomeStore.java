@@ -250,6 +250,33 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
+    public Map<String, List<HealthOutcomeCount>> countsForAgents(Collection<String> agentIds, LocalDate from, LocalDate to,
+                                                                 Collection<String> origins) {
+        if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
+        Document key = new Document("a", "$" + FIELD_AGENT).append("g", "$" + FIELD_ORIGIN).append("o", "$" + FIELD_OUTCOME)
+                .append("e", "$" + FIELD_EVIDENCE).append("en", "$" + FIELD_ENGAGED).append("p", "$" + FIELD_PROVISIONAL);
+        List<Document> pipeline = List.of(
+                new Document("$match", and(in(FIELD_AGENT, List.copyOf(agentIds)), gte(FIELD_DAY, from.toString()), lte(FIELD_DAY, to.toString()),
+                        in(FIELD_ORIGIN, List.copyOf(origins)))),
+                new Document("$group", new Document("_id", key).append("sessions", new Document("$sum", 1)).append("turns",
+                        new Document("$sum", "$" + FIELD_TURNS))));
+        try {
+            Map<String, List<HealthOutcomeCount>> counts = new LinkedHashMap<>();
+            for (Document d : outcomes.aggregate(pipeline).allowDiskUse(true)) {
+                Document k = d.get("_id", Document.class);
+                counts.computeIfAbsent(k.getString("a"), a -> new ArrayList<>())
+                        .add(new HealthOutcomeCount(null, k.getString("g"), k.getString("o"), k.getString("e"), Boolean.TRUE.equals(k.get("en")),
+                                Boolean.TRUE.equals(k.get("p")), number(d.get("sessions")), number(d.get("turns"))));
+            }
+            return counts;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not count the health outcomes of agents", e);
+        }
+    }
+
+    @Override
     public List<HealthOutcome> sessions(HealthSessionQuery query) {
         if (query.origins().isEmpty() || query.versions().isEmpty()) {
             return List.of();

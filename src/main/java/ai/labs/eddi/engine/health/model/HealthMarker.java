@@ -42,4 +42,5 @@ public record HealthMarker(String id, String agentId, Instant at, String kind, S
     public static final String KIND_VERSION_FIRST_TURN = "VERSION_FIRST_TURN";
     public static final String KIND_SNIPPET_CHANGE = "SNIPPET_CHANGE";
     public static final String KIND_GLOBAL_VARIABLE_CHANGE = "GLOBAL_VARIABLE_CHANGE";
+    public static final String KIND_PROFILE_CHANGE = "PROFILE_CHANGE";
 }

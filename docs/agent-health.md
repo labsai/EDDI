@@ -4,14 +4,17 @@ Agent Health answers the questions usage counts cannot: *is this agent doing its
 job, is it getting better or worse, and why?* It is built in phases. This page
 describes what ships today — the **turn facts** every view is computed from,
 the **daily rollup**, **change markers**, **conversation outcomes** per session,
-and the **REST and MCP views** over them — and marks what is still coming.
+a **status with reasons** judged by each agent's **health profile**,
+**`HEALTH` alerts**, **owner report links**, and the **REST and MCP views** over
+them — and marks what is still coming.
 
 | Phase | What it adds | Status |
 | --- | --- | --- |
 | H2a — Turn facts | One small row per turn execution, recorded after the fact | **Available** |
 | H2b — Series & compare | Daily rollups, trends, version-to-version compare, change markers, REST/MCP | **Available** |
 | H3 — Outcomes | Sessions, engagement, resolved / escalated / abandoned, coverage, drill-down | **Available** |
-| H4 — Status | Health profiles, presets, status with reasons, `HEALTH` alerts | Coming |
+| H4 — Status | Health profiles, presets, status with reasons, `HEALTH` alerts | **Available** |
+| H4b — Owner report | Read-only, branded report links for people without Manager access | **Available over REST** — the Manager's owner report page and link screens are not built yet |
 | H5 — Business join | Outcome events from other systems matched by the agent's own references | Coming |
 
 The design and the decisions behind it are in
@@ -156,6 +159,14 @@ permission.
 | --- | --- |
 | MongoDB | `healthturns`, `_id` `<conversationId>\|<executionId>`, indexed by `(agentId, day)`, `(conversationId, stepIndex)`, `userId`, `day`, `discardedAt`, `updatedAt` |
 | PostgreSQL | `health_turns`, primary key `(conversation_id, execution_id)`, indexed by `(agent_id, day)`, `user_id`, `day`, `discarded_at_ms` (markers), `updated_at_ms`; created on first use |
+
+The H4 stores sit beside them, each created on first use on PostgreSQL:
+
+| Store | MongoDB | PostgreSQL | Holds |
+| --- | --- | --- | --- |
+| Health profiles | `healthprofiles`, `_id` the agent id | `health_profiles`, primary key `agent_id` | The profile as written (JSON text) and its last author |
+| `HEALTH` alert states | `healthalertstate`, `_id` `<ruleId>\|<agentId>` | `health_alert_state`, primary key `(rule_id, agent_id)` | What each rule last saw of each agent: the status and the conditions that held |
+| Owner report links | `healthreportlinks`, unique index on `tokenHash` | `health_report_links`, unique index on `token_hash` | Link id, agent, SHA-256 of the token, sections, period, creator, expiry — never the token |
 
 ## Daily rollup
 
@@ -516,6 +527,15 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/health/agents` | The portfolio: every agent the caller may view (at most 5,000; `agentsTruncated: true` when there are more), `sort=attention\|name\|traffic`, `limit` (default 100, ≤ 500), `cursor` (`nextCursor`, `null` on the last page), plus `platformIncidents` |
 | `GET` | `/agents/{agentId}/health/sessions` | The drill-down: one row per session — conversation id, `sessionNo`, start and end, version, origin, engaged, outcome, evidence, `provisional`, turns, cost, failed turns — newest first. Filters `outcome=` and `evidence=` (repeatable), `origin`, `version`, `period`/`from`/`to`; `limit` 1–100 (default 50), `cursor` |
 | `GET` | `/agents/{agentId}/health/outcome-suggestions` | The actions that most often end engaged, closed sessions and are not mapped in the current version's `healthConfig.outcomes`, with `sessionsEndingWith`, a `suggested` outcome from the action's name (`*confirm*`, `*done*`, `*complete*`, `*booked*` → `RESOLVED`; `*handoff*`, `*human*`, `*escalat*` → `ESCALATED`; `*out_of_scope*`, `*not_supported*` → `DEFLECTED`; else none) and a `reason`. At most 20; reserved actions are left out. Never applies anything |
+| `GET` | `/agents/{agentId}/health/profile` | The effective [health profile](#health-profiles-and-presets), `stored: false` when it is only the preset's defaults; `defaulted` names the fields that come from the preset, not the stored profile |
+| `PUT` | `/agents/{agentId}/health/profile` | Stores a profile (EDIT); `200` with the effective profile, `400 {"violations": [{"path", "message"}]}` |
+| `DELETE` | `/agents/{agentId}/health/profile` | Back to the preset (EDIT); `204` |
+| `GET` | `/health/presets` | The four presets with their critical measures and thresholds |
+| `POST` | `/agents/{agentId}/health/reports` | Creates an [owner report link](#owner-report-links) (EDIT); `201` with its token, shown once |
+| `GET` | `/agents/{agentId}/health/reports` | The live links (EDIT) — never their tokens |
+| `DELETE` | `/agents/{agentId}/health/reports/{id}` | Revokes a link (EDIT); `204`, `404` for an unknown one |
+| `DELETE` | `/agents/{agentId}/health/reports` | Revokes every link of the agent (EDIT); `200 {"revoked": n}` |
+| `GET` | `/health/reports/{token}` | **Unauthenticated**: the report a link shows |
 
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
 ending today, or `from`/`to` (both, at most 90 days, not after today);
@@ -537,11 +557,14 @@ with `significant` and `better` (null for a measure with no direction).
 **Portfolio.** `sessions` is null (with a `hint`) when the period reaches past
 the turn-row retention, and `sessionsDelta` when its baseline does — so the
 90-day portfolio has sessions but no session change; `sort=traffic` then falls
-back to the daily rows' turns. `status` is null for every agent until health profiles exist, so
-a `status=` filter matches none. `sort=attention` puts first the agents whose key
-measures (`agentFailureRate`, `apdex`, `costPerSession`) got **significantly**
-worse — by the largest such change, absolute for rates, relative for the rest —
-then the worst band among them, then traffic, then name. A **platform incident**
+back to the daily rows' turns. Every row has its `status` and `topReason` (the
+first [reason](#status-and-reasons), without a marker), computed by the same rules
+as the agent's report over the period's reliability, effectiveness and efficiency
+measures; `status=` (repeatable) filters by it. `sort=attention` orders by the
+status's severity (`NEEDS_ATTENTION`, `WATCH`, `HEALTHY`, then `NOT_ENOUGH_DATA`),
+then by the largest **significant** change for the worse among the counted
+measures (absolute for rates, relative for the rest), then traffic, then name.
+The key measures are `agentFailureRate`, `apdex` and `costPerSession`. A **platform incident**
 is a run of days on which one platform failure class hit at least 3 of the
 listed agents at once (an agent counts when it had ≥ 10 turns that day, ≥ 3
 failed attempts of the class and ≥ 5 % of its turns touched by the platform);
@@ -556,6 +579,11 @@ daily granularity, because that is what the rollup keeps.
 | Portfolio | Only agents the caller may `VIEW`; platform incidents are computed over those agents only |
 | Session drill-down | The [conversation-review rule](workspaces.md): the caller **maintains** the agent (`EDIT`), else `403 {"reason": "FORBIDDEN"}`, and conversation review is enabled on the version asked for — without `version`, on the agent's current version — else `403 {"reason": "REVIEW_DISABLED"}`. Without `version` the page lists only sessions of versions that have review enabled (of the 100 newest). The version checked is the one of the session's **last** turn: a session that moved from a version without review to one with it is listed. The rows carry ids, counts and outcomes, no content; reading the conversation itself goes through the conversation endpoints, which apply the review rule to the conversation's own version |
 | Outcome suggestions | `VIEW`, like the report |
+| Health profile, presets | Read: `VIEW`, like the report. `PUT` and `DELETE`: roles `eddi-admin` or `eddi-editor` and `EDIT` on the agent |
+| Owner report links | Create, list and revoke: `eddi-admin` or `eddi-editor` and `EDIT` on the agent. A link with the `quality` section only when the creator may read the agent's ratings (`403` otherwise). The public `GET /health/reports/{token}` needs no account — see [the security notes](#owner-report-links) |
+
+The **status** never counts the quality section, so it is the same for a viewer
+and an admin, and a viewer cannot infer a rating from it.
 
 No view but the drill-down carries a conversation id, and none carries
 conversation content or a user id.
@@ -564,8 +592,9 @@ conversation content or a user id.
 
 `n` is the sample a value rests on; below a measure's minimum sample the band is
 `GREY` with a hint ("Fewer than 30 turns in this period"), never green or red on
-a handful of turns. Bands come from default thresholds (the `support` preset's
-intent); health profiles will override them per agent.
+a handful of turns. Bands, `critical` and `thresholds` come from the agent's
+[health profile](#health-profiles-and-presets) — its preset unless a profile
+says otherwise; the defaults below are the `support` preset's.
 
 | Section | Measure | Definition | Kind, default band |
 | --- | --- | --- | --- |
@@ -575,15 +604,15 @@ intent); health profiles will override them per agent.
 | | `turnDurationP95` | The 95th percentile of turn duration, **approximate**: interpolated inside fixed buckets (100 ms … 5 min) | Informational |
 | | `fallbackRate` | Turns that served the configured fallback ÷ turns | Scored: green ≤ 2 %, red ≥ 10 % |
 | Effectiveness | `resolutionRate` | `RESOLVED` + `ASSUMED_RESOLVED` ÷ closed, engaged sessions of judged origins (`n`). `breakdown` always has four parts, each a share of `n` that add up to the rate: `confirmed` (mapped agent actions; external events in H5), `selfReported`, `agentClosed`, `silence`. A rate resting mostly on `silence` is an assumption, not a result | Scored, **critical**: green ≥ 70 %, red ≤ 40 %, min 30 sessions; `null` below the coverage minimum |
-| | `escalationRate`, `abandonmentRate`, `deflectionRate` | `ESCALATED`, `ABANDONED`, `DEFLECTED` ÷ the same `n` | Scored (deflection informational), no thresholds until health profiles; `null` below the coverage minimum |
+| | `escalationRate`, `abandonmentRate`, `deflectionRate` | `ESCALATED`, `ABANDONED`, `DEFLECTED` ÷ the same `n` | Scored (deflection informational): escalation green ≤ 15 %, red ≥ 30 %; abandonment green ≤ 20 %, red ≥ 35 % (support preset); `null` below the coverage minimum |
 | | `outcomeCoverage` | Closed sessions with an outcome other than `ENDED_QUIETLY` ÷ `n`; also the section's `coverage` | Scored: green ≥ 80 %, red ≤ 50 %; never significant |
 | Quality | `ratingScore` | The Wilson lower bound of the average normalised conversation rating — what the ratings support with 95 % confidence, so three five-star ratings do not outrank three hundred four-star ones | Scored: green ≥ 0.7, red ≤ 0.5, min 10 ratings |
 | | `ratingResponseRate` | Conversation ratings ÷ sessions | Informational |
 | | `replyThumbsUp` | Thumbs-up reply ratings ÷ reply ratings | Scored: green ≥ 80 %, red ≤ 60 %, min 10 |
 | | `guardrailTripRate` | Guardrail trips per turn (can exceed 1) | Informational |
-| Efficiency | `costPerSession` | Spend of every row (undone executions included, so it matches the conversations' cost) ÷ sessions | Informational until budgets (H4) |
-| | `costPerResolvedSession` | The period's spend (the selected origins) ÷ resolved sessions — what one resolution costs, failures included | Informational until budgets (H4) |
-| | `tokensPerTurn` | Tokens ÷ turns | Informational |
+| Efficiency | `costPerSession` | Spend of every row (undone executions included, so it matches the conversations' cost) ÷ sessions | Informational; scored with `budgets.costPerSessionUsd` |
+| | `costPerResolvedSession` | The period's spend (the selected origins) ÷ resolved sessions — what one resolution costs, failures included | Informational; scored with `budgets.costPerResolvedUsd` |
+| | `tokensPerTurn` | Tokens ÷ turns | Informational; scored with `budgets.tokensPerTurn` |
 | Adoption | `sessions`, `engagedSessions` | Sessions that **ended** in the period (open ones included), from the outcome rows; engaged as [defined above](#sessions) | Informational |
 | | `distinctUsers` | Distinct user ids of the period's turn rows | Informational |
 | | `returningUserShare` | Users of the period who also had a turn in the 30 days before it (clipped to the turn-row retention) ÷ distinct users. Never called significant: the look-back of a baseline near the retention is shorter. No daily series | Informational |
@@ -625,6 +654,12 @@ both.
   `p = e / (1 + e)`, `e` the current period's exposure over the baseline's. A
   measure with no variance to test — a percentile from buckets, a cost or token
   average, the returning-user share — is never called significant.
+- **`tested`** says which kind a measure is: `true` for every measure with a test
+  (the rates, Apdex, the counts), `false` for `turnDurationP95`, `costPerSession`,
+  `costPerResolvedSession`, `tokensPerTurn`, `turnsPerSession`,
+  `guardrailTripRate`, `returningUserShare` and `outcomeCoverage`. It is a
+  property of the measure, derived from how it is computed, not of the period's
+  data — so a client can tell "no significant change" from "never tested".
 - **Exposure.** A period that ends today is not over: its exposure is its full
   days plus the part of today that has passed. A count measure's `baseline` is
   the previous period's count **scaled to that exposure**, so a window read at
@@ -641,14 +676,236 @@ version deployed to production (any version when none is deployed): `PASS` or
 `FAIL`, `UNKNOWN` when no run finished (an `ERROR`, aborted or cancelled run
 says nothing about the agent), `stale` when older than 14 days.
 
+## Status and reasons
+
+Every report has a `status` — the headline, read before any number — and the
+`reasons` for it. The rules (`HealthStatusRules`):
+
+| Status | When |
+| --- | --- |
+| `NOT_ENOUGH_DATA` | Every counted measure is `GREY` (too little data, or no threshold) |
+| `NEEDS_ATTENTION` | A **critical** measure is `RED` |
+| `WATCH` | Any counted measure is `AMBER` or `RED`, or got **significantly worse** than in the baseline by at least 2 percentage points (rates, scores) or 10 % (everything else) |
+| `HEALTHY` | None of the above |
+
+**Counted** are the scored measures (a [budget](#health-profiles-and-presets)
+makes a cost measure scored) that no active override ignores. The **quality**
+section (ratings) is never counted: who may read ratings differs per caller, and
+a status that changed with the caller's permissions would leak them. The effect
+floor keeps a statistically significant but tiny change of a busy agent from
+raising a flag. The status describes the selection asked for — a `version=` or
+`origin=` filter judges that slice.
+
+A **reason** is `{measureId, severity, text, markerId}`, at most five, ordered by
+severity (`RED`, `AMBER`, `INFO`), critical measures first, then by the size of
+the change for the worse:
+
+- a band — "Agent-caused failures 8 % (target ≤ 1 %)";
+- a change for the worse — "Resolution 41 % (−12 pp since v8 on 3 Nov)", with
+  the newest deployment or version start of the period as `markerId` (without
+  one, "vs. the previous period"); the portfolio's `topReason` never names a
+  marker (markers are read per agent);
+- `INFO` "Resolution rests mostly on silence: 64 % of resolved sessions are
+  assumed because people went quiet" whenever the `silence` part is **more than
+  half** of the resolved sessions — also while the rate itself is withheld, and
+  whatever the status (it does not change it): an assumed rate must never read as
+  a measured one;
+- `INFO` "Not enough data: …" with `NOT_ENOUGH_DATA`, from the first critical
+  measure's hint.
+
+Texts are English and short, for display as they are. No weighted 0–100 index
+is computed: the contract has none, and a single number across different kinds
+of agents is what the plan rejected as a headline.
+
+## Health profiles and presets
+
+How an agent's health is judged lives in its **health profile** — an admin
+resource keyed by the agent id, **not versioned** (tuning a threshold must not
+mint an agent version and split its statistics) and **not part of agent export
+or sync** (thresholds belong to a deployment). Agent behaviour that decides
+outcomes stays in the versioned `healthConfig`.
+
+```json
+{ "preset": "support",
+  "critical": ["agentFailureRate", "resolutionRate"],
+  "thresholds": { "resolutionRate": { "green": 0.7, "red": 0.4 } },
+  "budgets": { "costPerResolvedUsd": 0.5 },
+  "slo": { "agentTurnSuccess": 0.99, "apdexTMs": 4000, "minTurnsForBurnAlert": 50 },
+  "overrides": [ { "measure": "business", "state": "IGNORED", "reason": "CRM outage", "until": "2026-11-14" } ] }
+```
+
+Every field is optional and falls back to the preset:
+
+| Field | Meaning |
+| --- | --- |
+| `preset` | `support`, `sales`, `assistant` or `task`. Without one, the traffic decides: `task` for an agent driven only by schedules, webhooks, A2A, groups or delegation, else `support` |
+| `critical` | The measures whose `RED` band makes the status `NEEDS_ATTENTION`; the preset's when absent, none when `[]`. Scored measures only (a cost measure once it has a budget), never quality |
+| `thresholds` | `{measure: {green, red}}` over the preset's; the measure decides whether higher is better. Rates and scores between 0 and 1. Cost measures take a budget instead |
+| `budgets` | `costPerResolvedUsd`, `costPerSessionUsd`, `tokensPerTurn`: each makes its measure scored, green up to the budget, red from 1.5× it |
+| `slo.agentTurnSuccess` | The share of turns without an agent-caused failure (default 0.99, at least 0.5, below 1). Unless `thresholds.agentFailureRate` is given, it sets that measure's bands: green up to the error budget (`1 − agentTurnSuccess`), red from five times it. Also the budget of the [burn-rate alert](#health-alerts) |
+| `slo.apdexTMs` | The agent's Apdex T (100 ms – 10 min); default `eddi.health.apdex-t`. Applied by the rollup: a change marks the agent's retained days for a recount, so for a while the period may mix T values (then Apdex is `null` with a hint) |
+| `slo.minTurnsForBurnAlert` | The volume floor of a burn-rate alert, per window (default 50) |
+| `overrides` | Up to 50 `{measure \| section, state: "IGNORED", reason, until}`: left out of the status through `until` (UTC day, inclusive). The measure is still shown, with the override in its hint. An expired override is ignored, not refused |
+
+**`GET`** answers the **effective** profile — the preset with the stored profile
+laid over it — and `stored: false` when nothing is stored, so a client that
+writes back what it read keeps the meaning. **`PUT`** replaces the stored profile
+with the body as sent; a field left out falls back to the preset again.
+Validation reports every problem as `{path, message}` with a dotted path into the
+body — `preset`, `critical[1]`, `thresholds.resolutionRate.red`,
+`budgets.costPerResolvedUsd`, `slo.agentTurnSuccess`, `overrides[0].reason` — in
+a `400 {"error": "bad_request", "message": …, "violations": […]}`. A save or a
+delete leaves a `PROFILE_CHANGE` [marker](#change-markers) ("Health profile
+changed"); the bands and the status follow at once (profiles are cached for 60 s
+per node).
+
+**Presets** (`GET /health/presets`):
+
+| Preset | For | Critical | Thresholds besides the shared ones |
+| --- | --- | --- | --- |
+| `support` | A chat agent that solves people's problems (the default for interactive traffic) | `agentFailureRate`, `resolutionRate` | resolution green ≥ 70 % / red ≤ 40 %; escalation ≤ 15 % / ≥ 30 %; abandonment ≤ 20 % / ≥ 35 % |
+| `sales` | An agent that converts | `agentFailureRate`, `abandonmentRate` | resolution ≥ 40 % / ≤ 15 %; escalation ≤ 25 % / ≥ 45 %; abandonment ≤ 30 % / ≥ 50 % |
+| `assistant` | Open-ended help without one goal | `agentFailureRate` | Apdex ≥ 0.8 / ≤ 0.6; resolution ≥ 60 % / ≤ 30 %; abandonment ≤ 30 % / ≥ 50 %; coverage ≥ 60 % / ≤ 30 %; escalation not banded |
+| `task` | Driven by schedules, webhooks, A2A or groups (the default when there is no interactive traffic) | `agentFailureRate` (the run failure rate) | failures ≤ 2 % / ≥ 10 %; Apdex ≥ 0.7 / ≤ 0.5; fallbacks ≤ 5 % / ≥ 20 %; no effectiveness bands — set a cost budget per run |
+
+Shared by `support`, `sales` and `assistant`: agent-caused failures green ≤ 1 %,
+red ≥ 5 %; Apdex ≥ 0.85 / ≤ 0.7; fallbacks ≤ 2 % / ≥ 10 %; outcome coverage
+≥ 80 % / ≤ 50 %; rating score ≥ 0.7 / ≤ 0.5; thumbs up ≥ 80 % / ≤ 60 %.
+
+## HEALTH alerts
+
+An [alert rule](alerts.md#sources-and-conditions) with `"source": "HEALTH"` tells
+people when an agent's health changes for the worse:
+
+```json
+{ "name": "Support health", "scope": { "agentIds": ["6740…"] }, "source": "HEALTH",
+  "condition": { "healthTriggers": ["STATUS_CHANGE", "BURN_RATE", "CRITICAL_TREND"], "healthStatuses": ["NEEDS_ATTENTION"] },
+  "delivery": [ { "type": "SLACK", "channelId": "C0123ABC" } ] }
+```
+
+| Trigger | Fires when |
+| --- | --- |
+| `STATUS_CHANGE` | The agent's status over the last 7 days (the portfolio's) entered one of `healthStatuses` — `WATCH`, `NEEDS_ATTENTION`, both by default. A rule that has not seen the agent yet reports a status in its list once, so a new rule says what already needs attention |
+| `BURN_RATE` | The agent-caused failure rate burns the SLO's error budget (`1 − slo.agentTurnSuccess`) at least **2×** in the long window (the last 3 UTC days, today included) **and** in the short one (today), each with at least `slo.minTurnsForBurnAlert` turns. Whole days, because the rollup keeps daily rows; the volume floor keeps an agent with three turns from paging anyone over two failures |
+| `CRITICAL_TREND` | A critical measure of the profile got significantly worse over the last 7 days against the 7 before, by at least the status rules' effect floor |
+
+Rules are evaluated **after each rollup pass**, never in a turn, by
+`HealthAlertEvaluator` under the rollup's schedule claim. Each condition fires
+when it **starts** — what a rule last saw of an agent is kept per rule and agent
+(`healthalertstate`) — not again while it lasts; states not refreshed for 30
+days (a rule deleted or narrowed) are dropped. Alerts go through the existing
+engine: deduplicated per rule, agent, condition and throttle window, throttled
+and digested like every other source, delivered to the inbox, Slack or a
+webhook. The alert's `match` carries `healthStatus`, `previousHealthStatus`,
+`measureId` and the reasons' texts; never conversation content. **Health only
+alerts** — it never rolls back, pauses or changes an agent (plan decision 7).
+
+## Owner report links
+
+A business owner without a Manager account gets a read-only, branded link to an
+agent's health.
+
+> **Not yet available in the Manager — REST only for now.** The owner report
+> page at `/manage/health-report/<token>` and the screens to create, list and
+> revoke links follow in a later release. Until then a link's URL leads to a
+> Manager route that does not render it, and the report itself is the JSON of
+> `GET /health/reports/{token}`.
+
+```http
+POST /agents/{agentId}/health/reports
+{ "expiresInDays": 30, "sections": ["reliability", "effectiveness", "efficiency", "adoption"], "period": "30d" }
+
+201 { "id": "r-…", "url": "https://eddi.example.com/manage/health-report/<token>",
+      "path": "/manage/health-report/<token>", "expiresAt": "…", "sections": […], "period": "30d" }
+```
+
+- `expiresInDays` 1–90 (default 30); `sections` any of the six (default all but
+  `quality`); `period` `7d`, `30d` (default) or `90d`, ending the day the link is
+  read. `quality` only when the creator may read the agent's ratings. At most 20
+  live links per agent.
+- The URL is `eddi.self.base-url` when set, else the request's base, plus
+  `/manage/health-report/<token>` — the route the Manager will render without
+  sign-in (not built yet, see above); it reads the report from
+  `GET /health/reports/{token}`.
+- `GET …/health/reports` lists the live links — id, expiry, sections, period,
+  creator — **never** a token; `DELETE …/health/reports/{id}` revokes one and
+  `DELETE …/health/reports` all of them. Expired links are deleted by the rollup
+  pass a day after they expire; an agent's links are revoked when the agent is
+  deleted (soft or permanent).
+- **A link shows only while its creator still holds `EDIT` on the agent.** Every
+  read re-checks the creator's access as it is now — ownership, grants, shares,
+  a move to another space — with the team list taken when the link was created.
+  A link whose creator lost `EDIT` answers 404 like a revoked one (and shows
+  again if the access comes back); one whose creator was erased (GDPR) answers
+  404 for good. What cannot be re-checked without the creator's own sign-in —
+  their roles (administrator, the rating roles behind `quality`) and leaving a
+  team — is as it was at creation: **revoke a departing person's links** (`DELETE
+  …/health/reports` per agent).
+- The report is the [`GET /agents/{agentId}/health`](#rest-api) shape for the
+  link's period, limited to its sections — with the **status and reasons judged
+  over those sections alone** (a link without `reliability` does not reveal that
+  reliability is red), the golden-suite check only with `reliability` — plus
+  `expiresAt` and a `brand` (`productName`, `tagline`, `poweredBy`, `logoUrl`
+  `/branding/logo`, `primaryColor`) from the
+  [white-label settings](white-labeling.md). No free text: no measure carries a
+  `hint` (an override's reason is an admin's note), and no reason a `markerId`.
+  No drill-down, no conversation ids, no user ids, no series.
+
+**Security.** `GET /health/reports/{token}` is the only unauthenticated health
+endpoint: the `health-report` permit rule covers `GET`/`HEAD` of
+`/health/reports/*` and nothing else (`/health/agents`, `/health/presets` and
+everything under `/agents` stay authenticated).
+
+- The token is 32 bytes from `SecureRandom` (256 bits), base64url. Only its
+  SHA-256 is stored; a request is answered by looking the hash up in a unique
+  index, so no token is compared character by character and a database dump
+  holds no usable link. The token is in the creation response only.
+- A malformed, unknown, expired or revoked token answers the same `404 {"error":
+  "not_found"}`; a malformed one is answered before any rate limit or database
+  lookup.
+- Rate limits per node, arranged so that tokens leading nowhere never use up a
+  real link's capacity: a token not found in the last 10 minutes is charged,
+  **before** its database lookup, to 10 lookups a minute per client address and
+  60 a minute in all — and gets the charge back when it turns out to be a live
+  link. Only a found link is charged to its own 30 reads a minute and to 300 a
+  minute for all found reports. Past any of them `429` with `Retry-After: 60`.
+  The client address is the one Quarkus resolves: the peer, or the forwarded
+  client only with `quarkus.http.proxy.proxy-address-forwarding` and the proxy in
+  `quarkus.http.proxy.trusted-proxies` — a raw `X-Forwarded-For` is never read.
+  Behind an unconfigured proxy every client shares one address, which only
+  tightens the unknown-token limit. A scan can therefore delay the *first* read
+  of a link on a node for a minute, never a link already being read.
+- Every answer is `Cache-Control: no-store`, `Referrer-Policy: no-referrer` (the
+  token is in the page's URL; it replaces the deployment-wide
+  `strict-origin-when-cross-origin` rather than adding a second header) and
+  `X-Robots-Tag: noindex`. No cookie, no CORS of its own — `quarkus.http.cors.*`
+  applies as to any endpoint.
+- **The token is in the URL path**, so whatever logs paths sees it. EDDI's own
+  traces do not: `HealthReportSpanScrubber` rewrites `url.path`, `http.target`,
+  `http.route`, `url.full` and `http.url` of a span to `/health/reports/{token}`
+  as it starts. A reverse proxy's or load balancer's access log is outside EDDI —
+  exclude `/health/reports/` from it or mask the segment there.
+- Creating and revoking links, and saving or deleting a profile, are logged
+  (`[HEALTH]`) and recorded in the [audit ledger](audit-ledger.md)
+  (`HEALTH_REPORT_LINK_CREATED`, `HEALTH_REPORT_LINK_REVOKED`,
+  `HEALTH_PROFILE_SAVED`, `HEALTH_PROFILE_DELETED`; actor, agent and link id —
+  never a token or its hash). The Platform Operator may list links but neither create nor
+  revoke them: a tool result is kept in its conversation and the audit ledger,
+  where a token would outlive being shown once, and its write scope holds no
+  `DELETE`.
+
 ## MCP
 
-Five read-only tools mirror the endpoints, with the same rules for the MCP
-caller: `read_agent_health`, `list_agent_health`,
-`compare_agent_versions_health`, `list_agent_health_sessions` (the drill-down —
-the review rule applies to the MCP caller exactly as over REST) and
-`suggest_outcome_mappings` (tier `eddi-admin`, `eddi-editor`, `eddi-viewer`). See
-[MCP Server](mcp-server.md#health-tools-5).
+Eight tools mirror the endpoints, with the same rules for the MCP caller:
+`read_agent_health`, `list_agent_health`, `compare_agent_versions_health`,
+`list_agent_health_sessions` (the drill-down — the review rule applies to the MCP
+caller exactly as over REST), `suggest_outcome_mappings`,
+`read_agent_health_profile` and `list_health_presets` (tier `eddi-admin`,
+`eddi-editor`, `eddi-viewer`), and `update_agent_health_profile` (tier
+`eddi-admin`, `eddi-editor`, plus `EDIT` on the agent). Report links have no
+tool. `update_agent_health_profile` replaces the stored profile: send what is
+stored with your change, without the fields the read profile's `defaulted`
+names. See [MCP Server](mcp-server.md#health-tools-8).
 
 ## Configuration
 
@@ -745,6 +1002,15 @@ Turn rows are personal data about a user's use of an agent:
   fencing, and deletes again what it wrote while the fence went up; outcomes
   are derived from turn rows, which the erasure deletes, so nothing re-creates
   them. A conversation delete removes its sessions too.
+- **Health profiles and report links** (`agentHealthAdministration`) hold only the
+  account name of whoever last saved a profile (`updatedBy`) or created a link
+  (`createdBy`); erasure blanks it and keeps the profile (it belongs to the
+  agent) and the link row — which, with nobody's authority behind it, answers
+  404 from then on. The export lists the profiles the person saved last (agent,
+  time) and the links they created (id, agent, sections, period, created,
+  expiry) — never a token.
+- **Deleting an agent** revokes its report links; a permanent delete also
+  removes its health profile and its `HEALTH` alert states.
 - **Deleting a conversation** deletes its rows (best effort — a failure is
   logged and the rows expire with the retention).
 - **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health
@@ -819,5 +1085,6 @@ lost (`dropped`, with a WARN at most once a minute). Both should stay at zero.
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because
 their user was erased or their conversation deleted; a rising `orphaned` (rows
-the daily sweep removed) means the worker's own clean-up had failed. See
-[Metrics](metrics.md#agent-health-metrics).
+the daily sweep removed) means the worker's own clean-up had failed. `HEALTH`
+alerts are counted with the other alerts, as `eddi_alerts_fired_total{source="HEALTH"}`.
+See [Metrics](metrics.md#agent-health-metrics).

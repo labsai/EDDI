@@ -140,7 +140,31 @@ const HEALTH_READS = [
   "GET /agents/{agentId}/health/sessions",
   "GET /agents/{agentId}/health/outcome-suggestions",
   "GET /health/agents",
+  // H4: how an agent's health is judged (its profile, the presets) and which
+  // owner report links exist (never their tokens). EDIT on the agent for the
+  // link list, VIEW for the rest — the backend checks both.
+  "GET /agents/{agentId}/health/profile",
+  "GET /health/presets",
+  "GET /agents/{agentId}/health/reports",
 ] as const;
+
+/**
+ * The Agent Health write (EDDI 6.7.0+, H4), granted in {@link WRITE_ENDPOINTS}
+ * and gated like every write: saving a health profile. It re-bands every measure
+ * and can change the status at once, and it is undone by putting back the
+ * profile read before.
+ *
+ * Deliberately NOT granted:
+ * - `DELETE /agents/{agentId}/health/profile` and
+ *   `DELETE /agents/{agentId}/health/reports/{id}` — the write scope holds no
+ *   DELETE (nothing here can be undone by the operator).
+ * - `POST /agents/{agentId}/health/reports`. Creating a link returns its token —
+ *   the credential of an unauthenticated page — and a tool result is stored in
+ *   the operator's conversation memory and the audit ledger, where it would
+ *   outlive the moment it was meant to be shown once. An admin creates and
+ *   revokes links in the Manager.
+ */
+const HEALTH_WRITES = ["PUT /agents/{agentId}/health/profile"] as const;
 
 /**
  * Read endpoints the operator is allowed to call.
@@ -452,9 +476,10 @@ export const READ_ENDPOINTS: readonly string[] = [
   // version) to the operator's caller like to anyone. Outcome suggestions only
   // read; applying a mapping is an ordinary agent update.
   //
-  // Deliberately NOT granted: nothing else exists yet. Health profiles and
-  // report links arrive in later phases and are decided when they do (a profile
-  // change re-bands every measure).
+  // H4 adds the status with its reasons, the health profile and the presets
+  // (reads here; the profile save is in WRITE_ENDPOINTS, gated), and the list
+  // of owner report links. Creating or revoking a link is deliberately not
+  // granted at all — see HEALTH_WRITES.
   ...HEALTH_READS,
 ] as const;
 
@@ -672,6 +697,8 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // every other write (`http.patch:*`), and for llmstore only ever approvable
   // through gate-guard.ts.
   ...PATCHABLE_EXTENSION_STORES.map((store) => `PATCH /${store}/{id}`),
+  // Agent Health profile save — see HEALTH_WRITES. Gated by `http.put:*`.
+  ...HEALTH_WRITES,
 ] as const;
 
 /**
@@ -1034,13 +1061,22 @@ export function grantsOversightReads(endpoints: readonly string[]): boolean {
 
 /**
  * Whether the Agent Health reads are granted — usage, the report, its series,
- * the version compare, the session drill-down, the outcome suggestions and the
- * portfolio. The prompt's health section names all seven, so it is shown only
- * when every one is held.
+ * the version compare, the session drill-down, the outcome suggestions, the
+ * portfolio, the profile, the presets and the report-link list. The prompt's
+ * health section names all ten, so it is shown only when every one is held.
  */
 export function grantsHealthReads(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return HEALTH_READS.every((entry) => set.has(entry));
+}
+
+/**
+ * Whether the Agent Health write is granted — the profile save. The prompt's
+ * health-writes lines name it.
+ */
+export function grantsHealthWrites(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return HEALTH_WRITES.every((entry) => set.has(entry));
 }
 
 /** Whether an upload source's stored files can be listed. */

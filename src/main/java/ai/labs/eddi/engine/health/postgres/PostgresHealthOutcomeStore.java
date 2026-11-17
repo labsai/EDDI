@@ -302,6 +302,34 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
         }
     }
 
+    static final String COUNTS_FOR_AGENTS = "SELECT agent_id, origin, outcome, evidence, engaged, provisional, COUNT(*), COALESCE(SUM(turns), 0) "
+            + "FROM health_outcomes WHERE agent_id = ANY(?) AND day >= ? AND day <= ? AND origin = ANY(?) "
+            + "GROUP BY agent_id, origin, outcome, evidence, engaged, provisional";
+
+    @Override
+    public Map<String, List<HealthOutcomeCount>> countsForAgents(Collection<String> agentIds, LocalDate from, LocalDate to,
+                                                                 Collection<String> origins) {
+        if (agentIds == null || agentIds.isEmpty() || origins == null || origins.isEmpty()) {
+            return Map.of();
+        }
+        try (Connection connection = connection(); PreparedStatement s = connection.prepareStatement(COUNTS_FOR_AGENTS)) {
+            s.setArray(1, connection.createArrayOf("text", agentIds.toArray(new String[0])));
+            s.setObject(2, from);
+            s.setObject(3, to);
+            s.setArray(4, connection.createArrayOf("text", origins.toArray(new String[0])));
+            Map<String, List<HealthOutcomeCount>> counts = new LinkedHashMap<>();
+            try (ResultSet r = s.executeQuery()) {
+                while (r.next()) {
+                    counts.computeIfAbsent(r.getString(1), a -> new ArrayList<>()).add(new HealthOutcomeCount(null, r.getString(2), r.getString(3),
+                            r.getString(4), r.getBoolean(5), r.getBoolean(6), r.getLong(7), r.getLong(8)));
+                }
+            }
+            return counts;
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not count the health outcomes of agents", e);
+        }
+    }
+
     @Override
     public List<HealthOutcome> sessions(HealthSessionQuery query) {
         if (query.origins().isEmpty() || query.versions().isEmpty()) {

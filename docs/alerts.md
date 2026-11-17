@@ -138,6 +138,21 @@ A save is validated and the error (`INVALID_RULE`) names every field that is wro
 | `RATING` | a rating is created or changed | `maxNormalizedScore` (0..1, fire at or below), `onComment` (any comment), `tags` (any of these reason tags). OR-ed; at least one |
 | `CONVERSATION_ERROR` | a turn ends badly | `errorKinds`, one or more of the table below |
 | `OUTPUT_MATCH` | a turn completes and a value in its result matches | `path`, `op`, `value`, `includeValue` — see [Matching a turn's result](#matching-a-turns-result) |
+| `HEALTH` | an agent's [health](agent-health.md#health-alerts) changes for the worse — evaluated after each health rollup pass, never in a turn | `healthTriggers`, one or more of `STATUS_CHANGE`, `BURN_RATE`, `CRITICAL_TREND`; `healthStatuses` (`WATCH`, `NEEDS_ATTENTION`; both when absent) narrows `STATUS_CHANGE` |
+
+`HEALTH` conditions fire when they **start**, not again while they last: the 7-day
+status entering one of `healthStatuses` (a rule that has not seen the agent yet
+reports its current status once), agent-caused failures burning the SLO's error
+budget at 2× or more over the last 3 days and today with the profile's volume
+floor (`slo.minTurnsForBurnAlert`, 50) in both windows, or a critical measure
+getting significantly worse. Their dedupe key carries the condition (`status:…`,
+`burn`, `trend:<measure>`) instead of a conversation, so two conditions of one
+agent in one window are two alerts. A `HEALTH` alert has no conversation and no
+agent version; its `match` adds `healthStatus`, `previousHealthStatus` and
+`measureId`. Health only alerts — it never acts on an agent. A rule that sets
+fields of another source is refused, and so is a `RATING`, `CONVERSATION_ERROR` or
+`OUTPUT_MATCH` rule with `healthTriggers`. Alerting off (`eddi.alerts.enabled=false`)
+switches the evaluation off too; health collection is unaffected.
 
 | Error kind | The turn… |
 | --- | --- |
@@ -434,3 +449,8 @@ most 10,000 of each, without naming anybody else.
   resolves; a rule cannot pick an integration by name.
 - `OUTPUT_MATCH` matches one value per rule; combine conditions by writing several
   rules.
+- `HEALTH` burn windows are whole UTC days (the rollup keeps daily rows), so a
+  burst of failures within one hour is diluted by the rest of the day and may not
+  reach 2×; `CONVERSATION_ERROR` rules are the tool for single bad turns.
+  The Manager's rule editor does not offer the `HEALTH` source yet; create such
+  rules over REST (`POST /alerts/rules`).

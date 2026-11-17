@@ -13,9 +13,11 @@ import ai.labs.eddi.engine.health.HealthMeasures.PeriodData;
 import ai.labs.eddi.engine.health.HealthMeasures.RatingStats;
 import ai.labs.eddi.engine.health.HealthMeasures.Totals;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
+import ai.labs.eddi.engine.health.HealthStatusRules.Verdict;
 import ai.labs.eddi.engine.health.model.HealthMarker;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
+import ai.labs.eddi.engine.health.model.HealthProfile;
 import ai.labs.eddi.engine.health.model.HealthTurnAggregate;
 import ai.labs.eddi.engine.health.model.HealthUsage;
 import ai.labs.eddi.engine.health.model.HealthUsagePoint;
@@ -24,11 +26,14 @@ import ai.labs.eddi.engine.health.report.HealthReports.AgentHealth;
 import ai.labs.eddi.engine.health.report.HealthReports.Check;
 import ai.labs.eddi.engine.health.report.HealthReports.CompareSide;
 import ai.labs.eddi.engine.health.report.HealthReports.DateRange;
+import ai.labs.eddi.engine.health.report.HealthReports.EffectivenessSection;
 import ai.labs.eddi.engine.health.report.HealthReports.HealthCompare;
 import ai.labs.eddi.engine.health.report.HealthReports.HealthSeries;
 import ai.labs.eddi.engine.health.report.HealthReports.Marker;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
 import ai.labs.eddi.engine.health.report.HealthReports.Period;
+import ai.labs.eddi.engine.health.report.HealthReports.Reason;
+import ai.labs.eddi.engine.health.report.HealthReports.Section;
 import ai.labs.eddi.engine.health.report.HealthReports.Series;
 import ai.labs.eddi.engine.health.report.HealthReports.SeriesPoint;
 import ai.labs.eddi.engine.model.Deployment;
@@ -124,6 +129,55 @@ public class HealthReportService {
         return this;
     }
 
+    /** The health profiles (H4); {@code null} applies the presets' defaults. */
+    private HealthProfiles profiles;
+
+    @Inject
+    void profiles(HealthProfiles profiles) {
+        this.profiles = profiles;
+    }
+
+    /** With health profiles — for tests. */
+    HealthReportService withProfiles(HealthProfiles profiles) {
+        this.profiles = profiles;
+        return this;
+    }
+
+    /**
+     * The agent's effective health profile: its stored one over its preset, the
+     * preset picked from the rows' traffic when the profile names none.
+     */
+    public EffectiveHealthProfile profile(String agentId, List<HealthTurnAggregate> rows) {
+        String auto = preset(rows);
+        return profiles == null ? EffectiveHealthProfile.ofPreset(auto) : profiles.effective(agentId, auto);
+    }
+
+    /**
+     * The preset picked from the agent's traffic of the last 30 days — what a
+     * profile without a preset uses.
+     */
+    public String autoPreset(String agentId) {
+        return preset(daily(agentId, today().minusDays(29), today()));
+    }
+
+    /** The effective profiles of many agents — for the portfolio. */
+    Map<String, EffectiveHealthProfile> profiles(List<String> agentIds, Map<String, List<HealthTurnAggregate>> rowsByAgent) {
+        Map<String, EffectiveHealthProfile> out = new LinkedHashMap<>();
+        Map<String, HealthProfile> stored = Map.of();
+        if (profiles != null) {
+            try {
+                stored = profiles.storedAll(agentIds);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not read the health profiles of the portfolio; using presets: %s", e.getMessage());
+            }
+        }
+        for (String agentId : agentIds) {
+            String auto = preset(rowsByAgent.getOrDefault(agentId, List.of()));
+            out.put(agentId, EffectiveHealthProfile.of(stored.get(agentId), auto, today()));
+        }
+        return out;
+    }
+
     HealthReportService(IHealthTurnStore turnStore, IHealthDailyStore dailyStore, IHealthDirtyDayStore dirtyStore, IHealthMarkerStore markerStore,
             IConversationRatingStore ratingStore, IAgentTestRunStore testRunStore, IDeploymentStore deploymentStore, HealthSettings settings,
             Clock clock) {
@@ -182,20 +236,82 @@ public class HealthReportService {
 
     /** {@code GET /agents/{agentId}/health}. */
     public AgentHealth report(Scope scope, String agentName, boolean qualityAllowed) {
+        return report(scope, agentName, qualityAllowed, null);
+    }
+
+    /**
+     * @param shown
+     *            {@code null} for the full report; else the sections of an owner
+     *            report link (see {@link #sharedReport})
+     */
+    private AgentHealth report(Scope scope, String agentName, boolean qualityAllowed, List<String> shown) {
         Window window = scope.window();
         Window baseline = window.baseline();
         List<HealthTurnAggregate> rows = daily(scope.agentId(), baseline.from(), window.to());
-        String preset = preset(rows);
+        EffectiveHealthProfile profile = profile(scope.agentId(), rows);
+        String preset = profile.preset();
         List<String> origins = scope.origins() != null ? scope.origins() : HealthPeriods.defaultOrigins(preset);
         Predicate<HealthTurnAggregate> selected = selected(scope.version(), origins);
 
         PeriodData current = periodData(scope.agentId(), window, scope.version(), origins, rows, selected, qualityAllowed);
         PeriodData before = periodData(scope.agentId(), baseline, scope.version(), origins, rows, selected, qualityAllowed);
-        Map<String, Object> sections = HealthMeasures.sections(current, before, !qualityAllowed);
+        Map<String, Object> sections = HealthMeasures.sections(current, before, !qualityAllowed, profile);
+        if (shown != null) {
+            sections = publicSections(sections, shown);
+        }
+        Verdict verdict = HealthStatusRules.evaluate(sections, profile,
+                markers(scope.agentId(), window, scope.markerTenants(), firstTurnOrigins(scope.origins())));
+        List<Reason> reasons = verdict.reasons();
+        List<Check> checks = List.of(goldenSuite(scope.agentId()));
+        if (shown != null) {
+            reasons = reasons.stream().map(r -> new Reason(r.measureId(), r.severity(), r.text(), null)).toList();
+            checks = shown.contains(HealthDefaults.RELIABILITY) ? checks : List.of();
+        }
 
         return new AgentHealth(scope.agentId(), agentName, period(window), new DateRange(baseline.from().toString(), baseline.to().toString()),
-                scope.version(), origins, null, List.of(), preset, clock.instant().toString(), dataThrough(scope.agentId()).toString(), sections,
-                List.of(goldenSuite(scope.agentId())));
+                scope.version(), origins, verdict.status(), reasons, preset, clock.instant().toString(), dataThrough(scope.agentId()).toString(),
+                sections, checks);
+    }
+
+    /**
+     * The report an owner report link shows (H4b): only the link's
+     * {@code sections}, and a status and reasons judged over those sections alone -
+     * a status over all of them would tell the owner about sections the link leaves
+     * out. Free text is left out: no measure carries a hint (an override's reason
+     * is an admin's note, not the owner's to read), no reason names a change
+     * marker, and the golden-suite check shows only with reliability.
+     */
+    public AgentHealth sharedReport(Scope scope, String agentName, List<String> sections) {
+        return report(scope, agentName, sections.contains(HealthDefaults.QUALITY), List.copyOf(sections));
+    }
+
+    /** The given sections only, in their order, without free-text hints. */
+    static Map<String, Object> publicSections(Map<String, Object> all, List<String> shown) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        all.forEach((section, content) -> {
+            if (shown.contains(section)) {
+                out.put(section, withoutHints(content));
+            }
+        });
+        return out;
+    }
+
+    private static Object withoutHints(Object content) {
+        if (content instanceof Section s) {
+            return new Section(s.restricted(), withoutHints(s.measures()));
+        }
+        if (content instanceof EffectivenessSection e) {
+            return new EffectivenessSection(e.restricted(), e.coverage(), withoutHints(e.measures()));
+        }
+        return content;
+    }
+
+    private static List<Measure> withoutHints(List<Measure> measures) {
+        if (measures == null) {
+            return null;
+        }
+        return measures.stream().map(m -> new Measure(m.id(), m.label(), m.kind(), m.critical(), m.unit(), m.value(), m.n(), m.interval(),
+                m.baseline(), m.delta(), m.significant(), m.tested(), m.band(), m.thresholds(), m.breakdown(), null)).toList();
     }
 
     /**
@@ -206,7 +322,7 @@ public class HealthReportService {
         if (requested != null) {
             return requested;
         }
-        return HealthPeriods.defaultOrigins(preset(daily(agentId, window.from(), window.to())));
+        return HealthPeriods.defaultOrigins(profile(agentId, daily(agentId, window.from(), window.to())).preset());
     }
 
     /**
@@ -428,7 +544,7 @@ public class HealthReportService {
     public HealthSeries series(Scope scope, List<String> measures, String groupBy, boolean qualityAllowed) {
         Window window = scope.window();
         List<HealthTurnAggregate> rows = daily(scope.agentId(), window.from(), window.to());
-        String preset = preset(rows);
+        String preset = profile(scope.agentId(), rows).preset();
         List<String> origins = scope.origins() != null ? scope.origins() : HealthPeriods.defaultOrigins(preset);
         List<HealthTurnAggregate> chosen = rows.stream().filter(selected(scope.version(), origins)).toList();
 
@@ -655,16 +771,16 @@ public class HealthReportService {
         }
         LocalDate earliest = olderWindow.from().isBefore(newerWindow.from()) ? olderWindow.from() : newerWindow.from();
         List<HealthTurnAggregate> rows = daily(agentId, earliest, today);
-        String preset = preset(rows);
-        List<String> origins = requestedOrigins != null ? requestedOrigins : HealthPeriods.defaultOrigins(preset);
+        EffectiveHealthProfile profile = profile(agentId, rows);
+        List<String> origins = requestedOrigins != null ? requestedOrigins : HealthPeriods.defaultOrigins(profile.preset());
 
         Window fromWindow = fromVersion == newer ? newerWindow : olderWindow;
         Window toWindow = toVersion == newer ? newerWindow : olderWindow;
         PeriodData fromData = periodData(agentId, fromWindow, fromVersion, origins, rows, selected(fromVersion, origins), qualityAllowed);
         PeriodData toData = periodData(agentId, toWindow, toVersion, origins, rows, selected(toVersion, origins), qualityAllowed);
         return new HealthCompare(agentId,
-                new CompareSide(fromVersion, range(fromWindow), HealthMeasures.sections(fromData, null, !qualityAllowed)),
-                new CompareSide(toVersion, range(toWindow), HealthMeasures.sections(toData, null, !qualityAllowed)),
+                new CompareSide(fromVersion, range(fromWindow), HealthMeasures.sections(fromData, null, !qualityAllowed, profile)),
+                new CompareSide(toVersion, range(toWindow), HealthMeasures.sections(toData, null, !qualityAllowed, profile)),
                 HealthMeasures.deltas(fromData, toData, !qualityAllowed));
     }
 
@@ -754,6 +870,49 @@ public class HealthReportService {
             }
         }
         return sessions;
+    }
+
+    /**
+     * For the portfolio and the {@code HEALTH} alerts: per agent, the sessions that
+     * ended in the window counted per origin (each count's {@code group}), in one
+     * query for the agents not cached yet. {@code null} when they cannot be counted
+     * — the window reaches past the retention, there is no outcome store, or it
+     * could not be read; then the effectiveness measures say so.
+     */
+    Map<String, List<HealthOutcomeCount>> outcomeCountsByAgent(List<String> agentIds, Window window) {
+        if (outcomeStore == null || window.from().isBefore(oldestTurnDay())) {
+            return null;
+        }
+        Map<String, List<HealthOutcomeCount>> counts = new LinkedHashMap<>();
+        List<String> missing = new ArrayList<>();
+        for (String agentId : agentIds) {
+            List<HealthOutcomeCount> hit = cache.peek(List.of("agentOutcomes", agentId, window));
+            if (hit == null) {
+                missing.add(agentId);
+            } else {
+                counts.put(agentId, hit);
+            }
+        }
+        if (!missing.isEmpty()) {
+            try {
+                Map<String, List<HealthOutcomeCount>> read = outcomeStore.countsForAgents(missing, window.from(), window.to(),
+                        HealthPeriods.defaultOrigins(HealthDefaults.PRESET_TASK));
+                for (String agentId : missing) {
+                    List<HealthOutcomeCount> agentCounts = List.copyOf(read.getOrDefault(agentId, List.of()));
+                    cache.put(List.of("agentOutcomes", agentId, window), agentCounts);
+                    counts.put(agentId, agentCounts);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not count the session outcomes of the portfolio for Agent Health: %s", sanitize(e.getMessage()));
+                return null;
+            }
+        }
+        return counts;
+    }
+
+    /** {@code eddi.health.min-outcome-coverage}. */
+    double minOutcomeCoverage() {
+        return settings.minOutcomeCoverage();
     }
 
     /** The daily rows grouped by agent, for the portfolio. */
