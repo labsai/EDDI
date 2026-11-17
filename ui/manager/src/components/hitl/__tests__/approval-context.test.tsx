@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalContext } from "@/components/hitl/approval-context";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import type { ApprovalContextView } from "@/lib/api/hitl";
+import type { ApprovalContextView } from "@eddi/app-kit/lib/api/hitl";
 
 function view(overrides: Partial<ApprovalContextView> = {}): ApprovalContextView {
   return {

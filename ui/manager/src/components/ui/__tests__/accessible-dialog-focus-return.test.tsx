@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { StrictMode } from "react";
 import { render, screen } from "@testing-library/react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 
 /**
  * Where focus goes when a dialog closes. The initial-focus frame is held (never

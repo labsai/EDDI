@@ -28,10 +28,12 @@ import java.util.concurrent.TimeUnit;
  * Shared LLM summarization infrastructure.
  * <p>
  * Provides a single entry point for any component that needs to summarize text
- * via an LLM call. Currently consumed by:
+ * via an LLM call. Consumed by, among others:
  * <ul>
  * <li>{@link ConversationSummarizer} — rolling conversation summary</li>
  * <li>{@code DreamService} — Dream memory consolidation</li>
+ * <li>the group conversation services (stance summaries, convergence
+ * judge)</li>
  * </ul>
  * <p>
  * Uses {@link ChatModelRegistry} for model creation and caching. Thread-safe

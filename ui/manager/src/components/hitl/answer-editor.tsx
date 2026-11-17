@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { EditableAnswer, ReasonCodeOption } from "@/lib/api/hitl";
+import { cn } from "@eddi/app-kit/lib/utils";
+import type { EditableAnswer, ReasonCodeOption } from "@eddi/app-kit/lib/api/hitl";
 import { codePointLength } from "@/lib/hitl-edit";
 
 /**

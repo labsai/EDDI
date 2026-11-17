@@ -33,7 +33,9 @@ import java.util.Map;
  * @param auditEntries
  *            processing records from the audit ledger (capped at 10,000)
  * @param attachments
- *            attachment metadata for the exported conversations
+ *            attachment metadata for all of the user's conversations (including
+ *            any beyond the conversation export cap), and for the exported
+ *            group discussions and the member conversations those created
  * @param totalConversations
  *            how many conversations the user has — <em>not</em> necessarily
  *            {@code conversations.size()}, see {@code conversationsTruncated}
@@ -318,13 +320,28 @@ public record UserDataExport(
 
     /**
      * Lightweight conversation summary for export.
+     *
+     * @param title
+     *            the conversation's title — derived from the user's own message,
+     *            written by a model from it, or set by the user — or null when it
+     *            has none (or its descriptor could not be read)
+     * @param pinned
+     *            whether the user pinned it
      */
     public record ConversationExportEntry(
             String conversationId,
             String agentId,
             Integer agentVersion,
             ConversationState state,
-            List<ConversationOutput> outputs) {
+            List<ConversationOutput> outputs,
+            String title,
+            boolean pinned) {
+
+        /** An entry without a title. */
+        public ConversationExportEntry(String conversationId, String agentId, Integer agentVersion, ConversationState state,
+                List<ConversationOutput> outputs) {
+            this(conversationId, agentId, agentVersion, state, outputs, null, false);
+        }
     }
 
     /**

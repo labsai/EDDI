@@ -35,14 +35,14 @@ import java.util.regex.Pattern;
  *
  * <h2>Where the signal comes from</h2>
  * <p>
- * langchain4j 1.20 surfaces a provider failure as a typed exception
- * ({@code RateLimitException}, {@code InvalidRequestException}, ...) whose
- * <em>cause</em> is a {@link HttpException} carrying exactly two things: the
- * numeric {@code statusCode()} and the response <b>body as the message</b>. The
- * response headers are not retained, so an HTTP {@code Retry-After} header is
- * not reachable; the provider's own hint is read from the body instead (Gemini
- * {@code RetryInfo.retryDelay}, or the "retry in 13s" sentence OpenAI and
- * Gemini put in the message). The typed exception alone cannot tell a rate
+ * langchain4j (1.23 in {@code pom.xml}) surfaces a provider failure as a typed
+ * exception ({@code RateLimitException}, {@code InvalidRequestException}, ...)
+ * whose <em>cause</em> is a {@link HttpException} carrying exactly two things:
+ * the numeric {@code statusCode()} and the response <b>body as the message</b>.
+ * The response headers are not retained, so an HTTP {@code Retry-After} header
+ * is not reachable; the provider's own hint is read from the body instead
+ * (Gemini {@code RetryInfo.retryDelay}, or the "retry in 13s" sentence OpenAI
+ * and Gemini put in the message). The typed exception alone cannot tell a rate
  * limit from a spent quota — both are a 429 — which is why the body is parsed.
  * </p>
  *

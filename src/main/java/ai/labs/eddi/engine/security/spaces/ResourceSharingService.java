@@ -44,15 +44,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * colleague's LLM config that you can see but do not own is skipped, and named
  * in the result, rather than silently widened.
  *
- * <h3>Revoke is reference-counted by construction</h3> Revoking removes the
- * subject's grant from the root and from each reachable resource, which is
- * correct even when two shared agents share a rule set: the second agent's own
- * grant on that rule set is a separate {@link ResourceGrant} for the same
- * subject only if it was granted through that agent, in which case re-sharing
- * the second agent restores it. Grants are keyed by subject, so the last revoke
- * wins — the alternative, tracking which share introduced which grant, buys
- * correctness in a case (two shares of overlapping graphs to the same person)
- * that a human would in any case expect to behave exactly like this.
+ * <h3>Revoke is not reference-counted</h3> Revoking removes the subject's grant
+ * from the root and from each reachable resource, even when two shared agents
+ * share a rule set: grants are keyed by subject, so there is only one grant per
+ * subject on that rule set, and re-sharing the second agent restores it. The
+ * last revoke wins — the alternative, tracking which share introduced which
+ * grant, buys correctness in a case (two shares of overlapping graphs to the
+ * same person) that a human would in any case expect to behave exactly like
+ * this.
  *
  * @author ginccc
  */

@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalsPage } from "@/pages/approvals";
-import type { PendingApprovalSummary } from "@/lib/api/hitl";
+import type { PendingApprovalSummary } from "@eddi/app-kit/lib/api/hitl";
 
 function mockInbox(regular: PendingApprovalSummary[]) {
   server.use(
@@ -55,7 +55,8 @@ describe("ApprovalsPage — tool-call pauses", () => {
 
     expect(await screen.findByTestId("tool-badge-conv-tool-1")).toBeInTheDocument();
     // Tool names replace the generic reason so the reviewer sees what's gated.
-    expect(screen.getByText("sendEmail, transfer_funds")).toBeInTheDocument();
+    // In words: the inbox is read, the identifiers stay on the approval card.
+    expect(screen.getByText("Send email, Transfer funds")).toBeInTheDocument();
     // Safe: a Review link, and NO inline Approve/Reject that would approve blind.
     expect(screen.getByTestId("review-conv-tool-1")).toBeInTheDocument();
     expect(screen.queryByTestId("approve-conv-tool-1")).not.toBeInTheDocument();

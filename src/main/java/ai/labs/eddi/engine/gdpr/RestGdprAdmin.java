@@ -65,9 +65,10 @@ public class RestGdprAdmin implements IRestGdprAdmin {
      * data-portability request for a user with 1,200 conversations returned 200
      * with 200 of them silently missing — an arbitrary 200 on MongoDB, whose
      * natural order is not insertion order. And the cap was then the <em>only</em>
-     * completeness check, while the exporter has never covered group transcripts,
-     * shared artifacts, schedules or HITL journal entries: a user whose data lives
-     * only in those four categories received an empty bundle, 200 OK, documented as
+     * completeness check, while the exporter did not cover group transcripts,
+     * shared artifacts, schedules or HITL journal entries (the first two are
+     * exported now; the last two are still omitted): a user whose data lives only
+     * in those four categories received an empty bundle, 200 OK, documented as
      * complete — an Art. 20 answer that overstates itself to the one reader who
      * cannot check it. {@link UserDataExport#complete()} answers both questions and
      * the status follows it; {@code omittedCategories} in the body names what is

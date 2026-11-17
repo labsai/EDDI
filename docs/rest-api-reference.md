@@ -24,8 +24,10 @@ for anything this page does not cover.
 - **Base URL.** The examples use `EDDI=http://localhost:7070`.
 - **Authentication.** With OIDC enabled (`QUARKUS_OIDC_TENANT_ENABLED=true`),
   send `Authorization: Bearer <access token>`. The conversation endpoints accept
-  the roles `eddi-admin`, `eddi-editor` and `eddi-user`; the approval endpoints
-  also accept `eddi-approver`. There is no role hierarchy — a role is accepted
+  the roles `eddi-admin`, `eddi-editor` and `eddi-user`; `cancel`, `resume`,
+  `resume/stream`, `approval-status` and `pending-approvals` also accept
+  `eddi-approver`, and the conversation store's reads also accept `eddi-approver`
+  and `eddi-viewer`. There is no role hierarchy — a role is accepted
   only where it is listed. A non-admin can only touch conversations they own (the
   `userId` the conversation was started for). See [Security](security.md).
 - **Two ids.** A conversation is *started* on the agent
@@ -55,12 +57,14 @@ for anything this page does not cover.
 | `POST /agents/{conversationId}/resume` | Submit a human decision for a paused turn | `200` |
 | `GET /agents/{conversationId}/approval-status` | Pause details of a conversation | `200` |
 | `GET /agents/pending-approvals` | Conversations awaiting a human decision | `200` list |
+| `GET /me/events` | The caller's event stream: approvals, team progress, finished jobs, notifications — ids only (see [Your event stream](#your-event-stream)) | `200` `text/event-stream` |
 | `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` (a compare-and-set from the state it read: `409` when the state changed meanwhile or cannot be reset) | `200` |
 | `GET /conversationstore/conversations` | List conversations (paged, filterable) | `200` list |
+| `GET /conversationstore/conversations/search?q=` | Search **my** conversations by title (paged; see [Searching my conversations](#searching-my-conversations)) | `200` list |
 | `GET /conversationstore/conversations/simple/{conversationId}` | Read a conversation (same shape as `GET /agents/{id}`) | `200` |
 | `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory. The `audit:*` step data (the compiled system prompt above all; `audit:token_usage` stays) is withheld unless the caller has `VIEW` on the agent — the same rule `approval-status?detail=full` and MCP `read_audit_trail` apply | `200` |
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
-| `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
+| `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor; optional `agentVersion`) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |
 | `POST /conversationstore/conversations/end-inactive` | End conversations idle for `inactiveForDays` (admin; optional `agentId`, `dryRun`) | `200` |
 
@@ -242,7 +246,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
 | `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
-| `tool_result` | `{"tool","callId","status","durationMs"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval) or `rejected` (a human declined it) | Sent exactly once for every `tool_call`, always after it in the same stream, whichever way the call ends; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the result** |
+| `tool_result` | `{"tool","callId","status","durationMs","ok","summary"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval, or a result that reports `NOT_EXECUTED`) or `rejected` (a human declined it); `ok` is `status == "ok"`; `summary` is the start of the result, or of the refusal, redacted exactly like `task_complete`'s `toolTrace`, whitespace collapsed, at most 200 characters (may be empty) | Sent once for every `tool_call`, always after it in the same stream, whichever way the call ends — except a call cut off by a cancellation or a turn deadline interrupt, which ends the turn without its result; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the raw result** |
 | `hitl_resume` | `{"pauseId","verdict"}` | `/resume/stream` only. The decision was committed; sent once, before any event of the continued turn |
 | `approval_required` | `{"pauseId","pauseType","callCount"}` — `pauseType` is `TOOL_CALL` or `RULE`; `callCount` the number of gated tool calls awaiting a decision (`0` for a rule pause) | The turn ends waiting for a human. Sent immediately before `done` on `/stream` and `/resume/stream`; pass `pauseId` back in the decision |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
@@ -444,19 +448,45 @@ and `toolDecisions` for per-tool-call gates. `?detail=full` on
 | `409 Conversation is not in a resumable state (current state: READY) — …` | Nothing is paused (already resumed, cancelled, timed out, or the agent is not deployed) |
 | `409` naming `pauseId no longer current` | The pause changed after the decision was made |
 
+### Your event stream
+
+Instead of polling `pending-approvals`, a client can hold `GET /me/events` open:
+a Server-Sent Event stream that says, for the signed-in user only, when an
+approval they may decide is waiting (`approval.pending`) or was decided
+(`approval.decided`), and when a team discussion, a long job or a notification
+concerns them. Payloads carry ids and kinds, never content — fetch the details
+here. There is no replay: on (re)connect, refetch. One stream per tab, at most
+8 per user by default (`429` past it); `401` without a sign-in.
+
+```bash
+curl -N -H "Authorization: Bearer $TOKEN" "$EDDI/me/events"
+# event: ready
+# data: {"v":1,"heartbeatSeconds":20}
+#
+# event: approval.pending
+# data: {"id":"…","kind":"approval.pending","ts":1793961600000,"surface":"regular","conversationId":"6abf…","agentId":"66a0…"}
+```
+
+Every kind, who receives it, the limits and the cluster behaviour:
+[User Events](user-events.md).
+
 ## Resetting a stuck conversation
 
 `PATCH /agents/{conversationId}/state?state=READY` (admin only) moves a
-conversation in `ERROR` or `EXECUTION_INTERRUPTED` back to `READY`. `READY` is
-the only accepted target:
+conversation in `ERROR` or `EXECUTION_INTERRUPTED` back to `READY`. The
+endpoint refuses only `IN_PROGRESS` and `ENDED`, so it also resets an
+`AWAITING_HUMAN` conversation — prefer `cancel` for a pause. `READY` is
+the only accepted target, and the default when `state` is omitted:
 
 | Situation | Response |
 | --- | --- |
-| Conversation in `ERROR` or `EXECUTION_INTERRUPTED` | `200 {"message":"State reset from ERROR to READY"}` |
+| Conversation in `ERROR` or `EXECUTION_INTERRUPTED` (or `AWAITING_HUMAN`) | `200 {"message":"State reset from ERROR to READY"}` |
 | Conversation already `READY` | `200 {"message":"Conversation already in READY state"}` |
 | Any other `state` value | `400 {"error":"Only READY is supported as target state"}` |
 | Conversation `IN_PROGRESS` | `409 {"error":"Cannot reset while conversation is IN_PROGRESS"}` |
 | Conversation `ENDED` | `409 {"error":"Cannot reset an ENDED conversation"}` |
+| The state changed between the read and the reset | `409 {"error":"Conversation state changed while resetting it — read it again and retry"}` |
+| Unknown conversation id | `404` |
 
 ## The conversation store
 
@@ -480,20 +510,28 @@ curl -s "$EDDI/conversationstore/conversations?agentId=<AGENT_ID>&limit=20&index
     "viewState": "UNSEEN",
     "conversationStepSize": 5,
     "environment": "production",
-    "conversationState": "READY"
+    "conversationState": "READY",
+    "title": "What is the weather in Vienna?",
+    "titleSource": "AUTO",
+    "pinned": false
   }
 ]
 ```
 
+`title` is the first user message that was not secret, truncated (`titleSource`
+`AUTO`), a model-written one for an agent with `titleGeneration` (`LLM`), or the
+owner's (`USER`); absent until the first such message.
+
 | Parameter | Meaning |
 | --- | --- |
-| `index`, `limit` | Page number and page size (default `0`, `20`). Page until a page comes back empty. `index × limit` above 10,000 is refused with `400` — narrow the listing with a filter instead |
+| `index`, `limit` | Page number and page size (default `0`, `20`). Page until a page comes back empty. A negative `index`, a `limit` above `eddi.rest.listing.max-limit` (default 1,000) or `index × limit` above 10,000 is refused with `400` — narrow the listing with a filter instead |
 | `agentId`, `agentVersion` | Only this agent (version) |
 | `conversationState` | Only conversations in this state |
 | `conversationId` | One conversation |
 | `viewState` | `UNSEEN`, `SEEN`, … |
 | `filter` | Free-text filter |
 | `mine` | `true`: only the caller's own conversations (default `false`) |
+| `excludeGroupMembers` | `true`: leave out the private conversations a group discussion started for its members — those whose descriptor records `groupConversationId`. Member conversations started before 6.7.0 record none and are still listed (since 6.7.0) |
 
 Results are newest first. A non-admin sees only their own conversations, plus,
 with `agentId`, those of an agent they review; an admin sees everybody's.
@@ -507,17 +545,55 @@ conversation from before v5.1.6 that records no owner there is left out. With
 authorization disabled there is no caller to match and every conversation is
 listed.
 
+A member conversation of a group discussion carries `groupConversationId` on
+its descriptor.
+
 | Call | Notes |
 | --- | --- |
 | `GET …/simple/{conversationId}` | Same snapshot as `GET /agents/{conversationId}`, with the same query parameters |
 | `GET …/{conversationId}` | The stored conversation memory document, every step and key |
+| `PATCH …/{conversationId}` | Owner (or admin): rename and/or pin, body `{"title": "…", "pinned": true}` (either field). `200` with the updated descriptor; `400` for an empty body or a blank or longer-than-200-character title; `404` for a deleted conversation. A title set here is never replaced by a generated one — see [Conversation titles](agent-config-authoring.md#conversation-titles-titlegeneration) |
 | `DELETE …/{conversationId}` | `204`. `?deletePermanently=true` removes the document instead of marking it deleted |
 | `DELETE …/?deleteOlderThanDays=N` | Admin only: permanently delete every **ended** conversation older than `N` days (`N ≥ 1`) |
-| `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent, `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
-| `POST …/end` | Admin or editor: end the listed conversations. The body is a JSON array of objects of which only `conversationId` is read, so the `active` list can be sent back as it is; an array of plain id strings is refused with `400`. `?endReason=agent-version-retired` is the one accepted reason. The response lists the `ended`, `skipped` and `failed` ids |
+| `GET …/active/{agentId}` | Admin or editor: open (not `ENDED`) conversations of an agent (`?agentVersion=` restricts it to one version), `[{"conversationId","agentId","agentVersion","conversationState","lastInteraction"}]` |
+| `POST …/end` | Admin or editor: end the listed conversations. The body is a JSON array of objects of which only `conversationId` is read, so the `active` list can be sent back as it is; an array of plain id strings is refused with `400`. `?endReason=agent-version-retired` is the one accepted reason. The response lists the `ended`, `skipped` and `failed` ids, with status `500` if any failed |
 
 Every per-conversation call checks ownership, so a caller can neither read nor
 delete a conversation they do not own.
+
+### Searching my conversations
+
+```bash
+curl -s "$EDDI/conversationstore/conversations/search?q=rome&index=0&limit=20"
+```
+
+Answers the same descriptors as the listing, newest first, for the conversations
+whose **title** contains `q`.
+
+- **Only the caller's own conversations**, for every caller, an administrator
+  included: this is "my conversations". (An administrator who needs everybody's
+  uses the listing's `filter`.) The owner is part of the database query, as an
+  exact match on the descriptor's `userId`, so another user's conversation is
+  never read. With authorization disabled every conversation is searched, as the
+  listing then shows every conversation. A conversation from before v5.1.6 that
+  records no owner on its descriptor is not searched.
+- `q` is literal text, not a pattern: `%`, `_`, `*` or `(` match themselves. It is
+  case-insensitive, whitespace is collapsed the way titles are stored, and it must
+  be 1 to 100 characters (`400` otherwise).
+- `index`, `limit` page as in the listing (`index × limit` at most 10,000). A page
+  can come back short, because a match whose conversation memory is gone is left
+  out, so page until a page comes back empty.
+- **Titles only.** A title never comes from a secret turn, and it lives on the
+  conversation descriptor, which [GDPR erasure](gdpr-compliance.md) deletes, so
+  nothing the search can find outlives an erasure. Conversation *outputs* are not
+  searched yet. Doing that safely needs more than a query: the outputs live in
+  the conversation memory documents, not the descriptors, so they need their own
+  index on both backends. They hold model and tool text that the turn-end scrub
+  does not cover (it removes secret input and secret context, not what a tool
+  echoed), so they would also need a decision on redaction. Both are open.
+- MongoDB matches with an escaped, case-insensitive regex and PostgreSQL with an
+  escaped `ILIKE`, both after the exact owner match narrows the rows to the
+  caller's.
 
 ## Calling an API as the user: secret context
 
@@ -558,6 +634,7 @@ admin endpoints, described under
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
+| `422` | `{"error": "agent_misconfigured", "message": "API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: ...", "retryable": false}` | `POST /agents/{agentId}/start` only: the agent's own `CONVERSATION_START` turn hit a configuration it cannot run — a `${vault:…}` reference that names no secret in the tenant it is looked up in (or no vault is configured), or a secret sent to a host its [`allowedHosts`](secrets-vault.md#destination-allow-list-allowedhosts) does not name. No conversation was created; fix the configuration rather than retrying. A server-side failure (the vault could not be read, the database failed) stays a `500` |
 | `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
@@ -570,6 +647,7 @@ For symptoms and fixes beyond the status code, see
 
 - [Conversations](conversations.md) — how conversation state, memory and windowing work
 - [Human-in-the-Loop](hitl.md) — pause configuration, timeouts, per-tool-call gates
+- [User Events](user-events.md) — `GET /me/events`, the per-user event stream
 - [Group Conversations](group-conversations.md) — the `/groups/{groupId}/conversations` API
 - [OpenAI-compatible API](open-webui-integration.md) — `/v1/chat/completions` on top of the same engine
 - [MCP Server](mcp-server.md) — the same operations as MCP tools

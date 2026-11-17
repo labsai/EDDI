@@ -173,7 +173,7 @@ public class Conversation implements IConversation {
      * <p>
      * This has to happen per turn, not per conversation. The field is not part of
      * the persisted snapshot, and every request rebuilds memory from the store — so
-     * setting it only in {@link #init()} meant it was present for the
+     * setting it only in {@link #init(Map)} meant it was present for the
      * CONVERSATION_START turn and null for every turn after it. The gate in
      * {@code ContextualToolsProvider.addUserMemoryToolIfEnabled} reads exactly that
      * field, so the {@code UserMemoryTool} was never assembled on a turn a user
@@ -316,16 +316,6 @@ public class Conversation implements IConversation {
     }
 
     /**
-     * Loads user properties from the {@code usermemories} collection. This replaces
-     * both the old {@code loadLongTermProperties()} (which read from the legacy
-     * {@code properties} collection) and the old {@code loadUserMemories()}.
-     * <p>
-     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
-     * scoping (self + group + global). Recall order and max entries come from
-     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
-     * defaults.
-     */
-    /**
      * One entry per key. A key can be visible more than once — the shared
      * {@code global} row and this agent's own {@code self} or {@code group} row are
      * different documents, and they coexist, for instance when an agent whose
@@ -337,12 +327,50 @@ public class Conversation implements IConversation {
      * untouched, since other agents may still read it.
      */
     static List<UserMemoryEntry> mostSpecificPerKey(List<UserMemoryEntry> entries) {
+        entries = withoutReplacedEntries(entries);
         Map<String, UserMemoryEntry> byKey = new LinkedHashMap<>();
         for (UserMemoryEntry entry : entries) {
             byKey.merge(entry.key(), entry, (kept, candidate) -> precedes(candidate, kept) ? candidate : kept);
         }
         return new ArrayList<>(byKey.values());
     }
+
+    /**
+     * Drops a {@code SUPERSEDED} entry when this reader also sees another entry for
+     * its key that is not superseded — the replacement wins over scope precedence,
+     * which is the point of superseding a more specific (say {@code self}) value by
+     * a newer {@code global} one. A superseded entry that is the reader's ONLY
+     * entry for its key is kept: Dream only supersedes where the replacement
+     * reaches every reader, so this is the recall window or a changed group
+     * membership hiding the replacement, and losing the fact altogether would be
+     * worse than an older value.
+     */
+    static List<UserMemoryEntry> withoutReplacedEntries(List<UserMemoryEntry> entries) {
+        if (entries.stream().noneMatch(e -> e.assessment() == UserMemoryEntry.Assessment.SUPERSEDED)) {
+            return entries;
+        }
+        Set<String> keysWithCurrentEntry = new HashSet<>();
+        for (UserMemoryEntry entry : entries) {
+            if (entry.assessment() != UserMemoryEntry.Assessment.SUPERSEDED) {
+                keysWithCurrentEntry.add(entry.key());
+            }
+        }
+        return entries.stream()
+                .filter(e -> e.assessment() != UserMemoryEntry.Assessment.SUPERSEDED || !keysWithCurrentEntry.contains(e.key()))
+                .toList();
+    }
+
+    /**
+     * Name of the conversation-scoped property listing the loaded memories that
+     * Dream marked {@code CONTESTED} — another entry for the same key holds a
+     * different value — as {@code key -> true}. Present only when there is at least
+     * one, so {@code {#if properties.contestedMemories}} gates a "please clarify"
+     * instruction, {@code {properties.contestedMemories.language}} asks about one
+     * key and {@code {properties.contestedMemories.keys}} lists them. The competing
+     * value is deliberately not exposed: it may be another agent's private
+     * ({@code self}) memory. Rewriting a key removes it from the marker.
+     */
+    public static final String KEY_CONTESTED_MEMORIES = ContestedMemoryMarker.KEY;
 
     private static boolean precedes(UserMemoryEntry a, UserMemoryEntry b) {
         int byScope = Integer.compare(scopeRank(a.visibility()), scopeRank(b.visibility()));
@@ -359,6 +387,16 @@ public class Conversation implements IConversation {
         return visibility == Visibility.group ? 1 : 2;
     }
 
+    /**
+     * Loads user properties from the {@code usermemories} collection. This replaces
+     * both the old {@code loadLongTermProperties()} (which read from the legacy
+     * {@code properties} collection) and the old {@code loadUserMemories()}.
+     * <p>
+     * Uses {@link IUserMemoryStore#getVisibleEntries} which handles visibility
+     * scoping (self + group + global). Recall order and max entries come from
+     * {@link AgentConfiguration.UserMemoryConfig} if available, or sensible
+     * defaults.
+     */
     private void loadUserProperties(IConversationMemory memory, Map<String, Context> context) throws LifecycleException {
         IUserMemoryStore store = propertiesHandler.getUserMemoryStore();
         if (store == null)
@@ -387,8 +425,12 @@ public class Conversation implements IConversation {
 
             List<UserMemoryEntry> entries = mostSpecificPerKey(store.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries));
 
+            Map<String, Object> contested = new LinkedHashMap<>();
             for (UserMemoryEntry entry : entries) {
                 Property prop = entryToProperty(entry);
+                if (entry.assessment() == UserMemoryEntry.Assessment.CONTESTED) {
+                    contested.put(entry.key(), true);
+                }
 
                 // Special handling for userInfo (needs to be stored as conversation-scoped map)
                 if (KEY_USER_INFO.equals(entry.key()) && entry.value() instanceof Map<?, ?>) {
@@ -397,6 +439,17 @@ public class Conversation implements IConversation {
                     memory.getConversationProperties().put(KEY_USER_INFO, new Property(KEY_USER_INFO, userInfoMap, Scope.conversation));
                 } else {
                     memory.getConversationProperties().put(entry.key(), prop);
+                }
+            }
+
+            if (!contested.isEmpty()) {
+                Property occupant = memory.getConversationProperties().get(KEY_CONTESTED_MEMORIES);
+                if (occupant != null && occupant.getScope() == Scope.longTerm) {
+                    LOGGER.warnf("[MEMORY] Not exposing %d contested memories as '%s' for agent='%s': a memory of that name exists",
+                            contested.size(), KEY_CONTESTED_MEMORIES, sanitize(agentId));
+                } else {
+                    memory.getConversationProperties().put(KEY_CONTESTED_MEMORIES,
+                            new Property(KEY_CONTESTED_MEMORIES, contested, Scope.conversation));
                 }
             }
 
@@ -871,8 +924,12 @@ public class Conversation implements IConversation {
      * Visibility is applied at the persistence boundary:
      * <ul>
      * <li>If the property has explicit visibility → use it</li>
-     * <li>If the property has no visibility (null) → default to {@code global}
-     * (matches legacy flat properties behavior)</li>
+     * <li>If the property has no visibility (null) → the agent's
+     * {@code userMemoryConfig.defaultVisibility}, else {@code global} (matches
+     * legacy flat properties behavior)</li>
+     * <li>A {@code group} property in a conversation that belongs to no group is
+     * stored as {@code self} (see
+     * {@link ConversationGroups#persistedVisibility})</li>
      * </ul>
      * <p>
      * <strong>Why the diff matters:</strong> every entry recalled at conversation
@@ -910,6 +967,7 @@ public class Conversation implements IConversation {
         // The groups this conversation belongs to — a group-visible property must
         // carry them, or no reader (the writer included) can ever match it.
         List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory, propertiesHandler.getGroupMembershipCheck());
+        Set<String> written = new LinkedHashSet<>();
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
@@ -944,17 +1002,29 @@ public class Conversation implements IConversation {
                 UserMemoryEntry entry = UserMemoryEntry.fromProperty(property, userId, agentId, conversationId, vis, groupIds);
                 store.upsert(entry);
                 pending.remove(propertyEntry.getKey());
+                written.add(propertyEntry.getKey());
             }
             // Every live longTerm property has been considered, so a leftover marker
             // refers to a property that no longer exists — there is nothing to write.
             pending.clear();
         } finally {
             conversationMemory.setPendingLongTermWrites(pending);
+            liftContestedMarkers(written);
         }
 
         // The turn's writes are now the new baseline — a resume that persists twice
         // within the same Conversation must not rewrite them a second time.
         captureLongTermBaseline();
+    }
+
+    /**
+     * A key written back to the store is a new statement of the fact, which the
+     * store records as {@code ACCEPTED} — so it is no longer contested in this
+     * conversation either. The {@code rememberFact} tool lifts its own writes the
+     * same way, as it makes them.
+     */
+    private void liftContestedMarkers(Set<String> writtenKeys) {
+        ContestedMemoryMarker.lift(conversationMemory.getConversationProperties(), writtenKeys);
     }
 
     /**
@@ -1727,7 +1797,8 @@ public class Conversation implements IConversation {
         String template = null;
         var batch = memory.getHitlPendingToolCalls();
         // Fix #1: prefer the task-scoped effective config that ACTUALLY gated this
-        // batch (persisted by AgentOrchestrator.buildPendingBatch) over the agent-level
+        // batch (persisted by ToolApprovalGateSupport.buildPendingBatch) over the
+        // agent-level
         // default. A legacy batch (null effective config) or a null batch falls back to
         // the agent-level config exactly as before.
         var cfg = batch != null && batch.getEffectiveToolApprovals() != null
@@ -1892,7 +1963,7 @@ public class Conversation implements IConversation {
     /**
      * Nulls the transient tool-pause state on the live memory (pause type, pending
      * batch, in-JVM resume decision). Distinct from {@link #clearHitlBookmark()},
-     * which owns only the six bookmark fields — this must NOT touch those.
+     * which owns only the eight bookmark fields — this must NOT touch those.
      */
     private void clearToolPauseState() {
         conversationMemory.setHitlPauseType(null);
@@ -1988,7 +2059,7 @@ public class Conversation implements IConversation {
             // Stash the decision on the live memory BEFORE clearing the bookmark so
             // LlmTask.executeResume (reached at the same index) can consume it. The
             // pending batch + pauseType survive clearHitlBookmark() — that method only
-            // owns the six bookmark fields — and are cleared by LlmTask after
+            // owns the eight bookmark fields — and are cleared by LlmTask after
             // consumption (Task 9) or by the finally safety-net below.
             if (toolPause) {
                 conversationMemory.setHitlResumeDecision(decision);

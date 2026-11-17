@@ -5,8 +5,8 @@ import {
   isOpenPlaceholder,
   useGroupDiscussionStream,
   useGroupStreamStore,
-} from "@/hooks/use-group-discussion-stream";
-import type { GroupSSEEvent, TranscriptEntry } from "@/lib/api/groups";
+} from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import type { GroupSSEEvent, TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
 
 /**
  * How a live group stream ends: turns that produce nothing, phases and runs
@@ -16,16 +16,16 @@ import type { GroupSSEEvent, TranscriptEntry } from "@/lib/api/groups";
 const mockStreamGroupDiscussion = vi.fn();
 const mockCancel = vi.fn();
 
-vi.mock("@/lib/api/groups", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/api/groups")>();
+vi.mock("@eddi/app-kit/lib/api/groups", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@eddi/app-kit/lib/api/groups")>();
   return {
     ...original,
     streamGroupDiscussion: (...args: unknown[]) => mockStreamGroupDiscussion(...args),
   };
 });
 
-vi.mock("@/lib/api/hitl", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/api/hitl")>();
+vi.mock("@eddi/app-kit/lib/api/hitl", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@eddi/app-kit/lib/api/hitl")>();
   return {
     ...original,
     cancelGroupDiscussion: (...args: unknown[]) => mockCancel(...args),

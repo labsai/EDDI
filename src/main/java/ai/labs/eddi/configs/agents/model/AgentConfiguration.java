@@ -68,6 +68,27 @@ public class AgentConfiguration {
     private String description;
 
     /**
+     * Whether this agent appears in the end-user catalog
+     * ({@code GET /catalog/agents}) that Workforce and other end-user apps list for
+     * the people allowed to use it.
+     * <p>
+     * <strong>Opt-in, default {@code false}</strong>: upgrading a deployment lists
+     * nothing, so the Platform Operator, test agents and internal helpers are never
+     * shown to every signed-in user by accident. Listing only decides what is
+     * <em>offered</em> — whether a caller may actually talk to the agent is still
+     * the USE check, and an unlisted agent stays reachable by anyone who has its id
+     * and may use it. With workspaces enforced, {@code published} and
+     * {@code internal} visibility count as listed too.
+     * <p>
+     * The catalog reads this flag from the <em>deployed</em> version of the agent,
+     * not from the latest stored one: listing or unlisting takes effect only once
+     * the version carrying the change is deployed.
+     *
+     * @since 6.7.0
+     */
+    private Boolean listed = false;
+
+    /**
      * Which versions of this agent a running conversation may move between. Two
      * versions with the same generation are compatible, and a conversation follows
      * the newest deployed version of its generation from its next turn; a different
@@ -86,8 +107,9 @@ public class AgentConfiguration {
     private Integer compatibilityGeneration;
 
     /**
-     * Cryptographic identity for inter-agent trust. Auto-generated on agent
-     * creation. The public key is stored here; the private key is in SecretsVault.
+     * Cryptographic identity for inter-agent trust. Empty until an admin generates
+     * a signing key with {@code POST /agentstore/agents/{id}/signing-keys}, which
+     * adds the public key here and stores the private key in the Secrets Vault.
      *
      * @since 6.0.0
      */
@@ -182,6 +204,14 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Boolean getListed() {
+        return listed;
+    }
+
+    public void setListed(Boolean listed) {
+        this.listed = listed;
     }
 
     public Integer getCompatibilityGeneration() {
@@ -478,6 +508,56 @@ public class AgentConfiguration {
     }
 
     /**
+     * How the agent presents itself in a chat window — display name, avatar, accent
+     * colour, conversation starters. Absent: the client's defaults.
+     *
+     * @since 6.7.0
+     */
+    private AgentAppearance appearance;
+
+    public AgentAppearance getAppearance() {
+        return appearance;
+    }
+
+    public void setAppearance(AgentAppearance appearance) {
+        this.appearance = appearance;
+    }
+
+    /**
+     * Which controls a chat window offers — undo, redo, attachments, rating, quick
+     * replies, streaming, and whether HTML in replies is rendered. Absent keeps
+     * every control as before, except that HTML is shown as text unless
+     * {@code rawHtml} is {@code true}.
+     *
+     * @since 6.7.0
+     */
+    private ConversationControls conversationControls;
+
+    public ConversationControls getConversationControls() {
+        return conversationControls;
+    }
+
+    public void setConversationControls(ConversationControls conversationControls) {
+        this.conversationControls = conversationControls;
+    }
+
+    /**
+     * Model-written conversation titles; absent or disabled — the default — titles
+     * a conversation with its first non-secret user message, truncated.
+     *
+     * @since 6.7.0
+     */
+    private TitleGeneration titleGeneration;
+
+    public TitleGeneration getTitleGeneration() {
+        return titleGeneration;
+    }
+
+    public void setTitleGeneration(TitleGeneration titleGeneration) {
+        this.titleGeneration = titleGeneration;
+    }
+
+    /**
      * Conversation ratings: how (and whether) the people chatting with this agent
      * are asked for feedback.
      *
@@ -760,8 +840,52 @@ public class AgentConfiguration {
         }
 
         /**
-         * Get the key for a specific version. Falls back to {@code publicKey} if no
-         * versioned keys exist.
+         * The key version this agent signs with: the highest one in {@link #keys}
+         * between 1 and {@link AgentPublicKey#MAX_VERSION}, revoked or not, or 0 — the
+         * legacy {@code publicKey} — when there is none. A revoked newest key is not
+         * skipped: the agent then cannot sign until a new key is generated, rather than
+         * falling back to an older one. The next generated key takes this plus one. Not
+         * a getter, so it stays out of the stored JSON.
+         */
+        public int signingKeyVersion() {
+            if (keys == null || keys.isEmpty()) {
+                return 0;
+            }
+            return keys.stream().mapToInt(AgentPublicKey::version).filter(v -> v >= 1 && v <= AgentPublicKey.MAX_VERSION).max().orElse(0);
+        }
+
+        /**
+         * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
+         * would sign with the legacy {@code publicKey}. When that version is declared
+         * more than once and any of its entries is revoked, the revoked one is
+         * returned, whatever the order: the version is revoked, as
+         * {@code GroupSigningGuard} treats it when it refuses to sign. Not a getter, so
+         * it stays out of the stored JSON.
+         */
+        public AgentPublicKey signingKey() {
+            int version = signingKeyVersion();
+            if (version == 0) {
+                return null;
+            }
+            AgentPublicKey first = null;
+            for (AgentPublicKey key : keys) {
+                if (key.version() != version) {
+                    continue;
+                }
+                if (key.revoked()) {
+                    return key;
+                }
+                if (first == null) {
+                    first = key;
+                }
+            }
+            return first;
+        }
+
+        /**
+         * Get the key for a specific version. Version {@code 0} ("signed before key
+         * versioning existed") falls back to {@code publicKey} when no versioned key
+         * matches; any other version without a matching key yields {@code null}.
          *
          * @param version
          *            the key version to find
@@ -1156,10 +1280,45 @@ public class AgentConfiguration {
         private String schedule = "0 3 * * *";
         private boolean detectContradictions = true;
         /**
-         * Contradiction resolution strategy. Reserved for future use — the current V1
-         * detector only counts and logs contradictions without resolving them.
+         * What a dream cycle does with a contradiction (one key, different values),
+         * when {@link #detectContradictions} is on. No strategy deletes an entry:
+         * <ul>
+         * <li>{@code keep_newest} (default) — count and log only, change nothing; the
+         * loader's own precedence (most specific scope, then newest) decides what an
+         * agent sees. Today's behaviour.</li>
+         * <li>{@code mark_contested} — flag every entry of the disputed key
+         * {@code CONTESTED} and keep them all; agents see a
+         * {@code properties.contestedMemories} marker.</li>
+         * <li>{@code supersede_older} — retire each older disagreeing entry as
+         * {@code SUPERSEDED} (pointing at the newest) where the newest reaches all of
+         * its readers; whatever still disagrees is marked {@code CONTESTED}.</li>
+         * </ul>
+         * Writes stay inside the agent-scoped set (see {@link #crossAgentMaintenance}).
+         * An unknown value is logged as a warning and treated as {@code keep_newest}.
          */
         private String contradictionResolution = "keep_newest";
+
+        /**
+         * When true, a consolidation numbers the group's entries, asks every
+         * consolidated entry to cite the ones it came from ({@code "sources"}) and
+         * checks each answer without a model before anything is written: every cited
+         * ref must exist and every number of the value must appear verbatim in the
+         * cited entries. A written entry records the cited originals' ids in
+         * {@code UserMemoryEntry.sourceEntryIds}. Off by default; while off the
+         * request, parsing and writes are unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What a consolidation group that fails the {@link #citeSources} check does:
+         * {@code fallback_to_previous} (the default — nothing is written, the originals
+         * stay), {@code retry_once} (one more call with the problems listed, bounded by
+         * the same cost ceilings; falls back if that fails too) or {@code keep} (write
+         * it anyway). The default is the safe one because a consolidation deletes its
+         * originals. Unknown values log a WARN and act as the default. Ignored while
+         * {@code citeSources} is false.
+         */
+        private String onValidationFailure = "fallback_to_previous";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
         private String llmProvider = "anthropic";
@@ -1312,6 +1471,22 @@ public class AgentConfiguration {
 
         public void setContradictionResolution(String contradictionResolution) {
             this.contradictionResolution = contradictionResolution;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
 
         public int getPruneStaleAfterDays() {
@@ -1591,15 +1766,15 @@ public class AgentConfiguration {
      * A checkpoint captures the conversation PROPERTIES only; rolling one back does
      * not restore steps, outputs or external side-effects (see
      * {@code MemorySnapshotService#rollbackToCheckpoint}). Checkpointing itself is
-     * performed unconditionally by {@code AgentOrchestrator} before every tool call
-     * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
-     * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
-     * honoured only where a caller passes it to
-     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
-     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
-     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
-     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
-     * always prunes to the service default of 10.
+     * performed unconditionally by the tool loop ({@code ToolLoopRunner}) before
+     * every tool call — {@link AutoSnapshot#isEnabled()} and
+     * {@link AutoSnapshot#getTriggerOn()} are NOT consulted yet, and
+     * {@link #getMaxCheckpointsPerConversation()} is honoured only where a caller
+     * passes it to {@code MemorySnapshotService#createCheckpoint(..., int)}. No
+     * production caller does: {@code ToolLoopRunner} uses the 3-arg overload
+     * because {@code SessionManagement} has no slot on {@code IConversationMemory}
+     * (unlike {@link UserMemoryConfig} and {@link MemoryPolicy}), so
+     * auto-checkpointing always prunes to the service default of 10.
      *
      * @since 6.0.0
      */
@@ -1624,8 +1799,8 @@ public class AgentConfiguration {
         }
 
         /**
-         * Auto-snapshot configuration. When enabled, checkpoints are created
-         * automatically before state-changing tool executions.
+         * Auto-snapshot configuration. Intended to create checkpoints only before
+         * state-changing tool executions when enabled.
          * <p>
          * <strong>Reserved — not yet honoured by the engine.</strong>
          * Auto-checkpointing currently runs before every tool call regardless of these

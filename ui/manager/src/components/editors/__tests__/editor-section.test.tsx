@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { EditorSection } from "@/components/editors/editor-section";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { Sparkles } from "lucide-react";
 
 describe("EditorSection", () => {

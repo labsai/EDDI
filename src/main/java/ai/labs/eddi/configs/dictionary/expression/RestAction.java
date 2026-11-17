@@ -50,8 +50,8 @@ public class RestAction implements IRestAction {
     @Override
     public List<String> readActions(String workflowId, Integer workflowVersion, String filter, Integer limit) {
         List<String> retActions = new LinkedList<>();
-        // This fans out from one workflow into whichever rule sets, api calls, output
-        // sets and dictionaries it references, reading those stores directly. The
+        // This fans out from one workflow into whichever rule sets, api calls and
+        // output sets it references, reading those stores directly. The
         // workflow is the entry point the caller named, so it is what access is
         // decided against — without this the helper reads any workflow, unguarded.
         if (workflowId == null || workflowId.isBlank()) {

@@ -78,7 +78,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
@@ -1328,11 +1328,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // guardrails are re-applied to the turns it condenses. It is a paid call
                 // like any other — asked of the spend gate first, and priced and recorded
                 // on the step afterwards.
-                Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
-                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
-                        historicInputScreen(memory, task), summaryAdmission(memory));
                 ModelPrices summaryPrices = ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
                         effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel());
+                Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
+                        historicInputScreen(memory, task), summaryAdmission(memory, summaryPrices));
+                // Recorded once, both calls of a retry_once update together: the
+                // admission only priced the first call's usage into its check.
                 recordSpend(currentStep, summaryUsage, summaryPrices.cost(summaryUsage), summaryPrices);
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
@@ -1359,14 +1361,18 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     /**
      * The spend check of a rolling-summary call: the conversation's ceiling and the
      * tenant budget, as for any other paid call of the turn. The answer's own cost
-     * is already on the step.
+     * is already on the step; what the update itself has spent so far (the first
+     * call, before a {@code retry_once} call) is not, so it is priced with
+     * {@code prices} and passed as pending. It is only checked here, not recorded:
+     * the caller records the update's whole usage once, afterwards.
      */
-    private BooleanSupplier summaryAdmission(IConversationMemory memory) {
+    private Predicate<Map<String, Object>> summaryAdmission(IConversationMemory memory, ModelPrices prices) {
         if (spendGate == null) {
             return null;
         }
-        return () -> {
-            try (LlmSpendGate.Admission admission = spendGate.admit(memory, 0.0, 0.0)) {
+        return pendingUsage -> {
+            double pendingUsd = pendingUsage == null || pendingUsage.isEmpty() ? 0.0 : prices.cost(pendingUsage);
+            try (LlmSpendGate.Admission admission = spendGate.admit(memory, pendingUsd, 0.0)) {
                 return admission.allowed();
             }
         };
@@ -2241,8 +2247,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
      * for the paused task, hands the frozen batch + human decision to
      * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
-     * applies the verdicts — implemented in Task 9), then stores the final result
-     * EXACTLY like the normal path and runs {@code postResponse}.
+     * applies the verdicts), then stores the final result EXACTLY like the normal
+     * path and runs {@code postResponse}.
      * <p>
      * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
      * deliberately skips every side-effecting step that already ran before the
@@ -2322,7 +2328,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
 
-        // === Hand off to the resume loop (Task 9) ===
+        // === Hand off to the resume loop ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
         // Same JSON policy the live loop would have applied — a resumed continuation
@@ -3204,6 +3210,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         effective.setMaxTurnsPerUpdate(configured.getMaxTurnsPerUpdate());
         effective.setMaxCharsPerUpdate(configured.getMaxCharsPerUpdate());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
+        effective.setCiteSources(configured.isCiteSources());
+        effective.setOnValidationFailure(configured.getOnValidationFailure());
         return effective;
     }
 
@@ -3799,7 +3807,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * @param context
      *            the retrieved context (may be null)
      * @param maxChars
-     *            character ceiling; {@code -1} = unbounded
+     *            character ceiling; {@code <= 0} = unbounded
      * @param source
      *            human-readable source name, used in the warning
      * @return the context, truncated with an explanatory marker when it exceeded

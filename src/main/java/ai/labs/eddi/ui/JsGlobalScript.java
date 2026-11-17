@@ -114,7 +114,7 @@ public final class JsGlobalScript {
      * <p>
      * Backslash, the double quote and the common whitespace escapes keep their
      * familiar forms; every other C0 control, DEL, U+2028/U+2029 (line terminators
-     * in older engines) and {@code <}, {@code >}, {@code &} become
+     * in older engines) and {@code <}, {@code >}, {@code &}, {@code '} become
      * {@code \}{@code uXXXX}, so the literal stays inert even if it is ever inlined
      * into a {@code <script>} element ({@code </script>} cannot close it).
      */

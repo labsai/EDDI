@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTaskOutcomes } from "@/hooks/use-group-outcomes";
-import type { OutcomeEvent } from "@/lib/api/group-outcomes";
+import type { OutcomeEvent } from "@eddi/app-kit/lib/api/group-outcomes";
 
 /** One outcome as a single line: kind, reading, source and when. */
 export function OutcomeLine({ event }: { event: OutcomeEvent }) {

@@ -32,19 +32,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code classifier} — input and output. Asks a safety-classifier model for a
- * verdict on the text. The model is whatever the agent designer points it at
- * (Granite Guardian on vLLM, ShieldGemma on Ollama, a hosted moderation
- * endpoint, ...): EDDI ships and endorses none, and every model-specific detail
- * — prompt, labels, how to read the answer — is configuration.
+ * {@code classifier} — input, output and tool-call arguments. Asks a
+ * safety-classifier model for a verdict on the text. The model is whatever the
+ * agent designer points it at (Granite Guardian on vLLM, ShieldGemma on Ollama,
+ * a hosted moderation endpoint, ...): EDDI ships and endorses none, and every
+ * model-specific detail — prompt, labels, how to read the answer — is
+ * configuration.
  * <h3>Transport</h3> The call goes through {@link ChatModelRegistry} with the
  * same provider type and parameter vocabulary as an LLM task ({@code provider}
  * names the type; {@code baseUrl}, {@code apiKey}, {@code modelName} /
  * {@code model}, {@code customParameters}, ... pass through to the provider
  * builder unchanged). A classifier endpoint is the same trust class as an
  * author-configured LLM {@code baseUrl} and is typically in-cluster, which is
- * why this is not {@code SafeHttpClient}. Vault and global-variable references
- * in the parameters are resolved by the registry, as for a task.
+ * why the call is not sent through {@code OutboundHttp}'s SSRF policy. Vault
+ * and global-variable references in the parameters are resolved by the
+ * registry, as for a task.
  * <h3>Prompt</h3> Without {@code promptTemplate} the text is sent as the
  * model's native conversation — input: one user message; output: the user's
  * question and the answer as an assistant message — and the model's own chat

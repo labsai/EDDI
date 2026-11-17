@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { ContentEditor } from "@/components/editors/content-editor";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { ContentEditor } from "@eddi/app-kit/components/editors/content-editor";
 
 // Mock monaco
 vi.mock("@monaco-editor/react", () => ({

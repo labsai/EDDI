@@ -28,7 +28,7 @@ import static com.mongodb.client.model.Filters.eq;
  * Startup migration: rewrites Thymeleaf template syntax to Qute across all
  * MongoDB collections that store template strings.
  * <p>
- * Idempotent — records completion in migration_log. Controlled by
+ * Idempotent — records completion in the migration log. Controlled by
  * {@code eddi.migration.v6-qute.enabled} (default: false).
  *
  * <h2>Templates it cannot convert</h2>

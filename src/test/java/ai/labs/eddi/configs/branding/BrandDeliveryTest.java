@@ -35,10 +35,11 @@ class BrandDeliveryTest {
         assertEquals("window.__EDDI_BRAND__={branded:false,revision:0,productName:\"EDDI\",shortName:\"EDDI\",tagline:null,"
                 + "poweredBy:true,showUpdateCheck:false,chat:{accent:null},"
                 + "assets:{logo:false,logoDark:false,icon:false,favicon:false,ogImage:false}};", script);
-        // Both UIs' dev-server plugin must answer exactly this, or `npm run dev`
-        // drifts from what an unbranded EDDI serves.
-        for (String ui : new String[]{"manager", "chat"}) {
-            Path plugin = Path.of("ui", ui, "scripts", "vite-plugin-brand.mjs");
+        // Every UI's dev-server plugin must answer exactly this, or `npm run dev`
+        // drifts from what an unbranded EDDI serves. The Manager and Workforce
+        // share ui/scripts/; the Chat UI keeps its own copy.
+        for (String dir : new String[]{"ui/scripts", "ui/chat/scripts"}) {
+            Path plugin = Path.of(dir, "vite-plugin-brand.mjs");
             String source = Files.readString(plugin, StandardCharsets.UTF_8);
             assertTrue(source.contains("'" + script + "'"), plugin + " must carry the unbranded script verbatim");
         }
@@ -92,12 +93,12 @@ class BrandDeliveryTest {
      */
     @Test
     void brandScaleIsFormulaTextForEveryStep() throws IOException {
-        String theme = Files.readString(Path.of("ui", "manager", "src", "index.css"), StandardCharsets.UTF_8);
+        String theme = Files.readString(Path.of("ui", "packages", "ui", "src", "styles", "theme.css"), StandardCharsets.UTF_8);
         for (int step : new int[]{50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950}) {
             String token = "--color-brand-" + step + ":";
             assertTrue(BrandDelivery.BRAND_SCALE.contains(token), token);
             assertTrue(theme.contains("--color-brand-" + step + ": var(--color-amber-" + step + ");"),
-                    "index.css must declare brand-" + step + " as amber, so an unbranded page is unchanged");
+                    "theme.css (@eddi/ui) must declare brand-" + step + " as amber, so an unbranded page is unchanged");
             assertTrue(theme.contains("--color-warn-" + step + ": var(--color-amber-" + step + ");"), "warn-" + step);
             assertTrue(theme.contains("--color-ochre-" + step + ": var(--color-amber-" + step + ");"), "ochre-" + step);
         }
@@ -119,9 +120,10 @@ class BrandDeliveryTest {
      */
     @Test
     void loaderAccentIsOnlySetWithAPrimaryColour() throws IOException {
-        for (String shell : new String[]{"manage.html", "welcome.html", "workforce.html"}) {
-            String html = Files.readString(Path.of("ui", "manager", shell), StandardCharsets.UTF_8);
-            assertTrue(html.contains("var(--brand-loader-accent, #d4a843)"), shell);
+        for (Path shell : new Path[]{Path.of("ui", "manager", "manage.html"), Path.of("ui", "manager", "welcome.html"),
+                Path.of("ui", "workforce", "workforce.html")}) {
+            String html = Files.readString(shell, StandardCharsets.UTF_8);
+            assertTrue(html.contains("var(--brand-loader-accent, #d4a843)"), shell.toString());
         }
         String accentOnly = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors(null, null, null, null, "#123"))));
         assertFalse(accentOnly.contains("--brand-loader-accent"), accentOnly);
@@ -178,7 +180,8 @@ class BrandDeliveryTest {
      */
     @Test
     void managerPreviewUsesTheSameBrandScale() throws IOException {
-        Path source = Path.of("ui", "manager", "src", "lib", "brand-css.ts");
+        // Shared by the Manager and Workforce since the split (@eddi/app-kit).
+        Path source = Path.of("ui", "packages", "app-kit", "src", "lib", "brand-css.ts");
         String ts = Files.readString(source, StandardCharsets.UTF_8);
         assertTrue(ts.contains("\"" + BrandDelivery.BRAND_SCALE + "\""), source + " must carry BRAND_SCALE verbatim");
     }

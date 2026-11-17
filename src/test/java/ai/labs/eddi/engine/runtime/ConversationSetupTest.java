@@ -99,6 +99,25 @@ class ConversationSetupTest {
 
             verify(conversationDescriptorStore).createDescriptor(eq("conv-2"), eq(0), argThat(desc -> {
                 assertNull(desc.getAgentName());
+                assertNull(desc.getGroupConversationId());
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("a group member's conversation records its group conversation")
+        void memberConversation_recordsGroupConversationId() throws Exception {
+            var agent = mock(IAgent.class);
+            doReturn("agent-3").when(agent).getAgentId();
+            doReturn(1).when(agent).getAgentVersion();
+            doReturn(new DocumentDescriptor()).when(documentDescriptorStore).readDescriptor("agent-3", 1);
+
+            URI conversationUri = URI.create("/conversationstore/conversations/conv-3");
+
+            setup.createConversationDescriptor("agent-3", agent, "user-1", "conv-3", conversationUri, "gc-7");
+
+            verify(conversationDescriptorStore).createDescriptor(eq("conv-3"), eq(0), argThat(desc -> {
+                assertEquals("gc-7", desc.getGroupConversationId());
                 return true;
             }));
         }

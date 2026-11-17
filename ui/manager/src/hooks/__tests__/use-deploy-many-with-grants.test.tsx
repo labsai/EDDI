@@ -2,16 +2,16 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   mergeGrantIssues,
   runDeployManyWithGrants,
   useDeployWithGrants,
   type DeployManyResult,
   type DeployTarget,
-} from "@/hooks/use-deploy-with-grants";
-import type { DeploymentFailure, DeploymentPreflight } from "@/lib/api/agents";
+} from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import type { DeploymentFailure, DeploymentPreflight } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Several agents created together are granted in ONE question: each restricted

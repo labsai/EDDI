@@ -13,9 +13,10 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.userevents.GroupUserEvents;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -40,6 +41,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -54,6 +56,7 @@ import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
+import ai.labs.eddi.engine.internal.groups.GroupApprovedResultActions;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
@@ -105,9 +108,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Phase-based orchestrator for multi-agent group conversations. Supports 6
- * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE,
- * TASK_FORCE) plus fully custom phase definitions.
+ * Phase-based orchestrator for multi-agent group conversations. Supports 7
+ * preset discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI,
+ * DEBATE, TASK_FORCE, NEGOTIATION) plus fully custom phase definitions
+ * ({@code CUSTOM}).
  * <p>
  * Agents participate through their normal pipelines via
  * {@link IConversationService#say}. The orchestrator constructs phase-specific
@@ -207,7 +211,6 @@ public class GroupConversationService implements IGroupConversationService, User
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
     private final IScheduleStore scheduleStore;
-    private final NonceCacheService nonceCacheService;
     private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
     private final GroupContextBuilder contextBuilder;
@@ -266,6 +269,14 @@ public class GroupConversationService implements IGroupConversationService, User
 
     @Inject
     TeamBudgetContext teamBudgetContext;
+
+    /**
+     * Raises the per-user stream's team events ({@code GET /me/events}). Same
+     * field-injection pattern and null-safety as {@link #liveDiscussionRegistry}:
+     * {@code null} in the direct-construction unit tests, which then raise nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     /**
      * I8's lesson store. Same field-injection pattern and null-safety as
@@ -372,7 +383,7 @@ public class GroupConversationService implements IGroupConversationService, User
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
+            AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -386,11 +397,11 @@ public class GroupConversationService implements IGroupConversationService, User
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
         this.scheduleStore = scheduleStore;
-        this.nonceCacheService = nonceCacheService;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
+        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
-        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, nonceCacheService, defaultTenantId);
+        this.contextBuilder.setSigningGuard(signingGuard);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -920,6 +931,10 @@ public class GroupConversationService implements IGroupConversationService, User
                         gc.getId(), gc.getRound(), question, phaseList.size()));
             }
         }
+        if (startPhaseIndex == 0) {
+            // Round 1 or a continuation round; a resume after a pause is not a start.
+            GroupUserEvents.started(userEventPublisher, gc, config);
+        }
 
         // I1: set once the cost ceiling fires under SYNTHESIZE_NOW. From then on the
         // phase loop skips every non-SYNTHESIS phase but still runs any remaining
@@ -1268,7 +1283,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
                                         phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
                                         phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
-                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf());
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf(), phase.onApproved());
                                 phaseList.set(phaseIdx, phase);
                                 persistRuntimePhases(gc, phaseList);
                             }
@@ -1757,9 +1772,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
             // removed token so a cancel that raced this remove is not silently dropped.
             removeTokenAndConvertIfSignalled(gc, listener);
-            // Drop the incremental verification cursor once this leg ends, but keep
-            // it across ANY pause (approval or a human turn, I6) so a resume
-            // continues from where it left off.
+            // Drop the signing guard's record of the withheld entries already logged
+            // once this leg ends, but keep it across ANY pause (approval or a human
+            // turn, I6) so a resume does not log the same entries at ERROR again.
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL
                     && gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
                 signingGuard.forgetConversation(gc.getId());
@@ -1774,7 +1789,32 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.CANCELLED) {
                 cleanupEphemeralAgents(gc, config);
             }
+            // Last, once the state this leg leaves behind is settled (a pause converted to
+            // a cancel above included): paused, waiting for a human, or ended.
+            GroupUserEvents.afterLeg(userEventPublisher, gc, config);
         }
+    }
+
+    /**
+     * Raises the per-user stream's event for a discussion's current state outside a
+     * running leg — the cancel of a paused discussion. Best effort: the group's
+     * configuration is read for its HUMAN members, and without it only the owner is
+     * told.
+     */
+    public void announceUserEvents(GroupConversation gc) {
+        if (userEventPublisher == null || gc == null) {
+            return;
+        }
+        AgentGroupConfiguration config = null;
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Group %s not readable for its user events: %s", LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+        }
+        GroupUserEvents.afterLeg(userEventPublisher, gc, config);
     }
 
     // =================================================================
@@ -2270,10 +2310,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2307,6 +2343,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
@@ -2344,7 +2384,7 @@ public class GroupConversationService implements IGroupConversationService, User
                 return List.of(new GroupMember(rosterModerator.agentId(), rosterModerator.displayName(), 0, "MODERATOR",
                         rosterModerator.memberType()));
             }
-            return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
+            return List.of(new GroupMember(moderatorAgentId, AgentGroupStore.MODERATOR_SPEAKER_NAME, 0, "MODERATOR"));
         }
 
         if (participants.toUpperCase().startsWith("ROLE:")) {
@@ -2689,9 +2729,8 @@ public class GroupConversationService implements IGroupConversationService, User
             throws IResourceStore.ResourceStoreException, GroupDiscussionException {
 
         // F6: a root discussion of a team with no budget left is refused before
-        // anything
-        // is created. A nested child is never gated: its parent already paid for the
-        // slot.
+        // anything is created. A nested child is never gated: its parent already paid
+        // for the slot.
         if (depth == 0 && teamBudgetService != null) {
             teamBudgetService.admit(groupId, TeamBudgetService.Surface.DISCUSSION);
         }
@@ -2762,12 +2801,6 @@ public class GroupConversationService implements IGroupConversationService, User
     // a characterization test reaches it via reflection.
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {
         return contextBuilder.buildPlainTextFallback(phase, speaker, question, transcript);
-    }
-
-    // Kept as a declared delegator (not inlined at its call site) since a
-    // characterization test reaches it via reflection.
-    private void verifyPriorEntriesIfRequired(String receivingAgentId, GroupConversation gc) {
-        signingGuard.verifyPriorEntriesIfRequired(receivingAgentId, gc);
     }
 
     // =================================================================
@@ -2858,6 +2891,16 @@ public class GroupConversationService implements IGroupConversationService, User
         contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
     }
 
+    /**
+     * Wires approved-result actions ({@code phase.onApproved}) into the approval
+     * resume. Initializer injection, same reason as {@link #wireOutcomeDigest}:
+     * builds made with {@code new} in tests run no actions.
+     */
+    @Inject
+    void wireApprovedResultActions(GroupApprovedResultActions approvedResultActions) {
+        hitlCoordinator.setApprovedResultActions(approvedResultActions);
+    }
+
     @Inject
     NodeIdentity nodeIdentity;
 
@@ -2936,7 +2979,9 @@ public class GroupConversationService implements IGroupConversationService, User
      * GDPR erasure: cancels, immediately, every discussion running on this node for
      * {@code userId}. Deleting a running discussion's document did not stop it —
      * its next phase wrote the document back — so the cascade signals first. A
-     * discussion on another node is not reachable from here; it is stopped by its
+     * discussion on another node is not signalled by this sweep (in cluster mode
+     * the erasing node asks that node over {@code IClusterRpc.GDPR_STOP}, which
+     * ends in {@link #stopInFlightWorkByHash}); failing that, it is stopped by its
      * next conditional write ({@link RunningDiscussionWrites}) finding the document
      * gone rather than recreating it.
      */

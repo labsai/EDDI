@@ -111,10 +111,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final String EXPORT_ARCHIVE_ROOT = "archives";
 
     /**
-     * How long a finished archive is kept. Nothing deleted these before: the
-     * scratch tree was cleaned up but the ZIP itself was written to {@code tmp/}
-     * and stayed there forever, so every export permanently consumed disk while the
-     * 404 message claimed archives "are not kept indefinitely".
+     * How long, in minutes, a finished archive is kept when
+     * {@code eddi.backup.export.retention-minutes} is not a positive number. The
+     * sweep deletes older archives, on a timer and before each export.
      */
     private static final int DEFAULT_ARCHIVE_RETENTION_MINUTES = 60;
 

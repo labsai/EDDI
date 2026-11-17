@@ -98,13 +98,15 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 # Integration tests (requires Docker)
 ./mvnw verify -DskipITs=false
 
-# Build Docker image
-./mvnw clean package -DskipTests '-Dquarkus.container-image.build=true'
+# Build Docker image (the jar first, then the Dockerfile CI builds)
+./mvnw clean package -DskipTests
+docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .
 ```
 
-The Manager (`ui/manager`) and the Chat UI (`ui/chat`) are part of this repository and have their own
-contributor notes in `ui/manager/AGENTS.md` and `ui/chat/AGENTS.md`. Frontend work runs from those
-directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
+The Manager (`ui/manager`), Workforce (`ui/workforce`) and the Chat UI (`ui/chat`) are part of this
+repository and have their own contributor notes in `ui/manager/AGENTS.md`, `ui/workforce/AGENTS.md` and
+`ui/chat/AGENTS.md`. `ui/` is an npm workspaces root with one lockfile: run `npm ci` once in `ui/`, then
+`npm run dev` (or `test`, `build`) in the app's own directory; Maven builds all three into the jar.
 
 ## Code Style
 
@@ -113,7 +115,8 @@ directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
 - **Language**: Java 25 — use modern Java features (records, sealed classes, pattern matching)
 - **Framework**: Quarkus + CDI — prefer `@Inject` over manual instantiation
 - **Line length**: 150 characters max (the Eclipse formatter wraps at 150; Checkstyle `LineLength` is advisory at 150)
-- **Checkstyle**: Run `./mvnw validate` to check style before submitting
+- **Checkstyle**: Run `./mvnw validate` to check style before submitting — an unused or redundant import in `src/main/java` fails the build
+- **Formatting**: `formatter:validate` fails the build on unformatted Java (main and test sources) and never rewrites it; run `./mvnw formatter:format` to fix
 - **No `@author` tags** in new code — Git history tracks authorship
 - **No `System.out.println`** — use the JBoss `Logger`
 
@@ -188,7 +191,7 @@ chore(deps): bump Quarkus to 3.33.0
    ./mvnw clean verify -DskipITs
    ```
 
-   Once per clone, activate the pre-push hook with `git config core.hooksPath .githooks`. Add a changelog fragment as a new file under `docs/changelog.d/` (`YYYY-MM-DD-<slug>.md`, see its README); never edit `docs/changelog.md` by hand.
+   Once per clone, activate the pre-push hook with `git config core.hooksPath .githooks`. Add a changelog fragment as a new file under `docs/changelog.d/` (`YYYY-MM-DD-<slug>.md`, see [its README](docs/changelog.d/README.md)); never edit `docs/changelog.md` by hand.
 
 5. **Push** and open a Pull Request against `main`
 
@@ -209,17 +212,20 @@ Every PR runs through these automated gates:
 
 | Check                 | What It Does                                         | Must Pass?     |
 | --------------------- | ---------------------------------------------------- | -------------- |
-| **Build + Tests**     | `mvnw clean test` plus packaging with Java 25                   | ✅ Yes         |
+| **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
+| **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers) and the JaCoCo 90% instruction / 80% branch coverage gate — on backend changes | Blocks publishing |
+| **Trivy Filesystem Scan** · **Secret Scanning** | Dependency CVE scan and Gitleaks | Blocks publishing |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
 | **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
 | **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
 | **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
 | **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
+| **Operator Activation E2E** | The same image beside a deterministic model stub: the Platform Operator is activated through the shipped Manager (spec check, `setup-api` with the real prompt, gate read-back, both canaries, one real tool call) | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Import rules (unused/redundant imports) fail the build; length rules are advisory | ✅ Yes (imports) |
-| **JaCoCo**            | Code coverage report                                 | 📊 Report only |
+| **JaCoCo**            | Coverage report on every build; the threshold is enforced only in **Integration Tests** | 📊 Report (gate in ITs) |
 
 ## Security
 

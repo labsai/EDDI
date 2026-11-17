@@ -61,7 +61,7 @@ import static ai.labs.eddi.engine.a2a.A2AModels.ERROR_CONTENT_TYPE_NOT_SUPPORTED
  * <td>send result</td>
  * <td>{@code {"task": {…}}}</td>
  * <td>the task, {@code "kind":"task"}</td>
- * <td>the task</td>
+ * <td>the task, {@code "kind":"task"}</td>
  * </tr>
  * </table>
  * A 1.0 client parses strictly (protobuf JSON without unknown fields), so a 1.0
@@ -432,6 +432,12 @@ public final class A2AWireFormat {
         String value = optionalString(raw);
         if (value != null && value.length() > MAX_ID_LENGTH) {
             throw new InvalidA2ARequestException("'" + name + "' is longer than " + MAX_ID_LENGTH + " characters");
+        }
+        // A control character is written as a six-byte escape sequence in the
+        // shared-cache JSON,
+        // which would let a full index shard outgrow the NATS payload limit.
+        if (value != null && value.chars().anyMatch(Character::isISOControl)) {
+            throw new InvalidA2ARequestException("'" + name + "' contains control characters");
         }
         return value;
     }

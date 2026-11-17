@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { MAX_GROUP_ATTACHMENTS } from "@/lib/api/groups";
-import { MAX_ATTACHMENT_BYTES } from "@/lib/api/attachments";
-import { useGroupAttachmentStaging } from "@/hooks/use-group-attachment-staging";
+import { MAX_GROUP_ATTACHMENTS } from "@eddi/app-kit/lib/api/groups";
+import { MAX_ATTACHMENT_BYTES } from "@eddi/app-kit/lib/api/attachments";
+import { useGroupAttachmentStaging } from "@eddi/app-kit/hooks/use-group-attachment-staging";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), warning: vi.fn(), success: vi.fn() },

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { NumberInput } from "./number-input";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import {
   Plus,
   Trash2,
