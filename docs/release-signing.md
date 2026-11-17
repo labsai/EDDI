@@ -137,6 +137,7 @@ This outputs the full certificate chain and Rekor log entry as JSON.
 gh attestation verify oci://docker.io/labsai/eddi:<tag> --repo labsai/EDDI
 
 # The checksum list attached to a GitHub release, signed at that tag
+gh release download <tag> --repo labsai/EDDI --pattern 'SHA256SUMS*'
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
   --certificate-identity "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/<tag>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \

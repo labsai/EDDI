@@ -13,6 +13,8 @@ import {
   updateAgent,
   deleteAgent,
   duplicateAgent,
+  generateAgentSigningKey,
+  revokeAgentSigningKey,
   undeployAgent,
   getDeploymentStatus,
   getDeploymentStatuses,
@@ -31,11 +33,14 @@ const PAGE_SIZE = 50;
 export function useAgentDescriptors(
   limit = 20,
   index = 0,
-  filter = ""
+  filter = "",
+  /** False for a caller the agent store refuses (`eddi-user`). */
+  enabled = true,
 ) {
   return useQuery({
     queryKey: agentKeys.descriptors(limit, index, filter),
     queryFn: () => getAgentDescriptors(limit, index, filter),
+    enabled,
   });
 }
 
@@ -103,7 +108,10 @@ export function useAgent(id: string, version?: number) {
   return useQuery({
     queryKey: [...agentKeys.all, id, version],
     queryFn: () => getAgent(id, version),
-    enabled: !!id,
+    // Only with a real version: a version-less read answers 400 (see
+    // `getAgentCurrentVersion`), and a caller that has not resolved the version
+    // yet must not load, show or act on some other one in the meantime.
+    enabled: !!id && version !== undefined && version > 0,
     // Keep the previous VERSION of the same agent on screen while another loads
     // (no flash on a version switch) — but never another AGENT's document. With
     // a blanket `keepPreviousData`, navigating from agent A to agent B rendered
@@ -371,6 +379,29 @@ export function useDuplicateAgent() {
       version: number;
       deepCopy?: boolean;
     }) => duplicateAgent(id, version, deepCopy),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/** Generates a signing key, which the backend saves as a new agent version. */
+export function useGenerateAgentSigningKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) => generateAgentSigningKey(id, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/** Revokes a signing key, which the backend saves as a new agent version. */
+export function useRevokeAgentSigningKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, keyVersion, version }: { id: string; keyVersion: number; version: number }) =>
+      revokeAgentSigningKey(id, keyVersion, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },

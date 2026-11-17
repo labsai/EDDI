@@ -53,6 +53,25 @@ public interface IRestRagIngestion {
                             @DefaultValue("false") Boolean replace,
                             String documentContent);
 
+    @DELETE
+    @Path("/{id}/documents")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The document's chunks were removed, or — with a 'warning' — the vector "
+            + "store cannot delete by metadata and the text is still retrievable.")
+    @APIResponse(responseCode = "400", description = "documentName is missing, blank or 'unnamed'.")
+    @APIResponse(responseCode = "409", description = "An ingestion source of this knowledge base holds a document by this name "
+            + "(remove it through the source), or a replacement of this document is still in flight.")
+    @APIResponse(responseCode = "503", description = "The vector store failed; nothing may have been removed. Retry.")
+    @Operation(summary = "Delete an ingested document",
+               description = "Removes everything ingested through /ingest under this documentName in this knowledge base — the "
+                       + "same chunks replace=true supersedes. Waits for a replacement of the same name in flight.")
+    Response deleteDocument(@PathParam("id") String ragConfigId,
+                            @Parameter(name = "version", required = true, example = "1")
+                            @QueryParam("version") Integer version,
+                            @Parameter(name = "documentName", required = true,
+                                       description = "The name the document was ingested under")
+                            @QueryParam("documentName") String documentName);
+
     @GET
     @Path("/{id}/ingestion/{ingestionId}/status")
     @Produces(MediaType.APPLICATION_JSON)

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ExternalLink, FileText, Library, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { useDocumentChunks, useSourceDocuments } from "@/hooks/use-ingestion-sources";
 import type { IngestedDocument, KnowledgeChunk } from "@/lib/api/ingestion-sources";

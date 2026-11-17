@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { demoStartConversation, demoSendMessageStreaming, demoGetQuickReplies } from "./demo-api";
+import {
+  createDemoTransport,
+  demoStartConversation,
+  demoSendMessageStreaming,
+  demoGetQuickReplies,
+} from "./demo-api";
 
 describe("demo-api", () => {
   describe("demoStartConversation", () => {
@@ -36,6 +41,40 @@ describe("demo-api", () => {
       // real delays totalling ~5s, so the 5s default makes this flaky under
       // parallel load rather than genuinely failing.
     }, 15000);
+  });
+
+  describe("demoSendMessageStreaming — cancellation", () => {
+    it("ends at once when the turn is stopped during the scripted delay", async () => {
+      const abort = new AbortController();
+      const events: Array<{ type: string }> = [];
+      const started = Date.now();
+      for await (const event of demoSendMessageStreaming("What about streaming?", abort.signal)) {
+        events.push(event);
+        // Stop while the 1.5 s "thinking" delay is running.
+        if (event.type === "task_start") setTimeout(() => abort.abort(), 20);
+      }
+      expect(events.map((e) => e.type)).toEqual(["task_start"]);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it("yields nothing for a turn already stopped", async () => {
+      const abort = new AbortController();
+      abort.abort();
+      const events: unknown[] = [];
+      for await (const event of demoSendMessageStreaming("What about streaming?", abort.signal)) events.push(event);
+      expect(events).toEqual([]);
+    });
+
+    it("the demo transport hands the turn's signal to the stream", async () => {
+      const abort = new AbortController();
+      const stream = createDemoTransport().stream!(null, "What about streaming?", { signal: abort.signal });
+      const types: string[] = [];
+      for await (const event of stream) {
+        types.push(event.type);
+        abort.abort();
+      }
+      expect(types).toEqual(["task_start"]);
+    });
   });
 
   describe("demoGetQuickReplies", () => {

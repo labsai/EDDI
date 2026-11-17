@@ -582,15 +582,19 @@ This will:
 1. Read the agent configuration to discover its workflows
 2. Resolve each workflow reference to the workflow's **current** version — references are version-pinned and are not re-pointed when the workflow is edited, so the pinned version frequently is not the one that exists
 3. Skip any workflow another agent still references (at any version), and any workflow with no live version left
-4. Soft-delete each remaining workflow, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, LLM configs, property setters, parser dictionaries)
-5. Delete the agent itself
+4. Delete the agent itself
+5. Delete the agent's schedules, then soft-delete each remaining workflow, which cascades the same way into its extensions (behavior sets, HTTP calls, output sets, LLM configs, property setters, parser dictionaries)
+
+The agent is deleted **before** the schedules and workflows. A failure in step 5 is logged as a warning and does not roll the agent deletion back, so the agent can be gone while some of its workflows remain.
 
 > **`permanent=true` never cascades.** It applies to the resource named in the request — every
-> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault,
-> which no endpoint can regenerate. Cascaded resources are always **soft-deleted**, whatever
-> `permanent` says: the "is anyone else using this?" check can only speak for the versions it can
-> see, while `permanent` erases all of them. To erase a shared resource, delete it explicitly,
-> without cascade.
+> version and every history row of that agent, plus its Ed25519 signing keys in the secrets vault.
+> Those keys are destroyed for good: an agent restored from a backup afterwards cannot sign until an
+> admin generates it a new key with `POST /agentstore/agents/{id}/signing-keys` (`eddi-admin`) and
+> turns `security.signInterAgentMessages` back on. Cascaded resources are always **soft-deleted**,
+> whatever `permanent` says: the "is anyone else using this?" check can only speak for the versions
+> it can see, while `permanent` erases all of them. To erase a shared resource, delete it
+> explicitly, without cascade.
 
 > **`permanent=true` requires the current version.** It is ID-scoped, so a request naming a stale
 > version is refused with **409** before anything is deleted — as `cascade=true` already was. A

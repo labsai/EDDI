@@ -418,10 +418,6 @@ the agents different rulesets.
 `env` context variable from the client and matching it with `contextmatcher`: a client that forgets
 the variable makes a production agent behave like a test one, silently.
 
-> **`tagMatches` cannot match today.** The condition reads the data key `agent:tags` from the
-> current step, and nothing in the engine writes that key — so a rule with `tagMatches` set always
-> fails, in every environment. Use `when` alone until agent tags are populated.
-
 ## The Behavior Rule API Endpoints
 
 The API Endpoints below will allow you to manage the `Behavior Rule`s in your EDDI instance.

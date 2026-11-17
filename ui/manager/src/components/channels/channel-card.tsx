@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Cable, Copy, Trash2, Users, Bot, Hash, Webhook, Mail } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import type { EnrichedChannelDescriptor } from "@/lib/api/channels";
 

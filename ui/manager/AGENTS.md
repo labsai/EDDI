@@ -25,7 +25,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | --- | --- |
 | **Build** | Vite 8 |
 | **UI** | React 19 + TypeScript 5 (strict) |
-| **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
+| **Styling** | Tailwind CSS v4 + CSS variables (black/gold); the tokens are `@eddi/ui/theme.css` |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand for cross-component UI state (chat, debug events, drawers, command palette, onboarding, navigation guard — `src/hooks/`), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
@@ -52,11 +52,26 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 - **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
 - **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
+### Dependencies: one npm workspace, one lockfile
+
+`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the
+shared packages under `ui/packages/` install from **one `ui/package-lock.json`** into
+`ui/node_modules`. There is no `ui/manager/package-lock.json` any more.
+
+- **Install at `ui/`**: `cd ui && npm ci`. Scripts still run from this directory
+  (`npm run dev`, `test`, `build`, `lint`, ...), and `npx` finds the hoisted binaries.
+- **Change a dependency from `ui/` with `-w manager`**: `npm install <pkg> -w manager`
+  updates `package.json` here and the root lock.
+  A version both apps use should stay the same in both `package.json` files, so it is
+  installed once (`lucide-react`, `react`, the lint and test toolchain).
+- **`overrides` live in `ui/package.json`.** npm ignores them in a workspace's own
+  `package.json`.
+
 ### ⚠️ Dependency changes on Windows break CI's `npm ci`
 
 `@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
 on Windows never resolves its children and **prunes them from
-`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+`ui/package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
 then fails before it runs anything:
 
 ```
@@ -66,16 +81,19 @@ npm error Missing: @emnapi/core@1.11.3 from lock file
 ```
 
 Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
-After changing any dependency on Windows, check the lock still carries all four:
+After changing any dependency on Windows, check the lock at `ui/`:
 
 ```bash
-node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+npm run lockfile:check   # in ui/; CI's UI Manager Checks runs the same script
 ```
 
-Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
-`@napi-rs/wasm-runtime` nested under
-`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
-restore them from the last lockfile CI accepted rather than regenerating.
+It (`ui/scripts/check-lockfile-platforms.mjs`) expects `@emnapi/core`,
+`@emnapi/runtime`, `@emnapi/wasi-threads` and `@napi-rs/wasm-runtime` resolvable from
+`node_modules/@tailwindcss/oxide-wasm32-wasi`, and every other locked dependency
+resolvable too. If it fails, restore `ui/package-lock.json` from the last version CI
+accepted rather than regenerating, or make the dependency change on Linux (WSL or a
+`node:26` container with `ui/` copied in, then copy the lock back). Dependabot resolves
+on Linux, so its lockfile PRs are not affected.
 
 ### Quality Gates
 
@@ -143,9 +161,9 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 src/
 ├── app.tsx                   # Routes (pages load through lazyPage — Key Patterns 5)
 ├── components/
-│   ├── ui/                   # Low-level primitives (button, badge, dialog, …)
+│   ├── ui/                   # Low-level primitives (badge, dialog, …); Button is @eddi/ui's
 │   ├── shared/               # App-level shared components (empty/error state, pickers, …)
-│   ├── layout/               # AppLayout, Sidebar, TopBar, theme provider
+│   ├── layout/               # AppLayout, Sidebar, TopBar, AppToaster (ThemeProvider is @eddi/ui's)
 │   ├── editors/              # Extension editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
 │   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
@@ -156,11 +174,12 @@ src/
 │                             # secrets, connections, groups, workflows, …
 ├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …)
+│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …);
+│   │                         # chat.ts binds @eddi/core's conversation API (ui/packages/core)
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
-├── i18n/                     # config.ts + locales/ (11 locale JSON files)
+├── i18n/                     # config.ts (setupI18n from @eddi/ui) + locales/ (11 locale JSON files)
 ├── pages/                    # Route pages; pages/workforce/ for the Workforce app
 └── test/
     ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
@@ -170,6 +189,19 @@ src/
 
 Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
 `src/components/` rather than trusting any enumeration here — it grows with every feature.
+
+### Shared packages: `@eddi/core` and `@eddi/ui`
+
+Two packages under [`ui/packages`](../packages/README.md) are compiled into this app as source. `@eddi/core` is the conversation contract (below, API Communication). `@eddi/ui` holds the design tokens (`index.css` imports `@eddi/ui/theme.css`), `ThemeProvider` / `useTheme`, the i18next setup and per-locale fonts, `Button` and `ThemedToaster` — import them from `@eddi/ui`. A change to a token or to `Button` reaches the Chat UI too once it uses them; it stays a pure move unless the change is meant to be visual. Tailwind scans the package (`@source` in `theme.css`), so its classes are generated. `npm run i18n:check` scans `ui/packages/*/src` with this app's locale files, and counts a package's own locale files (`src/i18n/locales`) as this app's.
+
+A third, [`@eddi/conversation`](../packages/conversation/README.md), holds the agent kind of conversation: the `AgentConversation` controller, the shared components and **the one markdown renderer** (`MarkdownContent`). `components/chat/chat-message.tsx` renders replies through it (`conversation-markdown.tsx`, which also hands the shared components this app's `t`); its `conversation.*` strings are merged into this app's bundles in `i18n/config.ts` (`withConversationLocales`) and live in the package, in all eleven locales. Every markdown surface uses `ConversationMarkdown` (options pass through: `escapeRawHtml` for third-party text such as release notes); a test in the package (`markdown/one-renderer.test.ts`) fails on any other `react-markdown` import in the UIs. **`ChatPanel` runs on the controller**: `use-chat.ts` builds `chatConversation` with the package's host hooks (README → Host hooks) — the controller reads and writes `useChatStore` through `chatConversationStore`, follows its `conversationEpoch`, and leaves the Manager's copy (toasts, error bubbles, the pause banner) to `presentChatFailure` and the debug drawer to `recordDebugEvent`. A turn rule (how a turn is sent, refused, streamed, reconciled) is fixed in `agent-conversation.ts`, not here; what stays Manager code is start, load/resume with its secret masking, following an executing turn, undo/redo/rerun and end. The Workforce member thread (`workforce-thread.tsx`) runs an `AgentConversation` of its own per advisor (internal store; its error banner, Retry and pause notice through `presentFailure` / `onTurnSnapshot`). The Operator keeps its own loop until phase 6.
+
+### Workforce: sidebar, Home and the chat URL (phase 4)
+
+- **The sidebar's conversations** (`components/workforce/session-list.tsx`, data in `hooks/use-workforce-sessions.ts`, shaping in `lib/workforce-sessions.ts`) list the person's chats (`GET /conversationstore/conversations?mine=true&excludeGroupMembers=true` — the backend applies the owner filter for an admin too and leaves out team members' threads, both in its query; never compare owners client-side, the recorded principal need not be `preferred_username`) and team sessions (`GET /groups/{id}/conversations?mine=true` for each team they can see), grouped Pinned / Today / Yesterday / Previous 7 / Previous 30 days / by month. `memberConversationIds` still hides member conversations started before their descriptor recorded `groupConversationId`. Deleting the chat or team session on screen returns to Home and clears the chat store. Rename and pin are `PATCH /conversationstore/conversations/{id}` (B2), delete is the owner `DELETE`; all three update the TanStack cache first and restore it on error (`workforceKeys`). Team sessions have no title or pin on the backend: their question is the title, and they can only be deleted. Every endpoint here is open to `eddi-user` — keep it that way (`e2e/workforce-end-user.spec.ts` fails on any store read).
+- **Home** (`components/workforce/workforce-home.tsx`): `HomeComposer` (agent picker defaulting to the agent of the most recent chat, else the first listed; the picked agent's `appearance.starters` as chips; its review notice), `RecentSessions` (the top five of the sidebar's data), then the catalog with each agent's B4 appearance from `GET /catalog/agents`. Sending hands the text to the chat in **router state** (`lib/workforce-chat-start.ts`), never in the URL, so a link still only preselects an agent.
+- **`ChatPanel urlSync`** (Workforce only) keeps `?agentId=…&conversationId=…` in the address bar so a reload or a second tab returns to the conversation (T1.15); without it the Manager's chat clears the parameters once read, as before. `initialMessage` starts a new conversation and sends Home's text once the agent is selected and its profile has answered.
+- **`conversationControls`** (B4) are read from the profile by `useAgentReviewProfile` and honoured by `ChatPanel` in both apps: undo, redo, attachments, ratings and quick replies disappear when the agent switched them off, and `streaming: false` sends without streaming (`agentStreaming` in the chat store). The Manager still never renders raw HTML.
 
 ### Key Patterns
 
@@ -348,6 +380,14 @@ what it finds. Off by default. Worth knowing before touching it:
   blocked at activation when OIDC is on, because every tool call would 401.
 - **Activation runs a canary** — one probe read counting tool calls — because a
   READY deployment badge says nothing about whether the tools can authenticate.
+- **Activation is tested against a real backend, not MSW.** Every unit and
+  component test of the operator runs on mocks, which is how 6.7.0 shipped with
+  `setup-api` refusing the real prompt. `e2e/operator/` (CI: `Operator Activation
+  E2E`, part of `E2E Gate`) activates it through the shipped bundle against the
+  image under test with `llm-stub.mjs` as the model. A change to activation, the
+  canaries, the tool generator or a tool's argument shape can break the stub's
+  assumptions too: it calls `readAgentDescriptors` for "list the agents" and the
+  tool the write canary names, filling arguments from the tool's own schema.
 
 #### 4b. Router, navigation guard and route labels
 
@@ -390,10 +430,12 @@ Consequences worth knowing:
   mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
   `src/test/setup.ts`.
 - **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
-  so it must resolve synchronously); the other ten load through a tiny i18next
-  backend in `src/i18n/config.ts`. Add a locale by adding it to
-  `SUPPORTED_LANGUAGES` **and** `LOCALE_LOADERS` — the types make a missed entry
-  a compile error. `main.tsx` awaits `i18nReady` before the first render so a
+  so it must resolve synchronously); the other ten load through the lazy backend
+  `setupI18n` installs (`@eddi/ui`, [`ui/packages/ui`](../packages/ui/README.md)),
+  from `LOCALE_LOADERS` in `src/i18n/config.ts`. Add a locale by adding it to
+  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to both apps' loader maps (this one and
+  the Chat UI's `src/i18n/index.ts`) — the types make a missed entry a compile error.
+  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `main.tsx` awaits `i18nReady` before the first render so a
   non-English user never sees a flash of English, and `i18n.changeLanguage()` is
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).
@@ -414,7 +456,8 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 - Base URL: `window.location.origin` (never hardcode)
 - Vite proxy forwards all store paths to EDDI backend in dev mode
 - **Default to `src/lib/api-client.ts`** (`ApiClient` class) for API calls — it injects the Keycloak auth token automatically
-- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`sse-utils.ts`, `bearer-event-source.ts`), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
+- **The agent conversation protocol lives in `@eddi/core`** ([`ui/packages/core`](../packages/core/README.md), shared with the Chat UI): the SSE frame parser and reader (agent and group streams), the conversation endpoints, HITL status, attachment context, rating steps, the stream payload helpers (`UNCONSUMED_STREAM_ERROR_CODES`, `parseErrorEvent`) and the contract list, each rule with its test. `lib/api/chat.ts` is the Manager's binding of it: it keeps the signatures and message types the hooks are written against, and builds its `HttpClient` on `api.authorizedFetch` with `apiErrorFromResponse`, so a conversation call refreshes the token, retries a 401 once and fails with an `ApiClientError` like any `api.post`. The group reader in `groups.ts` is `readSseStream`. A contract change goes into the package with a test there; what the Manager *says* about it stays here
+- Some call sites use raw `fetch` because they need something `ApiClient` does not do: SSE streams (`bearer-event-source.ts`; the conversation stream goes through `api.authorizedFetch`, above), binary bodies and blob downloads (`backup.ts`, `attachments.ts`), and `text/plain` payloads (`rag-editor.tsx`). **Every raw `fetch` must spread `api.getAuthHeader()` itself** — forgetting it is a 401 that only appears once OIDC is switched on
 - `updates.ts` holds the only raw `fetch` that must **not** carry the auth header: it calls `api.github.com` for the latest EDDI release, and attaching this deployment's Keycloak token would hand it to a third party. It is also the only call that is not same-origin, so `ApiClient` could not express it anyway. **`api.github.com` is the only host the Manager contacts off-origin on its own initiative, and it stays that way** — the Docker image shown beside the release is *derived* from the release version, never looked up, because EDDI's CI pushes the image before it cuts the release. Do not add a relay (shields.io or similar) to "verify" the tag: every first-party Docker endpoint is CORS-blocked from a browser, so anything that appears to work is a third party in the path. A test in `update-check-card.test.tsx` fails if a second host appears **for the update card** — note that it guards those two components, not the whole app. The one other off-origin request is `agent-wizard.tsx`'s OpenAPI-spec fetch, which goes to a URL the *user* types; it is hardened the same way (`credentials: "omit"`, `referrerPolicy: "no-referrer"`, an http/https check, a timeout and a size cap) precisely because it leaves the origin
 - `secrets.ts` is the exception that is *not* justified: its seven remaining raw `fetch` call sites are ordinary JSON CRUD for historical reasons (one more has already moved onto `ApiClient`). They do pass `api.getAuthHeader()`, and they check `!res.ok` (a past bug swallowed vault failures into an empty state). Error handling now runs through one `throwVaultError` helper raising a `SecretsError` with a translatable `code`, rather than seven copies of an English sentence. Treat the raw `fetch` itself as debt to migrate onto `ApiClient`, not as the pattern to copy
 - For a new ordinary JSON call, use `ApiClient`

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { QuickReplies } from "./QuickReplies";
+import { QuickReplies } from "@eddi/conversation";
 
 describe("QuickReplies", () => {
   it("renders nothing when replies array is empty", () => {

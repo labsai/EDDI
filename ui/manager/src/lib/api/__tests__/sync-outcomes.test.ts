@@ -5,6 +5,7 @@ import {
   executeSync,
   executeSyncBatch,
   importAgentUpgrade,
+  importAgent,
   importAgentMerge,
   exportAgentSelective,
   hasFailures,
@@ -193,7 +194,46 @@ describe("importAgentMerge", () => {
 
   it("reports null when the header is absent, which is the usual case", async () => {
     server.use(http.post(IMPORT, () => HttpResponse.json({})));
-    expect((await importAgentMerge(zip())).schedulesSkipped).toBeNull();
+    const merged = await importAgentMerge(zip());
+    expect(merged.schedulesSkipped).toBeNull();
+    expect(merged.signingTurnedOff).toBeNull();
+  });
+
+  it("reports signing turned off on an agent this instance cannot sign for", async () => {
+    server.use(
+      http.post(IMPORT, () =>
+        HttpResponse.json({}, { headers: { "X-Agent-Signing-Turned-Off": SIGNING_OFF } }),
+      ),
+    );
+
+    expect((await importAgentMerge(zip())).signingTurnedOff).toBe(SIGNING_OFF);
+  });
+});
+
+/**
+ * EDDI turns `signInterAgentMessages` off on an agent it cannot sign for rather
+ * than refusing the import, and this header is the only place it says so.
+ */
+const SIGNING_OFF =
+  "signInterAgentMessages was turned off: the imported agent is new and has no signing key yet.";
+
+describe("importAgent", () => {
+  it("returns the new agent's Location and why signing was turned off", async () => {
+    server.use(
+      http.post(IMPORT, () =>
+        new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/agentstore/agents/new-1?version=1", "X-Agent-Signing-Turned-Off": SIGNING_OFF },
+        }),
+      ),
+    );
+
+    expect(await importAgent(zip())).toEqual({ location: "/agentstore/agents/new-1?version=1", signingTurnedOff: SIGNING_OFF });
+  });
+
+  it("reports null when signing was left alone", async () => {
+    server.use(http.post(IMPORT, () => new HttpResponse(null, { status: 201, headers: { Location: "/agentstore/agents/new-1?version=1" } })));
+    expect((await importAgent(zip())).signingTurnedOff).toBeNull();
   });
 });
 

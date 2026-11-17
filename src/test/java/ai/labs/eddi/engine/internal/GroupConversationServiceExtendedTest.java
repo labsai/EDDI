@@ -83,7 +83,7 @@ class GroupConversationServiceExtendedTest {
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, agentStore, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                null, agentStore, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -1327,7 +1327,7 @@ class GroupConversationServiceExtendedTest {
             var svc = new GroupConversationService(groupStore, conversationStore,
                     conversationService, agentFactory, templatingEngine,
                     jsonSerialization, new SimpleMeterRegistry(),
-                    null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                    null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
             assertDoesNotThrow(svc::shutdown);
         }

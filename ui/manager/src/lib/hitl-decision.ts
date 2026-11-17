@@ -1,4 +1,5 @@
 import type { HitlVerdict, PauseDetails, ToolCallDecision } from "@/lib/api/hitl";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /**
  * What a reviewer agreed to, captured the moment the decision was submitted, so
@@ -14,7 +15,11 @@ export interface SubmittedDecision {
   /** Group PHASE/TASK: the phase that was decided. */
   phaseName?: string;
   /** Per-call (or per-task) outcomes; empty for a plain RULE or PHASE decision. */
-  items: { id: string; label: string; outcome: HitlVerdict; amended: boolean }[];
+  /**
+   * `label` is what the reviewer reads (a tool call's name in words); `toolName`
+   * is the exact identifier, kept for the tooltip as on the approval card.
+   */
+  items: { id: string; label: string; toolName?: string; outcome: HitlVerdict; amended: boolean }[];
 }
 
 interface SummariseArgs {
@@ -40,7 +45,8 @@ export function summariseDecision(args: SummariseArgs): SubmittedDecision {
   if (pauseDetails?.type === "TOOL_CALL") {
     items = pauseDetails.calls.map((call) => ({
       id: call.callId,
-      label: call.toolName,
+      label: humanizeToolName(call.toolName) || call.toolName,
+      toolName: call.toolName,
       outcome: verdict === "REJECTED" ? "REJECTED" : (toolDecisions?.[call.callId]?.verdict ?? "APPROVED"),
       amended: verdict === "APPROVED" && !!toolDecisions?.[call.callId]?.amendedArguments,
     }));
