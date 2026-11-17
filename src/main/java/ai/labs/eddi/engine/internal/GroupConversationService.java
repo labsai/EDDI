@@ -2336,6 +2336,26 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
+     * The retry feedback a standing team's cadence keeps from {@code task}, a task
+     * of the finished discussion {@code gc}: its text as {@link #recordedTask}
+     * counts it, who wrote it, and whether it had to verify to be kept.
+     * {@code null} when the task left neither a note nor a result.
+     */
+    public GroupSigningGuard.RecordedFeedback recordedFeedback(GroupConversation gc, TaskItem task) {
+        return GroupSigningGuard.recordedFeedback(signingGuard, gc, recordsConfigOf(gc.getGroupId()), task);
+    }
+
+    /**
+     * Whether group {@code groupId}'s records, as its readers stand now, may quote
+     * retry feedback {@link #recordedFeedback} kept: see
+     * {@link GroupSigningGuard#recordsTrustFeedback}. A group whose configuration
+     * cannot be read is counted as verifying.
+     */
+    public boolean recordsTrustFeedback(String groupId, String authorAgentId, boolean verified) {
+        return GroupSigningGuard.recordsTrustFeedback(signingGuard, recordsConfigOf(groupId), authorAgentId, verified);
+    }
+
+    /**
      * Whether group {@code groupId}'s records take a backlog task agent
      * {@code agentId} handed off as that agent's text: none of its readers requires
      * peer verification, or the agent signs verifiably. A standing team's cadence

@@ -598,8 +598,14 @@ nothing. It also means a fire's `COMPLETED` status says the discussion was
 *started*, not that its tasks are done: backlog statuses change only once that
 writeback has run. VERIFIED outcomes stay VERIFIED on the backlog and credit the
 assignee's `perMemberStats`; anything else returns to PENDING with the
-reviewer's feedback appended to the description — **the cross-run retry
-loop**. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
+reviewer's feedback kept for it — **the cross-run retry loop**. The next run
+quotes that feedback after the task's description (the workspace's
+`backlogFeedback`, each item with the agent that wrote it, capped at the last 8
+runs per task). Once a member, the moderator or an enabled facilitator requires
+peer verification, a run quotes only feedback no agent wrote, or feedback that
+verified when it was kept from an agent that still signs verifiably; the rest is
+counted as withheld. Feedback a workspace from before this field appended to the
+description stays part of the description. A FAILED, REJECTED or CANCELLED discussion returns every pulled task untouched.
 Retro lessons flow through I8 unchanged (no duplication).
 
 **Human approval as done.** A team gated by a person instead of a VERIFY phase —

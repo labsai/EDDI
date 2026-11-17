@@ -64,6 +64,19 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   in a newline or a space was not found in it and passed. The ends cut are the union of what
   `String.strip()` and `String.trim()` remove, since the summary's `trim()` also drops control
   characters: feedback ending in an ESC was not found either and passed.
+  The feedback is no longer appended to the backlog task's description: it is kept beside it in
+  `GroupWorkspace.backlogFeedback` (`BacklogFeedback`: task id, run id, text, the agent that wrote
+  it, and whether a reader verified when it was kept; `GroupSigningGuard.recordedFeedback`), and
+  each run quotes it after the description, in the question and the tasks it plans, only if
+  `GroupSigningGuard.recordsTrustFeedback` passes for the readers as they stand then: no agent wrote
+  it (a HUMAN member, an approver's edit, the engine), no reader verifies, or it was verified when
+  kept and its author still signs verifiably. Otherwise it is counted as withheld, as concessions
+  are. So feedback an agent wrote while nobody verified is not quoted once a verifying member joins
+  (the description of a task a person filed is still pulled), which the description text could not
+  express. A task keeps its last 8 runs' feedback (`MAX_FEEDBACK_PER_TASK`) and none once it is
+  verified, approved as done or gone from the backlog. The field is optional, so older workspaces
+  load with none; feedback they already appended to a description has no provenance and stays part
+  of the description, as it was written under the rule of its time.
 - **Handoffs.** An `AUTO` tool handoff filed another team's agent's text into the backlog with no
   creator, and the cadence turned it into configured task text. The backlog task now records the
   agent that wrote it (`TeamHandoffService`, `TaskItem.filedBy`); `TaskDefinition` carries it as an
