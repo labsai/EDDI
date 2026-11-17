@@ -88,14 +88,14 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
 
     /**
      * Whether the task's {@code convertToObject} parameter will turn the JSON parse
-     * on: a literal value must be {@code true} (ignoring case), as the runtime
-     * reads it with {@code Boolean.parseBoolean}, so {@code "yes"} or an empty
-     * string is off; a templated value is given the benefit of the doubt, and an
-     * absent one is {@code false}.
+     * on: a literal value must be exactly {@code true} (ignoring case, not
+     * trimmed), as the runtime reads it with {@code Boolean.parseBoolean}, so
+     * {@code "yes"} or an empty string is off; a templated value is given the
+     * benefit of the doubt, and an absent one is {@code false}.
      */
     private static boolean convertsToObject(LlmConfiguration.Task task) {
         String value = task.getParameters() != null ? task.getParameters().get("convertToObject") : null;
-        return value != null && ("true".equalsIgnoreCase(value.trim()) || TemplatingEngine.containsTemplateExpression(value));
+        return value != null && ("true".equalsIgnoreCase(value) || TemplatingEngine.containsTemplateExpression(value));
     }
 
     /**

@@ -122,9 +122,9 @@ class LlmStoreRescueValidationTest {
     }
 
     @Test
-    @DisplayName("a literal convertToObject that the runtime reads as false (\"yes\", empty) is rejected, like \"false\"")
+    @DisplayName("a literal convertToObject that the runtime reads as false (\"yes\", empty, padded) is rejected, like \"false\"")
     void createRejectsConvertToObjectTheRuntimeReadsAsFalse() {
-        for (String literal : List.of("yes", "", "  ", "1", "false")) {
+        for (String literal : List.of("yes", "", "  ", "1", "false", " true ")) {
             var error = assertThrows(IllegalArgumentException.class,
                     () -> store.create(recoveryConfig(literal, List.of("htmlResponseText"), null, "ignore")), "'" + literal + "'");
             assertTrue(error.getMessage().contains("convertToObject"), error.getMessage());
@@ -135,7 +135,7 @@ class LlmStoreRescueValidationTest {
     @Test
     @DisplayName("convertToObject \"TRUE\" and a templated value are accepted at save time")
     void createAcceptsTrueAndTemplatedConvertToObject() throws Exception {
-        for (String accepted : List.of("TRUE", " true ", "{context.json}", "{#if context.json}true{#else}false{/if}")) {
+        for (String accepted : List.of("TRUE", "{context.json}", "{#if context.json}true{#else}false{/if}")) {
             try {
                 store.create(recoveryConfig(accepted, List.of("htmlResponseText"), null, "ignore"));
             } catch (IllegalArgumentException e) {
