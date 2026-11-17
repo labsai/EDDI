@@ -12,7 +12,7 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image** with the **Manager dashboard and Chat UI built in**. Selected as a **UNIDO Trusted Partner** for Industrial AI. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), the **OpenAI Chat Completions API**, **Slack**, **OpenAPI**, and **OAuth 2.0**.
 
-[Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+[Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Commercial Support](https://eddi.solutions/) · License: Apache 2.0
 
 ---
 
@@ -30,6 +30,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
   - [Maven Command Reference](#maven-command-reference)
   - [Build & Docker](#build--docker)
   - [Kubernetes](#️-kubernetes)
+- [💼 Commercial Support](#-commercial-support)
 - [🤝 Contributing](#-contributing)
 - [🔒 Security](#-security)
 - [📜 Code of Conduct](#-code-of-conduct)
@@ -708,6 +709,16 @@ Includes overlays for auth (Keycloak), monitoring (Prometheus/Grafana), cluster 
 See the [Kubernetes Guide](docs/kubernetes.md) for details, including the Keycloak upgrade note for existing installs.
 
 ---
+
+## 💼 Commercial Support
+
+EDDI is free and open source under Apache 2.0. If you want it deployed, operated and supported for you, [EDDI Solutions](https://eddi.solutions/) is the managed offering from LABS.AI, the team that develops EDDI:
+
+- Dedicated EDDI instances in the US, EU, Switzerland or Singapore, or deployment inside your own cloud or on-premise
+- SLA-backed operations: monitoring, upgrades and security patching, with support up to 24/7
+- Workshops, data-source connectors and agent builds by the EDDI core team
+
+See the [plans](https://eddi.solutions/pricing/) or [request a demo](https://eddi.solutions/contact/).
 
 ## 🤝 Contributing
 
