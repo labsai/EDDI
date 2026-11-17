@@ -73,7 +73,10 @@ public class McpHealthTools {
             + "failures, Apdex response time, p95 duration, fallback rate), efficiency (cost per session, tokens per turn), adoption "
             + "(sessions, engaged sessions, distinct and returning users), effectiveness (resolution split into confirmed, self-reported, "
             + "agent-closed and silence; escalation, abandonment, deflection, outcome coverage — rates are null while coverage is below "
-            + "the minimum), quality (ratings — restricted unless you may read ratings) and the golden-suite check. Each measure has its "
+            + "the minimum), quality (ratings — restricted unless you may read ratings), business (event:<type> — business events an "
+            + "external system reported through a health-outcomes webhook target and matched to the agent's sessions, per event type "
+            + "the agent declares in healthConfig.outcomeEvents, split by reference / conversation id, with value sums) and the "
+            + "golden-suite check. Each measure has its "
             + "value, sample size n, interval, the previous period's value, the delta, whether the change is significant, and a band "
             + "(GREEN/AMBER/RED, GREY for too little data). Use it to answer 'is agent X healthy', 'does it resolve conversations' or "
             + "'why did X get worse'.")
@@ -131,8 +134,9 @@ public class McpHealthTools {
 
     @Tool(name = "list_agent_health_sessions", description = "List an agent's sessions with how they ended — the drill-down behind the "
             + "effectiveness measures: conversation id, session number, start and end, version, origin, engaged, outcome (RESOLVED, "
-            + "ASSUMED_RESOLVED, ESCALATED, ABANDONED, FAILED, DEFLECTED, ENDED_QUIETLY, OPEN), evidence (agent_action, self_reported, "
-            + "agent_closed, silence, structural, inferred), provisional, turns, cost, failures; newest first, no user ids, no content. Needs "
+            + "ASSUMED_RESOLVED, ESCALATED, ABANDONED, FAILED, DEFLECTED, ENDED_QUIETLY, OPEN), evidence (external_event, "
+            + "conversation_id_event — a matched business event, the strongest —, agent_action, self_reported, agent_closed, silence, "
+            + "structural, inferred), provisional, turns, cost, failures; newest first, no user ids, no content. Needs "
             + "EDIT on the agent and conversation review enabled on the version — otherwise the error says FORBIDDEN or REVIEW_DISABLED. "
             + "Use it to find the conversations behind a rate, then read_conversation to read one.")
     public String listAgentHealthSessions(@ToolArg(description = "Agent id (required)") String agentId,

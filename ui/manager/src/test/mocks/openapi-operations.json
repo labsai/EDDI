@@ -103,6 +103,7 @@
     "GET /agents/pending-approvals",
     "GET /agents/{agentId}/health",
     "GET /agents/{agentId}/health/compare",
+    "GET /agents/{agentId}/health/export",
     "GET /agents/{agentId}/health/outcome-suggestions",
     "GET /agents/{agentId}/health/series",
     "GET /agents/{agentId}/health/sessions",
