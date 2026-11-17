@@ -34,8 +34,8 @@ resolved, which the Manager does not reliably know. So the listing gained a flag
 
 **Files:** [`IRestConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/rest/IRestConversationStore.java),
 [`RestConversationStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/rest/RestConversationStore.java),
-[`conversations.ts`](../../ui/manager/src/lib/api/conversations.ts),
-[`use-chat.ts`](../../ui/manager/src/hooks/use-chat.ts),
+[`conversations.ts`](../../ui/packages/app-kit/src/lib/api/conversations.ts),
+[`use-chat.ts`](../../ui/packages/app-kit/src/hooks/use-chat.ts),
 [`use-operator-chat.ts`](../../ui/manager/src/hooks/use-operator-chat.ts),
 [`use-conversations.ts`](../../ui/manager/src/hooks/use-conversations.ts),
 [`operator-history.tsx`](../../ui/manager/src/components/operator/operator-history.tsx),

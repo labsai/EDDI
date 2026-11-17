@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { opsFor, outputMatchProblems, pathProblem, ruleProblems, throttleProblems } from "../alert-rules";
-import { blankRule } from "../api/alerts";
+import { blankRule } from "@eddi/app-kit/lib/api/alerts";
 
 describe("ruleProblems — mirrors AlertRuleValidator", () => {
   it("a named blank rule of either source is valid", () => {

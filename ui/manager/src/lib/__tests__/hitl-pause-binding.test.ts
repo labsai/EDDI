@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiClientError } from "@/lib/api-client";
-import type { ApprovalStatusSummary, HitlDecision } from "@/lib/api/hitl";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
+import type { ApprovalStatusSummary, HitlDecision } from "@eddi/app-kit/lib/api/hitl";
 import {
   bindDecisionToPause,
   currentGroupPauseOf,
@@ -10,7 +10,7 @@ import {
   isSamePause,
   PauseChangedError,
   shownPauseOf,
-} from "@/lib/hitl-pause-binding";
+} from "@eddi/app-kit/lib/hitl-pause-binding";
 
 const ruleStatus: ApprovalStatusSummary = {
   conversationId: "c",

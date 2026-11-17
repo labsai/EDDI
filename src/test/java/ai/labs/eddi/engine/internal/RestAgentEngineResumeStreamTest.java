@@ -322,13 +322,14 @@ class RestAgentEngineResumeStreamTest {
     }
 
     @Test
-    @DisplayName("tool_result carries tool, callId, status and duration - nothing else")
+    @DisplayName("tool_result carries tool, callId, status, duration, ok and the summary - nothing else")
     void toolResultShape() throws Exception {
         var handler = accepted(streaming(true));
 
         handler.onToolResult("lookup", "c1", "not_executed", 12);
 
-        assertEquals("{\"tool\":\"lookup\",\"callId\":\"c1\",\"status\":\"not_executed\",\"durationMs\":12}", dataOf("tool_result"));
+        assertEquals("{\"tool\":\"lookup\",\"callId\":\"c1\",\"status\":\"not_executed\",\"durationMs\":12,\"ok\":false,\"summary\":\"\"}",
+                dataOf("tool_result"));
     }
 
     @Test

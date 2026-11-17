@@ -28,12 +28,13 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  * ({@code docs/model-pricing.md}): what prices a model, what the unpriced
  * policy is, and which models were called without a price.
  * <p>
- * <b>Read only, by design.</b> The catalog is a budget lever — lowering a price
- * to $0 raises every budget that model counts against — so it is written by an
- * {@code eddi-admin} in the Manager's Model Prices page or over REST, never by
- * a tool. The tool calls the in-process {@link IRestModelPriceCatalog} bean,
- * the same reads as {@code GET /administration/model-prices}, {@code /resolve}
- * and {@code /unpriced}. Tier {@link McpRoles#AUTHOR}, equal to their
+ * <b>Read only.</b> The catalog is a budget lever — lowering a price to $0
+ * raises every budget that model counts against — so its MCP write,
+ * {@code update_model_prices} in {@link McpSpendControlTools}, is admin-only
+ * and applies only what makes spending stricter. The tool calls the in-process
+ * {@link IRestModelPriceCatalog} bean, the same reads as
+ * {@code GET /administration/model-prices}, {@code /resolve} and
+ * {@code /unpriced}. Tier {@link McpRoles#AUTHOR}, equal to their
  * {@code @RolesAllowed}.
  *
  * @since 6.7.0
@@ -63,7 +64,7 @@ public class McpPricingTools {
             + "REFUSE or REFUSE_WHEN_BUDGETED — the stricter of the catalog's and the deployment floor) and the models called without "
             + "any price on this node since it started. A model with no price costs $0 against every budget and is counted as unpriced. "
             + "Give provider and model to also see which catalog entry prices that model (exact, then the longest wildcard). "
-            + "Read only: prices are changed by an administrator in the Manager (Model Prices), never by a tool.")
+            + "Read only; administrators change prices with update_model_prices (a lower price waits for approval in the Manager).")
     public String readModelPrices(@ToolArg(description = "Model type, e.g. openai, anthropic (with model: resolve that model)",
                                            required = false) String provider,
                                   @ToolArg(description = "Model name, e.g. gpt-4o-mini (with provider: resolve that model)",

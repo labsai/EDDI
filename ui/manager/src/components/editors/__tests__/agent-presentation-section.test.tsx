@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 import { AgentPresentationSection } from "../agent-presentation-section";
 
 const baseAgent = { workflows: [] } as unknown as Agent;

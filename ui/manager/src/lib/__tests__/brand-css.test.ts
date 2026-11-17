@@ -10,7 +10,7 @@ import {
   resolveBrandColors,
   EMPTY_COLORS,
   UNBRANDED_COLORS,
-} from "@/lib/brand-css";
+} from "@eddi/app-kit/lib/brand-css";
 
 /**
  * `BrandDeliveryTest` keeps {@link BRAND_SCALE} equal to the Java constant; this

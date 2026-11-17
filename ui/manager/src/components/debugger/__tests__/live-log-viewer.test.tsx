@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { LiveLogViewer } from "@/components/debugger/live-log-viewer";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { LiveLogViewer } from "@eddi/app-kit/components/debugger/live-log-viewer";
 
 // Mock scrollTo for jsdom
 beforeAll(() => {
@@ -14,7 +14,7 @@ afterAll(() => {
 });
 
 // Mock the logs API module
-vi.mock("@/lib/api/logs", () => ({
+vi.mock("@eddi/app-kit/lib/api/logs", () => ({
   createLogEventSource: vi.fn(() => ({
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("@/lib/api/logs", () => ({
   getRecentLogs: vi.fn(() => Promise.resolve([])),
 }));
 
-import { createLogEventSource, getRecentLogs } from "@/lib/api/logs";
+import { createLogEventSource, getRecentLogs } from "@eddi/app-kit/lib/api/logs";
 const mockCreateLogEventSource = vi.mocked(createLogEventSource);
 const mockGetRecentLogs = vi.mocked(getRecentLogs);
 

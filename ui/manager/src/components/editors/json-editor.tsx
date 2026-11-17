@@ -1,7 +1,7 @@
 import { useTheme } from "@eddi/ui";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
-import "@/lib/monaco-setup";
+import "@eddi/app-kit/lib/monaco-setup";
 import Editor, { type OnMount, type BeforeMount, type Monaco } from "@monaco-editor/react";
 import { useCallback, useEffect, useId, useRef } from "react";
 import type { editor } from "monaco-editor";

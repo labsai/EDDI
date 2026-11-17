@@ -18,7 +18,12 @@ export type ConversationState =
 
 /**
  * SSE event types emitted by POST /agents/{conversationId}/stream.
- * Mirrors RestAgentEngineStreaming — all eleven.
+ * Mirrors RestAgentEngineStreaming — all fourteen; stream-events.review.test.ts
+ * reads the Java and fails when the two disagree. `tool_result` (B6) is
+ * parsed by `@eddi/core/tool-events`; `llm_retry` and `cascade_escalation` also feed
+ * the signed-in apps' turn notes (`@eddi/conversation/tool-activity`, T2.7);
+ * `hitl_resume` and `approval_required` are sent on `/resume/stream` (and
+ * `approval_required` on `/stream` too, before `done`).
  *
  * Note: there is no "thinking" event. A UI once declared one and the backend
  * never emitted it, so the thinking indicator was only ever cleared by the
@@ -31,11 +36,17 @@ export type SSEEventType =
   | "task_complete"
   | "task_failed"
   | "tool_call"
-  /** EDDI 6.7: `{tool, callId, status, durationMs}` once per call, after it ran. */
+  /**
+   * EDDI 6.7: `{tool, callId, status, durationMs, ok, summary}` once per call,
+   * after it ran; `summary` is the start of the redacted result (B6).
+   */
   | "tool_result"
   | "cascade_step_start"
   | "cascade_escalation"
   | "guardrail_triggered"
+  | "llm_retry"
+  | "hitl_resume"
+  | "approval_required"
   | "done"
   | "error";
 

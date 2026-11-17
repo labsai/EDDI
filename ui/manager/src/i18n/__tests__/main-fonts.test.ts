@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -8,6 +9,11 @@ import { describe, expect, it } from "vitest";
  */
 describe("main.tsx", () => {
   const main = readFileSync(resolve(__dirname, "../../main.tsx"), "utf8");
+  // `startApp` (@eddi/app-kit) is the boot both signed-in apps share.
+  const startApp = readFileSync(
+    createRequire(import.meta.url).resolve("@eddi/app-kit/lib/start-app"),
+    "utf8",
+  );
 
   it("imports only the default Noto family eagerly", () => {
     // The seven script families are ~388 KB of @font-face rules; an eager
@@ -16,7 +22,8 @@ describe("main.tsx", () => {
     expect(eager).toEqual(["@fontsource-variable/noto-sans"]);
   });
 
-  it("installs the per-locale loader", () => {
-    expect(main).toMatch(/installLocaleFonts\(i18n\)/);
+  it("boots through startApp, which installs the per-locale loader", () => {
+    expect(main).toMatch(/startApp\(\{/);
+    expect(startApp).toMatch(/installLocaleFonts\(i18n\)/);
   });
 });

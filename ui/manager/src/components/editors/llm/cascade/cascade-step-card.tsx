@@ -9,10 +9,10 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
-import { ProviderSelect } from "@/components/shared/provider-select";
-import { type CascadeStep } from "../types";
+import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
+import { type CascadeStep } from "@eddi/app-kit/components/editors/llm/types";
 import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
 import { parseNum as num, nextParamKey, LEGACY_MODEL_KEY, modelField, withModel } from "./cascade-utils";

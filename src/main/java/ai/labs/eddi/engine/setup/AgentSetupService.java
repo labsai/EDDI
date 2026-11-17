@@ -1419,7 +1419,7 @@ public class AgentSetupService {
      * deployment could activate or upgrade its Operator. 250,000 leaves room for
      * that prompt to keep growing and still bounds an LLM-authored one. The Manager
      * mirrors this value as {@code SETUP_MAX_SYSTEM_PROMPT_LENGTH} in
-     * {@code ui/manager/src/lib/api/agent-setup.ts};
+     * {@code ui/packages/app-kit/src/lib/api/agent-setup.ts};
      * {@code SetupPromptCapMirrorTest} fails when the two differ, and the Manager's
      * {@code operator-prompt-size.test.ts} fails when the Operator prompt exceeds
      * 80% of it. Change both values together.

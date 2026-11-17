@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DollarSign } from "lucide-react";
-import { EditorSection } from "../editor-section";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import type { TaskSectionProps } from "./task-section-props";
 import { parseNum as num } from "./cascade/cascade-utils";
 import { useResolvedModelPrice } from "@/hooks/use-model-prices";

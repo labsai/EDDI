@@ -1,0 +1,4 @@
+@import 'tailwindcss';
+/* Tokens, markdown, typography and the base layer, shared with the Manager
+   (ui/packages/app-kit/src/styles/app.css). */
+@import '@eddi/app-kit/styles/app.css';

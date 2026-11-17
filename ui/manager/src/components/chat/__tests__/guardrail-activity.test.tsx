@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { GuardrailActivity } from "@/components/chat/guardrail-activity";
-import type { ChatMessage } from "@/lib/api/chat";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { GuardrailActivity } from "@eddi/app-kit/components/chat/guardrail-activity";
+import type { ChatMessage } from "@eddi/app-kit/lib/api/chat";
 
 // The activity indicator's guardrail state (@eddi/conversation), in the
 // Manager's chat: a guardrail fired on the reply still being written.

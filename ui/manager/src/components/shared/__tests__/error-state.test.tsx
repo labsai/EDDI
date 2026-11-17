@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ErrorState } from "@/components/shared/error-state";
-import { ApiClientError } from "@/lib/api-client";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
 
 describe("ErrorState", () => {
   it("renders the error message", () => {

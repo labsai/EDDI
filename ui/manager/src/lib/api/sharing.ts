@@ -1,5 +1,5 @@
-import { api } from "../api-client";
-import { seg } from "./path-segment";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
 
 /**
  * How much of a shared resource a subject may do something with.

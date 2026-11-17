@@ -46,10 +46,19 @@ class OversightGuardsTest {
 
         @ParameterizedTest
         @CsvSource({"PATCH,/hitl/samples/s1", "POST,/hitl/autonomy/a1/apply?category=x", "POST,/hitl/analytics/rebuild",
-                "POST,/hitl/autonomy/a1/lift"})
+                "POST,/hitl/autonomy/a1/lift", "PATCH,/hitl;v=1/samples/s1", "POST,/hitl/autonomy;x/a1/apply"})
         @DisplayName("an approved call writing to the oversight API is refused for every agent")
         void oversightApiRefused(String method, String path) {
             assertEquals(OversightWriteGuard.OVERSIGHT_API_REASON,
+                    SelfUngatingGuard.refusal(method, "http://localhost:7070" + path, "{}", protection()));
+        }
+
+        @ParameterizedTest
+        @CsvSource({"POST,/administration/spend-control-changes/c1/approve", "POST,/administration/spend-control-changes/c1/reject",
+                "POST,/administration/spend-control-changes;x=1/c1/approve", "POST,/administration;a=b/spend-control-changes/c1/approve"})
+        @DisplayName("an approved call deciding a spend-control change is refused for every agent")
+        void spendControlApiRefused(String method, String path) {
+            assertEquals(OversightWriteGuard.SPEND_CONTROL_API_REASON,
                     SelfUngatingGuard.refusal(method, "http://localhost:7070" + path, "{}", protection()));
         }
 

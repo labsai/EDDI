@@ -4,16 +4,16 @@ import {
   useGroupDiscussionStream,
   useStreamingGroupIds,
   useGroupStreamStore,
-} from "@/hooks/use-group-discussion-stream";
-import type { GroupConversation, TranscriptEntry } from "@/lib/api/groups";
-import type { GroupApprovalRequest } from "@/lib/api/hitl";
+} from "@eddi/app-kit/hooks/use-group-discussion-stream";
+import type { GroupConversation, TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
+import type { GroupApprovalRequest } from "@eddi/app-kit/lib/api/hitl";
 
 const mockStreamGroupDiscussion = vi.fn();
 const mockStreamGroupApproval = vi.fn();
 const mockStreamGroupContinue = vi.fn();
 
-vi.mock("@/lib/api/groups", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/api/groups")>();
+vi.mock("@eddi/app-kit/lib/api/groups", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@eddi/app-kit/lib/api/groups")>();
   return {
     ...original,
     streamGroupDiscussion: (...args: unknown[]) => mockStreamGroupDiscussion(...args),

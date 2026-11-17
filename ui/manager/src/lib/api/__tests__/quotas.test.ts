@@ -4,7 +4,7 @@ import {
   updateQuota,
   getUsage,
   resetUsage,
-} from "../quotas";
+} from "@eddi/app-kit/lib/api/quotas";
 
 describe("quotas API", () => {
 

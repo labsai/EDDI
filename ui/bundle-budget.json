@@ -5,14 +5,24 @@
       "dist": "manager/dist",
       "pages": {
         "manage.html": { "baselineKb": 743.8, "budgetKb": 700 },
-        "workforce.html": { "baselineKb": 743.8, "budgetKb": 700 },
         "welcome.html": { "baselineKb": 743.8, "budgetKb": 700 }
+      }
+    },
+    "workforce": {
+      "$comment": "Its own app since phase 5 (planning/frontend-unification-plan.md §7): 252.2 KB gz measured at the split, against the 743.8 KB it loaded as part of the Manager's bundle before phase 0. The budget leaves about 10% headroom.",
+      "dist": "workforce/dist",
+      "pages": {
+        "workforce.html": { "baselineKb": 743.8, "budgetKb": 280 }
       }
     },
     "chat": {
       "dist": "chat/dist",
       "pages": {
         "chat.html": { "baselineKb": 224.8, "budgetKb": 180 }
+      },
+      "$scripts": "Standalone scripts a host page loads by themselves, each its own budget. The embed launcher (T2.9, served at /chat/embed.js) is new in phase 8: baselineKb is its first build (2026-11-06); the budget keeps it a small fraction of the widget it opens.",
+      "scripts": {
+        "scripts/js/chat-ui-embed.js": { "baselineKb": 3.7, "budgetKb": 5 }
       }
     }
   }

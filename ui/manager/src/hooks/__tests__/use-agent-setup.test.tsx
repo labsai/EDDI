@@ -5,7 +5,7 @@ import { type ReactNode } from "react";
 import {
   useSetupAgent,
   useCreateApiAgent,
-} from "@/hooks/use-agent-setup";
+} from "@eddi/app-kit/hooks/use-agent-setup";
 
 function createWrapper() {
   const queryClient = new QueryClient({
