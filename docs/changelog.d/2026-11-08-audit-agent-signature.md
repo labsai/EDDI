@@ -2,6 +2,8 @@
 
 **Repo:** EDDI (`fix/audit-agent-signature`, review round on the same branch, now merged with the review round of `feat/agent-signing-key-provisioning`)
 
+- Review round: an erasure no longer rewrites a row without its agent signature when the agent store fails (the row is left unredacted and counted failed), and a permanent agent delete drops the cached agent versions even with no live deployment.
+
 ### What changed and why
 
 A whole-feature review of agent signing found that the audit half signed with keys it should not have used, reported a routine agent delete as tampering, and could not see a stripped signature.
