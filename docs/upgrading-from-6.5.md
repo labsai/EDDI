@@ -433,6 +433,15 @@ and each such condition logs a WARN naming the ruleset and the rule. The conditi
 did before, so it never matches, and a rule that negates it keeps firing on every turn.
 
 What you will see: the WARN at deploy, and a 400 naming the rule the next time you save that
-ruleset. Remove the field before saving. A negated `tagMatches` was always true, so when you remove
-it, keep the rule's behavior by dropping the negation too, or by rewriting the rule. See
-[behavior-rules.md](behavior-rules.md#deployment-context).
+ruleset. Repair the two conditions differently:
+
+- **`deploymentContext` with `tagMatches`:** remove the `tagMatches` field. This changes what the
+  rule does when it was negated. A negated `tagMatches` was always true, so the rule fired in every
+  environment; after removing the field, a remaining `when` (for example `"production"`) is
+  evaluated for real and the rule no longer fires elsewhere. To keep it unconditional, remove the
+  condition together with its negation, or replace it with one that is always true.
+- **`dependency` without `reference`:** there is no field to remove. Add the `reference` naming the
+  rule it depends on, or replace or remove the condition after checking what the rule was meant to
+  do.
+
+See [behavior-rules.md](behavior-rules.md#deployment-context).

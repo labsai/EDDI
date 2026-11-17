@@ -224,6 +224,25 @@ class DependencyTest {
         assertNull(dependency.retiredConfiguration());
     }
 
+    /**
+     * A blank reference is a missing one: it must not match a rule whose name is
+     * blank too, or a condition-less rule would make the dependency succeed.
+     */
+    @Test
+    void execute_blankReference_doesNotMatchABlankRuleName() throws Exception {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var blankNamed = new Rule("");
+        blankNamed.setConditions(List.of(succeeding()));
+        group.setRules(new LinkedList<>(List.of(blankNamed)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        var state = TemplateDataScope.call(memory, () -> dependencyOn("", ruleSet).execute(memory, new ArrayList<>()));
+
+        assertNotEquals(IRuleCondition.ExecutionState.SUCCESS, state);
+    }
+
     private static Dependency dependencyOn(String reference, RuleSet ruleSet) {
         var dependency = new Dependency();
         dependency.setConfigs(Map.of("reference", reference));

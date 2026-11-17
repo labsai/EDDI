@@ -2034,8 +2034,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
-        return ExistingRuleSetWrite.call(() -> updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config,
-                store::updateRuleSet, transaction));
+        // The scope is entered inside the callback: updateTracked also calls it for
+        // the compensation, which runs after this method has returned.
+        return updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config,
+                (id, version, document) -> ExistingRuleSetWrite.call(() -> store.updateRuleSet(id, version, document)), transaction);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {

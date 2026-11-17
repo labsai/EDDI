@@ -22,6 +22,8 @@ The PR said removing the field changes nothing at runtime. That is wrong for a n
 - The WARN names the ruleset URI and the rule, but not the agent. Workflows, and the rulesets in them, are configured and cached per workflow and can be shared by several agents, so `configure()` does not know which agent it is serving.
 - A `ScopedValue`, not a `ThreadLocal`, matching `TemplateDataScope`. The binding cannot outlive the call, and every wrapped write runs on the caller's thread.
 
+- Review follow-up: the existing-ruleset scope is entered inside the merge update callback, so the compensation that restores a replaced ruleset also runs in it; a blank `dependency` reference is treated as missing and matches no rule (including a blank-named one); the upgrade note gives `tagMatches` and `dependency` separate repairs and says that dropping a negated `tagMatches` changes environment behavior.
+
 ### Tests
 
 `RuleDeserializationTest`, `DeploymentContextConditionTest`, `DependencyTest`, `RuleSetStoreSaveTimeValidationTest`, `RulesEvaluationTaskTest`, `RestImportServiceReviewFixesTest`. They cover the following: a stored `tagMatches` ruleset deploys with a WARN; a negated `tagMatches` still evaluates SUCCESS; the same ruleset is refused on create and update; it is accepted inside `ExistingRuleSetWrite` while other checks still refuse; a ZIP import through the real `RuleSetStore` succeeds; a reference-less `dependency` loads and fails.

@@ -76,7 +76,7 @@ public class Dependency implements IRuleCondition {
                 // turn every dependency lookup into a NullPointerException. A stored
                 // ruleset may still carry a dependency without a reference: it
                 // matches no rule and fails, as it always did.
-                if (reference != null && reference.equals(behaviorRule.getName())) {
+                if (reference != null && !reference.isBlank() && reference.equals(behaviorRule.getName())) {
                     filteredRules.add(behaviorRule);
                 }
             }

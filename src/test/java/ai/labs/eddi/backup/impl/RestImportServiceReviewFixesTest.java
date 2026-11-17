@@ -16,6 +16,8 @@ import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.rules.ExistingRuleSetWrite;
+import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.mongo.RuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -326,6 +328,48 @@ class RestImportServiceReviewFixesTest {
         assertEquals(201, runImport("create", Map.of(IRuleSetStore.class, ruleSetStore)).getStatus());
 
         verify(resourceStorage).store(stored);
+    }
+
+    /**
+     * The compensation of a merge update runs after the update call has returned,
+     * so the existing-ruleset scope has to be entered by the callback itself: a
+     * ruleset with a retired {@code tagMatches} is otherwise written, but cannot be
+     * restored.
+     */
+    @Test
+    @DisplayName("a merged ruleset is written and restored inside the existing-ruleset scope")
+    void mergedRulesetIsRolledBackInsideTheExistingRuleSetScope() throws Exception {
+        String rules = "eddi://ai.labs.rules/rulestore/rulesets/" + RULES_ID;
+        givenArchive(List.of(WORKFLOW_ID), workflowDir -> {
+            Files.writeString(new File(workflowDir, WORKFLOW_ID + ".workflow.json").toPath(), "{\"workflowSteps\":["
+                    + "{\"type\":\"eddi://ai.labs.rules\",\"config\":{\"uri\":\"" + rules + "?version=1\"}}]}");
+            Files.writeString(new File(workflowDir, RULES_ID + ".behavior.json").toPath(), "RULESJSON");
+        });
+        when(jsonSerialization.deserialize(eq("RULESJSON"), eq(RuleSetConfiguration.class))).thenAnswer(i -> new RuleSetConfiguration());
+
+        String localRulesId = "cdcd11112222333344445555";
+        var original = new RuleSetConfiguration();
+        var ruleSetStore = mock(IRuleSetStore.class);
+        when(ruleSetStore.read(localRulesId, 1)).thenReturn(original);
+        var restRuleSetStore = mock(IRestRuleSetStore.class);
+        List<Object> written = new ArrayList<>();
+        List<Boolean> inScope = new ArrayList<>();
+        when(restRuleSetStore.updateRuleSet(eq(localRulesId), anyInt(), any())).thenAnswer(i -> {
+            written.add(i.getArgument(2));
+            inScope.add(ExistingRuleSetWrite.isActive());
+            return Response.ok().build();
+        });
+        var local = new DocumentDescriptor();
+        local.setResource(URI.create(rules.replace(RULES_ID, localRulesId) + "?version=1"));
+        when(documentDescriptorStore.findByOriginId(RULES_ID)).thenReturn(List.of(local));
+        when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+        assertThrows(RuntimeException.class,
+                () -> runImport("merge", Map.of(IRuleSetStore.class, ruleSetStore, IRestRuleSetStore.class, restRuleSetStore)));
+
+        assertEquals(2, written.size(), "the merge update and its compensation");
+        assertSame(original, written.get(1), "restored to the content from before the import");
+        assertEquals(List.of(true, true), inScope, "both writes ran inside the existing-ruleset scope");
     }
 
     // ==================== fixtures ====================
