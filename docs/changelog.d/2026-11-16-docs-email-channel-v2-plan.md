@@ -26,7 +26,9 @@ The review behind it found four defects, which the plan fixes in its phases:
 
 ### What's next
 
-Phase 1 (doc corrections, provider matrix), then Phase 2 (mail log) before Phase 3, which starts refusing unaddressed mail. Phase 4 can run in parallel. Owner question open: GDPR erasure of one participant in a thread-mode conversation (plan §13 Q4).
+Phase 1 (doc corrections, provider matrix), then Phase 2 (mail log) before Phase 3, which starts refusing unaddressed mail. Phase 4 can run in parallel.
+
+Re-checked against `main` on 2026-11-17. Phases 3 and 5 depend on the open PR #1394: it switches the processor to the DKIM-signed view of a mail (only signed To/Cc, Subject and Reply-To), and routing, addressing and the thread audience must read only that view. Phase 4 reuses the per-user OAuth flow and prerequisites of the Google Workspace recipe (#1302), on its own OAuth client. A consulted agent would see the sender's `global` memory entries, so Phase 6 runs it under a memory-free identity. Owner question open: GDPR erasure of one participant in a thread-mode conversation (plan §13 Q4).
 
 ```decision-log
 | 2026-11-16 | Google Workspace mailboxes use a mailbox-scoped grant (`Binding.MAILBOX`, auth-code, keyed `mailbox:<address>`, usable only by the mail transport, account verified against the address on link and refresh) for dedicated mailboxes only; no domain-wide delegation | Product owner: dedicated mailboxes only, enterprise first. Run-as-principal (v1 Phase 6) would key the grant to the linking admin, the wrong owner | Run-as-principal per the RAG plan; domain-wide delegation; using a person's own mailbox |
