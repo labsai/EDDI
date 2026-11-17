@@ -1578,14 +1578,29 @@ public class GdprComplianceService {
      */
     private Map<String, Object> clusterStopRequest(String userId) {
         String hash = KvKeys.sha256(userId);
+        Map<String, Object> request = new LinkedHashMap<>();
+        // Tells the other nodes that this erasure wrote tombstones first; a node that
+        // receives a stop without it knows the erasure runs on a node without the
+        // guarantee and says so (see ClusterControlHandlers).
+        if (erasureGuard != null) {
+            request.put(TOMBSTONED, true);
+        }
         if (clusterSigner != null && clusterSigner.isResolvable()) {
             String sealed = clusterSigner.get().seal(hash);
             if (sealed != null) {
-                return Map.of("userIdSealed", sealed);
+                request.put("userIdSealed", sealed);
+                return request;
             }
         }
-        return Map.of("userIdHash", hash);
+        request.put("userIdHash", hash);
+        return request;
     }
+
+    /**
+     * Key of the {@code gdpr-stop} request saying the erasing node wrote erasure
+     * tombstones before it.
+     */
+    public static final String TOMBSTONED = "tombstoned";
 
     /**
      * Drop a cached restriction verdict. Null-safe because it is called from catch

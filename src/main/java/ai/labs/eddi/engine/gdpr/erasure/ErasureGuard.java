@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.Kind;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore.PendingRemoval;
+import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -31,7 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -101,13 +104,27 @@ public class ErasureGuard {
     private final Duration drainTimeout;
     private final Duration clockSkew;
     private final Clock clock;
-    private volatile byte[] salt;
+    private volatile TombstoneKey tombstoneKey;
+    private final AtomicLong lastMismatchLog = new AtomicLong();
     /** The writers when built without CDI; otherwise null. */
     private Iterable<AsyncErasureWriter> writerList;
 
     /** Cluster mode: the conversation-delete barrier on every other node. */
     @Inject
     IClusterRpc clusterRpc;
+
+    /**
+     * The secrets vault, the source of the tombstone key when it is configured.
+     * Field-injected; null when built without CDI.
+     */
+    @Inject
+    Instance<VaultSecretProvider> vault;
+
+    /**
+     * Test seam: the vault subkey (returning null: no vault). Overrides
+     * {@link #vault} when set.
+     */
+    Supplier<byte[]> vaultKey;
 
     /** How long a cluster drain waits for the other nodes' replies. */
     @ConfigProperty(name = "eddi.cluster.gdpr-stop-timeout", defaultValue = "10s")
@@ -251,7 +268,7 @@ public class ErasureGuard {
 
     /**
      * The drain barrier on this node: waits, up to {@code eddi.gdpr.drain-timeout}
-     * per writer, until every writer finished the work it had queued before this
+     * in total, until every writer finished the work it had queued before this
      * call.
      *
      * @return the names of the writers that did not drain in time (or failed to);
@@ -260,9 +277,15 @@ public class ErasureGuard {
     public List<String> drainLocal() {
         List<String> undrained = new ArrayList<>();
         long started = System.nanoTime();
+        // One deadline for all writers, not one each: the whole barrier is bounded by
+        // eddi.gdpr.drain-timeout however many writers there are. The writers drain
+        // concurrently anyway (their queues run on their own threads); waiting for
+        // them one after the other costs nothing but the longest wait.
+        long deadline = started + drainTimeout.toNanos();
         for (AsyncErasureWriter writer : writers()) {
             try {
-                if (!writer.awaitDrained(drainTimeout)) {
+                Duration left = Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
+                if (!writer.awaitDrained(left)) {
                     metrics.drainTimedOut(writer.name());
                     undrained.add(writer.name());
                 }
@@ -438,31 +461,124 @@ public class ErasureGuard {
 
     /**
      * The tombstone key of a user: HMAC-SHA256 of {@code KvKeys.sha256(userId)}
-     * (the form the cluster stop carries) under the deployment's tombstone salt. A
+     * (the form the cluster stop carries) under the deployment's tombstone key. A
      * plain hash of an e-mail address would tell anyone with a candidate list and
      * database access whom the deployment erased.
+     *
+     * @throws IllegalStateException
+     *             when the tombstone key cannot be resolved or no longer matches
+     *             the one the tombstones were written with — every caller fails
+     *             closed on it
      */
     public String userKey(String userIdHash) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(salt(), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(userIdHash.getBytes(StandardCharsets.UTF_8)));
-        } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("HmacSHA256 unavailable", e);
+        return HexFormat.of().formatHex(key().macs().get().doFinal(userIdHash.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * The internal subject a writer stores on a row of {@code userId} so the row
+     * can be found again at erasure without keeping the plain id: the
+     * {@link #userKey} with a {@value #SUBJECT_KEY_PREFIX} prefix.
+     */
+    public String subjectKey(String userId) {
+        return SUBJECT_KEY_PREFIX + userKey(KvKeys.sha256(userId));
+    }
+
+    /** The prefix of {@link #subjectKey}: never a plain user id. */
+    public static final String SUBJECT_KEY_PREFIX = "k1:";
+
+    /** HKDF label of the vault-derived tombstone key. Never change it. */
+    static final String VAULT_KEY_LABEL = "eddi-gdpr-erasure-tombstone-key|v1";
+    /** Meta name of the random tombstone salt, used when there is no vault. */
+    static final String SALT_META = "tombstone-salt";
+    /**
+     * Meta name of the key check value: the mode and an HMAC of a constant under
+     * the key, written by the first node to use a key.
+     */
+    static final String KEY_CHECK_META = "tombstone-key-check";
+    private static final byte[] KEY_CHECK_PLAINTEXT = "eddi-gdpr-tombstone-key-check".getBytes(StandardCharsets.UTF_8);
+    private static final long MISMATCH_LOG_INTERVAL_MILLIS = 60_000;
+
+    /** The resolved key, with one Mac per thread (Mac is not thread-safe). */
+    private record TombstoneKey(String mode, ThreadLocal<Mac> macs) {
+    }
+
+    private TombstoneKey key() {
+        TombstoneKey current = tombstoneKey;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            if (tombstoneKey == null) {
+                tombstoneKey = resolveKey();
+            }
+            return tombstoneKey;
         }
     }
 
-    private byte[] salt() {
-        byte[] current = salt;
-        if (current == null) {
+    /**
+     * The key, from outside the database when the secrets vault is configured — a
+     * subkey (HKDF, {@value #VAULT_KEY_LABEL}) of the vault's KEK-wrapped
+     * deployment key, which survives KEK rotation and is never stored — otherwise a
+     * random salt kept in the tombstone store (which protects a dump of the
+     * tombstone table alone, not one of the whole database).
+     * <p>
+     * Either way the first node to use a key records a check value, and every node
+     * compares its key with it: a key that changed (a vault configured or removed
+     * later, a restored vault metadata store, a lost salt row) would make every
+     * existing tombstone silently stop matching, so it fails closed instead — every
+     * guarded write is skipped, every erasure step that needs the key fails — and
+     * says so (ERROR, {@code eddi_gdpr_guard_key_mismatch_total}). Not cached, so
+     * the guard recovers as soon as the operator restored the key.
+     */
+    private TombstoneKey resolveKey() {
+        byte[] raw = vaultSubkey();
+        String mode = "vault";
+        if (raw == null) {
             byte[] random = new byte[32];
             new SecureRandom().nextBytes(random);
-            // Insert-if-absent: every node adopts the first salt written, and it never
-            // changes, so caching it is safe (unlike a tombstone verdict).
-            current = Base64.getDecoder().decode(store.salt(Base64.getEncoder().encodeToString(random)));
-            salt = current;
+            raw = Base64.getDecoder().decode(store.putMetaIfAbsent(SALT_META, Base64.getEncoder().encodeToString(random)));
+            mode = "salt";
         }
-        return current;
+        String check = mode + ":" + HexFormat.of().formatHex(newMac(raw).doFinal(KEY_CHECK_PLAINTEXT));
+        String stored = store.putMetaIfAbsent(KEY_CHECK_META, check);
+        if (!check.equals(stored)) {
+            metrics.keyMismatch();
+            long now = System.currentTimeMillis();
+            long last = lastMismatchLog.get();
+            if (now - last >= MISMATCH_LOG_INTERVAL_MILLIS && lastMismatchLog.compareAndSet(last, now)) {
+                LOGGER.errorf("GDPR: the erasure tombstone key (%s) is not the one the stored tombstones were written with (%s). "
+                        + "Guarded writes are skipped and erasures fail until it is restored: restore the vault master key and "
+                        + "metadata, or the '%s' row, that were in use. Only if the old key is gone for good, delete the '%s' row "
+                        + "of the erasure meta store; tombstones written under the old key then stop matching.", mode,
+                        stored.substring(0, Math.max(0, stored.indexOf(':'))), SALT_META, KEY_CHECK_META);
+            }
+            throw new IllegalStateException("The erasure tombstone key changed (now " + mode + "); see the ERROR log for the operator action");
+        }
+        final byte[] keyBytes = raw;
+        return new TombstoneKey(mode, ThreadLocal.withInitial(() -> newMac(keyBytes)));
+    }
+
+    /** The vault subkey, or null when no vault is configured. */
+    private byte[] vaultSubkey() {
+        if (vaultKey != null) {
+            return vaultKey.get();
+        }
+        if (vault == null || !vault.isResolvable() || !vault.get().isAvailable()) {
+            return null;
+        }
+        // An available vault that fails here propagates: falling back to the salt
+        // would quietly switch keys.
+        return vault.get().deploymentSubkey(VAULT_KEY_LABEL);
+    }
+
+    private static Mac newMac(byte[] key) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(key, "HmacSHA256"));
+            return mac;
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("HmacSHA256 unavailable", e);
+        }
     }
 
     private Iterable<AsyncErasureWriter> writers() {

@@ -25,7 +25,11 @@ public interface ErasureTombstoneStoreContract {
 
     IErasureTombstoneStore tombstoneStore();
 
-    Instant T0 = Instant.parse("2026-11-11T10:00:00Z");
+    /**
+     * Far ahead of the database's clock, so the erasedAt a test writes is the later
+     * of the two (see {@code erasedAt}).
+     */
+    Instant T0 = Instant.parse("2100-01-01T10:00:00Z");
 
     @Test
     default void tombstonesAreReadUntilTheyExpireAndOnlyEverMoveLater() {
@@ -52,10 +56,22 @@ public interface ErasureTombstoneStoreContract {
     }
 
     @Test
-    default void theSaltIsInsertedOnceAndThenAdopted() {
+    default void aMetaValueIsInsertedOnceAndThenAdopted() {
         IErasureTombstoneStore store = tombstoneStore();
-        String first = store.salt("c2FsdC1vbmU=");
-        assertEquals(first, store.salt("c2FsdC10d28="), "every later caller adopts the stored salt");
+        String first = store.putMetaIfAbsent("tombstone-salt", "c2FsdC1vbmU=");
+        assertEquals("c2FsdC1vbmU=", first);
+        assertEquals(first, store.putMetaIfAbsent("tombstone-salt", "c2FsdC10d28="), "every later caller adopts the stored value");
+        assertEquals("salt:abc", store.putMetaIfAbsent("tombstone-key-check", "salt:abc"), "names are independent");
+    }
+
+    @Test
+    default void aTombstoneFromASlowClockCountsFromTheDatabaseWriteTime() {
+        IErasureTombstoneStore store = tombstoneStore();
+        Instant before = Instant.now().minus(Duration.ofMinutes(1));
+        Instant slowNode = Instant.parse("2020-01-01T00:00:00Z");
+        store.putTombstones(Kind.CONVERSATION, List.of("slow"), slowNode, T0);
+        Instant effective = store.erasedAt(Kind.CONVERSATION, "slow", Instant.now()).orElseThrow();
+        assertTrue(effective.isAfter(before), "the database's clock, not the node's 2020: " + effective);
     }
 
     @Test

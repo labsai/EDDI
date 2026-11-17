@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.alerts;
 
-import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.gdpr.erasure.AsyncErasureWriter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -12,7 +11,6 @@ import jakarta.inject.Inject;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Optional;
 
 /**
  * Alerting's part in the erasure guarantee (see {@link AsyncErasureWriter}).
@@ -88,13 +86,10 @@ public class AlertErasureWriter implements AsyncErasureWriter {
      */
     static void removeContent(IAlertEventStore store, String eventId, Instant now) {
         store.redactEventContent(eventId, now);
-        Optional<AlertEvent> left = store.read(eventId);
-        if (left.isPresent() && holdsContent(left.get())) {
+        // Read back what the write committed (primary, majority): a lagging read
+        // could say "gone" while the content is still stored.
+        if (store.holdsPersonalContent(eventId)) {
             throw new IllegalStateException("alert event " + eventId + " still holds erased content (a delivery holds its send claim)");
         }
-    }
-
-    static boolean holdsContent(AlertEvent event) {
-        return event.match() != null && (event.match().value() != null || event.match().commentExcerpt() != null);
     }
 }

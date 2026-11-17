@@ -405,7 +405,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     @Override
     public long redactOutputValues(String userId, Instant now) {
         ensureSchema();
-        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE subject_user_id = ?" + UNCLAIMED,
+        return update(
+                "UPDATE alert_events SET match = match - 'value' - 'commentExcerpt', subject_user_id = NULL WHERE subject_user_id = ?" + UNCLAIMED,
                 Arrays.asList(userId, timestamp(now)), false);
     }
 
@@ -448,6 +449,13 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         ensureSchema();
         return update("SELECT COUNT(*) FROM alert_events WHERE conversation_id = ? AND (match->>'value') IS NOT NULL", List.of(conversationId),
                 true);
+    }
+
+    @Override
+    public boolean holdsPersonalContent(String eventId) {
+        ensureSchema();
+        return update("SELECT COUNT(*) FROM alert_events WHERE id = ? AND ((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL "
+                + "OR subject_user_id IS NOT NULL)", List.of(eventId), true) > 0;
     }
 
     static String where(AlertEventFilter f, List<Object> params) {

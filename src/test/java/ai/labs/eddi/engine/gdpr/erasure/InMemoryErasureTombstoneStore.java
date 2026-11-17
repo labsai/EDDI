@@ -25,10 +25,15 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
 
     private final Map<String, Tombstone> tombstones = new ConcurrentHashMap<>();
     private final Map<String, PendingRemoval> pending = new LinkedHashMap<>();
-    private String salt;
+    private final Map<String, String> meta = new LinkedHashMap<>();
     public volatile boolean failReads;
     public volatile boolean failPending;
     public volatile boolean failWrites;
+    /**
+     * The database's clock when a tombstone is written; null: the same as the
+     * erasing node's.
+     */
+    public volatile Instant databaseNow;
 
     private static String id(Kind kind, String key) {
         return kind + ":" + key;
@@ -39,8 +44,10 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
         if (failWrites) {
             throw new IllegalStateException("tombstone store down");
         }
+        // As the real stores: the later of the node's erasedAt and the database clock.
+        Instant effective = databaseNow == null ? erasedAt : max(erasedAt, databaseNow);
         for (String key : keys) {
-            tombstones.merge(id(kind, key), new Tombstone(erasedAt, expiresAt),
+            tombstones.merge(id(kind, key), new Tombstone(effective, expiresAt),
                     (a, b) -> new Tombstone(max(a.erasedAt(), b.erasedAt()), max(a.expiresAt(), b.expiresAt())));
         }
     }
@@ -66,11 +73,13 @@ public class InMemoryErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
-    public synchronized String salt(String candidate) {
-        if (salt == null) {
-            salt = candidate;
-        }
-        return salt;
+    public synchronized String putMetaIfAbsent(String name, String value) {
+        return meta.computeIfAbsent(name, n -> value);
+    }
+
+    /** Simulates a restore or an operator replacing a stored meta value. */
+    public synchronized void replaceMeta(String name, String value) {
+        meta.put(name, value);
     }
 
     @Override

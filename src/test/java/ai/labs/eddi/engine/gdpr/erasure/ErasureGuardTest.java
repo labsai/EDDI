@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -321,6 +322,105 @@ class ErasureGuardTest {
             assertTrue(old.getMessage().contains("older release"), old.getMessage());
             assertEquals(0, writer.erasedConversations);
         }
+    }
+
+    @Nested
+    @DisplayName("the tombstone key")
+    class TombstoneKey {
+
+        private ErasureGuard guardWith(InMemoryErasureTombstoneStore shared, byte[] vaultSubkey) {
+            ErasureGuard other = new ErasureGuard(shared, List.of(writer), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                    Duration.ofSeconds(30), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+            other.vaultKey = () -> vaultSubkey;
+            return other;
+        }
+
+        @Test
+        @DisplayName("with a vault the key comes from it: no salt is stored, and every node with the same vault agrees")
+        void fromTheVault() {
+            byte[] subkey = new byte[32];
+            subkey[0] = 7;
+            ErasureGuard a = guardWith(store, subkey);
+            ErasureGuard b = guardWith(store, subkey);
+            assertEquals(a.userKey("h"), b.userKey("h"));
+            assertEquals(null, store.putMetaIfAbsent(ErasureGuard.SALT_META, null), "no salt was written");
+            assertTrue(store.putMetaIfAbsent(ErasureGuard.KEY_CHECK_META, "x").startsWith("vault:"));
+        }
+
+        @Test
+        @DisplayName("without a vault every node adopts the stored salt")
+        void fromTheSalt() {
+            ErasureGuard a = guardWith(store, null);
+            ErasureGuard b = guardWith(store, null);
+            assertEquals(a.userKey("h"), b.userKey("h"));
+            assertTrue(store.putMetaIfAbsent(ErasureGuard.KEY_CHECK_META, "x").startsWith("salt:"));
+        }
+
+        @Test
+        @DisplayName("a changed key (vault added later, salt lost) fails closed instead of silently not matching, and recovers once restored")
+        void changedKeyFailsClosed() {
+            ErasureGuard original = guardWith(store, null);
+            original.tombstoneUser(USER, List.of());
+            String salt = store.putMetaIfAbsent(ErasureGuard.SALT_META, "unused");
+
+            // A vault configured after tombstones were written under the salt.
+            ErasureGuard switched = guardWith(store, new byte[32]);
+            assertThrows(IllegalStateException.class, () -> switched.userKey("h"));
+            assertFalse(switched.beforeWrite(USER, "other", NOW.plus(Duration.ofDays(1))), "a guarded write is skipped");
+            assertThrows(IllegalStateException.class, () -> switched.tombstoneUser("someone", List.of()), "an erasure step fails");
+            assertThrows(IllegalStateException.class, () -> switched.verifyUserErased("fake", USER, () -> 0));
+
+            // The salt row lost (a partial restore): a new salt would not match either.
+            store.replaceMeta(ErasureGuard.SALT_META, Base64.getEncoder().encodeToString(new byte[32]));
+            ErasureGuard lostSalt = guardWith(store, null);
+            assertThrows(IllegalStateException.class, () -> lostSalt.userKey("h"));
+
+            // Restored: the same guard recovers (a mismatch is never cached).
+            store.replaceMeta(ErasureGuard.SALT_META, salt);
+            assertFalse(lostSalt.beforeWrite(USER, "other", NOW.minusSeconds(1)), "the old tombstone matches again");
+        }
+    }
+
+    @Test
+    @DisplayName("clock skew: content captured up to erasedAt + skew is refused, a millisecond later it is new activity")
+    void skewBoundary() {
+        guard.tombstoneUser(USER, List.of());
+        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5))));
+        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(5)).plusMillis(1)));
+    }
+
+    @Test
+    @DisplayName("clock skew: a slow erasing-node clock cannot move the cut-off back — the database's write time counts")
+    void databaseClockCounts() {
+        // The erasing node's clock is 20 minutes behind the database's.
+        store.databaseNow = NOW.plus(Duration.ofMinutes(20));
+        guard.tombstoneUser(USER, List.of());
+        assertFalse(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(19))), "captured before the tombstone was written");
+        assertTrue(guard.beforeWrite(USER, "c", NOW.plus(Duration.ofMinutes(26))));
+    }
+
+    @Test
+    @DisplayName("the drain barrier is bounded by one timeout in total, however many writers there are")
+    void drainSharesOneDeadline() {
+        List<Duration> asked = new ArrayList<>();
+        AsyncErasureWriter slow = new FakeWriter() {
+            @Override
+            public boolean awaitDrained(Duration timeout) {
+                asked.add(timeout);
+                try {
+                    Thread.sleep(Math.min(timeout.toMillis(), 300));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return false;
+            }
+        };
+        ErasureGuard two = new ErasureGuard(store, List.of(slow, slow), new ErasureMetrics(new SimpleMeterRegistry()), Duration.ofDays(400),
+                Duration.ofMillis(400), Duration.ofMinutes(5), Clock.fixed(NOW, ZoneOffset.UTC));
+        long started = System.nanoTime();
+        assertEquals(2, two.drainLocal().size());
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 700, "one deadline, not two");
+        assertTrue(asked.get(1).compareTo(asked.get(0)) < 0, "the second writer gets what is left: " + asked);
     }
 
     @Test

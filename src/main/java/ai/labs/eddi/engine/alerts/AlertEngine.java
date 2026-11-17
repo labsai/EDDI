@@ -61,6 +61,14 @@ public class AlertEngine {
     private final ErasureGuard erasureGuard;
     private final Clock clock;
 
+    /**
+     * Where first deliveries run, off the alert worker (see
+     * {@link AlertDeliveryStage}). Field-injected; null in tests built with
+     * {@code new}, which then deliver inline.
+     */
+    @Inject
+    AlertDeliveryStage deliveryStage;
+
     @Inject
     public AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
             AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, ErasureGuard erasureGuard) {
@@ -89,8 +97,33 @@ public class AlertEngine {
             return;
         }
         for (AlertRule rule : ruleCache.rulesFor(rating.agentId())) {
-            AlertMatchers.matchRating(rule, rating).ifPresent(match -> fire(rule, match, rating.agentId(), rating.agentVersion(),
-                    rating.conversationId(), null, stored -> afterRatingInsert(rating, stored)));
+            AlertMatchers.matchRating(rule, rating).ifPresent(match -> {
+                // An excerpt is stored with the rater's keyed subject, so the rater's
+                // erasure finds and verifies it directly. Without a key there is no
+                // excerpt: it could not be found again.
+                String subject = match.commentExcerpt() == null || erasureGuard == null ? null : raterSubject(rating);
+                AlertMatch stored = erasureGuard != null && subject == null && match.commentExcerpt() != null
+                        ? match.withoutCommentExcerpt()
+                        : match;
+                fire(rule, stored, rating.agentId(), rating.agentVersion(), rating.conversationId(), subject,
+                        event -> afterRatingInsert(rating, event));
+            });
+        }
+    }
+
+    /**
+     * The rater's keyed subject ({@link ErasureGuard#subjectKey}), or null when it
+     * cannot be computed (no rater, or the tombstone key fails closed).
+     */
+    private String raterSubject(ConversationRating rating) {
+        if (rating.userId() == null) {
+            return null;
+        }
+        try {
+            return erasureGuard.subjectKey(rating.userId());
+        } catch (RuntimeException e) {
+            LOGGER.warnf("No erasure key for a rating alert; storing it without the comment excerpt: %s", e.getMessage());
+            return null;
         }
     }
 
@@ -254,6 +287,18 @@ public class AlertEngine {
                     : AlertEvent.State.DIGEST_PENDING;
             return eventStore.updateDelivery(stored.withDelivery(deliveries, held, null), stored.version());
         }
+        if (deliveryStage != null) {
+            // The send leaves the alert worker, whose queue is the GDPR drain barrier: an
+            // erasure waits for this write, not for Slack or a webhook. The guard check
+            // runs again right before the send, in case an erasure started meanwhile.
+            AlertEvent written = stored;
+            deliveryStage.submit(() -> deliver(afterInsert.apply(written), rule));
+            return Optional.of(stored);
+        }
+        return deliver(stored, rule);
+    }
+
+    private Optional<AlertEvent> deliver(AlertEvent stored, AlertRule rule) {
         Optional<AlertEvent> delivered = deliveryService.deliver(stored, rule);
         if (delivered.isEmpty()) {
             LOGGER.debugf("Alert %s was updated by another writer during its first delivery", sanitize(stored.id()));

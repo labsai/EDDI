@@ -189,6 +189,11 @@ public class RestConversationStore implements IRestConversationStore {
      * Field-injected like the vault above, so constructing the resource directly
      * (tests) still works — {@link #purgeService()} then builds one over the same
      * collaborators.
+     * <p>
+     * That hand-built service has no erasure guard (no tombstone, no drain barrier
+     * for alerts). It cannot be reached in the running application: the field is a
+     * plain {@code @Inject}, which CDI always satisfies or fails startup, so only a
+     * test that constructs this resource with {@code new} ever sees null.
      */
     @Inject
     ConversationPurgeService conversationPurgeService;

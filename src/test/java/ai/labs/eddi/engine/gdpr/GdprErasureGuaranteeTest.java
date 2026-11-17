@@ -49,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
@@ -230,7 +231,10 @@ class GdprErasureGuaranteeTest {
         service.clusterRpc = rpc;
 
         assertTrue(service.deleteUserData(USER_ID).complete());
-        verify(rpc).callAll(eq(IClusterRpc.GDPR_STOP), anyMap(), eq(Duration.ofSeconds(40)), eq(1));
+        // The request says the erasure wrote tombstones, so a peer can flag one that
+        // did not.
+        verify(rpc).callAll(eq(IClusterRpc.GDPR_STOP), argThat(request -> Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED))),
+                eq(Duration.ofSeconds(40)), eq(1));
     }
 
     @Test

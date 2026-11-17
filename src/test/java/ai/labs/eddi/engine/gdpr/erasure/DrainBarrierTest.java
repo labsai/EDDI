@@ -9,7 +9,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -108,6 +110,50 @@ class DrainBarrierTest {
             assertEquals(0, barrier.outstanding());
         } finally {
             full.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("stress: under concurrent submitters and a pool, every task submitted before a barrier has run when it passes")
+    void stress() throws Exception {
+        DrainBarrier barrier = new DrainBarrier();
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        ExecutorService submitters = Executors.newFixedThreadPool(4);
+        int perSubmitter = 400;
+        AtomicBoolean[] done = new AtomicBoolean[4 * perSubmitter];
+        ConcurrentLinkedQueue<Integer> submitted = new ConcurrentLinkedQueue<>();
+        try {
+            for (int s = 0; s < 4; s++) {
+                int base = s * perSubmitter;
+                submitters.submit(() -> {
+                    for (int i = 0; i < perSubmitter; i++) {
+                        int id = base + i;
+                        done[id] = new AtomicBoolean();
+                        barrier.execute(pool, () -> {
+                            if (id % 7 == 0) {
+                                Thread.onSpinWait();
+                            }
+                            done[id].set(true);
+                        });
+                        submitted.add(id); // execute has returned: the task is tracked
+                    }
+                });
+            }
+            for (int round = 0; round < 30; round++) {
+                List<Integer> before = List.copyOf(submitted);
+                assertTrue(barrier.awaitDrained(Duration.ofSeconds(10)));
+                for (int id : before) {
+                    assertTrue(done[id].get(), "task " + id + " was submitted before the barrier but had not run");
+                }
+            }
+            submitters.shutdown();
+            assertTrue(submitters.awaitTermination(10, TimeUnit.SECONDS));
+            assertTrue(barrier.awaitDrained(Duration.ofSeconds(10)));
+            assertEquals(4 * perSubmitter, submitted.size());
+            assertEquals(0, barrier.outstanding());
+        } finally {
+            pool.shutdownNow();
+            submitters.shutdownNow();
         }
     }
 

@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.alerts.model.AlertSource;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
@@ -79,11 +81,19 @@ public class AlertEventStore implements IAlertEventStore {
 
     private final MongoCollection<Document> events;
     private final MongoCollection<Document> windows;
+    /**
+     * The events read from the primary with majority read concern — for the erasure
+     * guarantee's verification counts and read-backs. The client reads
+     * {@code nearest()}, and a lagging secondary would report 0 rows left while a
+     * row is still there.
+     */
+    private final MongoCollection<Document> verified;
 
     @Inject
     public AlertEventStore(MongoDatabase database) {
         this.events = database.getCollection(COLLECTION_EVENTS);
         this.windows = database.getCollection(COLLECTION_WINDOWS);
+        this.verified = events.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY);
         events.createIndex(Indexes.ascending("dedupeKey"),
                 new IndexOptions().name("idx_alertevent_dedupe").unique(true).partialFilterExpression(exists("dedupeKey", true)));
         events.createIndex(Indexes.compoundIndex(Indexes.ascending("agentId"), Indexes.descending("firedAt")),
@@ -258,7 +268,7 @@ public class AlertEventStore implements IAlertEventStore {
         if (ratingIds.isEmpty()) {
             return 0;
         }
-        return events.countDocuments(and(in("match.ratingId", ratingIds), ne("match.commentExcerpt", null)));
+        return verified.countDocuments(and(in("match.ratingId", ratingIds), ne("match.commentExcerpt", null)));
     }
 
     /** No send claim, or an expired one. */
@@ -298,13 +308,13 @@ public class AlertEventStore implements IAlertEventStore {
 
     @Override
     public long redactOutputValues(String userId, Instant now) {
-        return events.updateMany(and(eq("subjectUserId", userId), unclaimed(now)), combine(unset("match.value"), unset("subjectUserId")))
-                .getModifiedCount();
+        return events.updateMany(and(eq("subjectUserId", userId), unclaimed(now)),
+                combine(unset("match.value"), unset("match.commentExcerpt"), unset("subjectUserId"))).getModifiedCount();
     }
 
     @Override
     public long countOutputValues(String userId) {
-        return events.countDocuments(eq("subjectUserId", userId));
+        return verified.countDocuments(eq("subjectUserId", userId));
     }
 
     @Override
@@ -335,7 +345,13 @@ public class AlertEventStore implements IAlertEventStore {
 
     @Override
     public long countConversationOutputValues(String conversationId) {
-        return events.countDocuments(and(eq("conversationId", conversationId), exists("match.value", true)));
+        return verified.countDocuments(and(eq("conversationId", conversationId), exists("match.value", true)));
+    }
+
+    @Override
+    public boolean holdsPersonalContent(String eventId) {
+        return verified.countDocuments(and(eq("_id", eventId),
+                or(exists("match.value", true), ne("match.commentExcerpt", null), exists("subjectUserId", true)))) > 0;
     }
 
     private static Bson acknowledgement(String by, Instant at) {

@@ -91,9 +91,15 @@ public class AlertGdprParticipant implements IGdprParticipant {
         // AlertErasureRedactor).
         long changed = redactor.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
         if (erasureGuard != null) {
+            // The comment excerpts of the user's rating alerts, found by the rater's
+            // keyed subject (the rating participant also reaches them through the
+            // ratings, but only while the ratings still exist).
+            String subject = erasureGuard.subjectKey(userId);
+            changed += redactor.redactOutputValues(subject);
             // Runs after the drain barrier of the erasure's stop step: nothing queued
             // before the tombstone can still write, so 0 here stays 0.
-            erasureGuard.verifyUserErased(AlertErasureWriter.NAME, userId, () -> eventStore.countOutputValues(userId));
+            erasureGuard.verifyUserErased(AlertErasureWriter.NAME, userId,
+                    () -> eventStore.countOutputValues(userId) + eventStore.countOutputValues(subject));
         }
         return changed;
     }

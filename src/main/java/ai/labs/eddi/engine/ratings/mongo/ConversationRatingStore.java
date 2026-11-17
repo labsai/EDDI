@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.ratings.model.RatingSummary;
 import ai.labs.eddi.engine.ratings.model.RatingSummary.TagCount;
 import ai.labs.eddi.engine.ratings.model.ReviewStatus;
 import com.mongodb.MongoException;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -267,7 +268,9 @@ public class ConversationRatingStore implements IConversationRatingStore {
         if (id == null || !ObjectId.isValid(id)) {
             return Optional.empty();
         }
-        Document doc = collection.find(eq(ID, new ObjectId(id))).first();
+        // From the primary: alert work checks with this read whether a rating was
+        // erased meanwhile, and a lagging secondary would still return it.
+        Document doc = collection.withReadPreference(ReadPreference.primary()).find(eq(ID, new ObjectId(id))).first();
         return doc == null ? Optional.empty() : Optional.of(toRating(doc));
     }
 

@@ -125,7 +125,12 @@ public class ConversationPurgeService {
             throw new PurgeRefusedException("Conversation " + sanitize(conversationId) + " is not a conversation of agent test run "
                     + sanitize(runId) + "; refusing to delete it.");
         }
-        purge(conversationId);
+        // No erasure guarantee here: an agent-test conversation belongs to no person
+        // (its user is the synthetic agent-test:<runId>:… id), so there is nothing to
+        // erase — and a cluster-wide drain plus a 400-day tombstone per test
+        // conversation would make every test run as slow as the slowest node's alert
+        // queue. Its alert rows age out on eddi.alerts.event-retention.
+        purge(conversationId, false);
     }
 
     /**
@@ -139,6 +144,10 @@ public class ConversationPurgeService {
      *             same delete finishes the job
      */
     public void purge(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        purge(conversationId, true);
+    }
+
+    private void purge(String conversationId, boolean guarded) throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
         // If the conversation is a live pending approval, resolve the HITL state
         // BEFORE removing the document: endConversation disarms the armed
@@ -183,7 +192,7 @@ public class ConversationPurgeService {
         // barrier of the async writers on every node, and the delete and verification
         // of their rows. If any of it fails nothing else is deleted, so the owner's
         // retry of the same delete finishes it (the snapshot is what lets them).
-        if (erasureGuard != null) {
+        if (guarded && erasureGuard != null) {
             try {
                 erasureGuard.eraseConversation(conversationId);
             } catch (ErasureIncompleteException e) {

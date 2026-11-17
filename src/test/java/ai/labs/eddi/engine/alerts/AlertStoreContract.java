@@ -217,9 +217,27 @@ public interface AlertStoreContract {
         assertTrue(eventStore().releaseSend(rated.id(), "B"));
         assertEquals(1, eventStore().redactEventContent(rated.id(), now));
         assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertTrue(eventStore().holdsPersonalContent(other.id()));
         assertEquals(1, eventStore().redactEventContent(other.id(), now));
         assertNull(eventStore().read(other.id()).orElseThrow().match().value());
         assertEquals(0, eventStore().countOutputValues("owner-2"));
+        assertFalse(eventStore().holdsPersonalContent(other.id()), "the read-back sees the removal");
+        assertFalse(eventStore().holdsPersonalContent("6aba70011a25f8be7920eeee"), "no such event holds nothing");
+    }
+
+    /**
+     * A rating alert's excerpt carries the rater's keyed subject; the user's
+     * erasure blanks it through that subject and counts it.
+     */
+    @Test
+    default void ratingExcerptIsFoundAndBlankedByItsKeyedSubject() {
+        AlertEvent t = event(AGENT, "ks", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent rated = eventStore().insert(t.withMatch(t.match(), "k1:rater-key")).orElseThrow();
+        assertEquals(1, eventStore().countOutputValues("k1:rater-key"));
+        assertEquals(1, eventStore().redactOutputValues("k1:rater-key", Instant.now()));
+        assertNull(eventStore().read(rated.id()).orElseThrow().match().commentExcerpt());
+        assertEquals(0, eventStore().countOutputValues("k1:rater-key"));
+        assertFalse(eventStore().holdsPersonalContent(rated.id()));
     }
 
     @Test

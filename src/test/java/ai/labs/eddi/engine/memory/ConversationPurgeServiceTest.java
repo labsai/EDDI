@@ -276,6 +276,19 @@ class ConversationPurgeServiceTest {
     }
 
     @Test
+    @DisplayName("an agent-test conversation is purged without the cluster drain or a tombstone: it belongs to no person")
+    void agentTestPurgeSkipsTheGuard() throws Exception {
+        ErasureGuard guard = mock(ErasureGuard.class);
+        service.erasureGuard = guard;
+        storedAs(AgentTestConversations.userIdFor(RUN_ID, 0, 1));
+
+        service.purgeAgentTestConversation(CONVERSATION_ID, RUN_ID);
+
+        verify(guard, never()).eraseConversation(anyString());
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
     @DisplayName("the guarded erasure runs before the snapshot is deleted")
     void erasureGuardRunsFirst() throws Exception {
         ErasureGuard guard = mock(ErasureGuard.class);

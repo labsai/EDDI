@@ -61,13 +61,12 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
                 name VARCHAR(64) PRIMARY KEY,
                 value TEXT NOT NULL
             )
-            """, "CREATE INDEX IF NOT EXISTS idx_erasure_tombstones_expiry ON erasure_tombstones (expires_at)",
+            """, "ALTER TABLE erasure_tombstones ADD COLUMN IF NOT EXISTS written_at TIMESTAMPTZ",
+            "CREATE INDEX IF NOT EXISTS idx_erasure_tombstones_expiry ON erasure_tombstones (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_erasure_pending_user ON erasure_pending_removals (user_key) WHERE user_key IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_erasure_pending_conversation ON erasure_pending_removals (conversation_id) "
                     + "WHERE conversation_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_erasure_pending_created ON erasure_pending_removals (created_at)"};
-
-    private static final String SALT_NAME = "tombstone-salt";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -81,15 +80,37 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
         if (schemaInitialized) {
             return;
         }
+        try {
+            createSchema();
+        } catch (SQLException e) {
+            if (!concurrentCreate(e)) {
+                throw new RuntimeException("Failed to initialize the erasure tombstone tables", e);
+            }
+            // Two nodes ran CREATE ... IF NOT EXISTS at the same instant: PostgreSQL can
+            // still fail one with a unique violation on its catalog. The other node has
+            // created the object by now, so once more succeeds.
+            try {
+                createSchema();
+            } catch (SQLException again) {
+                throw new RuntimeException("Failed to initialize the erasure tombstone tables", again);
+            }
+        }
+        schemaInitialized = true;
+        LOGGER.info("PostgresErasureTombstoneStore schema initialized");
+    }
+
+    private void createSchema() throws SQLException {
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             for (String ddl : SCHEMA) {
                 stmt.execute(ddl);
             }
-            schemaInitialized = true;
-            LOGGER.info("PostgresErasureTombstoneStore schema initialized");
-        } catch (SQLException e) {
-            throw new RuntimeException("Failed to initialize the erasure tombstone tables", e);
         }
+    }
+
+    /** unique_violation, duplicate_table or duplicate_object: a racing CREATE. */
+    static boolean concurrentCreate(SQLException e) {
+        String state = e.getSQLState();
+        return "23505".equals(state) || "42P07".equals(state) || "42710".equals(state);
     }
 
     @Override
@@ -98,9 +119,10 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
             return;
         }
         ensureSchema();
-        String sql = "INSERT INTO erasure_tombstones (kind, tkey, erased_at, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, tkey) DO UPDATE "
-                + "SET erased_at = GREATEST(erasure_tombstones.erased_at, EXCLUDED.erased_at), "
-                + "expires_at = GREATEST(erasure_tombstones.expires_at, EXCLUDED.expires_at)";
+        // written_at is the database's clock (see erasedAt).
+        String sql = "INSERT INTO erasure_tombstones (kind, tkey, erased_at, expires_at, written_at) VALUES (?, ?, ?, ?, now()) "
+                + "ON CONFLICT (kind, tkey) DO UPDATE SET erased_at = GREATEST(erasure_tombstones.erased_at, EXCLUDED.erased_at), "
+                + "expires_at = GREATEST(erasure_tombstones.expires_at, EXCLUDED.expires_at), written_at = now()";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             for (String key : keys) {
                 ps.setString(1, kind.name());
@@ -120,7 +142,8 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn
-                        .prepareStatement("SELECT erased_at FROM erasure_tombstones WHERE kind = ? AND tkey = ? AND expires_at > ?")) {
+                        .prepareStatement("SELECT GREATEST(erased_at, COALESCE(written_at, erased_at)) FROM erasure_tombstones "
+                                + "WHERE kind = ? AND tkey = ? AND expires_at > ?")) {
             ps.setString(1, kind.name());
             ps.setString(2, key);
             ps.setObject(3, timestamp(now));
@@ -139,21 +162,21 @@ public class PostgresErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
-    public String salt(String candidate) {
+    public String putMetaIfAbsent(String name, String value) {
         ensureSchema();
         // Insert-if-absent, then read whichever value won.
-        update("INSERT INTO erasure_meta (name, value) VALUES (?, ?) ON CONFLICT (name) DO NOTHING", List.of(SALT_NAME, candidate));
+        update("INSERT INTO erasure_meta (name, value) VALUES (?, ?) ON CONFLICT (name) DO NOTHING", List.of(name, value));
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT value FROM erasure_meta WHERE name = ?")) {
-            ps.setString(1, SALT_NAME);
+            ps.setString(1, name);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
-                    throw new IllegalStateException("The erasure tombstone salt was not stored");
+                    throw new IllegalStateException("The erasure meta value '" + name + "' was not stored");
                 }
                 return rs.getString(1);
             }
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to read the erasure tombstone salt", e);
+            throw new RuntimeException("Failed to read the erasure meta value " + name, e);
         }
     }
 

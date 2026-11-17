@@ -25,6 +25,7 @@ public class ErasureMetrics {
     static final String PENDING_REMOVALS = "eddi.gdpr.guard.pending.removals";
     static final String DRAIN = "eddi.gdpr.guard.drain";
     static final String DRAIN_TIMEOUTS = "eddi.gdpr.guard.drain.timeouts";
+    static final String KEY_MISMATCH = "eddi.gdpr.guard.key.mismatch";
 
     static final String REASON_TOMBSTONE = "tombstone";
     static final String REASON_CHECK_FAILED = "check_failed";
@@ -44,6 +45,17 @@ public class ErasureMetrics {
             pending0(outcome);
         }
         drainTimer();
+        keyMismatch0();
+    }
+
+    void keyMismatch() {
+        keyMismatch0().increment();
+    }
+
+    private Counter keyMismatch0() {
+        return Counter.builder(KEY_MISMATCH)
+                .description("Times the erasure tombstone key did not match the stored check value; every guarded operation then fails closed")
+                .register(registry);
     }
 
     void writeSkipped(String reason) {

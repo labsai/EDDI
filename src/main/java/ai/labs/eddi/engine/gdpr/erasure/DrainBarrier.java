@@ -16,13 +16,25 @@ import java.util.concurrent.atomic.AtomicLong;
  * its work on an {@link Executor}: submit through {@link #execute} and answer
  * {@link AsyncErasureWriter#awaitDrained} with {@link #awaitDrained}.
  * <p>
- * Every task gets a sequence number when it is submitted; a barrier waits until
- * no task numbered at or below the last one submitted before it is still
- * outstanding. That holds for any executor — one thread or many, any order —
- * and a task the executor rejects is forgotten at once. A task that never
- * finishes (an executor shut down with {@code shutdownNow}) keeps every later
- * barrier waiting until its timeout, which the erasure reports as a failure
- * rather than a guarantee it could not give.
+ * Every task gets a sequence number when it is submitted and stays in the
+ * outstanding set until it has run. A barrier reads the highest number handed
+ * out so far and waits until no outstanding task carries that number or a lower
+ * one. That holds for any executor — one thread or many, any order — and a task
+ * the executor rejects is removed at once. A task that never finishes (an
+ * executor shut down with {@code shutdownNow}) keeps every later barrier
+ * waiting until its timeout, which the erasure reports as a failure rather than
+ * a guarantee it could not give.
+ *
+ * <h3>Why the gap between numbering and tracking is safe</h3> A task is
+ * numbered an instant before it is added to the outstanding set, so a barrier
+ * running in that instant can pass without waiting for it. It does not need to:
+ * the erasure commits its tombstones <em>before</em> it starts the barrier, and
+ * a guarded writer checks the tombstones ({@code ErasureGuard.beforeWrite})
+ * only when its task runs — after the task was added. So a task the barrier
+ * misses runs its check after the tombstones exist and refuses the write. What
+ * the barrier must catch is a task whose check already passed before the
+ * tombstones, and such a task is always in the outstanding set when the barrier
+ * looks.
  */
 public final class DrainBarrier {
 

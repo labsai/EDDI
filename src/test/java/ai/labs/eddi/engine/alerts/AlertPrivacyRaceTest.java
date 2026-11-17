@@ -295,9 +295,7 @@ class AlertPrivacyRaceTest {
                 return Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID));
             }).when(store).insert(any());
             // The redaction did not apply: the event still holds the value.
-            when(store.read(EVENT_ID)).thenAnswer(inv -> Optional.of(new AlertEvent(EVENT_ID, RULE_ID, "x", AlertSource.OUTPUT_MATCH,
-                    AlertEvent.Kind.ALERT, AGENT, 2, CONVERSATION, NOW, "s", AlertMatch.output("x", "call me at once"), List.of(),
-                    AlertEvent.State.PENDING, null, "k", 0, null, null, null, null, 0, null, null)));
+            when(store.holdsPersonalContent(EVENT_ID)).thenReturn(true);
             engine.evaluateOutput(capturedAt(CONVERSATION, NOW.minusSeconds(5)));
 
             assertEquals(1, tombstones.pendingCount());
@@ -334,6 +332,31 @@ class AlertPrivacyRaceTest {
             ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
             order.verify(delivery).deliver(delivered.capture(), any());
             assertNull(delivered.getValue().match().commentExcerpt());
+        }
+
+        @Test
+        @DisplayName("a rating alert's excerpt is stored with the rater's keyed subject, never the plain id")
+        void ratingExcerptCarriesKeyedSubject() {
+            ConversationRating low = rating(1, "It kept looping.", List.of());
+            when(cache.rulesFor(AGENT)).thenReturn(List.of(ratingRule(0.5, null, null, DeliveryTarget.slack("C0123ABC"))));
+            when(ratings.readById(low.id())).thenReturn(Optional.of(low));
+            engine.evaluateRating(low);
+
+            AlertEvent stored = inserted();
+            assertEquals("It kept looping.", stored.match().commentExcerpt());
+            assertEquals(guard.subjectKey(low.userId()), stored.subjectUserId());
+            assertFalse(stored.subjectUserId().contains(low.userId()));
+        }
+
+        @Test
+        @DisplayName("the tombstone key changed (fails closed): a queued rating alert with an excerpt is not written at all")
+        void ratingExcerptWithoutKeyIsDropped() {
+            tombstones.replaceMeta("tombstone-key-check", "vault:not-this-key");
+            ConversationRating low = rating(1, "It kept looping.", List.of());
+            when(cache.rulesFor(AGENT)).thenReturn(List.of(ratingRule(0.5, null, null, DeliveryTarget.slack("C0123ABC"))));
+            when(ratings.readById(low.id())).thenReturn(Optional.of(low));
+            engine.evaluateRating(low);
+            verify(store, never()).insert(any());
         }
 
         @Test

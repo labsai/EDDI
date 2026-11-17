@@ -65,7 +65,9 @@ public interface IErasureTombstoneStore {
 
     /**
      * When the tombstone was (last) written, or empty when there is none or it has
-     * expired at {@code now}.
+     * expired at {@code now}: the later of the {@code erasedAt} the erasing node
+     * gave and the database's own clock when it stored the tombstone, so one node
+     * with a slow clock cannot move the cut-off back.
      */
     Optional<Instant> erasedAt(Kind kind, String key, Instant now);
 
@@ -73,11 +75,11 @@ public interface IErasureTombstoneStore {
     long deleteExpiredTombstones(Instant now);
 
     /**
-     * The deployment's tombstone salt: the stored one, or {@code candidate} if none
-     * is stored yet — an insert-if-absent, so every node adopts the first one
-     * written. Never changes once written.
+     * A deployment-wide value of the guarantee — the tombstone salt, the key check
+     * value: the stored one, or {@code value} if none is stored yet. An
+     * insert-if-absent, so every node adopts the first one written.
      */
-    String salt(String candidate);
+    String putMetaIfAbsent(String name, String value);
 
     /** Records a pending removal; a second record of the same row is a no-op. */
     void addPendingRemoval(PendingRemoval removal);

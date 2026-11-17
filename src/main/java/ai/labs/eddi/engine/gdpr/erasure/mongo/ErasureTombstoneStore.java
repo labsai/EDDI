@@ -7,6 +7,9 @@ package ai.labs.eddi.engine.gdpr.erasure.mongo;
 import ai.labs.eddi.engine.gdpr.erasure.IErasureTombstoneStore;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
+import com.mongodb.ReadConcern;
+import com.mongodb.ReadPreference;
+import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -36,6 +39,7 @@ import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
+import static com.mongodb.client.model.Updates.currentDate;
 import static com.mongodb.client.model.Updates.max;
 import static com.mongodb.client.model.Updates.setOnInsert;
 
@@ -44,6 +48,13 @@ import static com.mongodb.client.model.Updates.setOnInsert;
  * {@code erasuretombstones} (a TTL index on {@code expiresAt} removes expired
  * ones; {@link #erasedAt} ignores them before that), pending removals in
  * {@code erasurependingremovals}, the salt in {@code erasuremeta}.
+ * <p>
+ * <b>Every collection is read from the primary with majority read concern and
+ * written with majority write concern</b>, whatever the client defaults are.
+ * The client is built with {@code ReadPreference.nearest()}
+ * ({@code PersistenceModule}): a lagging secondary would answer "no tombstone"
+ * for one the erasure has already committed, and the guarantee would rest on
+ * replication lag.
  */
 @ApplicationScoped
 @DefaultBean
@@ -52,7 +63,6 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     static final String COLLECTION_TOMBSTONES = "erasuretombstones";
     static final String COLLECTION_PENDING = "erasurependingremovals";
     static final String COLLECTION_META = "erasuremeta";
-    private static final String SALT_ID = "tombstone-salt";
 
     private final MongoCollection<Document> tombstones;
     private final MongoCollection<Document> pending;
@@ -60,15 +70,24 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
 
     @Inject
     public ErasureTombstoneStore(MongoDatabase database) {
-        this.tombstones = database.getCollection(COLLECTION_TOMBSTONES);
-        this.pending = database.getCollection(COLLECTION_PENDING);
-        this.meta = database.getCollection(COLLECTION_META);
+        this.tombstones = linearizable(database.getCollection(COLLECTION_TOMBSTONES));
+        this.pending = linearizable(database.getCollection(COLLECTION_PENDING));
+        this.meta = linearizable(database.getCollection(COLLECTION_META));
         tombstones.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_erasuretombstone_ttl").expireAfter(0L, TimeUnit.SECONDS));
         pending.createIndex(Indexes.ascending("userKey"),
                 new IndexOptions().name("idx_erasurepending_user").partialFilterExpression(exists("userKey", true)));
         pending.createIndex(Indexes.ascending("conversationId"),
                 new IndexOptions().name("idx_erasurepending_conversation").partialFilterExpression(exists("conversationId", true)));
         pending.createIndex(Indexes.ascending("createdAt"), new IndexOptions().name("idx_erasurepending_created"));
+    }
+
+    /**
+     * Primary reads, majority read and write concern: a read sees every write the
+     * erasure got acknowledged.
+     */
+    static MongoCollection<Document> linearizable(MongoCollection<Document> collection) {
+        return collection.withReadPreference(ReadPreference.primary()).withReadConcern(ReadConcern.MAJORITY)
+                .withWriteConcern(WriteConcern.MAJORITY);
     }
 
     private static String id(Kind kind, String key) {
@@ -82,7 +101,9 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
         }
         List<WriteModel<Document>> writes = new ArrayList<>(keys.size());
         for (String key : keys) {
-            Bson update = combine(setOnInsert("kind", kind.name()), max("erasedAt", Date.from(erasedAt)), max("expiresAt", Date.from(expiresAt)));
+            // writtenAt is the database's clock (see erasedAt).
+            Bson update = combine(setOnInsert("kind", kind.name()), max("erasedAt", Date.from(erasedAt)), max("expiresAt", Date.from(expiresAt)),
+                    currentDate("writtenAt"));
             writes.add(new UpdateOneModel<>(eq("_id", id(kind, key)), update, new UpdateOptions().upsert(true)));
         }
         tombstones.bulkWrite(writes);
@@ -91,7 +112,13 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     @Override
     public Optional<Instant> erasedAt(Kind kind, String key, Instant now) {
         Document found = tombstones.find(and(eq("_id", id(kind, key)), gt("expiresAt", Date.from(now)))).first();
-        return found == null ? Optional.empty() : Optional.ofNullable(found.getDate("erasedAt")).map(Date::toInstant);
+        if (found == null) {
+            return Optional.empty();
+        }
+        Date erased = found.getDate("erasedAt");
+        Date written = found.getDate("writtenAt");
+        Date later = written != null && (erased == null || written.after(erased)) ? written : erased;
+        return Optional.ofNullable(later).map(Date::toInstant);
     }
 
     @Override
@@ -100,20 +127,25 @@ public class ErasureTombstoneStore implements IErasureTombstoneStore {
     }
 
     @Override
-    public String salt(String candidate) {
-        Document existing = meta.find(eq("_id", SALT_ID)).first();
+    public String putMetaIfAbsent(String name, String value) {
+        Document existing = meta.find(eq("_id", name)).first();
         if (existing != null) {
             return existing.getString("value");
         }
         try {
-            meta.insertOne(new Document("_id", SALT_ID).append("value", candidate));
-            return candidate;
+            meta.insertOne(new Document("_id", name).append("value", value));
+            return value;
         } catch (MongoWriteException e) {
             if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
                 throw e;
             }
-            // Another node wrote it first: adopt that one.
-            return meta.find(eq("_id", SALT_ID)).first().getString("value");
+            // Another node wrote it first: adopt that one. A primary, majority read sees
+            // the winner's acknowledged insert, so this is never null in practice.
+            Document winner = meta.find(eq("_id", name)).first();
+            if (winner == null) {
+                throw new IllegalStateException("The erasure meta value '" + name + "' was neither inserted nor found");
+            }
+            return winner.getString("value");
         }
     }
 

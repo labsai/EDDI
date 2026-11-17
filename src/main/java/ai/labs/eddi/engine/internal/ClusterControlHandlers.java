@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.ClusterStartable;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.gdpr.erasure.ErasureGuard;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -106,6 +107,14 @@ public class ClusterControlHandlers implements ClusterStartable {
     }
 
     private Map<String, Object> gdprStop(Map<String, Object> request) {
+        if (!Boolean.TRUE.equals(request.get(GdprComplianceService.TOMBSTONED))) {
+            // An erasure coordinated by a node of an older release: it wrote no tombstones,
+            // so this node's async writers cannot see it and their late writes are not
+            // guarded. Nothing here can make up for that; say so where operators look.
+            LOGGER.warn("GDPR: an erasure was coordinated by a node without the erasure guarantee (an older release). Its "
+                    + "asynchronously written rows (alerts) are not guarded — upgrade every node before relying on the guarantee, "
+                    + "then re-run that erasure.");
+        }
         String userIdHash;
         if (request.get("userIdSealed") != null) {
             // Sealed with the cluster signing key (B5); a node without the same key cannot
