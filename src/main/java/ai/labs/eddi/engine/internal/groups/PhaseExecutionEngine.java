@@ -880,7 +880,7 @@ public class PhaseExecutionEngine {
                     config.getRetroConfig());
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
-            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
+            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(), recordsOf(gc, config));
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -1000,7 +1000,8 @@ public class PhaseExecutionEngine {
                                 GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                                 config.getRetroConfig());
                         // I11: see the sequential loop — appended, not templated.
-                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
+                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(),
+                                recordsOf(gc, config));
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the
