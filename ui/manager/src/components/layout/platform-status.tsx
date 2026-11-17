@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { usePlatformStatus } from "@/hooks/use-platform-status";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /**
  * Always-visible platform status pill for the top bar.

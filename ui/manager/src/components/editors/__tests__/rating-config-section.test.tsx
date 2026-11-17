@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
-import { renderWithProviders } from "@/test/test-utils";
-import type { Agent } from "@/lib/api/agents";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 import { ratingConfigErrors } from "@/lib/rating-config";
 import { RatingConfigSection } from "../rating-config-section";
 

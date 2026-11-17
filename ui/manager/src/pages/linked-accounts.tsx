@@ -2,9 +2,9 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link2 } from "lucide-react";
 import { LinkedAccountsPanel } from "@/components/connections/linked-accounts-panel";
-import { useConnectionDescriptors } from "@/hooks/use-connections";
+import { useConnectionDescriptors } from "@eddi/app-kit/hooks/use-connections";
 import { useConnectionLinkResult } from "@/hooks/use-connection-link-result";
-import { useHasRole } from "@/hooks/use-auth";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 
 /**
  * "Your linked accounts" — the per-user page, reachable from the user menu.

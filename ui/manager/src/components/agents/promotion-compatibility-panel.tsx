@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Pin } from "lucide-react";
-import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
+import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
 import type { PromotionImpact } from "@/lib/api/backup";
 
 export interface PromotionCompatibilityPanelProps {

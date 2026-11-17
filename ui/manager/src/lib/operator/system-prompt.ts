@@ -23,8 +23,8 @@ import {
   grantsOversightReads,
   type OperatorScope,
 } from "./tool-scopes";
-import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
-import { DEFAULT_BRAND, getBrand } from "@/lib/brand";
+import { MODEL_SUGGESTIONS } from "@eddi/app-kit/lib/model-suggestions";
+import { DEFAULT_BRAND, getBrand } from "@eddi/app-kit/lib/brand";
 
 /**
  * System prompt for the Platform Operator.
@@ -1472,6 +1472,19 @@ your tool schemas do not cover it, not as a routine first step:
   date, under the conversation \`title\`; the owner renames, pins and deletes
   them there. Team sessions carry their question as title and cannot be
   renamed or pinned.
+- Workforce (/workforce) is its own app beside the manager (/manage), built
+  into the same jar: one sign-in (it uses the manager's Keycloak client), and
+  moving between the two is a page load. You live only in the manager;
+  Workforce shows an administrator a link to you, never your chat.
+  Users can install Workforce as an app (Chrome or Edge: "Install app";
+  iPhone Safari: Share, Add to Home Screen). The server renders its manifest at
+  /workforce/manifest.webmanifest from the branding: product name, primary
+  colour, and the brand's icon (a square PNG of at least 512 px or an SVG
+  makes a sharp home-screen icon). There is no service worker and no offline
+  mode, on purpose: nothing signed-in is cached on the device.
+  In a cluster, Stop in a chat may not reach a turn running on another pod
+  (/cancel stops a running turn only on its own pod); the chat re-reads the
+  conversation and tells the user when the turn ran on.
 - Emailing people when an agent waits for approval takes two settings. (1) The
   operator sets up the deployment's system mailer once, in application.properties
   or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
@@ -1538,6 +1551,115 @@ your tool schemas do not cover it, not as a routine first step:
   belong to the conversation's owner (PATCH on the conversation, not one of your
   tools), and a title the owner set is never replaced. Metric:
   eddi_conversation_titles_total{outcome}.
+- Users search their own conversations by title
+  (GET /conversationstore/conversations/search?q=, not one of your tools):
+  literal, case-insensitive, 1-100 characters, paged with index and limit. It
+  returns only the caller's own conversations, an administrator's too, so it
+  cannot answer "find user X's chat" (the listing's filter, as admin, can). It
+  searches titles only, never conversation outputs; titles never come from a
+  secret turn, and erasing a user removes everything it could find.
+- The conversation listing (GET /conversationstore/conversations) takes two
+  filters the Workforce sidebar uses: mine=true keeps only the caller's own
+  conversations, an administrator's too (an admin otherwise sees everyone's),
+  and excludeGroupMembers=true leaves out the conversations a team session
+  holds for its members. Both are applied in the database query. Group
+  sessions (GET /groups/{id}/conversations) take mine=true as well.
+- A streamed turn (POST /agents/{conversationId}/stream) sends tool_call before
+  each tool runs and tool_result after it: {tool, callId, status, durationMs,
+  ok, summary}, status ok, error, not_executed (refused or skipped: budget,
+  quota, turn deadline) or rejected (a human declined it), ok true only for
+  status ok, summary the start of the result redacted like task_complete's
+  toolTrace, at most 200 characters. A call cut off by a cancel gets no
+  tool_result. A client that does not know the event ignores it. Workforce and
+  the Manager's chat show these as collapsed tool cards under the turn's
+  question, and beside Edit and Regenerate of a turn that ran tools they name
+  the tools, since neither undoes what a tool did. The cards are live only: a
+  reload, a conversation opened later, or a turn answered without streaming
+  shows none. The embeddable chat widget shows no tool activity.
+- The same chats explain, under a reply, how it was reached, in plain words,
+  from three stream events only: cascade_escalation (reason low_confidence,
+  timeout, error/retryable_error or invalid_output: "Another model was tried
+  because the first answer wasn't confident enough" — said when the cascade
+  moves on, so it never claims the next model answered), llm_retry (the
+  same model re-asked: empty, truncated, content_filter, invalid_json or
+  schema_mismatch, context_too_long) and guardrail_triggered ("A safety check
+  removed part of the answer (pii-redaction)"). Live only, like the tool
+  cards. A cascade stopped early by maxCostPerRun or maxTotalDurationMs sends
+  no event, so users are told nothing about it; no model name or cost is shown.
+- In a Workforce chat, typing @ hands the question to another agent or team:
+  the list is the caller's catalog (listed, and USE), and the question starts a
+  new chat or a new team discussion as its first message. There is no
+  server-side record of that hand-off: the two marker lines linking the
+  conversations live in the user's browser storage and are cleared at sign-out.
+  It is not cross-team handoff (an agent filing a task into a team backlog,
+  docs/team-handoff.md). Workforce Home's picker lists the catalog's teams too.
+- On a Workforce team board an end user sees the decision as a plain sentence
+  first ("The team voted, and "Ship it" won."), a HUMAN member's pending turn
+  ("It's your turn", or whose turn it is and that only that member or an admin
+  may answer), and the session's shared artifacts in a read-only side panel
+  with every version the artifact's history keeps (the current one plus up to
+  10). Group preset templates need eddi-editor or eddi-admin; an eddi-user
+  starts sessions only from listed teams.
+- Embedding a chat button on another site: one tag,
+  <script src="https://<this-server>/chat/embed.js" data-agent-id="<agentId>" defer>,
+  draws a floating button that opens the agent's /chat widget in a panel.
+  Optional data- attributes: environment (default production), position
+  (bottom-right or bottom-left), color (a plain colour), label, open ("true":
+  opens on load, not on a phone), lang, theme, and token-provider (the name of a
+  host-page function returning an access token, for authentication on). Two
+  things must be set or it fails: the operator lists the host page's origin in
+  eddi.chat.frame-ancestors (otherwise the browser refuses the panel), and a
+  host page with its own CSP allows this server's origin in script-src and
+  frame-src. The agent must be deployed to that environment. You cannot change
+  either setting; docs page "chat-ui-embedding", section "The launcher".
+- Users see and delete what agents remember about them in Workforce, "My
+  memory" (/workforce/memory): each entry's agent, its visibility (private to
+  one agent, a team's agents, or all their agents), search, forget one, and
+  forget everything (after a confirm). A user may delete any of their own
+  entries, shared ones included — deleting a shared entry removes it for every
+  agent. The GDPR bookkeeping rows (keys starting _gdpr_) are not listed and
+  cannot be deleted there; a full erasure is the admin's GDPR endpoint.
+- An agent asks for one typed value with an inputField output item: only
+  subType "password" (or none) is masked and sent as a secret turn; "text"
+  and "email" are ordinary turns of that type, and the user can choose "Type a
+  message instead". Quick replies hide while the user's own secret mode is on.
+- GET /me/events (not one of your tools; it is a stream) is each signed-in
+  user's server-sent event stream: approval.pending and approval.decided (to
+  the conversation's owner and every eddi-admin and eddi-approver; for a 1:1
+  pause the owner only while they may still USE the agent),
+  team.started, team.waiting_for_human and team.ended (to a discussion's owner
+  and its HUMAN members), job.finished, job.run_completed and job.failed (to
+  the conversation's owner), notification.created (to the recipient, an update
+  notice to every admin). Payloads carry ids and kinds, never content, and
+  scoping is decided on the server per connection from that request's own
+  identity. Events are hints: no replay, no Last-Event-ID; a client refetches
+  on reconnect. approval.decided comes with the hitl.approval audit entry, so
+  with eddi.audit.enabled=false it is never sent. Limits, all per node:
+  eddi.user-events.max-connections-per-user (8, one stream per tab, 429 past
+  it), eddi.user-events.max-connections (10000), buffer-size (64 unacknowledged
+  frames, then the stream is closed as a slow consumer and the client
+  reconnects), dispatch-queue-size (10000), heartbeat-interval (20s),
+  max-connection-age (1h; also closed at token expiry); eddi.user-events.enabled
+  =false answers 404. With authorization off every tab shares one bucket and
+  gets every event; the per-user cap does not apply to it, only the node cap. In a cluster (eddi.messaging.type=nats) events cross pods on
+  the cluster event bus with principals hashed; with in-memory messaging only
+  the local node delivers. Metrics: eddi_user_events_connections,
+  eddi_user_events_delivered_total{kind}, eddi_user_events_dropped_total{reason
+  slow_consumer|dispatch_queue_full}, eddi_user_events_rejected_total{reason
+  user_limit|node_limit}. The chat widget never opens it. The Manager and
+  Workforce open one per tab once signed in, close it on sign-out, and use it
+  to refresh the approvals inbox, the sidebar badge, a chat's pause notice,
+  team sessions and the notification bell at once. Workforce's topbar counts
+  what waits on a human (the person's own paused chats and team sessions, and
+  for an approver or admin the pauses they may decide, linking to the Manager's
+  approvals inbox), with each pause's deadline; it toasts a finished, stopped
+  or failed long job, a team that ended or waits for that person's turn, and a
+  decision on their own pause. A scheduled run is not toasted every time: only
+  the first failure of a streak and the run that recovers from it. Browser notifications are
+  off unless the person turns them on in that panel. When the stream is
+  unavailable (eddi.user-events.enabled=false, a proxy that buffers SSE)
+  Workforce falls back to polling pending approvals every 30 s and shows no
+  toasts — a user asking "why do I get no notices" usually has one of those.
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is stored as a \${vault:key-name}
   reference — you can read one, but never put one in a request you send.
@@ -2126,8 +2248,9 @@ if the one you want is missing; this deployment may ship a subset):
 - email channel (IMAP trigger mode, SMTP conversation mode, suppressions): "email-integration"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
-- embedding the chat widget in another site (iframe, frame-ancestors, token
-  hand-off with auth on, image CSP): "chat-ui-embedding"
+- embedding the chat widget in another site (the /chat/embed.js launcher,
+  iframe, frame-ancestors, token hand-off with auth on, image CSP):
+  "chat-ui-embedding"
 - white-labeling (the Branding page, eddi.branding.* properties, the login
   theme download): "white-labeling"
 - cost, prices and unpriced models: "model-pricing" · tenant budgets:

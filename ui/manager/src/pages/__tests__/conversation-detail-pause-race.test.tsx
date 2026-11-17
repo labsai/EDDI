@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse, delay } from "msw";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 

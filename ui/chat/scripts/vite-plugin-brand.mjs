@@ -16,7 +16,7 @@
  * shows the EDDI brand, even when a backend with a brand is running.
  *
  * Plain JS with a `.d.mts` (as the Manager keeps it): vite.config.ts and the test both
- * import it. Keep it in step with ui/manager/scripts/vite-plugin-brand.mjs.
+ * import it. Keep it in step with ui/scripts/vite-plugin-brand.mjs.
  */
 import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";

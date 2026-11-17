@@ -10,7 +10,7 @@ import {
   withPiiKinds,
   type PiiRegion,
 } from "./guardrails";
-import type { GuardrailConfig } from "./types";
+import type { GuardrailConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 const LEGEND = "mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
 const CHECKBOX = "h-3.5 w-3.5 rounded border-input accent-primary";

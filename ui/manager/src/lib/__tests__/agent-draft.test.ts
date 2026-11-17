@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyChangedFields, changedAgentFields, isAgentDraftDirty } from "@/lib/agent-draft";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 describe("agent draft", () => {
   const stored: Agent = {

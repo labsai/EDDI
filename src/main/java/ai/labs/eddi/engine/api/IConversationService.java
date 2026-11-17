@@ -294,6 +294,14 @@ public interface IConversationService {
         }
 
         /**
+         * As the status-only form, with the redacted summary — see
+         * ConversationEventSink#onToolResult(String, String, String, long, String).
+         */
+        default void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            onToolResult(toolName, callId, status, durationMs);
+        }
+
+        /**
          * A resume stream only: the human decision was committed (the conversation left
          * AWAITING_HUMAN) and the continued turn is about to run. Sent once, before any
          * other event of the resumed turn.

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { DiscussionTranscript } from "../discussion-transcript";
-import type { GroupConversation } from "@/lib/api/groups";
-import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
+import type { GroupConversation } from "@eddi/app-kit/lib/api/groups";
+import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 
 /**
  * A rejected recommendation is a recorded human decision, not a system error.

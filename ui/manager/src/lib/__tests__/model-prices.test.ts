@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { entryProblems, isStale, mergeReference, parseCatalogImport } from "../model-prices";
-import type { ModelPriceEntry } from "@/lib/api/model-prices";
+import type { ModelPriceEntry } from "@eddi/app-kit/lib/api/model-prices";
 
 const e = (provider: string, model: string, inputPricePer1M: number | null = 1, outputPricePer1M: number | null = 2): ModelPriceEntry => ({
   provider,

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { AddExtensionDialog } from "@/components/editors/add-extension-dialog";
-import type { ExtensionDescriptor } from "@/lib/api/extensions";
+import type { ExtensionDescriptor } from "@eddi/app-kit/lib/api/extensions";
 
 const mockExtensionTypes: ExtensionDescriptor[] = [
   { type: "eddi://ai.labs.llm", displayName: "LLM Configuration", configs: {}, extensions: {} },
@@ -14,15 +14,15 @@ vi.mock("@/hooks/use-extensions-store", () => ({
 
 const createResource = vi.fn();
 const updateDescriptor = vi.fn();
-vi.mock("@/lib/api/resources", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/api/resources")>("@/lib/api/resources");
+vi.mock("@eddi/app-kit/lib/api/resources", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/resources")>("@eddi/app-kit/lib/api/resources");
   return {
     ...actual,
     getResourceDescriptors: vi.fn().mockResolvedValue([]),
     createResource: (...args: unknown[]) => createResource(...args),
   };
 });
-vi.mock("@/lib/api/descriptors", () => ({
+vi.mock("@eddi/app-kit/lib/api/descriptors", () => ({
   updateDescriptor: (...args: unknown[]) => updateDescriptor(...args),
 }));
 
@@ -73,7 +73,7 @@ describe("AddExtensionDialog — Create new", () => {
   });
 
   it("does not report a picked existing resource as created", async () => {
-    const { getResourceDescriptors } = await import("@/lib/api/resources");
+    const { getResourceDescriptors } = await import("@eddi/app-kit/lib/api/resources");
     vi.mocked(getResourceDescriptors).mockResolvedValue([
       {
         resource: "eddi://ai.labs.llm/llmstore/llms/old-1?version=3",

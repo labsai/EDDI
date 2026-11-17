@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { useQuery } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
-import { renderPage } from "@/test/test-utils";
-import { sampleSpendControlChange, seedSpendControlMock } from "@/test/mocks/spend-control-handlers";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { sampleSpendControlChange, seedSpendControlMock } from "@eddi/app-kit/test/mocks/spend-control-handlers";
 import { PendingSpendChanges } from "../pending-spend-changes";
 
 describe("PendingSpendChanges", () => {

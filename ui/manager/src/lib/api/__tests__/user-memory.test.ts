@@ -3,7 +3,7 @@ import {
   getAllMemories,
   deleteMemory,
   deleteAllForUser,
-} from "../user-memory";
+} from "@eddi/app-kit/lib/api/user-memory";
 
 describe("user-memory API", () => {
   describe("getAllMemories", () => {

@@ -2,17 +2,16 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Badge, Button } from "@eddi/ui";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { ErrorState } from "@/components/shared/error-state";
-import { getErrorMessage, isApiError } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   useApproveSpendControlChange,
   usePendingSpendControlChanges,
   useRejectSpendControlChange,
 } from "@/hooks/use-spend-control";
-import type { SpendControlChange, SpendControlKind } from "@/lib/api/spend-control";
+import type { SpendControlChange, SpendControlKind } from "@eddi/app-kit/lib/api/spend-control";
 
 interface PendingSpendChangesProps {
   /** Which control's changes this page shows. */

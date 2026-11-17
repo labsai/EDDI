@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { UserMemoryPage } from "@/pages/user-memory";
 import userEvent from "@testing-library/user-event";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 const MOCK_MEMORIES = [
