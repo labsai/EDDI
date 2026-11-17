@@ -684,25 +684,37 @@ public class TeamCadenceService {
     /** One failed run's feedback slice — enough context, never a whole turn. */
     static final int MAX_FEEDBACK_CHARS = 500;
 
+    /** One quoted feedback line: the run it came from, then its capped slice. */
+    static String feedbackLine(String runId, String feedback) {
+        return "\n[Cadence run " + runId + "] " + feedbackSlice(feedback);
+    }
+
     /**
-     * Bounded feedback append (final-review finding): {@code outcome.result()} is
-     * the agent's ENTIRE turn output, and a task failing every run appended it to a
-     * PERSISTED description each time — unbounded document growth that also rode
-     * into the next run's PLAN/bid prompts. The feedback is capped per run and the
-     * accumulated description trimmed from the FRONT (oldest feedback first) to the
-     * shared task-description ceiling.
+     * The task's description followed by the quoted feedback lines (oldest first),
+     * within the shared task-description ceiling. The description is never cut to
+     * make room: the room it takes is reserved first, and the OLDEST feedback lines
+     * are dropped until the rest fits. A trailing note counts what was withheld as
+     * unverified.
      */
-    static String appendFeedbackBounded(String description, String runId, String feedback) {
-        return boundedDescription((description != null ? description : "") + "\n[Cadence run " + runId + "] " + feedbackSlice(feedback));
+    static String composeDescription(String description, List<String> feedbackLines, int withheld) {
+        String base = description != null ? description : "";
+        String withheldNote = withheld > 0 ? "\n(" + withheld + " earlier cadence feedback item(s) withheld: not verified)" : "";
+        int budget = SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH - base.length() - withheldNote.length();
+        int first = feedbackLines.size();
+        int used = 0;
+        while (first > 0 && used + feedbackLines.get(first - 1).length() <= budget) {
+            used += feedbackLines.get(first - 1).length();
+            first--;
+        }
+        StringBuilder out = new StringBuilder(base);
+        for (int i = first; i < feedbackLines.size(); i++) {
+            out.append(feedbackLines.get(i));
+        }
+        return out.append(withheldNote).toString();
     }
 
     private static String feedbackSlice(String feedback) {
         return feedback.length() <= MAX_FEEDBACK_CHARS ? feedback : feedback.substring(0, MAX_FEEDBACK_CHARS) + "…";
-    }
-
-    private static String boundedDescription(String combined) {
-        int cap = SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH;
-        return combined.length() <= cap ? combined : "…" + combined.substring(combined.length() - cap + 1);
     }
 
     /**
@@ -720,7 +732,7 @@ public class TeamCadenceService {
         Map<String, Boolean> trusted = new HashMap<>();
         Map<String, String> descriptions = new HashMap<>();
         for (TaskItem task : pulled) {
-            String description = task.description();
+            List<String> lines = new ArrayList<>();
             int withheld = 0;
             for (BacklogFeedback feedback : workspace.feedbackFor(task.id())) {
                 boolean quoted = feedback.authorAgentId() == null || trusted.computeIfAbsent(
@@ -728,15 +740,12 @@ public class TeamCadenceService {
                         key -> groupConversationService.recordsTrustFeedback(workspace.getGroupId(), feedback.authorAgentId(),
                                 feedback.verified(), feedback.authorKeyVersion()));
                 if (quoted && feedback.text() != null) {
-                    description = appendFeedbackBounded(description, feedback.runId(), feedback.text());
+                    lines.add(feedbackLine(feedback.runId(), feedback.text()));
                 } else if (!quoted) {
                     withheld++;
                 }
             }
-            if (withheld > 0) {
-                description = boundedDescription((description != null ? description : "") + "\n(" + withheld
-                        + " earlier cadence feedback item(s) withheld: not verified)");
-            }
+            String description = composeDescription(task.description(), lines, withheld);
             descriptions.put(task.id(), description);
         }
         return descriptions;

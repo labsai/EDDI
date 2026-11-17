@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -881,24 +882,31 @@ class TeamCadenceServiceTest {
     }
 
     @Test
-    @DisplayName("per-run feedback is capped and the accumulated description trimmed from the front")
-    void appendFeedbackBounded_capsSliceAndTotal() {
-        String bounded = TeamCadenceService.appendFeedbackBounded("desc", "run-1",
-                "x".repeat(TeamCadenceService.MAX_FEEDBACK_CHARS + 100));
-        assertTrue(bounded.length() < TeamCadenceService.MAX_FEEDBACK_CHARS + 100,
-                "one run's feedback never rides in whole: " + bounded.length());
-        assertTrue(bounded.startsWith("desc\n[Cadence run run-1] "), bounded.substring(0, 30));
-        assertTrue(bounded.endsWith("…"), "the slice is visibly truncated");
+    @DisplayName("per-run feedback is capped to a slice")
+    void feedbackLine_capsSlice() {
+        String line = TeamCadenceService.feedbackLine("run-1", "x".repeat(TeamCadenceService.MAX_FEEDBACK_CHARS + 100));
+        assertTrue(line.length() < TeamCadenceService.MAX_FEEDBACK_CHARS + 100, "one run's feedback never rides in whole: " + line.length());
+        assertTrue(line.startsWith("\n[Cadence run run-1] "));
+        assertTrue(line.endsWith("…"), "the slice is visibly truncated");
+        assertEquals("\n[Cadence run r] short", TeamCadenceService.feedbackLine("r", "short"), "short feedback is untouched");
+    }
 
-        String longDescription = "y".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH);
-        String trimmed = TeamCadenceService.appendFeedbackBounded(longDescription, "run-2", "newest feedback");
-        assertEquals(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH, trimmed.length(),
-                "the persisted description never outgrows the shared task cap");
-        assertTrue(trimmed.startsWith("…"), "oldest feedback is what gets dropped");
-        assertTrue(trimmed.endsWith("newest feedback"), "the newest feedback always survives");
+    @Test
+    @DisplayName("a long description plus eight full-length feedback items keeps the description and drops the oldest feedback")
+    void composeDescription_keepsDescriptionDropsOldestFeedback() {
+        String description = "Original instruction. " + "d".repeat(1500);
+        List<String> lines = new ArrayList<>();
+        for (int i = 1; i <= 8; i++) {
+            lines.add(TeamCadenceService.feedbackLine("run-" + i, ("" + i).repeat(TeamCadenceService.MAX_FEEDBACK_CHARS + 50)));
+        }
 
-        assertEquals("d\n[Cadence run r] short",
-                TeamCadenceService.appendFeedbackBounded("d", "r", "short"), "short feedback is untouched");
+        String composed = TeamCadenceService.composeDescription(description, lines, 2);
+
+        assertTrue(composed.length() <= SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH, "within the shared cap: " + composed.length());
+        assertTrue(composed.startsWith(description), "the task's own description is intact");
+        assertFalse(composed.contains("[Cadence run run-1]"), "the oldest feedback is what gets dropped");
+        assertTrue(composed.contains("[Cadence run run-8]"), "the newest feedback survives");
+        assertTrue(composed.endsWith("2 earlier cadence feedback item(s) withheld: not verified)"), "the withheld note is kept");
     }
 
     @Test
