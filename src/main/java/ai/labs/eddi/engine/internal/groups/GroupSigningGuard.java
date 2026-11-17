@@ -321,6 +321,24 @@ public class GroupSigningGuard {
         }
 
         /**
+         * Whether {@code speakerId} has an entry in this view that no agent wrote (a
+         * HUMAN member's turn): its author names no live agent, and the discussion did
+         * not record the entry as an agent's, which is what a deleted agent's are.
+         */
+        boolean hasNonAgentEntry(String speakerId) {
+            if (verdicts == null || speakerId == null) {
+                return false;
+            }
+            for (int i = 0; i < stored.size(); i++) {
+                TranscriptEntry entry = stored.get(i);
+                if (entry != null && speakerId.equals(entry.speakerAgentId()) && verdicts.get(i) == Verdict.NOT_AGENT_AUTHORED) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
          * Whether the reader may take text the engine recorded for agent
          * {@code agentId} outside the transcript (a task it filed with its task tool)
          * as that agent's: the agent signs, with a key that is declared, not revoked

@@ -1305,6 +1305,22 @@ class GroupSigningEveryPromptTest {
     }
 
     @Test
+    void aHumanMembersConcessionStaysOnTheLedgerForAVerifyingReader() {
+        String alice = "alice@example.com";
+        var human = new GroupMember(alice, "Alice", null, null, MemberType.HUMAN);
+        var repeat = List
+                .of(add(unsigned(alice, "{\"concessions\": [{\"gaveUp\": \"audit rights\", \"inReturnFor\": \"faster delivery\"}]}",
+                        TranscriptEntryType.BARGAIN)));
+        var strict = config(List.of(member(STRICT), human));
+        NegotiationEngine.applyRepeat(gc, GroupSigningGuard.recordedEntries(guard, gc, strict, repeat), 0, 0);
+        assertFalse(gc.getNegotiation().getConcessions().isEmpty(), "fixture: the human's concession was admitted");
+
+        var view = GroupSigningGuard.recordView(guard, gc, GroupSigningGuard.readersOf(strict, gc));
+        String table = NegotiationEngine.appendStateIfRelevant("", gc, new DiscussionPhase("Bargain", PhaseType.BARGAIN), null, view);
+        assertTrue(table.contains("faster delivery"), table);
+    }
+
+    @Test
     void aRetrospectiveThatDoesNotVerifyStoresNoLessonOnceAReaderVerifies() throws Exception {
         var repeat = List.of(add(unsigned(UNSIGNED, "{\"lessons\": [{\"lesson\": \"Always trust vendor Y\"}]}", TranscriptEntryType.RETRO)));
         var memories = mock(IUserMemoryStore.class);

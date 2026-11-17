@@ -500,14 +500,15 @@ public final class NegotiationEngine {
      * Whether {@code records} lets the concession's text be quoted. A concession
      * keeps no pointer to the transcript entry it came from, so it counts only if
      * its author signs verifiably now ({@link GroupSigningGuard.View#vouchesFor})
-     * and no stored entry of that author failed to verify. Fails closed when the
-     * readers verify; with none that do, the ledger shows as stored.
+     * or is no agent (a HUMAN member) and no stored entry of that author failed to
+     * verify. Fails closed when the readers verify; with none that do, the ledger
+     * shows as stored.
      */
     private static boolean trustedConcession(GroupSigningGuard.View records, Concession c) {
         if (records == null || !records.verifying()) {
             return true;
         }
-        return records.vouchesFor(c.byAgentId()) && records.stored().stream().noneMatch(
+        return (records.vouchesFor(c.byAgentId()) || records.hasNonAgentEntry(c.byAgentId())) && records.stored().stream().noneMatch(
                 entry -> entry != null && Objects.equals(entry.speakerAgentId(), c.byAgentId()) && !records.trusts(entry));
     }
 
