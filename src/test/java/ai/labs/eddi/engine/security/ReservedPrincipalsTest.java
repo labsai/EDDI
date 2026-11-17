@@ -67,6 +67,7 @@ class ReservedPrincipalsTest {
             Map.entry("c:", "hash input tag"),
             Map.entry("h:", "hash input tag"),
             Map.entry("h1:", "hash input tag"),
+            Map.entry("k1:", "erasure subject key-version prefix (ErasureGuard.SUBJECT_KEY_PREFIX) on an HMAC digest, never a principal"),
             Map.entry("v1:", "HITL plan-hash version prefix (HitlPlanHash.VERSION_PREFIX), a digest, never a principal"),
             Map.entry("k:", "hash input tag"),
             Map.entry("u:", "hash input tag"),
