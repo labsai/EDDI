@@ -328,6 +328,27 @@ class ModelOutputParserRecoverFieldsTest {
     }
 
     @Test
+    @DisplayName("an empty following key (\"\":) ends the value like any other key")
+    void emptyNextKeyEndsValue() {
+        String raw = "{\"htmlResponseText\":\"bad \"x\" quote\",\"\":0,\"broken\":[";
+
+        assertEquals("bad \"x\" quote", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("fieldAliases apply to a recovered field as they do to a parsed reply, even when wrapDefaults holds the target")
+    void aliasesApplyToRecoveredFields() {
+        var options = new RescueOptions(null, Map.of("answer", ""), RescueOptions.DEFAULT_WRAP_MAX_CHARS, false,
+                Map.of("answer_text", "answer"), List.of("answer_text"));
+
+        JsonOutcome outcome = parse("{\"answer_text\":\"cut", options);
+
+        assertTrue(outcome.recovered());
+        assertEquals("cut", map(outcome).get("answer"));
+        assertFalse(map(outcome).containsKey("answer_text"));
+    }
+
+    @Test
     @DisplayName("many candidate quotes followed by a brace are checked without copying the rest of the reply each time")
     void manyBraceCandidatesStayLinear() {
         String raw = "{\"htmlResponseText\":\"bad \"x\" " + "\"}".repeat(200_000);

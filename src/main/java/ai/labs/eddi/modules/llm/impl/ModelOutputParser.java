@@ -273,14 +273,19 @@ public final class ModelOutputParser {
 
     /** A parsed reply, with the task's field aliases applied. */
     private static JsonOutcome valid(Object parsed, boolean repaired, RescueOptions options, String raw) {
-        if (options.fieldAliases().isEmpty() || !(parsed instanceof Map<?, ?> map)) {
-            return new JsonOutcome(Kind.VALID, parsed, repaired, null, raw);
-        }
+        Map<String, Object> renamed = parsed instanceof Map<?, ?> map ? withAliases(map, options) : null;
+        return renamed == null ? new JsonOutcome(Kind.VALID, parsed, repaired, null, raw) : new JsonOutcome(Kind.VALID, renamed, true, null, raw);
+    }
+
+    /**
+     * The map with the task's field aliases applied, or null when no alias matched.
+     * A key is renamed only into an absent target: when the model sent both keys,
+     * the target is the one the template reads and it wins.
+     */
+    private static Map<String, Object> withAliases(Map<?, ?> map, RescueOptions options) {
         Map<String, Object> renamed = null;
         for (Map.Entry<String, String> alias : options.fieldAliases().entrySet()) {
             Map<?, ?> current = renamed != null ? renamed : map;
-            // Rename only into an absent target: when the model sent both keys, the
-            // target is the one the template reads and it wins.
             if (current.containsKey(alias.getKey()) && !current.containsKey(alias.getValue())) {
                 if (renamed == null) {
                     renamed = new LinkedHashMap<>();
@@ -291,7 +296,7 @@ public final class ModelOutputParser {
                 renamed.put(alias.getValue(), renamed.remove(alias.getKey()));
             }
         }
-        return renamed == null ? new JsonOutcome(Kind.VALID, parsed, repaired, null, raw) : new JsonOutcome(Kind.VALID, renamed, true, null, raw);
+        return renamed;
     }
 
     /**
@@ -392,16 +397,21 @@ public final class ModelOutputParser {
         if (found.isEmpty()) {
             return null;
         }
+        // keep the order the fields were configured in, whatever order they sit in
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (String field : options.recoverFields()) {
+            if (found.containsKey(field)) {
+                fields.put(field, found.get(field));
+            }
+        }
+        // aliases apply as they do to a reply that parsed, and before the defaults,
+        // so a default for the target key does not block the rename
+        Map<String, Object> aliased = withAliases(fields, options);
         Map<String, Object> result = new LinkedHashMap<>();
         for (Map.Entry<String, Object> d : options.wrapDefaults().entrySet()) {
             result.put(d.getKey(), deepCopy(d.getValue()));
         }
-        // keep the order the fields were configured in, whatever order they sit in
-        for (String field : options.recoverFields()) {
-            if (found.containsKey(field)) {
-                result.put(field, found.get(field));
-            }
-        }
+        result.putAll(aliased != null ? aliased : fields);
         return new JsonOutcome(Kind.VALID, result, true, null, raw, false, true);
     }
 
@@ -534,7 +544,7 @@ public final class ModelOutputParser {
      * {@code recoverFields} accepts; a longer, unrecognised key is read as part of
      * the value, which only ever keeps text, never skips a check.
      */
-    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{1," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*:|\\z)");
+    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{0," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*:|\\z)");
 
     /**
      * Whether a quote followed by {@code text[from..]} closes a value. Prose can
