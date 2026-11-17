@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -193,8 +194,12 @@ class HealthReportLinksTest {
         }
         // Another creation slipped in between this one's check and its insert: the
         // list read after the insert holds 21 live links, and the new one is last.
+        AtomicInteger calls = new AtomicInteger();
         when(store.listByAgent("a")).thenAnswer(inv -> {
             List<HealthReportLink> all = new ArrayList<>(stored);
+            if (calls.getAndIncrement() == 0) {
+                return all.subList(0, 19);
+            }
             ArgumentCaptor<HealthReportLink> created = ArgumentCaptor.forClass(HealthReportLink.class);
             verify(store).create(created.capture());
             all.add(created.getValue());

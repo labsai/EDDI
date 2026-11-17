@@ -144,7 +144,7 @@ class McpRoleTierParityTest {
 
     /** Agent Health reads: REST's admin/editor/viewer tier, like /usage. */
     private static final Set<String> HEALTH_READ_TOOLS = Set.of("read_agent_health", "list_agent_health", "compare_agent_versions_health",
-            "list_agent_health_sessions", "suggest_outcome_mappings");
+            "list_agent_health_sessions", "suggest_outcome_mappings", "read_agent_health_profile", "list_health_presets");
 
     /**
      * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
