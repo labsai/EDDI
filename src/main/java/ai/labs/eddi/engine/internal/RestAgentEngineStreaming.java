@@ -77,8 +77,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>{@code guardrail_triggered} — an input or output guardrail fired
  * ({@code type}, {@code phase}, {@code action}, {@code taskId})</li>
  * <li>{@code tool_call} / {@code tool_result} — one tool call started /
- * finished: name, call id, status and duration, never arguments or results (a
- * designer's {@code toolDisplay} may add a label and a few allow-listed
+ * finished: name, call id, status and duration, never arguments or raw results
+ * ({@code tool_result} adds {@code ok} and a redacted, bounded {@code summary};
+ * a designer's {@code toolDisplay} may add a label and a few allow-listed
  * argument values to {@code tool_call})</li>
  * <li>{@code hitl_resume} — {@code /resume/stream} only: the decision was
  * committed</li>

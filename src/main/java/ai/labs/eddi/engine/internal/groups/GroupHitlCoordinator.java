@@ -72,11 +72,11 @@ import java.util.stream.Collectors;
  * the calls that stay on the facade: {@code executeDiscussion} (the phase loop
  * {@code resumeDiscussion} re-enters), {@code effectivePhases},
  * {@code resolveParticipants} / {@code rosterWithRecruits},
- * {@code approvalContextRenderer}, {@code planHashStrict} and
- * {@code cleanupEphemeralAgents}. Same safety argument as
- * {@link MemberTurnExecutor}'s self-reference — this class's constructor only
- * stores it, never invokes a method on it before the facade's own constructor
- * (and therefore full field initialization) completes.
+ * {@code approvalContextRenderer}, {@code planHashStrict},
+ * {@code announceUserEvents} and {@code cleanupEphemeralAgents}. Same safety
+ * argument as {@link MemberTurnExecutor}'s self-reference — this class's
+ * constructor only stores it, never invokes a method on it before the facade's
+ * own constructor (and therefore full field initialization) completes.
  * <p>
  * {@code discussionControls} and the virtual-thread {@link ExecutorService} are
  * shared by reference, not owned — {@code GroupConversationService} and its
