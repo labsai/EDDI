@@ -449,6 +449,10 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(e.getMessage().contains("Could not verify"), e.getMessage());
             assertFalse(e.getMessage().contains("does not match"), e.getMessage());
             assertTrue(e.getCause() instanceof IllegalStateException);
+            // Not the caller's fault (a 500 at the REST layer), and the provider's text
+            // stays in the log rather than in the message.
+            assertTrue(e instanceof AgentSetupService.AgentSetupInternalException, e.getClass().getName());
+            assertFalse(e.getMessage().contains("meta read failed"), e.getMessage());
             verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
@@ -574,7 +578,13 @@ class AgentSetupVaultKeyReuseTest {
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
-            assertTrue(e.getMessage().contains("disk full"), e.getMessage());
+            // Reported as an internal failure: the key it concerns and a correlation id
+            // for the server log, where the provider's own text ("disk full") went.
+            assertTrue(e instanceof AgentSetupService.AgentSetupInternalException, e.getClass().getName());
+            assertTrue(e.getMessage().contains("openai-prod"), e.getMessage());
+            assertTrue(e.getMessage().contains("correlationId: "), e.getMessage());
+            assertFalse(e.getMessage().contains("disk full"), e.getMessage());
+            assertEquals("disk full", e.getCause().getMessage());
         }
 
         @Test
