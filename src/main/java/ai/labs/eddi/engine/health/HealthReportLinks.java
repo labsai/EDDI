@@ -11,12 +11,13 @@ import ai.labs.eddi.engine.health.HealthPeriods.Window;
 import ai.labs.eddi.engine.health.HealthReportService.Scope;
 import ai.labs.eddi.engine.health.model.HealthReportLink;
 import ai.labs.eddi.engine.health.report.HealthReports.AgentHealth;
-import ai.labs.eddi.engine.health.report.HealthReports.Check;
 import ai.labs.eddi.engine.health.report.HealthReports.CreatedReportLink;
-import ai.labs.eddi.engine.health.report.HealthReports.Reason;
 import ai.labs.eddi.engine.health.report.HealthReports.ReportBrand;
 import ai.labs.eddi.engine.health.report.HealthReports.ReportLinkInfo;
 import ai.labs.eddi.engine.health.report.HealthReports.SharedHealthReport;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard.UseCheck;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -30,10 +31,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -53,9 +53,21 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@value #DEFAULT_EXPIRES_DAYS}); <b>revocation</b> deletes the link. An
  * expired or revoked token answers exactly like one that never existed.</li>
  * <li><b>Sections</b> are chosen per link; {@code quality} only when the
- * creator may read the agent's ratings. Reasons of other sections are left out.
- * Never drill-down, conversation ids or user data.</li>
- * <li>At most {@value #MAX_LINKS_PER_AGENT} live links per agent.</li>
+ * creator may read the agent's ratings. The status and its reasons are judged
+ * over the link's sections alone, and the view carries no free text (hints,
+ * override reasons, marker ids). Never drill-down, conversation ids or user
+ * data.</li>
+ * <li><b>The creator's authority is re-checked on every read</b>: a link shows
+ * only while the person who created it still holds {@code EDIT} on the agent —
+ * ownership, grants and shares as they are now, with the team snapshot taken
+ * when the link was created (see {@link #authorized}). A link whose creator
+ * lost that answers 404 like a revoked one, and shows again if the access comes
+ * back. What cannot be re-checked without the creator's token — their roles
+ * (administrator, rating roles) and leaving a team — is the snapshot taken at
+ * creation; revoke the links of a person who leaves.</li>
+ * <li>At most {@value #MAX_LINKS_PER_AGENT} live links per agent, enforced
+ * after the insert (see {@link #create}), so concurrent creations cannot exceed
+ * it.</li>
  * </ul>
  */
 @ApplicationScoped
@@ -85,10 +97,17 @@ public class HealthReportLinks {
     private final HealthReportService reports;
     private final IDocumentDescriptorStore descriptorStore;
     private final Clock clock;
+    /** {@code null} only in tests built without it: every creator is authorized. */
+    private ResourceAccessGuard accessGuard;
+    /** {@code null} only in tests built without it. */
+    private HealthAdminAudit audit;
 
     @Inject
-    public HealthReportLinks(IHealthReportLinkStore store, HealthReportService reports, IDocumentDescriptorStore descriptorStore) {
+    public HealthReportLinks(IHealthReportLinkStore store, HealthReportService reports, IDocumentDescriptorStore descriptorStore,
+            ResourceAccessGuard accessGuard, HealthAdminAudit audit) {
         this(store, reports, descriptorStore, Clock.systemUTC());
+        this.accessGuard = accessGuard;
+        this.audit = audit;
     }
 
     HealthReportLinks(IHealthReportLinkStore store, HealthReportService reports, IDocumentDescriptorStore descriptorStore, Clock clock) {
@@ -96,6 +115,18 @@ public class HealthReportLinks {
         this.reports = reports;
         this.descriptorStore = descriptorStore;
         this.clock = clock;
+    }
+
+    /** With an access guard and an audit — for tests. */
+    HealthReportLinks with(ResourceAccessGuard accessGuard, HealthAdminAudit audit) {
+        this.accessGuard = accessGuard;
+        this.audit = audit;
+        return this;
+    }
+
+    /** Whether a token has the shape of one (checked before anything else). */
+    public static boolean wellFormed(String token) {
+        return token != null && TOKEN.matcher(token).matches();
     }
 
     /** A new random token. */
@@ -140,7 +171,14 @@ public class HealthReportLinks {
 
     /**
      * Creates a link. The caller has checked EDIT and, for {@code quality}, the
-     * ratings rule.
+     * ratings rule; this records the creator's teams and administrator flag, so
+     * every read can re-check their EDIT without their request.
+     * <p>
+     * The cap is enforced <em>after</em> the insert: the new link is kept only if
+     * it is among the agent's first {@value #MAX_LINKS_PER_AGENT} live links in
+     * creation order (time, then id), else it is deleted again and refused. Every
+     * concurrent creator sees the same order, so two that race for the last slot
+     * cannot both keep theirs — a check before the insert let both through.
      *
      * @param baseUrl
      *            the deployment's public base URL, without a trailing slash
@@ -160,13 +198,35 @@ public class HealthReportLinks {
             throw HealthPeriods.badRequest("an agent may have at most " + MAX_LINKS_PER_AGENT + " live report links; revoke one first");
         }
         String token = newToken();
+        List<String> teams = accessGuard == null ? List.of() : accessGuard.currentTeamSubjects();
+        boolean admin = accessGuard != null && accessGuard.callerIsAdmin();
         HealthReportLink link = new HealthReportLink("r-" + UUID.randomUUID(), agentId, hash(token), sections, p, now, creator,
-                now.plus(Duration.ofDays(days)));
+                now.plus(Duration.ofDays(days)), teams, admin);
         store.create(link);
+        if (!withinCap(link)) {
+            store.delete(agentId, link.id());
+            throw HealthPeriods.badRequest("an agent may have at most " + MAX_LINKS_PER_AGENT + " live report links; revoke one first");
+        }
+        if (audit != null) {
+            audit.linkCreated(creator, agentId, link.id(), link.sections(), p, link.expiresAt());
+        }
         LOGGER.infof("[HEALTH] '%s' created owner report link %s for agent %s (sections %s, expires %s)", sanitize(creator), link.id(),
                 sanitize(agentId), link.sections(), link.expiresAt());
         String path = UI_PATH + token;
         return new CreatedReportLink(link.id(), (baseUrl == null ? "" : baseUrl) + path, path, link.expiresAt().toString(), link.sections(), p);
+    }
+
+    /**
+     * Whether a just-inserted link is among the agent's first
+     * {@link #MAX_LINKS_PER_AGENT} live links, oldest first.
+     */
+    private boolean withinCap(HealthReportLink link) {
+        Instant now = clock.instant();
+        Comparator<HealthReportLink> order = Comparator.comparing(HealthReportLink::createdAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(HealthReportLink::id);
+        long before = store.listByAgent(link.agentId()).stream()
+                .filter(l -> !l.id().equals(link.id()) && l.expiresAt().isAfter(now) && order.compare(l, link) < 0).count();
+        return before < MAX_LINKS_PER_AGENT;
     }
 
     /** An agent's live links, newest first — never their tokens. */
@@ -183,8 +243,35 @@ public class HealthReportLinks {
         boolean deleted = store.delete(agentId, id);
         if (deleted) {
             LOGGER.infof("[HEALTH] '%s' revoked owner report link %s of agent %s", sanitize(caller), sanitize(id), sanitize(agentId));
+            if (audit != null) {
+                audit.linkRevoked(caller, agentId, id, 1);
+            }
         }
         return deleted;
+    }
+
+    /** Revokes every link of an agent; how many there were. */
+    public long revokeAll(String agentId, String caller) {
+        long deleted = store.deleteByAgent(agentId);
+        LOGGER.infof("[HEALTH] '%s' revoked all %d owner report links of agent %s", sanitize(caller), deleted, sanitize(agentId));
+        if (audit != null && deleted > 0) {
+            audit.linkRevoked(caller, agentId, null, deleted);
+        }
+        return deleted;
+    }
+
+    /**
+     * Whether the link's creator still holds {@code EDIT} on its agent, judged now
+     * from the agent's current ownership, grants and shares (with the creator's
+     * team snapshot). {@link UseCheck#UNKNOWN} when the descriptor store could not
+     * answer. A link without a creator (erased, or created with authentication off)
+     * is {@code DENIED} wherever access is enforced.
+     */
+    public UseCheck authorized(HealthReportLink link) {
+        if (accessGuard == null) {
+            return UseCheck.ALLOWED;
+        }
+        return accessGuard.checkPrincipalLevel(link.agentId(), link.createdBy(), link.creatorTeams(), link.creatorAdmin(), AccessLevel.EDIT);
     }
 
     /**
@@ -192,11 +279,21 @@ public class HealthReportLinks {
      * revoked token alike.
      */
     public Optional<HealthReportLink> resolve(String token) {
-        if (token == null || !TOKEN.matcher(token).matches()) {
+        if (!wellFormed(token)) {
             return Optional.empty();
         }
-        Optional<HealthReportLink> link = store.findByTokenHash(hash(token));
+        return resolveHash(hash(token));
+    }
+
+    /** The live link stored under a token hash, or empty. */
+    public Optional<HealthReportLink> resolveHash(String tokenHash) {
+        Optional<HealthReportLink> link = store.findByTokenHash(tokenHash);
         return link.filter(l -> l.expiresAt() != null && l.expiresAt().isAfter(clock.instant()));
+    }
+
+    /** GDPR export: the links a person created — ids and dates, never a token. */
+    public List<HealthReportLink> createdBy(String userId) {
+        return userId == null ? List.of() : store.listByCreator(userId);
     }
 
     /**
@@ -214,23 +311,11 @@ public class HealthReportLinks {
             throw new HealthStoreException("Could not read the agent of a health report", e);
         }
         Window window = HealthPeriods.window(link.period(), null, null, "30d", reports.today());
-        boolean quality = link.sections().contains(HealthDefaults.QUALITY);
-        AgentHealth full = reports.report(new Scope(link.agentId(), window, null, null, markerTenants), name, quality);
-        Map<String, Object> sections = new LinkedHashMap<>();
-        full.sections().forEach((section, content) -> {
-            if (link.sections().contains(section)) {
-                sections.put(section, content);
-            }
-        });
-        List<Reason> reasons = full.reasons().stream().filter(r -> r.measureId() == null || inSections(r.measureId(), link.sections())).toList();
-        List<Check> checks = link.sections().contains(HealthDefaults.RELIABILITY) ? full.checks() : List.of();
-        return Optional.of(new SharedHealthReport(name, full.period(), full.baseline(), full.status(), reasons, full.preset(), full.generatedAt(),
-                full.dataThrough(), sections, checks, link.expiresAt().toString(), brand));
-    }
-
-    private static boolean inSections(String measureId, List<String> sections) {
-        HealthDefaults.Definition d = HealthDefaults.of(measureId);
-        return d != null && sections.contains(d.section());
+        // The status and its reasons are judged over the link's sections only, and
+        // the view carries no free text (see HealthReportService.sharedReport).
+        AgentHealth shared = reports.sharedReport(new Scope(link.agentId(), window, null, null, markerTenants), name, link.sections());
+        return Optional.of(new SharedHealthReport(name, shared.period(), shared.baseline(), shared.status(), shared.reasons(), shared.preset(),
+                shared.generatedAt(), shared.dataThrough(), shared.sections(), shared.checks(), link.expiresAt().toString(), brand));
     }
 
     /** Deletes the links that expired more than a day ago; never throws. */

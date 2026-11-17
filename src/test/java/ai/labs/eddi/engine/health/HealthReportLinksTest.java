@@ -10,7 +10,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.health.HealthReportService.Scope;
 import ai.labs.eddi.engine.health.model.HealthReportLink;
 import ai.labs.eddi.engine.health.report.HealthReports.AgentHealth;
-import ai.labs.eddi.engine.health.report.HealthReports.Check;
 import ai.labs.eddi.engine.health.report.HealthReports.CreatedReportLink;
 import ai.labs.eddi.engine.health.report.HealthReports.DateRange;
 import ai.labs.eddi.engine.health.report.HealthReports.Period;
@@ -19,6 +18,9 @@ import ai.labs.eddi.engine.health.report.HealthReports.ReportBrand;
 import ai.labs.eddi.engine.health.report.HealthReports.ReportLinkInfo;
 import ai.labs.eddi.engine.health.report.HealthReports.Section;
 import ai.labs.eddi.engine.health.report.HealthReports.SharedHealthReport;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard.UseCheck;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -155,35 +157,80 @@ class HealthReportLinksTest {
     }
 
     @Test
-    @DisplayName("render: only the link's sections and their reasons; checks only with reliability; quality read only when shared")
+    @DisplayName("render: the shared view of the link's sections, under the brand, with the link's expiry")
     void render() throws Exception {
         DocumentDescriptor descriptor = new DocumentDescriptor();
         descriptor.setName("Support");
         when(descriptors.readCurrentDescriptor("a")).thenReturn(descriptor);
         Map<String, Object> sections = new LinkedHashMap<>();
-        for (String s : HealthDefaults.SECTIONS) {
-            sections.put(s, new Section(false, List.of()));
-        }
-        AgentHealth full = new AgentHealth("a", "Support", new Period("2026-10-12", "2026-11-10", 30), new DateRange("2026-09-12", "2026-10-11"),
-                null, List.of("api"), "NEEDS_ATTENTION",
-                List.of(new Reason("resolutionRate", "RED", "Resolution 30 %", null), new Reason("apdex", "AMBER", "Apdex 0.80", null),
-                        new Reason(null, "INFO", "Not enough data", null)),
-                "support", NOW.toString(), "2026-11-10", sections, List.of(new Check("goldenSuite", "Golden", "PASS", null, false, 3)));
-        when(reports.report(any(Scope.class), eq("Support"), anyBoolean())).thenReturn(full);
+        sections.put("effectiveness", new Section(false, List.of()));
+        sections.put("adoption", new Section(false, List.of()));
+        AgentHealth shared = new AgentHealth("a", "Support", new Period("2026-10-12", "2026-11-10", 30), new DateRange("2026-09-12", "2026-10-11"),
+                null, List.of("api"), "WATCH", List.of(new Reason("resolutionRate", "AMBER", "Resolution 30 %", null)), "support", NOW.toString(),
+                "2026-11-10", sections, List.of());
+        when(reports.sharedReport(any(Scope.class), eq("Support"), eq(List.of("effectiveness", "adoption")))).thenReturn(shared);
         ReportBrand brand = new ReportBrand("Acme", null, false, "/branding/logo", "#123456");
 
-        SharedHealthReport r = links.render(link("r-1", NOW.plusSeconds(60), List.of("effectiveness", "adoption")), List.of("default"), brand)
-                .orElseThrow();
+        HealthReportLink link = link("r-1", NOW.plusSeconds(60), List.of("effectiveness", "adoption"));
+        SharedHealthReport r = links.render(link, List.of("default"), brand).orElseThrow();
         assertEquals(List.of("effectiveness", "adoption"), List.copyOf(r.sections().keySet()));
-        assertEquals(List.of("resolutionRate", "null"), r.reasons().stream().map(x -> String.valueOf(x.measureId())).toList());
+        assertEquals("WATCH", r.status());
+        assertEquals(shared.reasons(), r.reasons());
         assertTrue(r.checks().isEmpty());
-        assertEquals("NEEDS_ATTENTION", r.status());
         assertEquals("Support", r.agentName());
         assertEquals(brand, r.brand());
-        verify(reports).report(any(Scope.class), eq("Support"), eq(false));
+        assertEquals(link.expiresAt().toString(), r.expiresAt());
+        verify(reports, never()).report(any(), any(), anyBoolean());
+    }
 
-        links.render(link("r-2", NOW.plusSeconds(60), List.of("reliability", "quality")), List.of("default"), brand);
-        verify(reports).report(any(Scope.class), eq("Support"), eq(true));
+    @Test
+    @DisplayName("the cap holds under a race: the link past the 20th live one is deleted again and refused")
+    void capAfterInsert() {
+        List<HealthReportLink> stored = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            stored.add(new HealthReportLink(String.format("r-%02d", i), "a", "h" + i, List.of("reliability"), "30d", NOW.minusSeconds(100 - i), "x",
+                    NOW.plusSeconds(3600)));
+        }
+        // Another creation slipped in between this one's check and its insert: the
+        // list read after the insert holds 21 live links, and the new one is last.
+        when(store.listByAgent("a")).thenAnswer(inv -> {
+            List<HealthReportLink> all = new ArrayList<>(stored);
+            ArgumentCaptor<HealthReportLink> created = ArgumentCaptor.forClass(HealthReportLink.class);
+            verify(store).create(created.capture());
+            all.add(created.getValue());
+            return all;
+        });
+        assertThrows(BadRequestException.class, () -> links.create("a", 7, HealthReportLinks.DEFAULT_SECTIONS, null, "x", ""));
+        verify(store).delete(eq("a"), anyString());
+    }
+
+    @Test
+    @DisplayName("strict rights: the creator's EDIT is re-checked with their team snapshot; no guard means no enforcement")
+    void authorized() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        HealthAdminAudit audit = mock(HealthAdminAudit.class);
+        links.with(guard, audit);
+        HealthReportLink link = new HealthReportLink("r-1", "a", "h", List.of("reliability"), "30d", NOW, "alice", NOW.plusSeconds(60),
+                List.of("team:ops"), false);
+        when(guard.checkPrincipalLevel("a", "alice", List.of("team:ops"), false, AccessLevel.EDIT)).thenReturn(UseCheck.DENIED);
+        assertEquals(UseCheck.DENIED, links.authorized(link));
+        when(guard.checkPrincipalLevel("a", "alice", List.of("team:ops"), false, AccessLevel.EDIT)).thenReturn(UseCheck.ALLOWED);
+        assertEquals(UseCheck.ALLOWED, links.authorized(link));
+
+        // Creation snapshots the creator's teams and admin flag and is audited without
+        // the token.
+        when(guard.currentTeamSubjects()).thenReturn(List.of("team:ops"));
+        when(guard.callerIsAdmin()).thenReturn(true);
+        CreatedReportLink created = links.create("a", null, HealthReportLinks.DEFAULT_SECTIONS, null, "alice", "");
+        ArgumentCaptor<HealthReportLink> stored = ArgumentCaptor.forClass(HealthReportLink.class);
+        verify(store).create(stored.capture());
+        assertEquals(List.of("team:ops"), stored.getValue().creatorTeams());
+        assertTrue(stored.getValue().creatorAdmin());
+        verify(audit).linkCreated(eq("alice"), eq("a"), eq(created.id()), any(), eq("30d"), any());
+
+        when(store.deleteByAgent("a")).thenReturn(3L);
+        assertEquals(3, links.revokeAll("a", "alice"));
+        verify(audit).linkRevoked("alice", "a", null, 3);
     }
 
     @Test

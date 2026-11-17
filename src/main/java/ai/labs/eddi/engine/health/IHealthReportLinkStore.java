@@ -30,6 +30,16 @@ public interface IHealthReportLinkStore {
     /** Revokes (deletes) one of an agent's links; whether it existed. */
     boolean delete(String agentId, String id);
 
+    /**
+     * Revokes every link of an agent — "revoke all", and the agent's deletion.
+     *
+     * @return the links deleted
+     */
+    long deleteByAgent(String agentId);
+
+    /** The links {@code userId} created, newest first — for the GDPR export. */
+    List<HealthReportLink> listByCreator(String userId);
+
     /** Deletes the links that expired before {@code before}. */
     long deleteExpiredBefore(Instant before);
 

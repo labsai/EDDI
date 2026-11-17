@@ -212,7 +212,8 @@ public interface IRestAgentHealth {
     @Operation(summary = "Create an owner report link", description = "A read-only, branded link to this agent's health for someone "
             + "without Manager access: {\"expiresInDays\": 1-90 (default 30), \"sections\": [...] (default all but quality), \"period\": "
             + "\"7d|30d|90d\" (default 30d)}. The token is in url and path of this response only and cannot be read again. quality "
-            + "needs permission to read the agent's ratings. Requires EDIT.")
+            + "needs permission to read the agent's ratings. Requires EDIT. The link shows only while its creator still holds EDIT on "
+            + "the agent.")
     @APIResponse(responseCode = "201", description = "The link, with its token.")
     @APIResponse(responseCode = "400", description = "A field is invalid, or the agent has too many live links.")
     @APIResponse(responseCode = "403", description = "The caller may not edit this agent, or asked for quality without ratings access.")
@@ -238,6 +239,17 @@ public interface IRestAgentHealth {
     @APIResponse(responseCode = "403", description = "The caller may not edit this agent.")
     @APIResponse(responseCode = "404", description = "No such agent or link.")
     Response revokeReportLink(@PathParam("agentId") String agentId, @PathParam("id") String id);
+
+    @DELETE
+    @Path("/reports")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor"})
+    @Operation(summary = "Revoke all of an agent's owner report links", description = "Every link of the agent answers 404 from now on — "
+            + "after a person who created links leaves, say. Answers {\"revoked\": n}. Requires EDIT.")
+    @APIResponse(responseCode = "200", description = "How many links were revoked.")
+    @APIResponse(responseCode = "403", description = "The caller may not edit this agent.")
+    @APIResponse(responseCode = "404", description = "No such agent.")
+    Response revokeAllReportLinks(@PathParam("agentId") String agentId);
 
     /**
      * The body of {@code POST …/health/reports}.

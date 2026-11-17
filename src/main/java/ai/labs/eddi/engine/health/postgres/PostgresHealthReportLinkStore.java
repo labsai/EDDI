@@ -45,15 +45,22 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
                 period VARCHAR(8),
                 created_at_ms BIGINT,
                 created_by VARCHAR(512),
-                expires_at_ms BIGINT NOT NULL
+                expires_at_ms BIGINT NOT NULL,
+                creator_teams TEXT[],
+                creator_admin BOOLEAN NOT NULL DEFAULT FALSE
             )
             """;
     static final String[] CREATE_INDEXES = {
+            // A table created before the creator's access snapshot existed.
+            "ALTER TABLE health_report_links ADD COLUMN IF NOT EXISTS creator_teams TEXT[]",
+            "ALTER TABLE health_report_links ADD COLUMN IF NOT EXISTS creator_admin BOOLEAN NOT NULL DEFAULT FALSE",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_health_report_links_token ON health_report_links (token_hash)",
             "CREATE INDEX IF NOT EXISTS idx_health_report_links_agent ON health_report_links (agent_id, created_at_ms)",
-            "CREATE INDEX IF NOT EXISTS idx_health_report_links_expires ON health_report_links (expires_at_ms)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_report_links_expires ON health_report_links (expires_at_ms)",
+            "CREATE INDEX IF NOT EXISTS idx_health_report_links_creator ON health_report_links (created_by)"};
 
-    static final String COLUMNS = "id, agent_id, token_hash, sections, period, created_at_ms, created_by, expires_at_ms";
+    static final String COLUMNS = "id, agent_id, token_hash, sections, period, created_at_ms, created_by, expires_at_ms, creator_teams, "
+            + "creator_admin";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -86,7 +93,7 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
     @Override
     public void create(HealthReportLink link) {
         try (Connection c = connection();
-                PreparedStatement s = c.prepareStatement("INSERT INTO health_report_links (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                PreparedStatement s = c.prepareStatement("INSERT INTO health_report_links (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
             s.setString(1, link.id());
             s.setString(2, link.agentId());
             s.setString(3, link.tokenHash());
@@ -95,6 +102,8 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
             s.setLong(6, link.createdAt() == null ? 0L : link.createdAt().toEpochMilli());
             s.setString(7, link.createdBy());
             s.setLong(8, link.expiresAt().toEpochMilli());
+            s.setArray(9, c.createArrayOf("text", link.creatorTeams().toArray(new String[0])));
+            s.setBoolean(10, link.creatorAdmin());
             s.executeUpdate();
         } catch (SQLException e) {
             throw new HealthStoreException("Could not store a health report link", e);
@@ -129,9 +138,11 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
         try (ResultSet r = s.executeQuery()) {
             while (r.next()) {
                 Array sections = r.getArray(4);
+                Array teams = r.getArray(9);
                 found.add(new HealthReportLink(r.getString(1), r.getString(2), r.getString(3),
                         sections == null ? List.of() : Arrays.asList((String[]) sections.getArray()), r.getString(5),
-                        Instant.ofEpochMilli(r.getLong(6)), r.getString(7), Instant.ofEpochMilli(r.getLong(8))));
+                        Instant.ofEpochMilli(r.getLong(6)), r.getString(7), Instant.ofEpochMilli(r.getLong(8)),
+                        teams == null ? List.of() : Arrays.asList((String[]) teams.getArray()), r.getBoolean(10)));
             }
         }
         return found;
@@ -145,6 +156,28 @@ public class PostgresHealthReportLinkStore implements IHealthReportLinkStore {
             return s.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new HealthStoreException("Could not revoke a health report link", e);
+        }
+    }
+
+    @Override
+    public long deleteByAgent(String agentId) {
+        try (Connection c = connection(); PreparedStatement s = c.prepareStatement("DELETE FROM health_report_links WHERE agent_id = ?")) {
+            s.setString(1, agentId);
+            return s.executeUpdate();
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not revoke the health report links of an agent", e);
+        }
+    }
+
+    @Override
+    public List<HealthReportLink> listByCreator(String userId) {
+        try (Connection c = connection();
+                PreparedStatement s = c.prepareStatement(
+                        "SELECT " + COLUMNS + " FROM health_report_links WHERE created_by = ? ORDER BY created_at_ms DESC, id")) {
+            s.setString(1, userId);
+            return read(s);
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not list health report links", e);
         }
     }
 

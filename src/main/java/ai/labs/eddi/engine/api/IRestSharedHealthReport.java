@@ -4,12 +4,14 @@
  */
 package ai.labs.eddi.engine.api;
 
+import io.vertx.core.http.HttpServerRequest;
 import jakarta.annotation.security.PermitAll;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -40,9 +42,10 @@ public interface IRestSharedHealthReport {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read a shared health report", description = "Unauthenticated: the token of an owner report link is the "
             + "credential. The agent's health over the link's period, limited to its sections, with the deployment's brand; no "
-            + "drill-down, no conversation ids, no user data. Rate-limited per link and per node.")
+            + "drill-down, no conversation ids, no user data. Rate-limited per link, per client for unknown tokens, and per node.")
     @APIResponse(responseCode = "200", description = "The report.")
-    @APIResponse(responseCode = "404", description = "No live link has this token (unknown, expired or revoked alike).")
+    @APIResponse(responseCode = "404", description = "No live link has this token (malformed, unknown, expired or revoked alike, or its "
+            + "creator no longer holds EDIT on the agent).")
     @APIResponse(responseCode = "429", description = "Too many requests; Retry-After says when to try again.")
-    Response readSharedReport(@PathParam("token") String token, @HeaderParam("Host") String host);
+    Response readSharedReport(@PathParam("token") String token, @HeaderParam("Host") String host, @Context HttpServerRequest request);
 }

@@ -48,6 +48,7 @@ public class MongoHealthReportLinkStore implements IHealthReportLinkStore {
         links.createIndex(Indexes.ascending("tokenHash"), new IndexOptions().name("idx_health_report_links_token").unique(true).background(true));
         links.createIndex(Indexes.ascending("agentId", "createdAt"), new IndexOptions().name("idx_health_report_links_agent").background(true));
         links.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_health_report_links_expires").background(true));
+        links.createIndex(Indexes.ascending("createdBy"), new IndexOptions().name("idx_health_report_links_creator").background(true));
     }
 
     /** For tests: a collection without index creation. */
@@ -60,7 +61,8 @@ public class MongoHealthReportLinkStore implements IHealthReportLinkStore {
         try {
             links.insertOne(new Document("_id", link.id()).append("agentId", link.agentId()).append("tokenHash", link.tokenHash())
                     .append("sections", link.sections()).append("period", link.period()).append("createdAt", date(link.createdAt()))
-                    .append("createdBy", link.createdBy()).append("expiresAt", date(link.expiresAt())));
+                    .append("createdBy", link.createdBy()).append("expiresAt", date(link.expiresAt()))
+                    .append("creatorTeams", link.creatorTeams()).append("creatorAdmin", link.creatorAdmin()));
         } catch (MongoException e) {
             throw new HealthStoreException("Could not store a health report link", e);
         }
@@ -98,6 +100,28 @@ public class MongoHealthReportLinkStore implements IHealthReportLinkStore {
     }
 
     @Override
+    public long deleteByAgent(String agentId) {
+        try {
+            return links.deleteMany(eq("agentId", agentId)).getDeletedCount();
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not revoke the health report links of an agent", e);
+        }
+    }
+
+    @Override
+    public List<HealthReportLink> listByCreator(String userId) {
+        try {
+            List<HealthReportLink> found = new ArrayList<>();
+            for (Document d : links.find(eq("createdBy", userId)).sort(Sorts.descending("createdAt"))) {
+                found.add(link(d));
+            }
+            return found;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not list health report links", e);
+        }
+    }
+
+    @Override
     public long deleteExpiredBefore(Instant before) {
         try {
             return links.deleteMany(lt("expiresAt", Date.from(before))).getDeletedCount();
@@ -127,6 +151,7 @@ public class MongoHealthReportLinkStore implements IHealthReportLinkStore {
         Date expires = d.getDate("expiresAt");
         return new HealthReportLink(d.getString("_id"), d.getString("agentId"), d.getString("tokenHash"), d.getList("sections", String.class),
                 d.getString("period"), created == null ? null : created.toInstant(), d.getString("createdBy"),
-                expires == null ? null : expires.toInstant());
+                expires == null ? null : expires.toInstant(), d.getList("creatorTeams", String.class),
+                Boolean.TRUE.equals(d.getBoolean("creatorAdmin")));
     }
 }

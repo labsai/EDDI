@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.health.HealthOutcomeViews;
 import ai.labs.eddi.engine.health.HealthOutcomes;
 import ai.labs.eddi.engine.health.HealthPeriods;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
+import ai.labs.eddi.engine.health.HealthAdminAudit;
 import ai.labs.eddi.engine.health.HealthProfiles;
 import ai.labs.eddi.engine.health.HealthProfiles.InvalidProfileException;
 import ai.labs.eddi.engine.health.HealthReportLinks;
@@ -84,6 +85,10 @@ public class RestAgentHealth implements IRestAgentHealth {
     @Inject
     HealthReportLinks reportLinks;
 
+    /** Audit-ledger records of profile saves and deletes. */
+    @Inject
+    HealthAdminAudit audit;
+
     /** Where the deployment is reachable, for a report link's URL. */
     @Inject
     SelfUrlResolver selfUrl;
@@ -110,6 +115,9 @@ public class RestAgentHealth implements IRestAgentHealth {
         try {
             HealthProfile saved = profiles.save(agentId, profile, access.callerName(), reports.autoPreset(agentId));
             LOGGER.infof("[HEALTH] '%s' saved the health profile of agent %s", sanitize(access.callerName()), sanitize(agentId));
+            if (audit != null) {
+                audit.profileSaved(access.callerName(), agentId);
+            }
             return Response.ok(saved, MediaType.APPLICATION_JSON_TYPE).build();
         } catch (InvalidProfileException e) {
             return Response.status(Response.Status.BAD_REQUEST).type(MediaType.APPLICATION_JSON_TYPE)
@@ -122,6 +130,9 @@ public class RestAgentHealth implements IRestAgentHealth {
         access.requireEdit(agentId);
         if (profiles.delete(agentId)) {
             LOGGER.infof("[HEALTH] '%s' deleted the health profile of agent %s", sanitize(access.callerName()), sanitize(agentId));
+            if (audit != null) {
+                audit.profileDeleted(access.callerName(), agentId);
+            }
         }
         return Response.noContent().build();
     }
@@ -173,6 +184,13 @@ public class RestAgentHealth implements IRestAgentHealth {
                     .entity(ErrorResponses.body("not_found", "No such report link")).build();
         }
         return Response.noContent().build();
+    }
+
+    @Override
+    public Response revokeAllReportLinks(String agentId) {
+        access.requireEdit(agentId);
+        long revoked = reportLinks.revokeAll(agentId, access.callerName());
+        return Response.ok(Map.of("revoked", revoked), MediaType.APPLICATION_JSON_TYPE).build();
     }
 
     @Override

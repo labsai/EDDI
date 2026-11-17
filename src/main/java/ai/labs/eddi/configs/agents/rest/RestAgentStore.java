@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.engine.health.HealthAgentCleanup;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.health.HealthConfigValidator;
 import ai.labs.eddi.engine.ratings.RatingConfigValidator;
@@ -37,6 +38,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
@@ -77,6 +79,14 @@ public class RestAgentStore implements IRestAgentStore {
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
+
+    /**
+     * Agent Health's administrative rows of a deleted agent — report links,
+     * profile, alert states. Field-injected and null-checked: the tests build this
+     * class by hand.
+     */
+    @Inject
+    Instance<HealthAgentCleanup> healthCleanup;
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -494,6 +504,11 @@ public class RestAgentStore implements IRestAgentStore {
         // Clearing first would strip a still-live Agent of the capabilities that
         // capabilityMatch rules and A2A discovery route on, with no error anywhere.
         capabilityRegistryService.unregister(id);
+
+        // Same reason: only once the delete went through. Never throws.
+        if (healthCleanup != null && healthCleanup.isResolvable()) {
+            healthCleanup.get().agentDeleted(id, Boolean.TRUE.equals(permanent));
+        }
 
         // Permanent deletes ONLY, and only for Agents that actually declare key
         // material.
