@@ -1,11 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { BarChart3, TriangleAlert } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { useApprovalSummary } from "@/hooks/use-hitl-oversight";
 import { duration, percent } from "@/components/oversight/format";
-import { OVERSIGHT_LIMITS, type ApprovalSummary, type AutonomyTier, type OversightQuery } from "@/lib/api/hitl-oversight";
+import { OVERSIGHT_LIMITS, type ApprovalSummary, type AutonomyTier, type OversightQuery } from "@eddi/app-kit/lib/api/hitl-oversight";
 
 function Tile({ label, value, testId, hint }: { label: string; value: string; testId: string; hint?: string }) {
   return (

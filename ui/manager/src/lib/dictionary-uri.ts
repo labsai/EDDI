@@ -1,4 +1,4 @@
-import { getResourceType } from "@/lib/api/resources";
+import { getResourceType } from "@eddi/app-kit/lib/api/resources";
 
 /**
  * The `eddi://` URI helpers for regular-dictionary references.

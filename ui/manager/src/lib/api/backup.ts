@@ -1,5 +1,5 @@
-import { api, SPACE_HEADER } from "../api-client";
-import { seg } from "./path-segment";
+import { api, SPACE_HEADER } from "@eddi/app-kit/lib/api-client";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
 
 // ==================== Export Types ====================
 

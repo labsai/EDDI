@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { listGroupOutcomes } from "@/lib/api/group-outcomes";
-import { getOutcomeAnalytics } from "@/lib/api/hitl-oversight";
+import { listGroupOutcomes } from "@eddi/app-kit/lib/api/group-outcomes";
+import { getOutcomeAnalytics } from "@eddi/app-kit/lib/api/hitl-oversight";
 
 export const OUTCOMES_KEY = ["group-outcomes"] as const;
 

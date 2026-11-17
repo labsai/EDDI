@@ -68,7 +68,7 @@ describe("session-log-store", () => {
     vi.useFakeTimers();
     try {
       vi.resetModules();
-      const logs = await import("@/lib/api/logs");
+      const logs = await import("@eddi/app-kit/lib/api/logs");
       const spy = vi
         .spyOn(logs, "createLogEventSource")
         .mockReturnValue({ addEventListener() {}, close() {} } as never);

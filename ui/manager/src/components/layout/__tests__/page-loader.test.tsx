@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderWithProviders } from "@/test/test-utils";
-import { PageLoader } from "@/components/layout/page-loader";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { PageLoader } from "@eddi/app-kit/components/layout/page-loader";
 
 describe("PageLoader", () => {
   it("renders skeleton placeholders", () => {

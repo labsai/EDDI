@@ -4,14 +4,18 @@
  */
 package ai.labs.eddi.ui;
 
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -120,6 +124,74 @@ class RestHtmlChatResourceTest {
 
         resource.urlTokenEnabled = true;
         assertEquals("window.__EDDI_CHAT__={urlTokenEnabled:true};", resource.fetchChatConfig().getEntity());
+    }
+
+    /**
+     * {@code /chat/embed.js}, the embed launcher (T2.9): the Chat UI build's
+     * standalone script, served as JavaScript (the deployment sends
+     * {@code X-Content-Type-Options: nosniff}, so any other type would be refused
+     * by the host page's browser) with an hour's caching — not immutable, because
+     * host pages hard-code the URL.
+     */
+    @Test
+    @DisplayName("embed.js serves the launcher from the Chat UI build as cacheable JavaScript")
+    void embedScriptIsServedAsJavaScript() {
+        byte[] script = "(function(){})();".getBytes(StandardCharsets.UTF_8);
+        withResource(RestHtmlChatResource.EMBED_SCRIPT_RESOURCE, script, () -> {
+            Response response = resource.fetchEmbedScript();
+
+            assertEquals(200, response.getStatus());
+            assertEquals("application/javascript;charset=UTF-8", response.getMediaType().toString().replace(" ", ""));
+            assertEquals("public, max-age=3600", response.getHeaderString("Cache-Control"));
+            assertArrayEquals(script, (byte[]) response.getEntity());
+        });
+    }
+
+    @Test
+    @DisplayName("embed.js answers 404 when the jar carries no UI (-DskipUi=true)")
+    void embedScriptMissingIsNotFound() {
+        withResource(RestHtmlChatResource.EMBED_SCRIPT_RESOURCE, null, () -> {
+            Response response = resource.fetchEmbedScript();
+
+            assertEquals(404, response.getStatus(), "no launcher must not read as the SPA shell or an empty script");
+            assertNull(response.getEntity());
+        });
+    }
+
+    /**
+     * The launcher's path is a literal, so JAX-RS prefers it to the
+     * {@code {path:.*}} catch-all that answers every other {@code /chat/...} with
+     * the widget's HTML — which a host page's {@code <script>} would refuse under
+     * nosniff.
+     */
+    @Test
+    @DisplayName("embed.js is a literal path that produces JavaScript, beside the SPA catch-all")
+    void embedScriptIsALiteralPath() throws Exception {
+        Method method = IRestHtmlChatResource.class.getDeclaredMethod("fetchEmbedScript");
+        assertEquals("embed.js", method.getAnnotation(Path.class).value());
+        assertArrayEquals(new String[]{"application/javascript"}, method.getAnnotation(Produces.class).value());
+    }
+
+    /**
+     * Run {@code body} with the thread's classloader answering {@code name} with
+     * {@code bytes} (null: missing).
+     */
+    private static void withResource(String name, byte[] bytes, Runnable body) {
+        ClassLoader previous = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(new ClassLoader(previous) {
+            @Override
+            public InputStream getResourceAsStream(String requested) {
+                if (!requested.equals(name)) {
+                    return super.getResourceAsStream(requested);
+                }
+                return bytes == null ? null : new ByteArrayInputStream(bytes);
+            }
+        });
+        try {
+            body.run();
+        } finally {
+            Thread.currentThread().setContextClassLoader(previous);
+        }
     }
 
     /**

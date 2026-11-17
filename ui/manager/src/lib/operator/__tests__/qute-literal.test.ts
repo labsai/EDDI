@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRODUCT_NAME_MAX } from "@/lib/brand-validation";
+import { PRODUCT_NAME_MAX } from "@eddi/app-kit/lib/brand-validation";
 import corpus from "./qute-literal-corpus.json";
 import { BODY_APP_CONTEXT } from "../context-block";
 import { escapeQuteLiterals, findUnescapedBraces } from "../qute-literal";

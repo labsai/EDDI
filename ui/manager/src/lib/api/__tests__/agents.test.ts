@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { parseResourceUri, getAgent, generateAgentSigningKey, revokeAgentSigningKey, type AgentDescriptor } from "@/lib/api/agents";
-import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { groupAgentsByName } from "@/hooks/use-agents";
-import { server } from "@/test/mocks/server";
+import { parseResourceUri, getAgent, generateAgentSigningKey, revokeAgentSigningKey, type AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { parseVersionFromLocation } from "@eddi/app-kit/lib/api/location-version";
+import { groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 describe("parseResourceUri", () => {
   it("parses standard agent resource URI", () => {

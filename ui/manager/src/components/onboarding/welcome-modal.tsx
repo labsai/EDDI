@@ -10,7 +10,7 @@ import {
   ArrowLeft,
   Sparkles,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
 const CAPABILITIES = [

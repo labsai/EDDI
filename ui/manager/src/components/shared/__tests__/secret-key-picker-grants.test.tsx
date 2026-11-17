@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { SecretKeyPicker } from "../secret-key-picker";
-import { AuthContext, GUEST_CONTEXT } from "@/components/auth/auth-context";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { AuthContext, GUEST_CONTEXT } from "@eddi/app-kit/components/auth/auth-context";
 
 /**
  * The restricted-key badge and the "not granted yet" note.

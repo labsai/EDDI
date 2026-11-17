@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { DiscussionInput } from "@/components/groups/discussion-input";
-import { DiscussionActions } from "@/components/groups/discussion-actions";
+import { DiscussionActions } from "@eddi/app-kit/components/groups/discussion-actions";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
-import { BoardInput } from "@/components/workforce/board-input";
-import type { GroupConversation, TranscriptEntry } from "@/lib/api/groups";
-import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
+import type { GroupConversation, TranscriptEntry } from "@eddi/app-kit/lib/api/groups";
+import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 
 /** A promise the test settles by hand — stands in for "the server answered". */
 function deferred<T>() {
@@ -54,21 +53,8 @@ describe("composers keep the draft until the request is accepted", () => {
     expect(input).toHaveValue("Keep me");
   });
 
-  it("BoardInput keeps the message when the send is refused", async () => {
-    const gate = deferred<boolean>();
-    const onSend = vi.fn(() => gate.promise);
-    const user = userEvent.setup();
-    renderWithProviders(<BoardInput onSend={onSend} />);
-
-    const box = screen.getByRole("textbox");
-    await user.type(box, "Plan the launch");
-    await user.click(screen.getByTestId("board-send"));
-    expect(box).toHaveValue("Plan the launch");
-
-    await act(async () => gate.resolve(false));
-    await waitFor(() => expect(box).not.toBeDisabled());
-    expect(box).toHaveValue("Plan the launch");
-  });
+  // Workforce's BoardInput holds the same contract; its test moved with it
+  // (ui/workforce/src/components/workforce/__tests__/board-input-draft.test.tsx).
 
   it("the follow-up composer keeps its question when the follow-up fails", async () => {
     const gate = deferred<boolean>();

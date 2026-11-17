@@ -149,6 +149,42 @@ class RestAgentEngineStreamingExtendedTest {
         }
 
         @Test
+        @DisplayName("onToolResult sends a tool_result event {tool, callId, status, durationMs, ok, summary}, JSON-escaped")
+        void onToolResultSendsEvent() throws Exception {
+            invokeSayStreaming();
+            var handler = captureHandler();
+
+            handler.onToolResult("weather", "c1", "error", 7L, "upstream said \"no\"\n");
+
+            verify(eventBuilder).name("tool_result");
+            var dataCaptor = ArgumentCaptor.forClass(String.class);
+            verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertEquals("weather", node.get("tool").asText());
+            assertFalse(node.get("ok").asBoolean());
+            assertEquals("upstream said \"no\"\n", node.get("summary").asText());
+            assertEquals("c1", node.get("callId").asText());
+            assertEquals("error", node.get("status").asText());
+            assertEquals(7, node.get("durationMs").asLong());
+            assertEquals(6, node.size(), "nothing but tool, callId, status, durationMs, ok and summary: " + node);
+        }
+
+        @Test
+        @DisplayName("onToolResult with no summary sends an empty one, never null")
+        void onToolResultNullSummary() throws Exception {
+            invokeSayStreaming();
+            var handler = captureHandler();
+
+            handler.onToolResult("calc", "c2", "ok", 1L, null);
+
+            var dataCaptor = ArgumentCaptor.forClass(String.class);
+            verify(eventBuilder).data(eq(String.class), dataCaptor.capture());
+            var node = MAPPER.readTree(dataCaptor.getValue());
+            assertTrue(node.get("ok").asBoolean());
+            assertEquals("", node.get("summary").asText());
+        }
+
+        @Test
         @DisplayName("onTaskComplete includes confidence in event")
         void onTaskCompleteIncludesConfidence() throws Exception {
             invokeSayStreaming();

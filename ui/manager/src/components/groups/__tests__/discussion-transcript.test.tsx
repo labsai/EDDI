@@ -1,9 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, fireEvent, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { DiscussionTranscript } from "../discussion-transcript";
-import type { GroupConversation } from "@/lib/api/groups";
-import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
+import type { GroupConversation } from "@eddi/app-kit/lib/api/groups";
+import type { GroupStreamState } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 
 const mockConversation: GroupConversation = {
   id: "conv-1",

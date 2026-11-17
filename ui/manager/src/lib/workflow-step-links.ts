@@ -6,7 +6,7 @@
  * can build the same link after it has saved a step.
  */
 
-import { getResourceTypeByStore } from "@/lib/api/resources";
+import { getResourceTypeByStore } from "@eddi/app-kit/lib/api/resources";
 
 /** Parse an eddi:// URI to extract the resource type slug and ID */
 export function parseExtensionUri(uri: string): { slug: string; id: string } | null {

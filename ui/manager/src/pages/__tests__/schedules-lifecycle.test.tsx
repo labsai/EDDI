@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { toast } from "sonner";
 import { screen, waitFor, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { SchedulesPage } from "@/pages/schedules";
-import { invalidScheduleReason } from "@/lib/api/schedules";
-import { ApiClientError } from "@/lib/api-client";
-import { server } from "@/test/mocks/server";
+import { invalidScheduleReason } from "@eddi/app-kit/lib/api/schedules";
+import { ApiClientError } from "@eddi/app-kit/lib/api-client";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 function renderSchedules() {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { clusterAccess } from "@/lib/cluster-access";
 import { formatBytes, formatDuration, activityGroup } from "@/lib/cluster-labels";
 import { mergeActivity, ACTIVITY_LIMIT, withTimeout } from "@/hooks/use-cluster";
-import type { ActivityEvent } from "@/lib/api/cluster";
+import type { ActivityEvent } from "@eddi/app-kit/lib/api/cluster";
 
 describe("clusterAccess", () => {
   it("admin may view and act", () => {

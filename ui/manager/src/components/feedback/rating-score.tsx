@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Star, ThumbsDown, ThumbsUp } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { RatingScale } from "@/lib/api/ratings";
+import { cn } from "@eddi/app-kit/lib/utils";
+import type { RatingScale } from "@eddi/app-kit/lib/api/ratings";
 
 /**
  * A score as people gave it: filled stars out of five, or a thumb. Low scores

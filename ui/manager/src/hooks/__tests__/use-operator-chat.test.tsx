@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { SSEEvent } from "@/lib/api/chat";
-import type { SimpleConversationMemorySnapshot } from "@/lib/api/conversations";
+import type { SSEEvent } from "@eddi/app-kit/lib/api/chat";
+import type { SimpleConversationMemorySnapshot } from "@eddi/app-kit/lib/api/conversations";
 
 /**
  * Drives the streaming and polling paths with fixtures each test controls via
@@ -32,8 +32,8 @@ const h = vi.hoisted(() => ({
   duringStream: null as null | (() => void),
 }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     startConversation: vi.fn(async () => "conv-1"),
@@ -53,8 +53,8 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/api/conversations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/conversations")>();
+vi.mock("@eddi/app-kit/lib/api/conversations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/conversations")>();
   return {
     ...actual,
     getSimpleConversationLog: vi.fn(async (_conv: string, returnDetailed?: boolean) => {
@@ -76,8 +76,8 @@ vi.mock("@/lib/api/conversations", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/api/hitl", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/hitl")>();
+vi.mock("@eddi/app-kit/lib/api/hitl", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/hitl")>();
   return {
     ...actual,
     resumeConversation: vi.fn(async (conversationId: string, decision: unknown) => {
@@ -215,7 +215,7 @@ describe("a send rejected 409 while already paused", () => {
       await result.current.send("do a thing");
     });
 
-    const { resumeConversation } = await import("@/lib/api/hitl");
+    const { resumeConversation } = await import("@eddi/app-kit/lib/api/hitl");
     vi.mocked(resumeConversation).mockRejectedValueOnce({ status: 500, message: "backend exploded" });
     await act(async () => {
       await result.current.resolveApproval("APPROVED");
@@ -1170,7 +1170,7 @@ describe("resolveApproval — reconciling the resumed turn", () => {
 
   it("reports resumeConversation failing as resolveError, without polling", async () => {
     const { result } = await pausedHook();
-    const { resumeConversation } = await import("@/lib/api/hitl");
+    const { resumeConversation } = await import("@eddi/app-kit/lib/api/hitl");
     vi.mocked(resumeConversation).mockRejectedValueOnce({ status: 500, message: "backend exploded" });
 
     await act(async () => {
@@ -1507,7 +1507,7 @@ describe("attachments on a turn", () => {
     await act(async () => {
       await result.current.send("hi");
     });
-    const { startConversation } = await import("@/lib/api/chat");
+    const { startConversation } = await import("@eddi/app-kit/lib/api/chat");
     expect(vi.mocked(startConversation)).toHaveBeenCalledTimes(1);
   });
 });
@@ -1660,7 +1660,7 @@ describe("attachment preview lifecycle in the store", () => {
 
 describe("ensureConversation concurrency", () => {
   it("two concurrent calls share one create — the second must not orphan the first gesture's upload", async () => {
-    const { startConversation } = await import("@/lib/api/chat");
+    const { startConversation } = await import("@eddi/app-kit/lib/api/chat");
     vi.mocked(startConversation).mockClear();
 
     const { result } = renderHook(() => useOperatorChat(config()));
@@ -1681,7 +1681,7 @@ describe("ensureConversation concurrency", () => {
   });
 
   it("a reset() during the in-flight create does not resurrect the conversation", async () => {
-    const { startConversation } = await import("@/lib/api/chat");
+    const { startConversation } = await import("@eddi/app-kit/lib/api/chat");
     vi.mocked(startConversation).mockClear();
     let release: (id: string) => void = () => {};
     vi.mocked(startConversation).mockImplementationOnce(

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChatHistory } from "../chat-history";
-import { useChatStore } from "@/hooks/use-chat";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChatHistory } from "@eddi/app-kit/components/chat/chat-history";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("ChatHistory", () => {
