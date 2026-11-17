@@ -891,7 +891,7 @@ eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the s
 eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
 eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
 eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
-eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
+eddi_alerts_dropped_total           # Alert work dropped because a queue was full; tag: reason (queue_full: evaluation dropped; delivery_queue_full: first send left to the maintenance pass)
 eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
 ```
 
@@ -909,8 +909,12 @@ eddi_gdpr_guard_self_deletions_total        # Rows an async writer removed again
 eddi_gdpr_guard_pending_removals_total      # Pending removals of erased rows; tag: outcome (recorded|cleared|record_failed)
 eddi_gdpr_guard_drain_seconds               # Timer: how long an erasure or permanent conversation delete waited for this node's async writers (_count, _sum, _max)
 eddi_gdpr_guard_drain_timeouts_total        # Drain barriers an async writer did not pass within eddi.gdpr.drain-timeout; tag: writer
+eddi_gdpr_guard_key_mismatch_total          # The tombstone key did not match the stored check value; every guarded operation fails closed until it is restored
 ```
 
+`eddi_gdpr_guard_key_mismatch_total` must stay at zero: any increase means the
+tombstone key changed and erasures are failing — see
+[The tombstone key](gdpr-compliance.md#the-tombstone-key) for the operator action.
 `check_failed` and `record_failed` should stay at zero: the first means the
 tombstone store could not be read and a write was skipped to be safe, the second
 that a row of an erased user could neither be removed nor recorded for a retry (the

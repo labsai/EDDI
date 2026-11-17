@@ -19397,7 +19397,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — `recorded` minus `cleared` is the backlog that keeps erasures failing until it is retried; `record_failed` should stay at zero.",
+          "description": "`eddi_gdpr_guard_writes_skipped_total` by `reason` — async writes (alert values and excerpts) not stored because their user or conversation was erased; `check_failed` means the tombstone store could not be read and should stay at zero. `eddi_gdpr_guard_self_deletions_total` — rows removed again because an erasure started while they were written. `eddi_gdpr_guard_pending_removals_total` by `outcome` — `recorded` minus `cleared` is the backlog that keeps erasures failing until it is retried; `record_failed` should stay at zero. `eddi_gdpr_guard_key_mismatch_total` must stay at zero: a rise means the tombstone key changed and every guarded write and erasure fails closed until it is restored.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -19437,6 +19437,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "pending {{outcome}}"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(increase(eddi_gdpr_guard_key_mismatch_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "key mismatch"
             }
           ],
           "fieldConfig": {

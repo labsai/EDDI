@@ -360,8 +360,14 @@ Alert work waits in a queue, so content captured before an erasure can reach the
 store after it. Alerting therefore takes part in the
 [erasure guarantee for asynchronously written data](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data):
 the erasure first writes durable tombstones of the user and of their conversations,
-then waits, on every node, until the alert work queued before them has run (the
-alert worker's queue is the drain barrier). An `OUTPUT_MATCH` value of an erased
+then waits, on every node, until the alert work queued before them has been
+written (the alert worker's queue is the drain barrier). Only the write is waited
+for: the first delivery of a fresh alert runs on a separate delivery stage
+(`eddi-alerts-delivery-*` threads), which checks the guard again right before the
+send, so a slow Slack or webhook call never holds an erasure back. When that stage's
+queue is full the send is left to the maintenance pass (the event was stored with
+its retry time a claim lease ahead), counted as
+`eddi_alerts_dropped_total{reason="delivery_queue_full"}`. An `OUTPUT_MATCH` value of an erased
 conversation, or captured before the user's erasure, is not stored — that alert
 still fires, without the value. A rating alert of an erased user or conversation is
 dropped altogether: no event is written or sent. A queued rating alert also reads
@@ -373,9 +379,18 @@ delivered; if that removal fails, a durable pending removal keeps the erasure's
 queue, and hold back only content captured *before* the erasure, so a later
 conversation of a reused id is not affected.
 
+A rating alert that stores a comment excerpt also stores the rater as an internal,
+keyed subject (`k1:` and an HMAC under the tombstone key — never the user id), so the
+rater's erasure finds, blanks and verifies those excerpts directly, even when the
+ratings themselves are already gone. When the key is unavailable the alert is stored
+without the excerpt.
+
 A **permanent conversation delete** blanks every `OUTPUT_MATCH` value stored from
 that conversation, with the same guarantee: tombstone, drain on every node, blank,
 verify — and the delete fails (and deletes nothing else) when any of it fails.
+Rating comment excerpts are deliberately **kept** by a conversation delete: a rating
+outlives its conversation, and its excerpt follows the rating — it is blanked when
+the rating or the rater is erased.
 
 **No send starts with erased content once an erasure has completed.** Every send —
 the first delivery and each retry, on any node — first takes a short claim on the

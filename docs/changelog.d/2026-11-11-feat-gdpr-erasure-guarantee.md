@@ -54,6 +54,30 @@ docs: [GDPR](../gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-writ
 [Alerts](../alerts.md), [Clustering](../clustering.md), [Configuration](../configuration-reference.md),
 [Metrics](../metrics.md).
 
+### Review fixes
+
+- **Primary reads (MongoDB).** The tombstone, pending-removal and meta collections read
+  the primary with majority read concern and write with majority; the alert store's
+  verification counts and the new `holdsPersonalContent` read-back do the same, and so
+  does the rating read alert work uses to detect an erased rating.
+- **Tombstone key outside the database** when the vault is configured (HKDF subkey of
+  the vault's KEK-wrapped deployment key, `VaultSecretProvider.deploymentSubkey`); a
+  stored check value makes a changed or lost key fail closed (ERROR,
+  `eddi_gdpr_guard_key_mismatch_total`) instead of silently not matching.
+- **Delivery out of the barrier** (`AlertDeliveryStage`): the barrier waits for the
+  guarded write only; the send re-checks the guard first.
+- **Rating excerpts** carry a keyed rater subject and are blanked and verified with
+  the rater; they survive a conversation delete with their rating (documented).
+- The database's write time also counts for the user tombstone's cut-off; the clock
+  assumption, every residual limit and the old-coordinator rolling-upgrade case are
+  documented; a peer warns about a stop from a node without the guarantee.
+- Agent-test purges skip the guard; the drain shares one deadline across writers; one
+  `Mac` per thread; PostgreSQL DDL tolerates a concurrent `CREATE`.
+- **Archive edit:** the link to the removed `AlertErasureFence.java` in
+  `docs/changelog/2026-10.md` became a code span. Archives are otherwise never edited;
+  this one had to change because its link target was deleted and
+  `DocumentationLinksTest` fails on a dead link.
+
 ### What's next
 
 Agent Health (stacked PR) registers an `AsyncErasureWriter` for its turn/outcome rows
@@ -63,7 +87,11 @@ and calls `beforeWrite`/`afterWrite`/`verifyUserErased` exactly as the GDPR guid
 ```decision-log
 | 2026-11-11 | Async per-user writes are guarded by durable tombstones + a drain barrier + verification; an erasure that cannot ensure "none can be written later" fails a step | Alert events queued before an erasure could land after it; the node-local fence was best effort | Keeping the fence with a longer TTL; deleting by a later sweep only; blocking erasure until queues empty without tombstones |
 | 2026-11-11 | User tombstones are time-scoped (content captured up to `tombstone-clock-skew` after the erasure is refused), conversation tombstones are absolute | A reused user id must be able to produce new data; a deleted conversation never comes back | Absolute user tombstones for 400 days |
-| 2026-11-11 | Tombstone user key = HMAC(per-deployment salt, SHA-256(userId)) | A plain SHA-256 of an e-mail is reversible by dictionary; nodes only receive the SHA-256 | The audit-keyed pseudonym (its key can rotate, which would make tombstones unreachable) |
+| 2026-11-11 | Tombstone user key = HMAC(key, SHA-256(userId)); the key is an HKDF subkey of the vault's KEK-wrapped deployment key when a vault is configured, else a DB-stored salt; a stored check value makes a changed key fail closed | A plain SHA-256 of an e-mail is reversible by dictionary; a key stored next to the tombstones only protects a dump of that table; a silently changed key would make every tombstone stop matching | The audit-keyed pseudonym (its key can rotate); a subkey of the KEK itself (changes on KEK rotation) |
 | 2026-11-11 | No cache on tombstone reads | A cached "not erased" could miss a tombstone written before a barrier completed | A TTL cache invalidated by broadcast |
+| 2026-11-17 | The drain barrier covers only the guarded write; first alert deliveries run on a separate stage that re-checks the guard before sending | A slow webhook or an alert storm would otherwise fail every erasure and conversation delete | Waiting for deliveries with a longer timeout |
+| 2026-11-17 | Tombstone, pending-removal and verification reads on MongoDB go to the primary with majority concern | The client reads `nearest()`; a lagging secondary could answer "not erased" or "0 rows left" | Relying on the client default |
+| 2026-11-17 | Rating comment excerpts carry a keyed rater subject and are erased with the rater, but survive a conversation delete | Ratings outlive their conversation and the excerpt follows the rating | Blanking excerpts on conversation delete |
+| 2026-11-17 | Agent-test purges skip the tombstone and the cluster drain | Their user is synthetic; a drain per test conversation would tie every test run to the slowest node | Batching the drains |
 | 2026-11-11 | Retention-driven conversation deletion runs no barrier | It only deletes conversations ended and untouched for at least the retention period; nothing of theirs can be queued, and their alert events age out on their own retention | Running the cluster barrier per retained conversation |
 ```

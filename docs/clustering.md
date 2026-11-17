@@ -338,7 +338,10 @@ While nodes of a release without the erasure drain barrier are still in the clus
 erasure reports `clusterStop` failed (their `gdpr-stop` reply carries no `drained: true`) and
 a permanent conversation delete fails (they have no `erasure-drain` handler): neither can be
 guaranteed while such a node may still write a queued row. Re-run them once the rollout
-finished.
+finished. The reverse is not caught by a failure: an erasure *run on* an older node writes
+no tombstones, so the late writes of the upgraded nodes are not guarded — they log a WARN
+when that erasure's stop reaches them. **Upgrade every node before relying on the erasure
+guarantee**, and re-run erasures made during the rollout.
 
 ### Upgrading from the build-profile NATS coordinator
 
@@ -523,8 +526,14 @@ hand. None of them is part of the normal build or a required check.
   presence view read when the erasure starts. A node that is running but cut off from NATS
   is not among them; work it queued before the erasure writes after the tombstones and so
   removes its own row again (`afterWrite`) — or leaves a pending removal, retried every five
-  minutes — possibly after the erasure has answered. See
-  [GDPR](gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-written-data).
+  minutes — possibly after the erasure has answered. If on such a node the row can neither
+  be removed nor the pending removal recorded (the database unreachable for both), the row
+  stays until alert retention deletes it, and no re-run is blocked by it
+  (`eddi_gdpr_guard_pending_removals_total{outcome="record_failed"}`). A crashed node stays
+  in the presence view until its entry expires and fails every erasure and permanent
+  conversation delete until then — a failure, not a leak. The time half of a user tombstone
+  assumes node clocks agree within `eddi.gdpr.tombstone-clock-skew` (run NTP). All limits:
+  [GDPR](gdpr-compliance.md#residual-limits-of-the-erasure-guarantee).
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's
