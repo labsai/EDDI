@@ -54,8 +54,12 @@ class TeamCadenceApprovalWritebackTest {
         workspaceStore = mock(IGroupWorkspaceStore.class);
         when(workspaceStore.casRunningDiscussion(any())).thenReturn(true);
         groupStore = mock(IAgentGroupStore.class);
+        var groupConversationService = mock(GroupConversationService.class);
+        // These tests are about the writeback, not signing: the records show a task as
+        // stored.
+        when(groupConversationService.recordedTask(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         service = new TeamCadenceService(workspaceStore, mock(IGroupConversationStore.class),
-                mock(GroupConversationService.class), mock(ITemplatingEngine.class), new SimpleMeterRegistry(),
+                groupConversationService, mock(ITemplatingEngine.class), new SimpleMeterRegistry(),
                 TeamCadenceService.DEFAULT_CLAIM_TTL);
         service.initMetrics();
         service.groupStore = groupStore;
