@@ -78,6 +78,12 @@ docs: [GDPR](../gdpr-compliance.md#the-erasure-guarantee-for-asynchronously-writ
   this one had to change because its link target was deleted and
   `DocumentationLinksTest` fails on a dead link.
 
+### Still open
+
+- The MongoDB primary/majority-read behaviour is covered by an integration test (MongoErasureTombstoneStoreIT) that needs Docker and was not run locally; CI is the check.
+- Nodes of an older release do not write tombstones: an erasure they coordinate is not guarded (a peer logs a warning); upgrade every node, then re-run it.
+- The residual limits (clock assumption, rows written by nodes that were offline during an erasure) are documented in the GDPR guide, not closed.
+
 ### What's next
 
 Agent Health (stacked PR) registers an `AsyncErasureWriter` for its turn/outcome rows
