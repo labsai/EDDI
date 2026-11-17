@@ -1314,19 +1314,51 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public void raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
+    public long raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         // GREATEST: never lowers; `_rev` is deliberately not touched — see
-        // IConversationMemoryStore#raiseFence.
-        String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{_fence}', to_jsonb(?::bigint)) "
+        // IConversationMemoryStore#raiseFence. Written only when it moves (a lease
+        // handed to its next turn raises the same fence again); otherwise the stored
+        // fence is read, since the caller must know whether the raise took.
+        String raise = "UPDATE conversation_memories SET data = jsonb_set(data, '{_fence}', to_jsonb(?::bigint)) "
                 + "WHERE id = ?::uuid AND COALESCE((data->>'_fence')::bigint, 0) < ?";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setLong(1, fence);
-            ps.setString(2, conversationId);
-            ps.setLong(3, fence);
-            ps.executeUpdate();
+        String read = "SELECT (data->>'_fence')::bigint FROM conversation_memories WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement(raise)) {
+                ps.setLong(1, fence);
+                ps.setString(2, conversationId);
+                ps.setLong(3, fence);
+                if (ps.executeUpdate() > 0) {
+                    return fence;
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(read)) {
+                ps.setString(1, conversationId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        long stored = rs.getLong(1);
+                        return rs.wasNull() ? fence : stored;
+                    }
+                    return fence; // no document: nothing to fence
+                }
+            }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to raise the fence of conversation " + conversationId, e);
+        }
+    }
+
+    @Override
+    public boolean liftFence(String conversationId, long expected, long lifted) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{_fence}', to_jsonb(?::bigint)) "
+                + "WHERE id = ?::uuid AND (data->>'_fence')::bigint = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, lifted);
+            ps.setString(2, conversationId);
+            ps.setLong(3, expected);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to lift the fence of conversation " + conversationId, e);
         }
     }
 

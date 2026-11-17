@@ -185,6 +185,41 @@ class KvLeaseManagerTest {
     }
 
     @Test
+    @DisplayName("confirmHeld asks the bucket: true while the key is this lease, false once it was taken over or released")
+    void confirmHeldAsksTheBucket() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        KvLeaseManager b = manager("b", "b1");
+        LeaseHandle first = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        assertTrue(first.confirmHeld());
+
+        // an administrator force-releases it and b takes it before a's heartbeat
+        // notices
+        long revision = kv.getConsistent("c.conv1").orElseThrow().revision();
+        assertTrue(kv.delete("c.conv1", revision));
+        LeaseHandle second = get(b.acquire("conv1", Duration.ofSeconds(1)));
+        assertFalse(first.confirmHeld(), "the key holds b's lease now");
+        assertTrue(second.confirmHeld());
+
+        b.release(second);
+        assertFalse(second.confirmHeld(), "a released lease is never confirmed");
+    }
+
+    @Test
+    @DisplayName("liftFence only ever raises the fence, and leaves the renewal revision alone")
+    void liftFenceOnlyRaises() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        long acquired = lease.fence();
+        lease.liftFence(acquired + 413);
+        assertEquals(acquired + 413, lease.fence());
+        lease.liftFence(acquired);
+        assertEquals(acquired + 413, lease.fence(), "never lowered");
+        assertTrue(lease.confirmHeld(), "the KV value is untouched by the lift");
+        a.release(lease);
+        assertTrue(a.peek("conv1").isEmpty(), "the release deletes at the KV revision, not at the lifted fence");
+    }
+
+    @Test
     @DisplayName("a held lease parks the second node, which wakes on the release notification with a larger fence")
     void contendedLeaseWakesOnRelease() throws Exception {
         KvLeaseManager a = manager("a", "a1");

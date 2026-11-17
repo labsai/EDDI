@@ -445,16 +445,49 @@ public interface IConversationMemoryStore {
      * when the successor starts closes that gap: from then on the predecessor's
      * write is refused. No-op for stores without fencing and for a missing
      * document.
+     * <p>
+     * The answer is the document's fence after the raise. Above {@code fence} it
+     * means the raise did not take: either a newer holder started (this lease is
+     * gone), or the lease's revision is below a fence handed out from a revision
+     * range the KV bucket no longer has — a JetStream stream-leader change can
+     * acknowledge writes at sequences its successor never had, and reissue them.
+     * The caller must not run its turn on such a fence: every write would be
+     * refused after the reply had gone out. See {@link #liftFence}.
      *
      * @param conversationId
      *            the conversation
      * @param fence
      *            the lease's fencing token
+     * @return the stored fence after the raise; {@code fence} itself for stores
+     *         without fencing and for a missing document
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    default void raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
+    default long raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
         // single-node stores have nothing to fence
+        return fence;
+    }
+
+    /**
+     * Cluster mode: moves the document's {@code _fence} from exactly
+     * {@code expected} to {@code lifted} — a compare-and-set, so of two holders
+     * lifting from the same value only one wins, and a raise that landed in between
+     * makes it miss.
+     * <p>
+     * Only for a holder that has just confirmed with the lease bucket's stream
+     * leader that it still holds its lease, after {@link #raiseFence} answered a
+     * fence above its own: no holder after it can exist, so the stored fence came
+     * from a revision range the bucket lost, and its holder — if it still runs —
+     * must be fenced out by a value above it.
+     *
+     * @return {@code true} when the fence was {@code expected} and is now
+     *         {@code lifted}
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    default boolean liftFence(String conversationId, long expected, long lifted) throws IResourceStore.ResourceStoreException {
+        // single-node stores have nothing to fence
+        return true;
     }
 
     /**
