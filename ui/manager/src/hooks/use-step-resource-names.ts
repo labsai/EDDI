@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { getDescriptor } from "@/lib/api/descriptors";
-import { parseResourceUri } from "@/lib/api/agents";
+import { getDescriptor } from "@eddi/app-kit/lib/api/descriptors";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 
 /** The resource a workflow step's config URI names, or null when it names none. */
 export function stepResourceRef(uri: unknown): { id: string; version: number } | null {

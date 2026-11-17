@@ -9,5 +9,11 @@
     "moduleDetection": "force",
     "noEmit": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "eslint.config.js", "scripts/vite-plugin-brand.d.mts"]
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.js",
+    "../scripts/vite-plugin-brand.d.mts",
+    "../scripts/vite-backend-proxy.d.mts"
+  ]
 }

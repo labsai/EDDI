@@ -70,6 +70,24 @@ export interface AgentConversationOptions {
   environment?: string;
   /** A rerun replaced this step's reply: a rating given to the old one no longer applies. */
   onStepRerun?: (stepIndex: number) => void;
+  /**
+   * After Stop, when to re-read the conversation to learn whether the turn
+   * really stopped (milliseconds after the cancel, one read each). `/cancel`
+   * stops a running turn only on the pod running it (docs/hitl.md); in a
+   * cluster the turn can run on, and its reply and tool effects still count.
+   * When a read shows the turn kept going, a notice says so and the reply is
+   * shown. Off by default; the apps pass `STOP_VERIFY_DELAYS_MS`.
+   */
+  stopVerifyDelaysMs?: readonly number[];
+  /**
+   * When a streamed turn's connection drops after part of the reply arrived,
+   * re-read the conversation at these delays (milliseconds, one read each)
+   * until the turn settles on the server, showing `reconnecting` meanwhile;
+   * the settled reply then replaces the partial one, as a `done` would. Off
+   * (the default) or after the last delay, the turn ends as a dropped
+   * connection, as before.
+   */
+  reconnectDelaysMs?: readonly number[];
 
   /* ─── Host hooks (phase 3c): how a host with its own store and its own copy
      drives the same turn loop. Every one is optional; without them the
@@ -174,7 +192,15 @@ export interface TurnFailureContext {
 
 /** How `send` ended. `failed` and `refused` carry what happened. */
 export type TurnResult =
-  | { outcome: "sent" | "ignored" }
+  | {
+      outcome: "sent";
+      /**
+       * The stream ended without its `done`, and a later read showed the turn
+       * settled on the server; its outcome was applied from that read.
+       */
+      recovered?: boolean;
+    }
+  | { outcome: "ignored" }
   | { outcome: "refused" | "failed"; failure: TurnFailure };
 
 /** A file sent with a turn: what the context names, and what the bubble shows. */
@@ -217,10 +243,62 @@ interface TurnContext {
   doneUnreadable: boolean;
   /** An error the stream reported, kept for the host to present once the stream ends. */
   failure: TurnFailure | null;
+  /**
+   * The mark of the latest STORED step before this turn (see `latestStepMark`),
+   * or null while it is not known. The backend keeps a running say turn in
+   * memory only and stores it when it completes, so a read during the turn
+   * answers READY with the PREVIOUS step: only a read whose latest step differs
+   * from this mark provably contains this turn.
+   */
+  baseline: string | null;
+  /**
+   * Settles once the baseline read, issued as the turn is sent, has answered
+   * (or failed). It is never early: it went out before the turn could be
+   * stored. If it is served late enough to see this turn's own step, the mark
+   * matches every later read and nothing is proven, which errs on the safe side.
+   */
+  baselineRead: Promise<void> | null;
 }
 
 function newTurn(stateBeforeSend: ConversationState | null, userMessageId: string | null = null): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false, failure: null };
+  return {
+    tokenCount: 0,
+    stateBeforeSend,
+    userMessageId,
+    announcedPause: false,
+    doneUnreadable: false,
+    failure: null,
+    baseline: null,
+    baselineRead: null,
+  };
+}
+
+/**
+ * A stream that closed, without an error, after part of the reply but before
+ * its `done`. The turn is handled as a dropped stream; a host's `presentFailure`
+ * can tell this case by the failure's `error`.
+ */
+export class StreamEndedError extends Error {
+  constructor() {
+    super("The stream closed before the turn finished");
+    this.name = "StreamEndedError";
+  }
+}
+
+/**
+ * What identifies the latest stored step in a read: the step's timestamp and
+ * its entries' keys and timestamps. A current-step read carries exactly that
+ * step, so two reads with the same mark saw the same stored step. Null when the
+ * read carries no step to tell.
+ */
+export function latestStepMark(snapshot: Partial<ConversationSnapshot> | null | undefined): string | null {
+  const steps = snapshot?.conversationSteps;
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const step = steps[steps.length - 1];
+  if (!step) return null;
+  const entries = Array.isArray(step.conversationStep) ? step.conversationStep : [];
+  if (!step.timestamp && entries.length === 0) return null;
+  return JSON.stringify([step.timestamp ?? null, entries.map((e) => [e.key, e.timestamp ?? null])]);
 }
 
 function uid(prefix: string): string {
@@ -249,6 +327,26 @@ export function makeNotice(content: string): ConversationMessage {
 
 function streamingPlaceholder(): ConversationMessage {
   return { id: uid("agent"), role: "agent", content: "", timestamp: Date.now(), isStreaming: true };
+}
+
+/** The `stopVerifyDelaysMs` the apps pass: one read soon after Stop, one a little later. */
+export const STOP_VERIFY_DELAYS_MS: readonly number[] = [1500, 5000];
+
+/** The `reconnectDelaysMs` the apps pass: about half a minute of re-reads. */
+export const RECONNECT_DELAYS_MS: readonly number[] = [1000, 2000, 4000, 8000, 15000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** States a stopped turn may be in: it did stop, or the conversation ended. */
+const STOPPED_STATES: ReadonlySet<string> = new Set(["EXECUTION_INTERRUPTED", "ENDED"]);
+
+/** An error's HTTP status: @eddi/core's ApiError, or a host client's error that carries one. */
+function statusOf(err: unknown): number | null {
+  if (err instanceof ApiError) return err.status;
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : null;
 }
 
 function isAbortError(e: unknown): boolean {
@@ -309,6 +407,8 @@ export class AgentConversation {
    * it, so this is what tells them a newer turn now owns the view.
    */
   private turnsSent = 0;
+  /** The turn in flight, so Stop can tell its own step from the one before it. */
+  private activeTurn: TurnContext | null = null;
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
@@ -950,6 +1050,8 @@ export class AgentConversation {
     /** True once Stop or New conversation has taken this turn over. */
     const stopped = () => this.abort !== abort;
     const turn = newTurn(this.state.conversationState, turnId);
+    this.activeTurn = turn;
+    if (conversationId && transport.mode !== "local") this.readBaseline(conversationId, turn);
     const failureContext: TurnFailureContext = {
       conversationId,
       userMessageId: turnId,
@@ -1003,9 +1105,28 @@ export class AgentConversation {
       // Release this turn's record; only the failure paths deleted it.
       this.pendingTurns.delete(turnId);
       if (this.abort === abort) this.abort = null;
+      if (this.activeTurn === turn) this.activeTurn = null;
       if (this.isCurrent(sendGen)) this.options.onTurnEnd?.();
     }
     return result;
+  }
+
+  /**
+   * Read the latest stored step as the turn is sent, so a later read can tell
+   * whether it holds THIS turn (see `TurnContext.baseline`). Only when a check
+   * needs it: following a dropped stream, or verifying Stop. Not awaited — the
+   * send does not wait on it.
+   */
+  private readBaseline(conversationId: string, turn: TurnContext): void {
+    if (!this.options.reconnectDelaysMs?.length && !this.options.stopVerifyDelaysMs?.length) return;
+    turn.baselineRead = this.transport.read(conversationId, true).then(
+      (snapshot) => {
+        turn.baseline = latestStepMark(snapshot);
+      },
+      () => {
+        // Unknown: no later read can prove the turn settled, so none is trusted.
+      },
+    );
   }
 
   /** Apply a turn answered by one snapshot: its reply, then why it failed, if it did. */
@@ -1080,6 +1201,14 @@ export class AgentConversation {
     // Past this point everything belongs to the turn just read; a swapped
     // conversation abandons it, safety net included.
     if (!this.isCurrent(sendGen)) return { outcome: "sent" };
+    // The stream closed cleanly after part of the reply, but without its
+    // `done`: a proxy cut it, say. That reply may be truncated and the turn may
+    // still be running, so it is a dropped stream like any other — followed,
+    // and reported if it never settles — rather than the part on screen
+    // passing for the whole answer.
+    if (!streamDone && !stopped() && turn.tokenCount > 0 && !turn.failure && this.options.reconnectDelaysMs?.length) {
+      throw new StreamEndedError();
+    }
     if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
 
     let result: TurnResult = { outcome: "sent" };
@@ -1215,6 +1344,15 @@ export class AgentConversation {
     // reset the UI, and the abort must not be reported as a failure.
     if (transport.mode !== "local" && stopped()) return { outcome: "sent" };
 
+    // The connection dropped after the turn was accepted and part of the reply
+    // arrived: the turn may well still be running on the server. Follow it
+    // before calling it lost.
+    if (status === null && turn.tokenCount > 0 && conversationId && this.options.reconnectDelaysMs?.length) {
+      const followed = await this.followDroppedTurn(conversationId, sendGen, turn, stopped);
+      if (followed === "applied") return { outcome: "sent", recovered: true };
+      if (followed === "taken" || !this.isCurrent(sendGen) || stopped()) return { outcome: "sent" };
+    }
+
     // Keep the send locked while the host presents the failure (it may await a
     // read); clear the processing state only once it has finished.
     const handled = await this.presentHostFailure(failure, failureContext);
@@ -1326,6 +1464,58 @@ export class AgentConversation {
       }
     }
     return result;
+  }
+
+  /**
+   * Re-read a turn whose stream dropped until it settles on the server, then
+   * apply it as its `done` would have been.
+   *
+   * A read is trusted only when it provably holds THIS turn: its latest step
+   * differs from the one stored before the turn was sent (`turn.baseline`).
+   * The backend keeps a running say turn in memory and stores it only when it
+   * completes, so every read during the turn answers READY with the PREVIOUS
+   * step — taking that for the outcome replaced the partial reply with the
+   * previous answer and called the turn finished.
+   *
+   * @returns `applied` when the settled turn was applied, `taken` when Stop or
+   *   a new conversation took the turn over meanwhile, `unsettled` when no
+   *   read proved it settled within `reconnectDelaysMs` (or nothing could be
+   *   proven, the baseline being unknown).
+   */
+  private async followDroppedTurn(
+    conversationId: string,
+    sendGen: number,
+    turn: TurnContext,
+    stopped: () => boolean,
+  ): Promise<"applied" | "taken" | "unsettled"> {
+    const taken = () => !this.isCurrent(sendGen) || stopped();
+    this.dispatch({ type: "SET_RECONNECTING", value: true });
+    try {
+      await turn.baselineRead;
+      if (taken()) return "taken";
+      // Without the step before the turn, no read can show the turn settled.
+      if (turn.baseline === null) return "unsettled";
+      for (const delay of this.options.reconnectDelaysMs ?? []) {
+        await sleep(delay);
+        if (taken()) return "taken";
+        let snapshot: Partial<ConversationSnapshot> | undefined;
+        try {
+          snapshot = await this.transport.read(conversationId, true);
+        } catch {
+          continue; // still offline: try again at the next delay
+        }
+        if (taken()) return "taken";
+        const mark = latestStepMark(snapshot);
+        // Still the step before this turn: the turn is running (or was never stored).
+        if (mark === null || mark === turn.baseline) continue;
+        if (!snapshot?.conversationState || snapshot.conversationState === "IN_PROGRESS") continue;
+        this.applyDone(snapshot as DoneSnapshot, turn);
+        return "applied";
+      }
+      return "unsettled";
+    } finally {
+      if (this.isCurrent(sendGen)) this.dispatch({ type: "SET_RECONNECTING", value: false });
+    }
   }
 
   /* ─── Undo, redo, retry ─────────────────────── */
@@ -1497,6 +1687,7 @@ export class AgentConversation {
     // sent while the cancel is in flight is not the one stopped: captured here,
     // before anything is awaited.
     const turns = this.turnsSent;
+    const stoppedTurn = this.activeTurn;
     this.abort?.abort();
     this.abort = null;
     // Stopping before the first token left an empty bubble reading "No response".
@@ -1508,15 +1699,116 @@ export class AgentConversation {
     const conversationId = this.state.conversationId;
     if (!conversationId || this.transport.mode === "local") return;
     const gen = this.currentGeneration;
+    // The reply bubble Stop left on screen: replaced if the turn ran on.
+    const last = this.state.messages[this.state.messages.length - 1];
+    const partialId = last?.role === "agent" && last.kind !== "notice" ? last.id : null;
+    let finished = false;
+    // A new conversation, or a turn sent after Stop: neither is the turn stopped.
+    const moved = () => !this.isCurrent(gen) || this.turnsSent !== turns;
+    // The step stored before the stopped turn: read as the turn was sent or,
+    // for a turn this controller did not send (a host's own), now — before the
+    // cancel. Any read issued after the send sees either the step before the
+    // turn or the turn's own; the second only makes every check unprovable.
+    const baseline = this.options.stopVerifyDelaysMs?.length
+      ? stoppedTurn?.baselineRead
+        ? stoppedTurn.baselineRead.then(() => stoppedTurn.baseline)
+        : this.transport.read(conversationId, true).then(latestStepMark, () => null)
+      : Promise.resolve(null);
     try {
       await this.transport.cancel(conversationId);
-      // New Conversation, or a turn sent after Stop, while the cancel was in
-      // flight: neither is the turn that was interrupted.
-      if (!this.isCurrent(gen) || this.turnsSent !== turns) return;
+      if (moved()) return;
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
     } catch (err) {
-      // 409 = nothing to cancel; the turn finished as we clicked.
-      if (!(err instanceof ApiError && err.status === 409)) console.error("Stop failed:", err);
+      if (moved()) return;
+      if (statusOf(err) === 409) {
+        // Nothing to cancel: the turn had already finished on the server.
+        finished = true;
+      } else {
+        console.error("Stop failed:", err);
+        dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.unreachable")) });
+        return;
+      }
+    }
+    await this.verifyStop(conversationId, {
+      moved,
+      finished,
+      partialId,
+      baseline,
+      stateBefore: stoppedTurn ? stoppedTurn.stateBeforeSend : null,
+    });
+  }
+
+  /**
+   * Whether Stop took. A `200` from `/cancel` only says the request was
+   * accepted: it raises a flag on the running turn, and on another pod of a
+   * cluster the turn can run on and store its reply anyway (docs/hitl.md). A
+   * `409` says there was nothing to cancel. So read the conversation again,
+   * until a read settles the stopped turn — one way or the other — or the
+   * delays run out. A turn sent meanwhile, or a new conversation, ends it.
+   *
+   * A read settles it only when it is provably about THIS turn. The backend
+   * stores a say turn only when it completes, so a read while it runs answers
+   * READY with the previous step. A read whose latest step differs from the one
+   * stored before the turn (`baseline`) holds the turn's own step: it ran
+   * on, and its reply replaces the part Stop left. A cancelled turn is never
+   * stored; its settlement records EXECUTION_INTERRUPTED over the previous
+   * step, so a stopped state the turn did not start in, over that step, says
+   * Stop took.
+   */
+  private async verifyStop(
+    conversationId: string,
+    stop: {
+      moved: () => boolean;
+      finished: boolean;
+      partialId: string | null;
+      /** The mark of the step stored before the stopped turn (null: unknown). */
+      baseline: Promise<string | null>;
+      /** The state the stopped turn was sent in, when this controller sent it. */
+      stateBefore: ConversationState | null;
+    },
+  ): Promise<void> {
+    const { moved, finished, partialId, stateBefore } = stop;
+    const delays = this.options.stopVerifyDelaysMs ?? [];
+    if (!delays.length) return;
+    const baseline = await stop.baseline;
+    if (moved()) return;
+    let running = false;
+    for (const delay of delays) {
+      await sleep(delay);
+      if (moved()) return;
+      let snapshot: Partial<ConversationSnapshot> | undefined;
+      try {
+        snapshot = await this.transport.read(conversationId, true);
+      } catch {
+        continue;
+      }
+      if (moved()) return;
+      const state = snapshot?.conversationState;
+      if (!state) continue;
+      const mark = latestStepMark(snapshot);
+      const ownStep = baseline !== null && mark !== null && mark !== baseline;
+      if (ownStep && state !== "IN_PROGRESS") {
+        // It finished on the server — ENDED included: its reply replaces the part Stop left.
+        this.dispatch({ type: "SET_CONVERSATION_STATE", state, endReason: snapshot?.endReason ?? null });
+        if (partialId) {
+          this.dispatch({ type: "REPLACE_MESSAGES", messages: this.state.messages.filter((m) => m.id !== partialId) });
+        }
+        this.dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.finished")) });
+        this.applySnapshot(snapshot ?? {}, { dedupe: true });
+        return;
+      }
+      if (!ownStep && baseline !== null && STOPPED_STATES.has(state) && state !== stateBefore) {
+        // Stop took (or the conversation was ended meanwhile): record what the server says.
+        this.dispatch({ type: "SET_CONVERSATION_STATE", state, endReason: snapshot?.endReason ?? null });
+        return;
+      }
+      // Not settled yet: the turn is still running, or nothing can be proven.
+      running = state === "IN_PROGRESS" || (baseline !== null && !STOPPED_STATES.has(state));
+    }
+    // The delays ran out on a turn still provably running: say so, rather than
+    // leave "stopped" standing over a turn that may yet land its reply.
+    if (!finished && running && !moved()) {
+      this.dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.stop.stillRunning")) });
     }
   }
 

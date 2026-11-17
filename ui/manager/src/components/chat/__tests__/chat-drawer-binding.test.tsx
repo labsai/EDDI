@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ChatDrawer } from "../chat-drawer";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
-import { useChatStore } from "@/hooks/use-chat";
-import { server } from "@/test/mocks/server";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 /**

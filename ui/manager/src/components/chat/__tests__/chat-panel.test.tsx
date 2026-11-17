@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChatPanel } from "../chat-panel";
-import { useChatStore } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChatPanel } from "@eddi/app-kit/components/chat/chat-panel";
+import { useChatStore } from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("ChatPanel", () => {
@@ -349,6 +349,76 @@ describe("ChatPanel", () => {
 
     // User message shown in chat should be masked
     expect(await screen.findByText("●●●●●●●●")).toBeInTheDocument();
+  });
+
+  /** T2.5 — one composer mode at a time, and a secret never echoed into the textarea. */
+  it("switching secret mode off drops the secret and brings back the text draft", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    renderWithProviders(<ChatPanel />);
+    // The composer opens once the agent's review notice has had its chance.
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+
+    await user.type(screen.getByTestId("chat-input"), "plain draft");
+    expect(screen.getByTestId("chat-input")).toHaveValue("plain draft");
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+    expect(screen.getByTestId("chat-input")).toHaveAttribute("type", "password");
+    expect(screen.getByTestId("chat-input")).toHaveValue("");
+    await user.type(screen.getByTestId("chat-input"), "hunter2");
+
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+    expect(screen.getByTestId("chat-input").tagName).toBe("TEXTAREA");
+    expect(screen.getByTestId("chat-input")).toHaveValue("plain draft");
+    expect(document.body.textContent).not.toContain("hunter2");
+
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+    expect(screen.getByTestId("chat-input")).toHaveValue("");
+  });
+
+  it("hides quick replies while secret mode is on", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setQuickReplies(["Skip"]);
+    renderWithProviders(<ChatPanel />);
+
+    expect(await screen.findByTestId("quick-reply-btn")).toBeInTheDocument();
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+    expect(screen.queryByTestId("quick-reply-btn")).toBeNull();
+    await user.click(screen.getByTestId("chat-secret-toggle"));
+    expect(screen.getByTestId("quick-reply-btn")).toBeInTheDocument();
+  });
+
+  it("sends an e-mail field the agent asked for as an ordinary turn, and lets the user type instead", async () => {
+    const user = userEvent.setup();
+    const bodies: string[] = [];
+    useChatStore.getState().setSelectedAgent("agent1", "Test Agent");
+    useChatStore.getState().setConversationId("conv1");
+    useChatStore.getState().setInputField({ subType: "email", label: "Your e-mail" });
+    server.use(
+      http.post("*/agents/conv1", async ({ request }) => {
+        // A plain turn goes out as the text itself; one with context (a
+        // secret's `secretInput`) as JSON.
+        bodies.push(await request.text());
+        return HttpResponse.json({ conversationOutputs: [{ output: [{ type: "text", text: "Thanks" }] }] });
+      }),
+    );
+    renderWithProviders(<ChatPanel />);
+
+    const field = screen.getByLabelText("Your e-mail");
+    expect(field).toHaveAttribute("type", "email");
+    await waitFor(() => expect(field).not.toBeDisabled());
+    await user.type(field, "me@example.com{Enter}");
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toContain("me@example.com");
+    expect(bodies[0]).not.toContain("secretInput");
+    expect(await screen.findByText("me@example.com")).toBeInTheDocument();
+
+    useChatStore.getState().setInputField({ subType: "password", label: "API key" });
+    await user.click(await screen.findByTestId("secret-input-cancel"));
+    expect(screen.queryByTestId("secret-input-field")).toBeNull();
+    expect(screen.getByTestId("chat-input").tagName).toBe("TEXTAREA");
   });
 
   it("dropping a file on the chat area stages it as an attachment", async () => {

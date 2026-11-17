@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { pairToolTrace } from "../tool-trace";
-import type { ToolTraceEntry } from "@/hooks/use-debug-events";
+import { pairToolTrace } from "@eddi/app-kit/lib/tool-trace";
+import type { ToolTraceEntry } from "@eddi/app-kit/hooks/use-debug-events";
 
 const call = (tool: string): ToolTraceEntry => ({ type: "tool_call", tool, arguments: "{}" });
 const result = (tool: string, r = "ok"): ToolTraceEntry => ({ type: "tool_result", tool, result: r });

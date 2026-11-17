@@ -19,7 +19,7 @@ store table) and the add-extension dialog and orphans page used a fourth
 ### What changed
 
 - **One resolution path.** `getResourceSlugForStep` in
-  [`ui/manager/src/lib/api/extensions.ts`](../../ui/manager/src/lib/api/extensions.ts) decides by
+  [`ui/manager/src/lib/api/extensions.ts`](../../ui/packages/app-kit/src/lib/api/extensions.ts) decides by
   the config URI's store segment (`apicallstore` → `apicalls`, through `RESOURCE_TYPES` and the new
   `getResourceTypeByStore`), and only falls back to the step type for a URI without that shape.
   The Studio uses it; `EXTENSION_TO_SLUG` is gone; `workflow-step-links.ts` reads the same store

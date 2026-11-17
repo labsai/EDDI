@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { type SSEEvent } from "@/lib/api/chat";
+import { type SSEEvent } from "@eddi/app-kit/lib/api/chat";
 
 const h = vi.hoisted(() => ({ frames: [] as Array<{ type: string; data: string }> }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* () {
@@ -18,8 +18,9 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { chatConversation, useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { RECONNECT_DELAYS_MS } from "@eddi/conversation";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -38,7 +39,15 @@ describe("use-chat — guardrail_triggered", () => {
     useChatStore.getState().reset();
     useDebugStore.getState().reset();
     h.frames = [];
+    // These streams end without a `done`, which the controller follows as a
+    // dropped stream (reconnectDelaysMs); the guardrail cases are about the
+    // events, so the follow is off here.
+    chatConversation.setOptions({ reconnectDelaysMs: [] });
     useChatStore.setState({ selectedAgentId: "agent1", conversationId: "conv1", streamingEnabled: true });
+  });
+
+  afterEach(() => {
+    chatConversation.setOptions({ reconnectDelaysMs: RECONNECT_DELAYS_MS });
   });
 
   async function send() {

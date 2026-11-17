@@ -4,8 +4,8 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Bot, CheckCheck, Download, MessageSquareHeart, Star } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import { FeedbackFilterBar } from "@/components/feedback/feedback-filters";
@@ -19,7 +19,7 @@ import {
   type FeedbackFilters,
   type FeedbackTab,
 } from "@/components/feedback/feedback-utils";
-import { useIsAdminOrUnknown } from "@/hooks/use-auth";
+import { useIsAdminOrUnknown } from "@eddi/app-kit/hooks/use-auth";
 import {
   isAgentRequired,
   isRatingChanged,
@@ -28,7 +28,7 @@ import {
   useRatingSummary,
   useReviewRating,
 } from "@/hooks/use-ratings";
-import { downloadRatingsCsv } from "@/lib/api/ratings";
+import { downloadRatingsCsv } from "@eddi/app-kit/lib/api/ratings";
 
 const PAGE_SIZE = 25;
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import i18n from "@/i18n/config";
-import { CascadeReferenceError } from "@/lib/api/cascade-save";
+import { CascadeReferenceError } from "@eddi/app-kit/lib/api/cascade-save";
 import { describeSaveError } from "@/lib/save-error";
 
 /**

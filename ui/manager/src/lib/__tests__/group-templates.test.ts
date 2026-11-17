@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getGroupTemplates, buildGroupFromTemplate } from "@/lib/group-templates";
+import { getGroupTemplates, buildGroupFromTemplate } from "@eddi/app-kit/lib/group-templates";
 import type { TFunction } from "i18next";
 
 describe("group-templates", () => {

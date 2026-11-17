@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { PropertiesPage } from "@/pages/properties";
 import userEvent from "@testing-library/user-event";
-import { MOCK_PROPERTIES_EMPTY_USER } from "@/test/mocks/handlers";
+import { MOCK_PROPERTIES_EMPTY_USER } from "@eddi/app-kit/test/mocks/handlers";
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });

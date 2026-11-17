@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalCard, type ApprovalCardProps } from "@/components/hitl/approval-card";
 import { summariseDecision } from "@/lib/hitl-decision";
-import type { ToolCallPauseDetails } from "@/lib/api/hitl";
+import type { ToolCallPauseDetails } from "@eddi/app-kit/lib/api/hitl";
 
 const twoCalls: ToolCallPauseDetails = {
   type: "TOOL_CALL",

@@ -86,5 +86,5 @@ unaffected: the recording is on this model only, and only this endpoint reads it
 [`RestDocumentDescriptorStore.java`](../../src/main/java/ai/labs/eddi/configs/descriptors/rest/RestDocumentDescriptorStore.java),
 [`IRestDocumentDescriptorStore.java`](../../src/main/java/ai/labs/eddi/configs/descriptors/IRestDocumentDescriptorStore.java),
 [`RestDocumentDescriptorStoreTest.java`](../../src/test/java/ai/labs/eddi/configs/descriptors/rest/RestDocumentDescriptorStoreTest.java),
-[`descriptors.ts`](../../ui/manager/src/lib/api/descriptors.ts),
+[`descriptors.ts`](../../ui/packages/app-kit/src/lib/api/descriptors.ts),
 [`developer-quickstart.md`](../developer-quickstart.md)

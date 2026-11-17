@@ -1,4 +1,4 @@
-import type { AuthUser } from "@/components/auth/auth-context";
+import type { AuthUser } from "@eddi/app-kit/components/auth/auth-context";
 
 /**
  * How the signed-in user is labelled in the chrome (top-bar menu, sidebar).

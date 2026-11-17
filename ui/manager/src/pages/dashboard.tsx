@@ -29,20 +29,20 @@ import {
   useRecentConversations,
   useCoordinatorStatusLight,
 } from "@/hooks/use-dashboard";
-import { groupAgentsByName } from "@/hooks/use-agents";
+import { groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import { usePlatformStatus } from "@/hooks/use-platform-status";
-import { useIsAdminOrUnknown, useMayOpenScreen } from "@/hooks/use-auth";
-import { isApiError } from "@/lib/api-client";
-import { useVaultHealth } from "@/hooks/use-secrets";
+import { useIsAdminOrUnknown, useMayOpenScreen } from "@eddi/app-kit/hooks/use-auth";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
+import { useVaultHealth } from "@eddi/app-kit/hooks/use-secrets";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
-import { parseConversationUri } from "@/lib/api/conversations";
-import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseConversationUri } from "@eddi/app-kit/lib/api/conversations";
+import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
 import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
 import { useAttentionCount } from "@/hooks/use-ratings";
 import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";

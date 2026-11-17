@@ -2,19 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Check, Loader2, Plus, Search, BookA } from "lucide-react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn } from "@/lib/utils";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 import { useCreateResource, useResourceDescriptors } from "@/hooks/use-resources";
-import { updateDescriptor } from "@/lib/api/descriptors";
+import { updateDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 import { buildDictionaryUri, dictionaryIdFromUri, parseDictionaryUri } from "@/lib/dictionary-uri";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 
 export interface DictionaryPickerDialogProps {
   open: boolean;

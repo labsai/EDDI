@@ -6,8 +6,8 @@ import {
   getStylePhases,
   NEGOTIATION_ARBITRATION_TEMPLATE,
   repairNegotiationArbitration,
-} from "@/lib/hitl-config";
-import { normalizeGroupConfig, type AgentGroupConfiguration } from "@/lib/api/groups";
+} from "@eddi/app-kit/lib/hitl-config";
+import { normalizeGroupConfig, type AgentGroupConfiguration } from "@eddi/app-kit/lib/api/groups";
 
 /**
  * NEGOTIATION's Arbitration is the one preset phase with a prompt of its own.

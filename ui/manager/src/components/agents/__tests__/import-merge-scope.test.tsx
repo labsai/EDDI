@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { api, SPACE_HEADER } from "@/lib/api-client";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { api, SPACE_HEADER } from "@eddi/app-kit/lib/api-client";
 import {
   executeSync,
   importSpaceHeader,
@@ -10,7 +10,7 @@ import {
   previewUpgrade,
 } from "@/lib/api/backup";
 import { MergeScopeNotice } from "@/components/agents/import-steps/preview-step";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 afterEach(() => {

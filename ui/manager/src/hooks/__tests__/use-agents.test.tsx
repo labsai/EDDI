@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   useAgentDescriptors,
   useInfiniteAgentDescriptors,
@@ -20,8 +20,8 @@ import {
   useDuplicateAgent,
   useUndeployAgent,
   groupAgentsByName,
-} from "@/hooks/use-agents";
-import type { AgentDescriptor } from "@/lib/api/agents";
+} from "@eddi/app-kit/hooks/use-agents";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 
 function createWrapper() {
   const queryClient = new QueryClient({
