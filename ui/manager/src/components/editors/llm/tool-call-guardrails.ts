@@ -1,6 +1,6 @@
 import { validateToolPattern } from "@/lib/hitl-tool-approvals";
 import { newGuardrail } from "./guardrails";
-import type { LlmTask, ToolCallGuardrailConfig } from "./types";
+import type { LlmTask, ToolCallGuardrailConfig } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Mirrors `ToolCallGuardrailConfigValidator`. */
 export const MAX_TOOL_CALL_GUARDRAILS = 32;

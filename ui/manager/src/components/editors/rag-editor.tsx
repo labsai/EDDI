@@ -18,12 +18,12 @@ import {
   Lock,
   ChevronDown,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { api } from "@/lib/api-client";
-import { seg } from "@/lib/api/path-segment";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
-import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
+import { ConnectionReferenceWarning } from "@eddi/app-kit/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
 import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
 import { RetrievalTester } from "@/components/editors/retrieval-tester";

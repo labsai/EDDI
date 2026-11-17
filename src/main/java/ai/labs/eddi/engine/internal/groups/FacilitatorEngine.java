@@ -175,6 +175,10 @@ public class FacilitatorEngine {
     /**
      * Everything about WHERE this checkpoint sits that move validation needs.
      *
+     * @param phaseIdx
+     *            index of the phase the checkpoint follows
+     * @param repeat
+     *            zero-based index of the repeat just completed
      * @param repeatCheckpoint
      *            {@code true} when the checkpoint runs inside the repeat loop
      *            (checkAfter=EACH_REPEAT) — the only place END_PHASE/EXTEND_PHASE

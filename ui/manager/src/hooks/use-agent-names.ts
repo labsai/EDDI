@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 
 /**
  * Agent id -> display name for every agent the user can see.

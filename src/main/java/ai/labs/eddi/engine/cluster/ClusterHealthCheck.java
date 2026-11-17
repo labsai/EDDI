@@ -23,8 +23,9 @@ import ai.labs.eddi.engine.cluster.lease.NatsLeaseManager;
  * connection fails for a reason retrying cannot heal (authentication, TLS,
  * client options; see {@link NatsConnectionManager#readinessProblem()}), or
  * when the operator opted in with
- * {@code eddi.cluster.readiness.require-nats=true} and the node is degraded. An
- * ordinary outage after a first connection keeps it UP.
+ * {@code eddi.cluster.readiness.require-nats=true} and the node is degraded, or
+ * when an administrator has drained the node. An ordinary outage after a first
+ * connection keeps it UP.
  * <p>
  * The old NATS health check reported DOWN on any NATS blip. Since every replica
  * sees the same NATS outage at the same moment, that emptied the load balancer

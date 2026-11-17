@@ -782,8 +782,12 @@ public class TaskForceEngine {
     }
 
     /**
-     * VERIFY phase: The moderator reviews all completed tasks and provides
-     * pass/fail assessments. Results are parsed and applied to the task list.
+     * VERIFY phase: the first resolved speaker (the moderator by default) reviews
+     * all COMPLETED tasks and provides pass/fail assessments, which are parsed and
+     * applied to the task list. A task that fails is sent back for rework up to
+     * {@code maxReworks} times and verified again (not a HUMAN-assigned task, not
+     * when the EXECUTE phase gates each task for approval, and not once the turn or
+     * cost budget is spent).
      */
     public void executeTaskVerificationPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                              DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
@@ -1318,10 +1322,11 @@ public class TaskForceEngine {
                                 phaseIdx, phase, null, listener, cancellation);
                         if (reply != null && reply.content() != null && !reply.content().isBlank()) {
                             // Recorded as a BID entry — peer-hidden while the phase
-                            // runs (F4's blind-bid rule), auditable afterwards.
-                            gc.getTranscript().add(new TranscriptEntry(member.agentId(), member.displayName(),
-                                    reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
-                                    Instant.now(), null, null));
+                            // runs (F4's blind-bid rule), auditable afterwards. Signed as
+                            // a BID, as a DISSENT is: the signature covers the entry type.
+                            gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(member.agentId(),
+                                    member.displayName(), reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
+                                    Instant.now(), null, null)));
                         }
                         return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
                     } catch (Exception e) {
@@ -1413,7 +1418,7 @@ public class TaskForceEngine {
 
     /**
      * Resolves task assignment. For "ALL" role, uses round-robin across
-     * non-moderator members to distribute tasks evenly (H3 fix).
+     * non-moderator, non-HUMAN members to distribute tasks evenly (H3 fix).
      *
      * @param taskIndex
      *            index of the task in the list, used for round-robin distribution

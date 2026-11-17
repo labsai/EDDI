@@ -56,7 +56,7 @@ import java.util.Map;
  * "systemMessage": "You are helpful"
  * },
  * "enableBuiltInTools": true,
- * "tools": ["eddi://ai.labs.apicalls/weather?version=1"],
+ * "builtInToolsWhitelist": ["calculator", "websearch"],
  * "maxBudgetPerConversation": 1.0
  * }
  * ]
@@ -278,7 +278,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Zero-infrastructure RAG: name of an httpCall in the workflow to execute
          * before the LLM call. The httpCall's response is injected as context into the
-         * system message. This is Phase 8c-0 (quick-win, no vector store needed).
+         * system message. Needs no vector store.
          */
         private String httpCallRag;
 
@@ -1601,16 +1601,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <p>
      * Supported actions per policy:
      * <ul>
-     * <li>{@code "ignore"} — do nothing (default for most signals)</li>
+     * <li>{@code "ignore"} — do nothing (the default of {@link #onRefusal},
+     * {@link #onInvalidJson} and {@link #onSchemaMismatch})</li>
      * <li>{@code "warn"} — log a warning, store metadata, continue</li>
      * <li>{@code "fallback"} — substitute a static fallback message</li>
      * <li>{@code "error"} — throw a LifecycleException (triggers strict-write +
      * error digest)</li>
      * <li>{@code "retry"} — only for {@link #onEmpty}, {@link #onTruncation},
-     * {@link #onContentFilter}, {@link #onInvalidJson} and
-     * {@link #onContextTooLong}: re-ask the same model (see {@link #maxRetries}),
-     * then, once the re-asks are spent, escalate to the next cascade step and
-     * finally apply {@link #fallbackAction}</li>
+     * {@link #onContentFilter}, {@link #onInvalidJson}, {@link #onSchemaMismatch}
+     * and {@link #onContextTooLong}: re-ask the same model (see
+     * {@link #maxRetries}), then, once the re-asks are spent, escalate to the next
+     * cascade step and finally apply {@link #fallbackAction}</li>
      * </ul>
      *
      * @since 6.0.0
@@ -2460,7 +2461,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Cascade strategy: "cascade" (sequential escalation, default) or "parallel"
-         * (concurrent, future)
+         * (reserved: currently runs sequentially, with a deploy-time warning)
          */
         private String strategy = "cascade";
 
@@ -3004,6 +3005,28 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private String summarizationPrompt;
 
         /**
+         * When true, the summarizer is told to end every point with the conversation
+         * steps it came from ({@code [turns 4-7]}, numbered as
+         * {@code conversationRecall} reads them), to copy numbers verbatim and to write
+         * "unclear in source" rather than guess — and its answer is checked, without a
+         * model, before it is stored: every citation must lie in the summarized range
+         * and every number must appear verbatim in the turns it cites. Off by default;
+         * while off, the check never runs and the prompt is unchanged.
+         */
+        private boolean citeSources = false;
+
+        /**
+         * What happens to a summary that fails the {@link #citeSources} check:
+         * {@code keep} (store it anyway — the default), {@code retry_once} (one more
+         * summarizer call with the problems listed, screened and spend-checked like the
+         * first; if that fails too, as {@code fallback_to_previous}) or
+         * {@code fallback_to_previous} (discard it; the previous summary and its
+         * boundary stay, and the next turn tries again). Unknown values log a WARN and
+         * act as {@code keep}. Ignored while {@code citeSources} is false.
+         */
+        private String onValidationFailure = "keep";
+
+        /**
          * Validate and sanitize configuration values. Enforces sensible floor values to
          * prevent IndexOutOfBoundsException (negative window), wasteful LLM calls (zero
          * window triggers every turn), and NPE (null provider).
@@ -3108,6 +3131,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+
+        public boolean isCiteSources() {
+            return citeSources;
+        }
+
+        public void setCiteSources(boolean citeSources) {
+            this.citeSources = citeSources;
+        }
+
+        public String getOnValidationFailure() {
+            return onValidationFailure;
+        }
+
+        public void setOnValidationFailure(String onValidationFailure) {
+            this.onValidationFailure = onValidationFailure;
         }
     }
 

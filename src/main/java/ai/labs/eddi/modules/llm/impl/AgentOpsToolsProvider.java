@@ -48,8 +48,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * The agent-operations tools: a team scorecard, a budget proposal and follow-up
  * scheduling. Each is <b>off unless its slug is named in the task's
  * {@code builtInToolsWhitelist}</b> — unlike the plain built-ins, an omitted
- * whitelist ("all built-in tools") does not admit them, because two of the
- * three spend or move money and the third books future work.
+ * whitelist ("all built-in tools") does not admit them, because the budget
+ * tools move money and the follow-up tool books future work.
  * <p>
  * The budget tool has one more condition: it is assembled only when the task's
  * effective {@code toolApprovals} gates both of its tools. The approval card is

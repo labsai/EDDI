@@ -3,7 +3,7 @@ import { renderHook, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   useActivateOperator,
   useReactivateOperator,
@@ -13,7 +13,7 @@ import {
 } from "@/hooks/use-operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY, type OperatorConfig } from "@/lib/api/operator";
 import { READ_ENDPOINTS, WRITE_ENDPOINTS, parseEndpoint } from "@/lib/operator/tool-scopes";
-import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
+import { GrantRequiredDialogHost } from "@eddi/app-kit/components/secrets/grant-required-dialog";
 
 /**
  * Operator activation and the vault grant.

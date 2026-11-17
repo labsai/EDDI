@@ -88,7 +88,11 @@ public class ChannelTarget {
 
     /**
      * If {@code true}, this target passively observes all channel messages and
-     * selectively responds based on {@link #observeConfig} filters.
+     * selectively responds based on {@link #observeConfig} filters. Saving is
+     * refused unless the target is of type {@code AGENT} (a group cannot be an
+     * observer), is not the integration's default target, and the integration is
+     * not an {@code email} or {@code webhook} one; a missing {@code observeConfig}
+     * is defaulted.
      * <p>
      * An observer is never addressable: {@code ChannelTargetRouter} excludes it
      * both from trigger matching and from the default target, so the only route to
@@ -105,7 +109,8 @@ public class ChannelTarget {
 
     /**
      * Configuration for passive observation — only meaningful when
-     * {@link #observeMode} is {@code true}. Set to {@code null} otherwise.
+     * {@link #observeMode} is {@code true}, where a {@code null} value is replaced
+     * by the {@link ObserveConfig} defaults on save. Leave {@code null} otherwise.
      */
     public ObserveConfig getObserveConfig() {
         return observeConfig;

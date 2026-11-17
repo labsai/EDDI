@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import java.time.ZoneId;
 import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
@@ -46,10 +47,14 @@ import static ai.labs.eddi.modules.llm.tools.quota.ToolQuotaConfigValidatorTest.
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -356,5 +361,26 @@ class ToolLoopRunnerQuotaTest {
         }
         assertEquals(3, ran.get());
         assertEquals(0, store.calls.get(), "a tool no rule names is not looked up");
+    }
+
+    @Test
+    @DisplayName("a call aborted by a cancel or an interrupt emits no tool_result event")
+    void abortedCallEmitsNoToolResult() {
+        var sink = mock(ConversationEventSink.class);
+        when(memory.getEventSink()).thenReturn(sink);
+        when(memory.isCancelled()).thenReturn(true);
+        call("searchWeb", "mcp", "{\"q\":\"a\"}", (req, id) -> "ok");
+        verify(sink, never()).onToolResult(anyString(), any(), anyString(), anyLong(),
+                anyString());
+
+        when(memory.isCancelled()).thenReturn(false);
+        Thread.currentThread().interrupt();
+        try {
+            call("searchWeb", "mcp", "{\"q\":\"b\"}", (req, id) -> "ok");
+        } finally {
+            Thread.interrupted();
+        }
+        verify(sink, never()).onToolResult(anyString(), any(), anyString(), anyLong(),
+                anyString());
     }
 }

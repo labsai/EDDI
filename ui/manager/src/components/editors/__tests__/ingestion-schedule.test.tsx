@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { useState } from "react";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { CronField } from "@/components/editors/ingestion-schedule";
 
 /** A CronField whose value can also be changed from outside it, as Discard does. */

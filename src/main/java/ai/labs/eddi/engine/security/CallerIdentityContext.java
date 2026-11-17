@@ -223,7 +223,8 @@ public class CallerIdentityContext {
     }
 
     /**
-     * The {@code scheme://host[:port]} the caller addressed.
+     * The normalized {@code scheme://host:port} the caller addressed
+     * ({@link OriginMatcher#normalize(String, String, int)}).
      * <p>
      * Taken from the inbound request rather than configuration so the token is only
      * ever sent back to the exact origin the caller already trusted it to.

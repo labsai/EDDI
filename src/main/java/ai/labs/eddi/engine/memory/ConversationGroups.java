@@ -75,7 +75,8 @@ public final class ConversationGroups {
      * and that belongs to that group. Engine-driven member turns (the discussion
      * loop, follow-ups) always carry the context on the current step; the fallback
      * serves a turn the owner sends into a member conversation while its discussion
-     * runs. {@code null} check, or anything unverified: no group (self scope).
+     * runs. A {@code null} {@code membershipCheck}, or anything unverified: no
+     * group (self scope).
      * <p>
      * Exact-key reads throughout ({@code getData} / {@code getExactDataPerStep}):
      * the prefix-matching {@code getLatestData} / {@code getAllLatestData} would

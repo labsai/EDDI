@@ -40,6 +40,18 @@ public final class ClusterSubjects {
         return root + ".evt.>";
     }
 
+    /**
+     * Core NATS: a transient event — outside {@link #eventWildcard()}, so it is
+     * never stored in the event stream, replayed or counted in its sequence.
+     */
+    public String transientEvent(String type) {
+        return root + ".tevt." + type;
+    }
+
+    public String transientEventWildcard() {
+        return root + ".tevt.>";
+    }
+
     /** Node-addressed request-reply. */
     public String rpc(String nodeId, String op) {
         return root + ".rpc." + nodeId + "." + op;

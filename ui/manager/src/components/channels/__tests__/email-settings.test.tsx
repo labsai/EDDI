@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EMAIL_DEFAULT_INPUT_TEMPLATE } from "@/lib/email-channel";
 

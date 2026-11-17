@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import en from "@/i18n/locales/en.json";
 import {
   compareVersions,

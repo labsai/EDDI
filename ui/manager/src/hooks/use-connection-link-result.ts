@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import {
   isConnectionErrorCode,
   type ConnectionErrorCode,
-} from "@/lib/api/connections";
-import { MINE_KEY } from "@/hooks/use-connections";
+} from "@eddi/app-kit/lib/api/connections";
+import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
 
 /**
  * What the browser came back from the provider carrying.

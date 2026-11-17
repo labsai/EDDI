@@ -16,6 +16,10 @@ import java.util.Date;
 import java.util.List;
 
 /**
+ * Recognises a time-of-day token such as {@code 15h} or {@code 19:50} (see
+ * {@code LanguageUtilities#isTimeExpression}) and emits a {@code time}
+ * expression carrying the time as epoch milliseconds.
+ *
  * @author ginccc
  */
 public class TimeExpressionDictionary implements IDictionary {

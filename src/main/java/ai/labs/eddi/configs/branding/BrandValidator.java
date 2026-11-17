@@ -23,7 +23,8 @@ import java.util.regex.Pattern;
  * attributes (the shells) — and two of those are escaped on the way out. The
  * stylesheet is not: no free-form CSS is ever emitted, so a colour has to match
  * a grammar strict enough that it cannot close a declaration, open a rule,
- * reference a URL or call a function other than the four colour functions with
+ * reference a URL or call a function other than the five colour functions
+ * ({@code rgb}, {@code rgba}, {@code hsl}, {@code hsla}, {@code oklch}) with
  * plain numbers. Names reject {@code <}, {@code >} and control characters as
  * well, because the Manager's i18next runs with {@code escapeValue: false} and
  * any {@code Trans}/HTML path would not escape them (plan R11).

@@ -13,7 +13,9 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
@@ -75,6 +77,11 @@ public interface IRestConversationStore {
      * authorization disabled (a conversation then records the userId the client
      * passed, not the principal), there is no owner to match and the flag changes
      * nothing.
+     * <p>
+     * {@code excludeGroupMembers=true} leaves out the private conversations a group
+     * discussion started for its members (those whose descriptor records a
+     * {@code groupConversationId}; member conversations started before 6.7.0 record
+     * none and are still listed).
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -90,7 +97,23 @@ public interface IRestConversationStore {
                                                              @Parameter(name = "mine", required = false, example = "true",
                                                                         description = "Only the caller's own conversations, an administrator's included")
                                                              @QueryParam("mine")
-                                                             @DefaultValue("false") Boolean mine);
+                                                             @DefaultValue("false") Boolean mine,
+                                                             @Parameter(name = "excludeGroupMembers", required = false, example = "true",
+                                                                        description = "Leave out group members' private conversations (since 6.7.0)")
+                                                             @QueryParam("excludeGroupMembers")
+                                                             @DefaultValue("false") Boolean excludeGroupMembers);
+
+    /**
+     * The listing with {@code mine} only, member threads included. Not a resource
+     * method.
+     */
+    default List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
+                                                                     String conversationId, String agentId, Integer agentVersion,
+                                                                     ConversationState conversationState,
+                                                                     ConversationDescriptor.ViewState viewState, Boolean mine) {
+        return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
+                mine, false);
+    }
 
     /**
      * The listing as the caller is entitled to see it ({@code mine=false}): every
@@ -102,8 +125,48 @@ public interface IRestConversationStore {
                                                                      ConversationState conversationState,
                                                                      ConversationDescriptor.ViewState viewState) {
         return readConversationDescriptors(index, limit, filter, conversationId, agentId, agentVersion, conversationState, viewState,
-                false);
+                false, false);
     }
+
+    /**
+     * Searches the caller's own conversations by title, newest first. Paged like
+     * the listing: {@code index} is a page of results, {@code index * limit} above
+     * 10,000 is refused, and a page can come back short (a conversation whose
+     * memory is gone is left out), so page until one comes back empty.
+     * <p>
+     * <b>Only the caller's conversations</b>, for every caller — an administrator
+     * included: this is "my conversations", and an administrator's view of
+     * everybody's is the listing's {@code filter}. The owner is pushed into the
+     * query as an exact match on the descriptor's {@code userId}, so another user's
+     * conversation is never read. With authorization disabled there is no owner to
+     * scope to and every conversation is searched, as the listing shows every
+     * conversation then.
+     * <p>
+     * <b>Titles only.</b> A title never comes from a secret turn (it is derived
+     * after the turn's secret scrub, see {@code ConversationTitles}), it lives on
+     * the conversation descriptor, and GDPR erasure deletes every descriptor of the
+     * user — so nothing searchable outlives an erasure. Conversation outputs are
+     * not searched: see {@code docs/rest-api-reference.md}.
+     *
+     * @param query
+     *            the text to find in a title — literal (no wildcards or patterns),
+     *            case-insensitive, whitespace collapsed; 1 to 100 characters
+     */
+    @GET
+    @Path("/search")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Search my conversations",
+               description = "The caller's own conversations whose title contains q (literal, case-insensitive), newest first. "
+                       + "Paged with index and limit like the listing. Titles only; never another user's conversation.")
+    @APIResponse(responseCode = "200", description = "The matching conversation descriptors (possibly empty).")
+    @APIResponse(responseCode = "400", description = "q is blank or longer than 100 characters, or the page is out of bounds.")
+    List<ConversationDescriptor> searchConversations(@Parameter(name = "q", required = true, example = "Rome",
+                                                                description = "Text to find in the title (1-100 characters)")
+    @QueryParam("q") String query,
+                                                     @QueryParam("index")
+                                                     @DefaultValue("0") Integer index,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/simple/{conversationId}")
@@ -120,6 +183,39 @@ public interface IRestConversationStore {
     @Path("/{conversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     ConversationMemorySnapshot readRawConversationLog(@PathParam("conversationId") String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The owner's edit of a conversation's list entry: its title, its pin, or both.
+     * A field left out (or null) is left as it is.
+     *
+     * @param title
+     *            the new title — whitespace collapsed, control characters dropped,
+     *            not blank, at most 200 characters. A renamed conversation keeps
+     *            the name: no generated title ever replaces it
+     * @param pinned
+     *            whether the conversation is pinned to the top of the owner's list
+     */
+    record ConversationPatch(String title, Boolean pinned) {
+    }
+
+    /**
+     * Renames or (un)pins a conversation. Owner only — the same strict owner check
+     * as deleting it, so an administrator may act too and nobody else can,
+     * reviewers included.
+     */
+    @PATCH
+    @Path("/{conversationId}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Rename or pin a conversation",
+               description = "Sets the title (then marked as set by the user, so a generated title never replaces it) "
+                       + "and/or the pin of one of the caller's conversations. Owner or eddi-admin only.")
+    @APIResponse(responseCode = "200", description = "The updated conversation descriptor.")
+    @APIResponse(responseCode = "400", description = "Neither field given, or the title is blank or too long.")
+    @APIResponse(responseCode = "403", description = "The caller does not own the conversation.")
+    @APIResponse(responseCode = "404", description = "No such conversation, or it was deleted.")
+    ConversationDescriptor patchConversation(@PathParam("conversationId") String conversationId, ConversationPatch patch)
             throws ResourceStoreException, ResourceNotFoundException;
 
     @DELETE

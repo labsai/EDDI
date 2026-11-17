@@ -75,7 +75,8 @@ regardless.
   `.ds-sync/node_modules` (install it alongside the other converter deps).
 - **Re-sync MUST run `cfg.buildCmd` first** (the driver does). It regenerates compiled.css.
 - Fonts: Noto Sans Variable (Latin + script subsets) wired via
-  `cfg.extraFonts = node_modules/@fontsource-variable/noto-sans/index.css`. 9 woff2 ship.
+  `cfg.extraFonts = ../node_modules/@fontsource-variable/noto-sans/index.css` (hoisted to the
+  `ui/` npm workspace root). 9 woff2 ship.
 
 ## Preview gotchas (authored in `.design-sync/previews/`)
 
@@ -307,7 +308,8 @@ grep -o -- '--color-warning[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
   build machine previews would render LTR English inside an RTL document (mirrored padding/
   icons). If that ever matters, force `document.documentElement.dir = "ltr"` in ds-providers.
 - ds-entry / ds-providers import real app code (`@/components/...`, `@/i18n/config`,
-  `@/components/layout/theme-provider`) — if those move, update the imports.
+  and `@eddi/ui` for `Button` and `ThemeProvider`, which moved there in phase 3a) — if those
+  move, update the imports and `componentSrcMap` in config.json.
 
 ## Auth
 DesignSync requires design-system authorization (`/design-login` in an interactive
