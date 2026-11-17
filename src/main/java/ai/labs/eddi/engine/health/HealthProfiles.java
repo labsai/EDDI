@@ -203,6 +203,22 @@ public class HealthProfiles {
         }
     }
 
+    /**
+     * {@link #apdexTMs}, read from the store past the cache - what the rollup
+     * counts under (a recount may run on another node within the cache's TTL of the
+     * change). The read refreshes the cache.
+     *
+     * @throws HealthStoreException
+     *             when the store cannot answer, so the rollup retries the day
+     *             rather than counting it under a guessed T
+     */
+    public long apdexTMsUncached(String agentId) {
+        Optional<HealthProfile> profile = store.read(agentId);
+        cache.put(agentId, profile);
+        Long t = apdexT(profile.orElse(null));
+        return t != null ? t : settings.apdexTMs();
+    }
+
     /** Clears the cached profile of an agent — for tests and erasure. */
     public void invalidate(String agentId) {
         cache.invalidate(agentId);

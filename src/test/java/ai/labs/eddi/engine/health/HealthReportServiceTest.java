@@ -130,6 +130,37 @@ class HealthReportServiceTest {
     }
 
     @Test
+    @DisplayName("shared report: status and reasons over the link's sections only; no hints, no marker ids; checks only with reliability")
+    void sharedReportJudgesOnlyItsSections() {
+        List<Long> buckets = new ArrayList<>();
+        for (int i = 0; i <= HealthTurnAggregator.DURATION_BOUNDS_MS.length; i++) {
+            buckets.add(0L);
+        }
+        // 500 turns, a quarter failed by the agent: reliability is RED and critical.
+        HealthTurnAggregate failing = new HealthTurnAggregate("agent", 2, "api", TODAY, 500, 500, 500, 125, Map.of(), 0, 0, Map.of(), 0, 0.0, 0, 0,
+                0, 0, 0, 0, 0, 125, 0, 0, 0, buckets, 4000, 0, 0);
+        when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(failing));
+        Scope scope = new Scope("agent", last(30), null, null);
+
+        AgentHealth full = service.report(scope, "Support", false);
+        assertEquals(HealthDefaults.STATUS_NEEDS_ATTENTION, full.status(), "the full report sees the failures");
+
+        AgentHealth adoptionOnly = service.sharedReport(scope, "Support", List.of(HealthDefaults.ADOPTION));
+        assertEquals(List.of(HealthDefaults.ADOPTION), List.copyOf(adoptionOnly.sections().keySet()));
+        assertTrue(!HealthDefaults.STATUS_NEEDS_ATTENTION.equals(adoptionOnly.status()), "a link without reliability does not leak its status");
+        assertTrue(adoptionOnly.reasons().stream().noneMatch(r -> "agentFailureRate".equals(r.measureId())));
+        assertTrue(adoptionOnly.checks().isEmpty());
+
+        AgentHealth reliability = service.sharedReport(scope, "Support", List.of(HealthDefaults.RELIABILITY));
+        assertEquals(HealthDefaults.STATUS_NEEDS_ATTENTION, reliability.status());
+        assertEquals(1, reliability.checks().size());
+        assertTrue(reliability.reasons().stream().allMatch(r -> r.markerId() == null));
+        for (Object section : reliability.sections().values()) {
+            assertTrue(((Section) section).measures().stream().allMatch(m -> m.hint() == null), "no free-text hints");
+        }
+    }
+
+    @Test
     @DisplayName("an agent with only automated traffic is a task agent; a 90-day baseline is past the turn retention, so no usage there")
     void taskPresetAndRetention() {
         when(daily.find(eq("agent"), any(), any())).thenReturn(List.of(row(TODAY, 1, "schedule", 20)));

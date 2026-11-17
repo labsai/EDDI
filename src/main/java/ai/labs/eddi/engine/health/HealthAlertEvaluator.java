@@ -39,6 +39,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -70,7 +71,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * </ul>
  * Each condition fires when it <em>starts</em> (what the rule saw last is kept
  * per rule and agent in {@link IHealthAlertStateStore}), not again while it
- * lasts. Never throws: a failure is logged and the next pass tries again.
+ * lasts. The state moves on only for what was recorded: a condition whose fire
+ * failed (or found no alert engine) stays "not seen", so the next pass fires it
+ * again. An agent with a day of the windows still waiting for the rollup since
+ * before this pass (a pass that ran out of time, a failed day) is not judged at
+ * all until its rows are complete: a half-finished day would read as a drop in
+ * traffic or a change of rates. Never throws: a failure is logged and the next
+ * pass tries again.
  */
 @ApplicationScoped
 public class HealthAlertEvaluator {
@@ -94,22 +101,25 @@ public class HealthAlertEvaluator {
     private final HealthPortfolioService portfolio;
     private final IHealthAlertStateStore stateStore;
     private final IDocumentDescriptorStore descriptorStore;
+    private final IHealthDirtyDayStore dirtyStore;
     private final Clock clock;
 
     @Inject
     public HealthAlertEvaluator(IAlertRuleStore ruleStore, Instance<AlertEngine> engine, AlertSettings alertSettings,
-            HealthPortfolioService portfolio, IHealthAlertStateStore stateStore, IDocumentDescriptorStore descriptorStore) {
-        this(ruleStore, engine, alertSettings, portfolio, stateStore, descriptorStore, Clock.systemUTC());
+            HealthPortfolioService portfolio, IHealthAlertStateStore stateStore, IDocumentDescriptorStore descriptorStore,
+            IHealthDirtyDayStore dirtyStore) {
+        this(ruleStore, engine, alertSettings, portfolio, stateStore, descriptorStore, dirtyStore, Clock.systemUTC());
     }
 
     HealthAlertEvaluator(IAlertRuleStore ruleStore, Instance<AlertEngine> engine, AlertSettings alertSettings, HealthPortfolioService portfolio,
-            IHealthAlertStateStore stateStore, IDocumentDescriptorStore descriptorStore, Clock clock) {
+            IHealthAlertStateStore stateStore, IDocumentDescriptorStore descriptorStore, IHealthDirtyDayStore dirtyStore, Clock clock) {
         this.ruleStore = ruleStore;
         this.engine = engine;
         this.alertSettings = alertSettings;
         this.portfolio = portfolio;
         this.stateStore = stateStore;
         this.descriptorStore = descriptorStore;
+        this.dirtyStore = dirtyStore;
         this.clock = clock;
     }
 
@@ -119,8 +129,16 @@ public class HealthAlertEvaluator {
 
     /** Evaluates every enabled HEALTH rule; never throws. */
     public void evaluate() {
+        evaluate(clock.instant());
+    }
+
+    /**
+     * Evaluates every enabled HEALTH rule after the rollup pass that started at
+     * {@code passStarted}; never throws.
+     */
+    public void evaluate(Instant passStarted) {
         try {
-            evaluateRules();
+            evaluateRules(passStarted);
         } catch (RuntimeException e) {
             LOGGER.warnf("The Agent Health alert evaluation failed; the next rollup pass tries again: %s", sanitize(e.getMessage()));
         }
@@ -128,6 +146,11 @@ public class HealthAlertEvaluator {
 
     /** @return what fired */
     List<Fired> evaluateRules() {
+        return evaluateRules(clock.instant());
+    }
+
+    /** @return what fired */
+    List<Fired> evaluateRules(Instant passStarted) {
         List<Fired> fired = new ArrayList<>();
         if (alertSettings != null && !alertSettings.enabled()) {
             return fired;
@@ -148,6 +171,10 @@ public class HealthAlertEvaluator {
         }
         LocalDate today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
         Window window = new Window(today.minusDays(STATUS_DAYS - 1L), today);
+        agentIds.removeIf(agentId -> !rolledUp(agentId, window.baseline().from(), passStarted));
+        if (agentIds.isEmpty()) {
+            return fired;
+        }
         Map<String, Assessment> assessed = portfolio.assess(agentIds.stream().map(id -> new AgentRef(id, null)).toList(), window);
         Instant now = clock.instant();
         for (AlertRule rule : rules) {
@@ -173,6 +200,29 @@ public class HealthAlertEvaluator {
         return fired;
     }
 
+    /**
+     * Whether the agent's daily rows from {@code from} on are complete: no day of
+     * them was waiting for the rollup before this pass started. A day marked during
+     * the pass is new traffic, not a half-finished rollup. A store that cannot
+     * answer counts as not complete — the next pass asks again.
+     */
+    boolean rolledUp(String agentId, LocalDate from, Instant passStarted) {
+        if (dirtyStore == null) {
+            return true;
+        }
+        try {
+            Optional<LocalDate> pending = dirtyStore.earliestPending(agentId, passStarted);
+            if (pending.isPresent() && !pending.get().isBefore(from)) {
+                LOGGER.debugf("HEALTH alerts of agent %s wait for the rollup of %s", sanitize(agentId), pending.get());
+                return false;
+            }
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read the pending rollup days of agent %s: %s", sanitize(agentId), e.getMessage());
+            return false;
+        }
+    }
+
     /** One rule, one agent: fires what started and answers the new state. */
     HealthAlertState evaluate(AlertRule rule, Assessment a, HealthAlertState before, LocalDate today, Instant now, List<Fired> fired) {
         String agentId = a.agent().agentId();
@@ -190,17 +240,18 @@ public class HealthAlertEvaluator {
                 List<String> matched = new ArrayList<>();
                 matched.add("status " + (previous == null ? "" : previous + " → ") + status);
                 a.verdict().reasons().stream().filter(r -> !"INFO".equals(r.severity())).limit(2).map(Reason::text).forEach(matched::add);
-                fire(rule, AlertMatch.health(matched, status, previous, null), agentId, "status:" + status, fired);
+                if (!fire(rule, AlertMatch.health(matched, status, previous, null), agentId, "status:" + status, fired)) {
+                    // Not recorded: keep what the rule saw, so the next pass fires again.
+                    status = previous;
+                }
             }
         }
         if (triggers.contains(HealthTrigger.BURN_RATE)) {
             Burn burn = burn(a.rows(), today, a.profile());
-            if (burn.active()) {
+            if (burn.active() && (wasActive.contains(CONDITION_BURN) || fire(rule,
+                    AlertMatch.health(List.of(burn.describe(a.profile())), a.verdict().status(), null, "agentFailureRate"), agentId,
+                    CONDITION_BURN, fired))) {
                 active.add(CONDITION_BURN);
-                if (!wasActive.contains(CONDITION_BURN)) {
-                    fire(rule, AlertMatch.health(List.of(burn.describe(a.profile())), status, null, "agentFailureRate"), agentId, CONDITION_BURN,
-                            fired);
-                }
             }
         }
         if (triggers.contains(HealthTrigger.CRITICAL_TREND)) {
@@ -209,26 +260,41 @@ public class HealthAlertEvaluator {
                     continue;
                 }
                 String key = CONDITION_TREND + m.id();
-                active.add(key);
-                if (!wasActive.contains(key)) {
-                    String text = HealthStatusRules.reason(m, HealthStatusRules.AMBER, true, null).text();
-                    fire(rule, AlertMatch.health(List.of("critical measure worse: " + text), status, null, m.id()), agentId, key, fired);
+                if (wasActive.contains(key)) {
+                    active.add(key);
+                    continue;
+                }
+                String text = HealthStatusRules.reason(m, HealthStatusRules.AMBER, true, null).text();
+                if (fire(rule, AlertMatch.health(List.of("critical measure worse: " + text), a.verdict().status(), null, m.id()), agentId, key,
+                        fired)) {
+                    active.add(key);
                 }
             }
         }
         return new HealthAlertState(rule.id(), agentId, status, active, now);
     }
 
-    private void fire(AlertRule rule, AlertMatch match, String agentId, String condition, List<Fired> fired) {
-        fired.add(new Fired(rule.id(), agentId, condition, match));
+    /**
+     * Fires through the engine.
+     *
+     * @return whether the alert was recorded (or deduplicated against one that was)
+     *         — {@code false} when the engine failed or is not there, so the caller
+     *         leaves the condition unseen and the next pass tries again
+     */
+    private boolean fire(AlertRule rule, AlertMatch match, String agentId, String condition, List<Fired> fired) {
         if (engine == null || !engine.isResolvable()) {
-            return;
+            LOGGER.debugf("No alert engine; the HEALTH alert of rule %s for agent %s waits for the next pass", sanitize(rule.id()),
+                    sanitize(agentId));
+            return false;
         }
         try {
             engine.get().fireHealth(rule, match, agentId, condition);
+            fired.add(new Fired(rule.id(), agentId, condition, match));
+            return true;
         } catch (RuntimeException e) {
-            LOGGER.warnf("Could not record the HEALTH alert of rule %s for agent %s: %s", sanitize(rule.id()), sanitize(agentId),
-                    sanitize(e.getMessage()));
+            LOGGER.warnf("Could not record the HEALTH alert of rule %s for agent %s (retried next pass): %s", sanitize(rule.id()),
+                    sanitize(agentId), sanitize(e.getMessage()));
+            return false;
         }
     }
 

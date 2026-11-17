@@ -19,12 +19,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.in;
 
@@ -110,12 +112,33 @@ public class MongoHealthProfileStore implements IHealthProfileStore {
         try {
             for (Document d : profiles.find(eq(FIELD_UPDATED_BY, userId))) {
                 HealthProfile p = profile(d);
-                write(p.withMeta(p.agentId(), p.stored(), p.updatedAt(), null));
-                changed++;
+                HealthProfile blanked = p.withMeta(p.agentId(), p.stored(), p.updatedAt(), null);
+                // Compare-and-set on the document read: a save in between (a new author,
+                // a new body) is left alone rather than overwritten with the old body.
+                changed += profiles.replaceOne(
+                        and(eq("_id", d.getString("_id")), eq(FIELD_UPDATED_BY, userId), eq(FIELD_PROFILE, d.getString(FIELD_PROFILE))),
+                        new Document("_id", d.getString("_id")).append(FIELD_PROFILE, HealthJson.write(blanked)).append(FIELD_UPDATED_BY, null))
+                        .getModifiedCount();
             }
             return changed;
         } catch (MongoException e) {
             throw new HealthStoreException("Could not clear the author of health profiles", e);
+        }
+    }
+
+    @Override
+    public List<HealthProfile> listByAuthor(String userId) {
+        List<HealthProfile> found = new ArrayList<>();
+        if (userId == null) {
+            return found;
+        }
+        try {
+            for (Document d : profiles.find(eq(FIELD_UPDATED_BY, userId))) {
+                found.add(profile(d));
+            }
+            return found;
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not list health profiles", e);
         }
     }
 

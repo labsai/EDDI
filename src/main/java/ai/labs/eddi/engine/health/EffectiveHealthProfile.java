@@ -234,6 +234,7 @@ public final class EffectiveHealthProfile {
         Slo stored = storedProfile == null || storedProfile.slo() == null ? Slo.NONE : storedProfile.slo();
         return new HealthProfile(agentId, preset.id(), List.copyOf(critical), limits, budgets,
                 new Slo(agentTurnSuccess, stored.apdexTMs(), minTurnsForBurnAlert), overrides, storedProfile != null,
-                storedProfile == null ? null : storedProfile.updatedAt(), storedProfile == null ? null : storedProfile.updatedBy());
+                storedProfile == null ? null : storedProfile.updatedAt(), storedProfile == null ? null : storedProfile.updatedBy(),
+                HealthProfile.defaultedFields(storedProfile));
     }
 }

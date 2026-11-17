@@ -217,8 +217,11 @@ public class McpHealthTools {
             + "charts. Needs EDIT on the agent. Invalid fields come back as violations with a dotted path (thresholds.resolutionRate.red, "
             + "overrides[0].reason). Example: {\"preset\":\"support\",\"critical\":[\"agentFailureRate\",\"resolutionRate\"],"
             + "\"thresholds\":{\"resolutionRate\":{\"green\":0.7,\"red\":0.4}},\"budgets\":{\"costPerResolvedUsd\":0.5},"
-            + "\"slo\":{\"agentTurnSuccess\":0.99},\"overrides\":[{\"measure\":\"business\",\"state\":\"IGNORED\",\"reason\":\"CRM outage\","
-            + "\"until\":\"2026-11-14\"}]}. Read the profile first and send back the whole of it with your change.")
+            + "\"slo\":{\"agentTurnSuccess\":0.99},\"overrides\":[{\"section\":\"business\",\"state\":\"IGNORED\",\"reason\":\"CRM outage\","
+            + "\"until\":\"2026-11-14\"}]}. The stored profile is replaced: to change one field of a stored profile, read it and "
+            + "send back what is stored with your change, but leave out the fields its 'defaulted' list names - those come from the "
+            + "preset, and sending them would pin today's defaults. To return to the preset entirely, the profile is deleted (REST "
+            + "DELETE /agents/{agentId}/health/profile).")
     public String updateAgentHealthProfile(@ToolArg(description = "Agent id (required)") String agentId,
                                            @ToolArg(description = "The profile as JSON (required)") String profile) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);

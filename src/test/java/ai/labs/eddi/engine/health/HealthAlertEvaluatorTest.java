@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,6 +50,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,6 +65,7 @@ class HealthAlertEvaluatorTest {
     private AlertSettings settings;
     private HealthPortfolioService portfolio;
     private IHealthAlertStateStore stateStore;
+    private IHealthDirtyDayStore dirtyStore;
     private HealthAlertEvaluator evaluator;
 
     @BeforeEach
@@ -77,7 +80,9 @@ class HealthAlertEvaluatorTest {
         when(settings.enabled()).thenReturn(true);
         portfolio = mock(HealthPortfolioService.class);
         stateStore = mock(IHealthAlertStateStore.class);
-        evaluator = new HealthAlertEvaluator(ruleStore, engines, settings, portfolio, stateStore, mock(IDocumentDescriptorStore.class),
+        dirtyStore = mock(IHealthDirtyDayStore.class);
+        when(dirtyStore.earliestPending(anyString(), any())).thenReturn(Optional.empty());
+        evaluator = new HealthAlertEvaluator(ruleStore, engines, settings, portfolio, stateStore, mock(IDocumentDescriptorStore.class), dirtyStore,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -286,6 +291,63 @@ class HealthAlertEvaluatorTest {
             when(ruleStore.findEnabled()).thenReturn(List.of());
             assertTrue(evaluator.evaluateRules().isEmpty());
             verify(portfolio, never()).assess(any(), any());
+        }
+
+        @Test
+        @DisplayName("a fire that fails is not remembered: the status, the burn and the trend fire again on the next pass")
+        void failedFireRetries() {
+            when(engine.fireHealth(any(), any(), anyString(), anyString())).thenThrow(new IllegalStateException("outbox down"));
+            AlertRule all = rule(List.of(HealthTrigger.STATUS_CHANGE, HealthTrigger.BURN_RATE, HealthTrigger.CRITICAL_TREND), null);
+            Measure worse = new Measure("agentFailureRate", "Agent-caused failures", "SCORED", true, "ratio", 0.08, 1000, null, 0.01, 0.07, true,
+                    true, "RED", new Thresholds(0.01, 0.05, false), null, null);
+            Assessment a = assessment("NEEDS_ATTENTION", List.of(worse), List.of(day(TODAY, 600, 60), day(TODAY.minusDays(1), 600, 60)),
+                    EffectiveHealthProfile.ofPreset("support"));
+            HealthAlertState before = state("HEALTHY", List.of());
+
+            assertTrue(run(all, a, before).isEmpty(), "nothing was recorded");
+            assertEquals("HEALTHY", lastState.status(), "the status the rule saw stays, so the change fires again");
+            assertTrue(lastState.active().isEmpty(), "no condition counts as seen");
+
+            reset(engine);
+            List<Fired> retried = run(all, a, lastState);
+            assertEquals(List.of("status:NEEDS_ATTENTION", "burn", "trend:agentFailureRate"), retried.stream().map(Fired::condition).toList());
+            assertEquals("NEEDS_ATTENTION", lastState.status());
+            assertEquals(List.of("burn", "trend:agentFailureRate"), lastState.active());
+        }
+
+        @Test
+        @DisplayName("without an alert engine nothing counts as fired")
+        @SuppressWarnings("unchecked")
+        void noEngine() {
+            Instance<AlertEngine> none = mock(Instance.class);
+            when(none.isResolvable()).thenReturn(false);
+            evaluator = new HealthAlertEvaluator(ruleStore, none, settings, portfolio, stateStore, mock(IDocumentDescriptorStore.class), dirtyStore,
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+            assertTrue(run(rule(List.of(HealthTrigger.STATUS_CHANGE), null), assessment("WATCH"), null).isEmpty());
+            assertEquals(null, lastState.status());
+        }
+
+        @Test
+        @DisplayName("an agent with a day of the windows still waiting for the rollup since before the pass is not judged")
+        void halfFinishedRollup() {
+            AlertRule health = rule(List.of(HealthTrigger.STATUS_CHANGE), null);
+            when(ruleStore.findEnabled()).thenReturn(List.of(health));
+            Instant passStarted = NOW.minusSeconds(30);
+            when(dirtyStore.earliestPending("a", passStarted)).thenReturn(Optional.of(TODAY.minusDays(3)));
+
+            assertTrue(evaluator.evaluateRules(passStarted).isEmpty());
+            verify(portfolio, never()).assess(any(), any());
+            verify(stateStore, never()).write(any());
+
+            // A day older than both windows (baseline included) does not hold it back.
+            when(dirtyStore.earliestPending("a", passStarted)).thenReturn(Optional.of(TODAY.minusDays(2L * HealthAlertEvaluator.STATUS_DAYS)));
+            when(portfolio.assess(any(), any())).thenReturn(Map.of("a", assessment("WATCH")));
+            when(stateStore.read(eq("r1"), any())).thenReturn(Map.of());
+            assertEquals(1, evaluator.evaluateRules(passStarted).size());
+
+            // A store that cannot answer holds it back too.
+            when(dirtyStore.earliestPending("a", passStarted)).thenThrow(new IllegalStateException("down"));
+            assertTrue(evaluator.evaluateRules(passStarted).isEmpty());
         }
 
         @Test

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health;
 import ai.labs.eddi.engine.health.model.HealthProfile;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -39,4 +40,7 @@ public interface IHealthProfileStore {
      * @return the profiles changed
      */
     long clearAuthor(String userId);
+
+    /** The profiles {@code userId} saved last — for the GDPR export. */
+    List<HealthProfile> listByAuthor(String userId);
 }

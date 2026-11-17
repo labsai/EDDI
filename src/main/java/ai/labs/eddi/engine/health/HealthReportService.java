@@ -26,11 +26,14 @@ import ai.labs.eddi.engine.health.report.HealthReports.AgentHealth;
 import ai.labs.eddi.engine.health.report.HealthReports.Check;
 import ai.labs.eddi.engine.health.report.HealthReports.CompareSide;
 import ai.labs.eddi.engine.health.report.HealthReports.DateRange;
+import ai.labs.eddi.engine.health.report.HealthReports.EffectivenessSection;
 import ai.labs.eddi.engine.health.report.HealthReports.HealthCompare;
 import ai.labs.eddi.engine.health.report.HealthReports.HealthSeries;
 import ai.labs.eddi.engine.health.report.HealthReports.Marker;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
 import ai.labs.eddi.engine.health.report.HealthReports.Period;
+import ai.labs.eddi.engine.health.report.HealthReports.Reason;
+import ai.labs.eddi.engine.health.report.HealthReports.Section;
 import ai.labs.eddi.engine.health.report.HealthReports.Series;
 import ai.labs.eddi.engine.health.report.HealthReports.SeriesPoint;
 import ai.labs.eddi.engine.model.Deployment;
@@ -233,6 +236,15 @@ public class HealthReportService {
 
     /** {@code GET /agents/{agentId}/health}. */
     public AgentHealth report(Scope scope, String agentName, boolean qualityAllowed) {
+        return report(scope, agentName, qualityAllowed, null);
+    }
+
+    /**
+     * @param shown
+     *            {@code null} for the full report; else the sections of an owner
+     *            report link (see {@link #sharedReport})
+     */
+    private AgentHealth report(Scope scope, String agentName, boolean qualityAllowed, List<String> shown) {
         Window window = scope.window();
         Window baseline = window.baseline();
         List<HealthTurnAggregate> rows = daily(scope.agentId(), baseline.from(), window.to());
@@ -244,12 +256,62 @@ public class HealthReportService {
         PeriodData current = periodData(scope.agentId(), window, scope.version(), origins, rows, selected, qualityAllowed);
         PeriodData before = periodData(scope.agentId(), baseline, scope.version(), origins, rows, selected, qualityAllowed);
         Map<String, Object> sections = HealthMeasures.sections(current, before, !qualityAllowed, profile);
+        if (shown != null) {
+            sections = publicSections(sections, shown);
+        }
         Verdict verdict = HealthStatusRules.evaluate(sections, profile,
                 markers(scope.agentId(), window, scope.markerTenants(), firstTurnOrigins(scope.origins())));
+        List<Reason> reasons = verdict.reasons();
+        List<Check> checks = List.of(goldenSuite(scope.agentId()));
+        if (shown != null) {
+            reasons = reasons.stream().map(r -> new Reason(r.measureId(), r.severity(), r.text(), null)).toList();
+            checks = shown.contains(HealthDefaults.RELIABILITY) ? checks : List.of();
+        }
 
         return new AgentHealth(scope.agentId(), agentName, period(window), new DateRange(baseline.from().toString(), baseline.to().toString()),
-                scope.version(), origins, verdict.status(), verdict.reasons(), preset, clock.instant().toString(),
-                dataThrough(scope.agentId()).toString(), sections, List.of(goldenSuite(scope.agentId())));
+                scope.version(), origins, verdict.status(), reasons, preset, clock.instant().toString(), dataThrough(scope.agentId()).toString(),
+                sections, checks);
+    }
+
+    /**
+     * The report an owner report link shows (H4b): only the link's
+     * {@code sections}, and a status and reasons judged over those sections alone -
+     * a status over all of them would tell the owner about sections the link leaves
+     * out. Free text is left out: no measure carries a hint (an override's reason
+     * is an admin's note, not the owner's to read), no reason names a change
+     * marker, and the golden-suite check shows only with reliability.
+     */
+    public AgentHealth sharedReport(Scope scope, String agentName, List<String> sections) {
+        return report(scope, agentName, sections.contains(HealthDefaults.QUALITY), List.copyOf(sections));
+    }
+
+    /** The given sections only, in their order, without free-text hints. */
+    static Map<String, Object> publicSections(Map<String, Object> all, List<String> shown) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        all.forEach((section, content) -> {
+            if (shown.contains(section)) {
+                out.put(section, withoutHints(content));
+            }
+        });
+        return out;
+    }
+
+    private static Object withoutHints(Object content) {
+        if (content instanceof Section s) {
+            return new Section(s.restricted(), withoutHints(s.measures()));
+        }
+        if (content instanceof EffectivenessSection e) {
+            return new EffectivenessSection(e.restricted(), e.coverage(), withoutHints(e.measures()));
+        }
+        return content;
+    }
+
+    private static List<Measure> withoutHints(List<Measure> measures) {
+        if (measures == null) {
+            return null;
+        }
+        return measures.stream().map(m -> new Measure(m.id(), m.label(), m.kind(), m.critical(), m.unit(), m.value(), m.n(), m.interval(),
+                m.baseline(), m.delta(), m.significant(), m.tested(), m.band(), m.thresholds(), m.breakdown(), null)).toList();
     }
 
     /**

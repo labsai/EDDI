@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.health.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -50,11 +51,68 @@ import java.util.Map;
  *            {@code null}
  * @param updatedBy
  *            response only: who wrote it last, or {@code null}
+ * @param defaulted
+ *            response only: the fields whose value is not stored but the
+ *            preset's or the deployment's default — every field when
+ *            {@code stored} is {@code false}; among {@code preset},
+ *            {@code critical}, {@code thresholds}, {@code budgets},
+ *            {@code slo.agentTurnSuccess}, {@code slo.apdexTMs},
+ *            {@code slo.minTurnsForBurnAlert}, {@code overrides}. Writing a
+ *            response back stores these defaults as the agent's own values,
+ *            which then no longer follow the preset: send only what you mean to
+ *            set. Ignored on a request.
  */
 @JsonInclude(JsonInclude.Include.ALWAYS)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record HealthProfile(String agentId, String preset, List<String> critical, Map<String, Limits> thresholds, Budgets budgets, Slo slo,
-        List<MeasureOverride> overrides, Boolean stored, String updatedAt, String updatedBy) {
+        List<MeasureOverride> overrides, Boolean stored, String updatedAt, String updatedBy, List<String> defaulted) {
+
+    /** The fields {@code defaulted} can name, in order. */
+    public static final List<String> FIELDS = List.of("preset", "critical", "thresholds", "budgets", "slo.agentTurnSuccess", "slo.apdexTMs",
+            "slo.minTurnsForBurnAlert", "overrides");
+
+    /** Without {@code defaulted} — a request body or a stored profile. */
+    public HealthProfile(String agentId, String preset, List<String> critical, Map<String, Limits> thresholds, Budgets budgets, Slo slo,
+            List<MeasureOverride> overrides, Boolean stored, String updatedAt, String updatedBy) {
+        this(agentId, preset, critical, thresholds, budgets, slo, overrides, stored, updatedAt, updatedBy, null);
+    }
+
+    /**
+     * The fields of {@link #FIELDS} a stored profile leaves to the defaults — all
+     * of them when nothing is stored.
+     */
+    public static List<String> defaultedFields(HealthProfile stored) {
+        if (stored == null) {
+            return FIELDS;
+        }
+        List<String> out = new ArrayList<>();
+        if (stored.preset() == null) {
+            out.add("preset");
+        }
+        if (stored.critical() == null) {
+            out.add("critical");
+        }
+        if (stored.thresholds() == null || stored.thresholds().isEmpty()) {
+            out.add("thresholds");
+        }
+        if (stored.budgets() == null) {
+            out.add("budgets");
+        }
+        Slo slo = stored.slo() == null ? Slo.NONE : stored.slo();
+        if (slo.agentTurnSuccess() == null) {
+            out.add("slo.agentTurnSuccess");
+        }
+        if (slo.apdexTMs() == null) {
+            out.add("slo.apdexTMs");
+        }
+        if (slo.minTurnsForBurnAlert() == null) {
+            out.add("slo.minTurnsForBurnAlert");
+        }
+        if (stored.overrides() == null) {
+            out.add("overrides");
+        }
+        return List.copyOf(out);
+    }
 
     /**
      * Band limits of one measure. Whether higher is better comes from the measure,
@@ -120,8 +178,11 @@ public record HealthProfile(String agentId, String preset, List<String> critical
         public static final String IGNORED = "IGNORED";
     }
 
-    /** The same profile with its bookkeeping fields set. */
+    /**
+     * The same profile with its bookkeeping fields set ({@code defaulted} dropped:
+     * it is never stored).
+     */
     public HealthProfile withMeta(String newAgentId, Boolean newStored, String newUpdatedAt, String newUpdatedBy) {
-        return new HealthProfile(newAgentId, preset, critical, thresholds, budgets, slo, overrides, newStored, newUpdatedAt, newUpdatedBy);
+        return new HealthProfile(newAgentId, preset, critical, thresholds, budgets, slo, overrides, newStored, newUpdatedAt, newUpdatedBy, null);
     }
 }

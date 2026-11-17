@@ -122,10 +122,16 @@ public class HealthRollupService {
     @Inject
     Instance<HealthReportLinks> reportLinks;
 
-    /** The agent's Apdex T: its profile's, else {@code eddi.health.apdex-t}. */
+    /**
+     * The agent's Apdex T: its profile's, else {@code eddi.health.apdex-t} - read
+     * from the store, not the profile cache: a recount runs on whichever node
+     * claims the day, and a cached profile there may predate the change that marked
+     * the days, which would recount them under the old T and mark them clean. A
+     * store that cannot answer fails the day (it is retried).
+     */
     long apdexTMs(String agentId) {
         if (profiles != null && profiles.isResolvable()) {
-            return profiles.get().apdexTMs(agentId);
+            return profiles.get().apdexTMsUncached(agentId);
         }
         return settings.apdexTMs();
     }
@@ -206,7 +212,7 @@ public class HealthRollupService {
         metrics.rolledUp(days, rows, failed, Duration.between(started, clock.instant()));
         if (alertEvaluator != null && alertEvaluator.isResolvable()) {
             // After the daily rows are fresh: HEALTH alerts read them. Never throws.
-            alertEvaluator.get().evaluate();
+            alertEvaluator.get().evaluate(started);
         }
         if (reportLinks != null && reportLinks.isResolvable()) {
             // Expired owner report links already answer 404; this drops their rows.

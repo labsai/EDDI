@@ -134,4 +134,14 @@ public class PostgresHealthAlertStateStore implements IHealthAlertStateStore {
             throw new HealthStoreException("Could not delete stale health alert states", e);
         }
     }
+
+    @Override
+    public long deleteByAgent(String agentId) {
+        try (Connection c = connection(); PreparedStatement s = c.prepareStatement("DELETE FROM health_alert_state WHERE agent_id = ?")) {
+            s.setString(1, agentId);
+            return s.executeUpdate();
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not delete the health alert states of an agent", e);
+        }
+    }
 }

@@ -105,4 +105,13 @@ public class MongoHealthAlertStateStore implements IHealthAlertStateStore {
             throw new HealthStoreException("Could not delete stale health alert states", e);
         }
     }
+
+    @Override
+    public long deleteByAgent(String agentId) {
+        try {
+            return states.deleteMany(eq("agentId", agentId)).getDeletedCount();
+        } catch (MongoException e) {
+            throw new HealthStoreException("Could not delete the health alert states of an agent", e);
+        }
+    }
 }

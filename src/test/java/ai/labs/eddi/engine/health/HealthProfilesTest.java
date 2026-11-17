@@ -102,6 +102,20 @@ class HealthProfilesTest {
     }
 
     @Test
+    @DisplayName("the rollup's Apdex T is read past the cache: a node that cached the old profile recounts under the new T")
+    void apdexUncached() {
+        when(store.read("a")).thenReturn(Optional.of(body(new Slo(null, 2000L, null)).withMeta("a", true, NOW.toString(), "alice")));
+        assertEquals(2000L, profiles.apdexTMs("a"), "cached now");
+        // Another node saves a new T; this node's cache still holds 2000.
+        when(store.read("a")).thenReturn(Optional.of(body(new Slo(null, 3000L, null)).withMeta("a", true, NOW.toString(), "bob")));
+        assertEquals(2000L, profiles.apdexTMs("a"), "the cached read is stale within the TTL");
+        assertEquals(3000L, profiles.apdexTMsUncached("a"), "the rollup's read is not");
+        assertEquals(3000L, profiles.apdexTMs("a"), "and it refreshes the cache");
+        when(store.read("b")).thenThrow(new HealthStoreException("down", null));
+        assertThrows(HealthStoreException.class, () -> profiles.apdexTMsUncached("b"), "a failed read fails the day instead of guessing T");
+    }
+
+    @Test
     @DisplayName("delete: a marker only when something was deleted")
     void delete() {
         when(store.delete("a")).thenReturn(true);

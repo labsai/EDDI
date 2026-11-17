@@ -143,17 +143,44 @@ public class PostgresHealthProfileStore implements IHealthProfileStore {
         if (userId == null) {
             return 0;
         }
-        List<HealthProfile> authored;
+        long changed = 0;
         try (Connection c = connection();
-                PreparedStatement s = c.prepareStatement("SELECT agent_id, profile FROM health_profiles WHERE updated_by = ?")) {
-            s.setString(1, userId);
-            authored = read(s);
+                PreparedStatement select = c.prepareStatement("SELECT agent_id, profile FROM health_profiles WHERE updated_by = ?");
+                PreparedStatement update = c.prepareStatement(
+                        "UPDATE health_profiles SET profile = ?, updated_by = NULL WHERE agent_id = ? AND updated_by = ? AND profile = ?")) {
+            select.setString(1, userId);
+            List<String[]> rows = new ArrayList<>();
+            try (ResultSet r = select.executeQuery()) {
+                while (r.next()) {
+                    rows.add(new String[]{r.getString(1), r.getString(2)});
+                }
+            }
+            for (String[] row : rows) {
+                HealthProfile p = HealthJson.read(row[1], HealthProfile.class);
+                // Compare-and-set on the row read: a save in between is left alone.
+                update.setString(1, HealthJson.write(p.withMeta(row[0], Boolean.TRUE, p.updatedAt(), null)));
+                update.setString(2, row[0]);
+                update.setString(3, userId);
+                update.setString(4, row[1]);
+                changed += update.executeUpdate();
+            }
+            return changed;
         } catch (SQLException e) {
             throw new HealthStoreException("Could not clear the author of health profiles", e);
         }
-        for (HealthProfile p : authored) {
-            write(p.withMeta(p.agentId(), p.stored(), p.updatedAt(), null));
+    }
+
+    @Override
+    public List<HealthProfile> listByAuthor(String userId) {
+        if (userId == null) {
+            return List.of();
         }
-        return authored.size();
+        try (Connection c = connection();
+                PreparedStatement s = c.prepareStatement("SELECT agent_id, profile FROM health_profiles WHERE updated_by = ?")) {
+            s.setString(1, userId);
+            return read(s);
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not list health profiles", e);
+        }
     }
 }

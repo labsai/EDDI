@@ -29,4 +29,7 @@ public interface IHealthAlertStateStore {
      * disabled or narrowed since.
      */
     long deleteEvaluatedBefore(Instant before);
+
+    /** Deletes every state of an agent — on the agent's deletion. */
+    long deleteByAgent(String agentId);
 }

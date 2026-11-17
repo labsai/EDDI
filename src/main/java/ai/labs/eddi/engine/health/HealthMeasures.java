@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.health.report.HealthReports.EffectivenessSection;
 import ai.labs.eddi.engine.health.report.HealthReports.Interval;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
 import ai.labs.eddi.engine.health.report.HealthReports.Section;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -377,14 +378,35 @@ public final class HealthMeasures {
     static final Set<String> TESTED;
 
     static {
-        PeriodData probe = probe();
+        TESTED = derivedTested();
+    }
+
+    /**
+     * {@link #TESTED}, derived; a measure whose probe build fails counts as not
+     * tested (and is logged) rather than failing the class's initialisation — which
+     * would take every health view down with it.
+     */
+    static Set<String> derivedTested() {
         Set<String> tested = new TreeSet<>();
+        PeriodData probe;
+        try {
+            probe = probe();
+        } catch (RuntimeException e) {
+            Logger.getLogger(HealthMeasures.class).errorf("Could not build the significance probe; no measure is marked tested: %s",
+                    e.getMessage());
+            return Set.of();
+        }
         for (String id : HealthDefaults.MEASURES.keySet()) {
-            if (!(stat0(id, probe).test() instanceof NoTest)) {
-                tested.add(id);
+            try {
+                if (!(stat0(id, probe).test() instanceof NoTest)) {
+                    tested.add(id);
+                }
+            } catch (RuntimeException e) {
+                Logger.getLogger(HealthMeasures.class).errorf("Could not probe measure %s for a significance test; marked untested: %s", id,
+                        e.getMessage());
             }
         }
-        TESTED = Set.copyOf(tested);
+        return Set.copyOf(tested);
     }
 
     /** A period in which every measure can be computed. */
