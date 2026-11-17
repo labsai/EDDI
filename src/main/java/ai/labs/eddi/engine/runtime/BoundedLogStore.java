@@ -233,12 +233,18 @@ public class BoundedLogStore {
         if (record == null)
             return;
 
+        // A record with no message but a throwable is still worth keeping: the
+        // exception is the whole content of `logger.log(SEVERE, "", failure)`.
+        boolean hasException = record.getThrown() != null || exceptionText != null;
+
         String message = preRedactedMessage;
         if (message == null) {
             // Format the message using a Formatter (avoids deprecated
             // getFormattedMessage())
             message = formatRecord(record);
-            if (message == null || message.isEmpty())
+            if (message == null)
+                message = "";
+            if (message.isEmpty() && !hasException)
                 return;
 
             // Redact potential secrets from log messages, and escape anything that
@@ -247,7 +253,7 @@ public class BoundedLogStore {
             // so a forged boundary kept here forges an entry there too.
             message = LogRecordRedactor.rewrite(message);
         }
-        if (message.isEmpty())
+        if (message.isEmpty() && !hasException)
             return;
 
         // Don't capture our own log messages to avoid infinite recursion

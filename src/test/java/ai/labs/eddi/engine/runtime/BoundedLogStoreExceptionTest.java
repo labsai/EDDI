@@ -133,4 +133,20 @@ class BoundedLogStoreExceptionTest {
         verify(databaseLogs, times(1)).addLogsBatch(batch.capture());
         assertTrue(batch.getValue().get(0).exception().contains("Caused by: java.io.IOException: socket closed"));
     }
+
+    @Test
+    @DisplayName("a record with an empty message but a throwable is kept; one with neither is dropped")
+    void keepsEmptyMessageWhenThrowablePresent() {
+        store.capture(record(Level.SEVERE, "", failure()));
+        store.capture(record(Level.SEVERE, null, failure()));
+        store.capture(record(Level.SEVERE, "", null));
+
+        List<LogEntry> entries = store.getEntries(null, null, null, 10);
+        assertEquals(2, entries.size(), "empty-message records with a throwable were dropped, or the bare empty one was kept");
+        for (LogEntry e : entries) {
+            assertEquals("", e.message());
+            assertNotNull(e.exception());
+            assertTrue(e.exception().contains("API agent sync failed"), e.exception());
+        }
+    }
 }

@@ -255,7 +255,8 @@ function LiveTab() {
     return entries.filter(
       (e) =>
         (e.message ?? "").toLowerCase().includes(q) ||
-        (e.loggerName ?? "").toLowerCase().includes(q)
+        (e.loggerName ?? "").toLowerCase().includes(q) ||
+        (e.exception ?? "").toLowerCase().includes(q)
     );
   }, [entries, textSearch]);
 
@@ -617,7 +618,8 @@ function HistoryTab() {
       result = result.filter(
         (e) =>
           (e.message ?? "").toLowerCase().includes(q) ||
-          (e.loggerName ?? "").toLowerCase().includes(q)
+          (e.loggerName ?? "").toLowerCase().includes(q) ||
+          (e.exception ?? "").toLowerCase().includes(q)
       );
     }
     return result;

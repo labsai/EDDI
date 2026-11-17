@@ -232,7 +232,7 @@ public final class LogCaptureFilter implements Filter {
                 // exist yet.
                 held = preStartMessage(record);
             }
-            if (held != null && !held.isEmpty()) {
+            if (held != null && (!held.isEmpty() || record.getThrown() != null)) {
                 store = holdUntilStoreExists(record, held);
             }
         }

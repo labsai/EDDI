@@ -61,12 +61,7 @@ curl "http://localhost:7070/administration/logs?agentId=my-agent&level=WARN&limi
     "loggerName": "ai.labs.eddi.engine.internal.RestAgentSync",
     "message": "API agent sync failed",
     "instanceId": "eddi-host-a1b2",
-    "exception": "java.net.ConnectException: Connection refused
-	at java.base/sun.nio.ch.Net.pollConnect(Native Method)
-	... 31 more
-Caused by: java.io.IOException: socket closed
-	at java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:672)
-	... 12 more"
+    "exception": "java.net.ConnectException: Connection refused\n\tat java.base/sun.nio.ch.Net.pollConnect(Native Method)\n\t... 31 more\nCaused by: java.io.IOException: socket closed\n\tat java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:672)\n\t... 12 more"
   }
 ]
 ```

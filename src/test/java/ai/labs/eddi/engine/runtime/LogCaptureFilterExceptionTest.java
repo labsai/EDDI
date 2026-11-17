@@ -66,4 +66,18 @@ class LogCaptureFilterExceptionTest {
         assertFalse(exception.contains(KEY), exception);
         assertTrue(exception.contains("Caused by: java.lang.IllegalStateException: root"), exception);
     }
+
+    @Test
+    @DisplayName("a pre-start record with no message but a throwable is replayed; one with neither is not")
+    void preStartEmptyMessageWithThrowableReplayed() {
+        filter.isLoggable(record("", new RuntimeException("boom")));
+        filter.isLoggable(record("", null));
+
+        LogCaptureFilter.setStore(store);
+
+        List<LogEntry> entries = store.getEntries(null, null, null, 10);
+        assertEquals(1, entries.size(), entries.toString());
+        assertEquals("", entries.get(0).message());
+        assertTrue(entries.get(0).exception().contains("boom"), entries.get(0).exception());
+    }
 }

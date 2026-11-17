@@ -253,6 +253,24 @@ describe("LogsPage", () => {
     expect(screen.queryByText("Low memory")).not.toBeInTheDocument();
   });
 
+  it("finds an entry by its exception text", async () => {
+    const base = vi.mocked(useLogStream)();
+    vi.mocked(useLogStream).mockReturnValue({
+      ...base,
+      entries: [
+        { timestamp: 1700000004000, level: "ERROR", message: "API agent sync failed", loggerName: "sync", exception: "java.net.ConnectException: refused" },
+        { timestamp: 1700000005000, level: "INFO", message: "Unrelated line", loggerName: "main" },
+      ],
+    });
+    renderLogs();
+
+    await userEvent.setup().type(screen.getByTestId("text-search"), "connectexception");
+
+    expect(screen.getByText("API agent sync failed")).toBeInTheDocument();
+    expect(screen.queryByText("Unrelated line")).not.toBeInTheDocument();
+    vi.mocked(useLogStream).mockReturnValue(base);
+  });
+
   it("shows instance badge", () => {
     renderLogs();
     expect(screen.getByText("test-instance-123")).toBeInTheDocument();
