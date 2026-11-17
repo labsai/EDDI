@@ -461,7 +461,11 @@ public final class NegotiationEngine {
         if (state.getConcessions().isEmpty()) {
             sb.append("- (empty)\n");
         } else {
-            List<Concession> ledger = state.getConcessions();
+            List<Concession> ledger = state.getConcessions().stream().filter(c -> trustedConcession(records, c)).toList();
+            int withheld = state.getConcessions().size() - ledger.size();
+            if (withheld > 0) {
+                sb.append("- (").append(withheld).append(" concession(s) withheld: not verified)\n");
+            }
             int omitted = Math.max(0, ledger.size() - maxRendered);
             if (omitted > 0) {
                 sb.append("- (").append(omitted).append(" earlier concession(s) omitted)\n");
@@ -490,6 +494,21 @@ public final class NegotiationEngine {
         Integer index = p.acceptanceEntryIndices() != null ? p.acceptanceEntryIndices().get(agentId) : null;
         List<TranscriptEntry> transcript = gc.getTranscript();
         return index != null && index >= 0 && index < transcript.size() && records.trusts(transcript.get(index));
+    }
+
+    /**
+     * Whether {@code records} lets the concession's text be quoted. A concession
+     * keeps no pointer to the transcript entry it came from, so it counts only if
+     * its author signs verifiably now ({@link GroupSigningGuard.View#vouchesFor})
+     * and no stored entry of that author failed to verify. Fails closed when the
+     * readers verify; with none that do, the ledger shows as stored.
+     */
+    private static boolean trustedConcession(GroupSigningGuard.View records, Concession c) {
+        if (records == null || !records.verifying()) {
+            return true;
+        }
+        return records.vouchesFor(c.byAgentId()) && records.stored().stream().noneMatch(
+                entry -> entry != null && Objects.equals(entry.speakerAgentId(), c.byAgentId()) && !records.trusts(entry));
     }
 
     private static String truncate(String value) {

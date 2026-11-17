@@ -234,3 +234,4 @@ makes, which cannot sign.
   its assignee), before the next fire leaves it on the backlog.
 - Lessons another team shares, and those the scorecard tool returns, were checked only against
   the storing team's records rule. Documented, not filtered.
+- The negotiation table's concession ledger is checked against the current records view as well: once a verifying reader joins, concessions by an author that does not sign verifiably (or that has an unverified entry) are withheld, with a count.
