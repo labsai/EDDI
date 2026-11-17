@@ -458,7 +458,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // older card for the same discussion cannot approve a later phase.
             String subject = SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId;
             String cardId = ISlackApprovalRecordStore.newCardId();
-            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId);
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName, subject, cardId, event.planHash());
 
             // Record the card BEFORE posting it, keyed by this pause's identity: the
             // interactivity endpoint refuses a decision on a subject this integration
@@ -800,15 +800,15 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * Fire-and-forget Slack post. Catches {@link SlackDeliveryException} so that a
      * transient Slack API failure does not abort the entire group discussion.
      *
-     * @return the message ts on success, or null on any failure
-     */
-    /**
+     * <p>
      * Every message of a discussion is composed from member output, display names,
      * artifact names, task subjects or the user's question — none of it written by
      * EDDI — and none needs a Slack control sequence, so the whole text is escaped
      * here, once ({@link SlackMrkdwn}). It used to be escaped field by field, and
      * the fields that carry the most text (contributions, syntheses, feedback) were
      * not: a member replying {@code <!channel>} pinged the channel.
+     *
+     * @return the message ts on success, or null on any failure
      */
     private String postSafe(String channel, String threadTs, String text) {
         // Escaped, then split into messages Slack will not truncate; the first

@@ -64,6 +64,8 @@ Each audit entry captures:
 | `agentSignature` | String  | The agent's Ed25519 signature over `hmac`, as `v<keyVersion>:<Base64>` (plain Base64 on entries written by 6.7.0 and earlier); null when the agent does not sign. See [Agent signatures](#agent-signatures) |
 | `sequence`       | long    | 0-based, gap-free position within the conversation; part of the signed payload |
 
+A task that runs because a human approved a plan records which one: every task a HITL resume runs carries `input.hitlPlanHash`, the [plan hash](hitl.md#plan-binding-planhash) the resume was admitted against, and an approved tool call's `hitl_approved` trace entry carries it as `planHash`. The decision itself is the `hitl.approval` entry, whose `output` has the same `planHash` and the `planBinding` it was decided under ([HITL Review & Audit](hitl-review-and-audit.md#top-level-fields-auditentryoutput)). Together they join a decision to what it let run.
+
 HITL oversight writes `hitl.sample.review`, `autonomy.promotion`, `autonomy.revert`, `autonomy.recommendation.dismissed`, `autonomy.demotion` and `autonomy.suspension.lifted` entries (`taskType: hitl`); approval analytics reads a projection of the `hitl.approval` entries, never the ledger itself — see [HITL Oversight](hitl-oversight.md#audit-ledger-entries).
 
 ### The ledger is the only copy of the prompt and the response
@@ -85,7 +87,7 @@ The audit ledger exposes a **read-only** REST API. No create, update, or delete 
 GET /auditstore/{conversationId}?skip=0&limit=100
 ```
 
-Returns audit entries for a conversation, newest first.
+Returns audit entries for a conversation, newest first. On this and the other entry-listing endpoints (not the verification endpoints below, which have their own default and ceiling) `limit` defaults to `100` and is capped at `1000`; a non-positive value falls back to the default.
 
 ### Get Audit Trail by Agent
 
@@ -221,11 +223,11 @@ Every **mutating** REST request — `POST`, `PUT`, `PATCH`, `DELETE` — outside
 | `output` | `status` — the HTTP status of the response |
 | `actions` | `ADMIN_<method>` |
 
-That covers configuration changes (every `…store` resource), deployments (`/administration`), the vault (`/secretstore`), backup import/export and sync (`/backup`), GDPR and other administrative endpoints (`/admin`), conversation deletion (`/conversationstore`), schedules, groups and channel integrations. **Not recorded** here: reads; the conversation and chat APIs (`/agents`, `/userconversationstore`, `/chat` — audited per pipeline task instead); `/v1`, `/a2a`, OAuth and channel callbacks (`/connections`, `/integrations`); the MCP transport and the UI shells. What is excluded is listed, so a new administrative endpoint is covered by default.
+That covers configuration changes (every `…store` resource), deployments (`/administration`), the vault (`/secretstore`), backup import/export and sync (`/backup`), GDPR and other administrative endpoints (`/admin`), conversation deletion (`/conversationstore`), schedules, groups and channel integrations. **Not recorded** here: reads; the conversation and chat APIs (`/agents`, `/userconversationstore`, `/chat` — audited per pipeline task instead); `/v1`, `/a2a`, OAuth and channel callbacks (`/connections`, `/integrations`); the MCP transport and the UI shells. What is excluded is listed, so a new administrative endpoint is covered by default. An **admin-only** endpoint under those roots is recorded all the same — one whose `@RolesAllowed` does not admit `eddi-user`, such as the conversation state reset (`PATCH /agents/{conversationId}/state`) and the managed-conversation mappings (`POST`/`DELETE /userconversationstore/userconversations/{intent}/{userId}`): its roles make it administrative wherever its path lives.
 
 A record never holds the request body or the query string. A path parameter that names a person (`userId` and the like) is replaced by that person's keyed pseudonym, so erasing a user does not leave their id in a `DELETE /admin/gdpr/…` record. The records have no conversation, so they take no chain position; they are HMAC-signed like every other entry.
 
-**MCP:** tools that act through the REST API — agent, resource, group, schedule and channel administration — reach this filter on the loopback call with the MCP caller's identity. `delete_user_data` and `export_user_data` call the GDPR service directly and are recorded by its compliance event (`GDPR_ERASURE`, `GDPR_EXPORT`), which names the subject's pseudonym but not the caller. The MCP user-memory tools are not recorded.
+**MCP:** tools that act through the REST API — agent, resource, group, schedule and channel administration — reach this filter on the loopback call with the MCP caller's identity. `delete_user_data` and `export_user_data` call the GDPR service directly, so they write the record themselves: method `MCP`, path `/mcp/<tool>/<pseudonym of the subject>`, `resource` `McpGdprTools#deleteUserData` or `#exportUserData`, the MCP caller as `userId`, and as `status` the code the REST surface answers for the same outcome — `200`, `207` (an erasure that lost a step, or an export bundle that is not everything), `400` (no `userId`, no `CONFIRM`), `403` (the caller lacks `eddi-admin`) or `500`. The GDPR service's own compliance event (`GDPR_ERASURE`, `GDPR_EXPORT`) still names the subject's pseudonym only; this record is the one that says who asked. The MCP user-memory tools are not recorded.
 
 List them with [`GET /auditstore/admin-actions`](#list-administrative-actions). Switch the records off with `eddi.audit.admin-actions.enabled=false`.
 

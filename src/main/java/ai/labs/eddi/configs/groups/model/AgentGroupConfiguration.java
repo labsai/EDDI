@@ -56,6 +56,17 @@ public class AgentGroupConfiguration {
     private String name;
     private String description;
 
+    /**
+     * Whether this group appears in the end-user catalog
+     * ({@code GET /catalog/groups}). Opt-in, default {@code false}, exactly like
+     * {@code AgentConfiguration.listed}: listing decides what is offered, the
+     * group's USE check still decides who may run it. With workspaces enforced,
+     * {@code published} and {@code internal} visibility count as listed too.
+     *
+     * @since 6.7.0
+     */
+    private Boolean listed = false;
+
     @Size(max = MAX_MEMBERS, message = "'members' must contain at most {max} entries")
     private List<GroupMember> members = new ArrayList<>();
     private String moderatorAgentId;
@@ -1063,7 +1074,19 @@ public class AgentGroupConfiguration {
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
             boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
-            boolean allowAbstention, VoteConfig voteConfig, PhaseSkipCondition skipIf) {
+            boolean allowAbstention, VoteConfig voteConfig, PhaseSkipCondition skipIf, OnApprovedConfig onApproved) {
+
+        /**
+         * The 13-component form that predates {@code onApproved} — {@code null} means
+         * an approved task runs nothing, the behavior of every phase written before
+         * approved-result actions existed.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval, ConvergenceConfig convergence,
+                boolean allowAbstention, VoteConfig voteConfig, PhaseSkipCondition skipIf) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
+                    allowAbstention, voteConfig, skipIf, null);
+        }
 
         /**
          * Convenience constructor with defaults: participants=ALL,
@@ -1138,6 +1161,73 @@ public class AgentGroupConfiguration {
             this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, requiresApproval, convergence,
                     allowAbstention, null, skipIf);
         }
+    }
+
+    /**
+     * What happens once a human approves a task of this phase: one configured call,
+     * made with the approved (possibly reviewer-edited) result exactly as approved,
+     * with no member turn in between.
+     * <p>
+     * Only valid on an {@code EXECUTE} phase with {@code requiresApproval: true} in
+     * a group whose {@code hitlConfig.granularity} is {@code TASK} — checked at
+     * save time. {@code null} (the default) runs nothing.
+     *
+     * @param action
+     *            the call to make — see {@link ApprovedAction}
+     * @param onFailure
+     *            what a failed call (non-2xx, refused, unreachable, or an outcome
+     *            lost to a crash) does to the task. Default {@code FAIL_TASK}
+     */
+    public record OnApprovedConfig(ApprovedAction action, ApprovedActionFailurePolicy onFailure) {
+
+        /** Normalization choke point, same shape as {@link GroupTaskConfig}. */
+        public OnApprovedConfig {
+            if (onFailure == null) {
+                onFailure = ApprovedActionFailurePolicy.FAIL_TASK;
+            }
+        }
+    }
+
+    /**
+     * The call an approved task triggers.
+     *
+     * @param type
+     *            the executor. {@code HTTPCALL} (the default, and the only kind
+     *            today) runs one call of an {@code httpcalls} configuration through
+     *            the same executor agents use
+     * @param uri
+     *            the {@code httpcalls} configuration, with an explicit version:
+     *            {@code eddi://ai.labs.apicalls/apicallstore/apicalls/<id>?version=<n>}
+     * @param call
+     *            the {@code name} of the call inside that configuration
+     */
+    public record ApprovedAction(ApprovedActionType type, String uri, String call) {
+
+        public ApprovedAction {
+            if (type == null) {
+                type = ApprovedActionType.HTTPCALL;
+            }
+        }
+    }
+
+    /** The kinds of {@link ApprovedAction}. */
+    public enum ApprovedActionType {
+        /** One call of an {@code httpcalls} configuration. */
+        HTTPCALL
+    }
+
+    /** What a failed {@link ApprovedAction} does to its task. */
+    public enum ApprovedActionFailurePolicy {
+        /**
+         * The task becomes FAILED with the failure as its note: its dependents do not
+         * run and VERIFY sees a failed task. The default — a "publish" that did not
+         * happen must not look done.
+         */
+        FAIL_TASK,
+        /**
+         * The task stays COMPLETED; the failure is recorded on the action only.
+         */
+        KEEP_COMPLETED
     }
 
     /**
@@ -1533,6 +1623,14 @@ public class AgentGroupConfiguration {
 
     // --- Getters/Setters ---
 
+    public Boolean getListed() {
+        return listed;
+    }
+
+    public void setListed(Boolean listed) {
+        this.listed = listed;
+    }
+
     public String getName() {
         return name;
     }
@@ -1922,6 +2020,26 @@ public class AgentGroupConfiguration {
         private HitlGranularity granularity = HitlGranularity.PHASE;
         private HitlRejectionPolicy onTaskRejection = HitlRejectionPolicy.FAIL;
 
+        /**
+         * Strict plan binding: a human decision on this group's pauses must carry the
+         * pause's {@code planHash} (from approval-status), or it is refused with a 400
+         * and the pause stays. Absent or {@code false} = a decision without the hash is
+         * accepted and logged, as clients that predate plan hashing send it. The
+         * deployment property {@code eddi.hitl.plan-hash.strict} turns it on for every
+         * group. Automated decisions (timeouts) are never refused for it.
+         *
+         * @since 6.8.0
+         */
+        private Boolean requirePlanHash;
+
+        public Boolean getRequirePlanHash() {
+            return requirePlanHash;
+        }
+
+        public void setRequirePlanHash(Boolean requirePlanHash) {
+            this.requirePlanHash = requirePlanHash;
+        }
+
         public String getApprovalTimeout() {
             return approvalTimeout;
         }
@@ -1987,6 +2105,34 @@ public class AgentGroupConfiguration {
 
         public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
             this.approvalContext = approvalContext;
+        }
+
+        /**
+         * Standing teams only: whether a backlog task that a person approved at a
+         * TASK-granularity gate counts as done when its cadence run is written back.
+         * <p>
+         * {@code false} (the default, and what every stored config reads as) keeps the
+         * original rule — only a {@code VERIFIED} outcome stays done; an approved task
+         * is merely {@code COMPLETED} and returns to {@code PENDING}, so the next run
+         * executes it again. {@code true} keeps it done as well, with the approver's
+         * edited result when there was one. Only an approval somebody gave counts: a
+         * timeout auto-approval ({@code decidedBy system:*}) does not, and neither does
+         * a task that completed in an ungated phase.
+         * <p>
+         * A switch (not a default) on {@code hitlConfig} rather than on the cadence: it
+         * is versioned with the group and sits next to the gate it qualifies. Ignored
+         * by a group without a workspace.
+         *
+         * @since 6.7.0
+         */
+        private boolean approvalCompletesBacklogTask;
+
+        public boolean isApprovalCompletesBacklogTask() {
+            return approvalCompletesBacklogTask;
+        }
+
+        public void setApprovalCompletesBacklogTask(boolean approvalCompletesBacklogTask) {
+            this.approvalCompletesBacklogTask = approvalCompletesBacklogTask;
         }
     }
 

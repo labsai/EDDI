@@ -169,7 +169,7 @@ public class ApiCallsTask implements ILifecycleTask {
                     targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 1);
                 }
                 httpCallsConfig.setTargetServerUrl(targetServerUrl);
-                rejectTemplatedHosts(httpCallsConfig, uriObj);
+                rejectRefusedTargets(httpCallsConfig, uriObj);
                 warnAboutUnescapedJsonValues(httpCallsConfig, uriObj);
                 return httpCallsConfig;
             } catch (ServiceException e) {
@@ -182,24 +182,33 @@ public class ApiCallsTask implements ILifecycleTask {
     }
 
     /**
-     * Fails the deployment when a target host is a template the deployment would
-     * not validate (see {@link IApiCallExecutor#rejectTemplatedAuthority}), instead
-     * of letting every turn that reaches the call fail.
+     * Fails the deployment when a target would be refused on every call, instead of
+     * letting the first turn that reaches it fail: a host that is a template the
+     * deployment would not validate
+     * ({@link IApiCallExecutor#rejectTemplatedAuthority}), or a literal host the
+     * SSRF check refuses ({@link IApiCallExecutor#rejectRefusedLiteralTarget}).
+     * Both the {@code targetServerUrl} and every absolute {@code request.path} are
+     * checked; a relative path inherits the server URL's host.
      */
-    private void rejectTemplatedHosts(ApiCallsConfiguration httpCallsConfig, Object uriObj) throws WorkflowConfigurationException {
+    private void rejectRefusedTargets(ApiCallsConfiguration httpCallsConfig, Object uriObj) throws WorkflowConfigurationException {
         try {
-            httpCallExecutor.rejectTemplatedAuthority(httpCallsConfig.getTargetServerUrl());
+            rejectRefusedTarget(httpCallsConfig.getTargetServerUrl());
             if (httpCallsConfig.getHttpCalls() != null) {
                 for (ApiCall call : httpCallsConfig.getHttpCalls()) {
                     String path = call.getRequest() != null ? call.getRequest().getPath() : null;
                     if (path != null && path.trim().startsWith("http")) {
-                        httpCallExecutor.rejectTemplatedAuthority(path.trim());
+                        rejectRefusedTarget(path.trim());
                     }
                 }
             }
         } catch (IllegalArgumentException e) {
             throw new WorkflowConfigurationException(e.getMessage() + " (uri:" + uriObj + ")", e);
         }
+    }
+
+    private void rejectRefusedTarget(String target) {
+        httpCallExecutor.rejectTemplatedAuthority(target);
+        httpCallExecutor.rejectRefusedLiteralTarget(target);
     }
 
     /**

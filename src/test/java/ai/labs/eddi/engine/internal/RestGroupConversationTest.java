@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.api.IRestGroupConversation.FollowUpRequest;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.Attachment;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -64,7 +65,7 @@ class RestGroupConversationTest {
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
     }
 
     @Nested
@@ -411,7 +412,7 @@ class RestGroupConversationTest {
             when(caller.getPrincipal()).thenReturn(principal);
             when(caller.hasRole("eddi-admin")).thenReturn(false);
             return new RestGroupConversation(groupService, jsonSerialization, caller, new OwnershipValidator(true),
-                    mock(HitlAccessGuard.class), resourceAccessGuard);
+                    mock(HitlAccessGuard.class), resourceAccessGuard, new CallerIdentityContext(null, null));
         }
 
         @Test
@@ -482,7 +483,7 @@ class RestGroupConversationTest {
             when(caller.getPrincipal()).thenReturn(principal);
             when(caller.hasRole("eddi-admin")).thenReturn(false);
             var rest = new RestGroupConversation(groupService, jsonSerialization, caller, realValidator, mock(HitlAccessGuard.class),
-                    resourceAccessGuard);
+                    resourceAccessGuard, new CallerIdentityContext(null, null));
             var gc = new GroupConversation();
             gc.setId("gc-1");
             gc.setGroupId("group-1");
@@ -500,7 +501,7 @@ class RestGroupConversationTest {
             var admin = mock(SecurityIdentity.class);
             when(admin.hasRole("eddi-admin")).thenReturn(true);
             var rest = new RestGroupConversation(groupService, jsonSerialization, admin, realValidator, mock(HitlAccessGuard.class),
-                    resourceAccessGuard);
+                    resourceAccessGuard, new CallerIdentityContext(null, null));
             var gc = new GroupConversation();
             gc.setId("gc-1");
             gc.setGroupId("group-1");
@@ -553,6 +554,32 @@ class RestGroupConversationTest {
             // The owner restriction is part of the query, so index/limit page through
             // the caller's own conversations; filtering a fetched page of everyone's
             // gave non-admins short or empty pages (Workforce history).
+            verify(groupService, never()).listGroupConversations("group-1", 0, 10);
+        }
+
+        @Test
+        @DisplayName("mine=true restricts an admin's listing to their own sessions, in the query")
+        void listGroupConversations_mineForAdmin() throws Exception {
+            when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+            when(identity.isAnonymous()).thenReturn(false);
+            lenient().when(identity.hasRole("eddi-admin")).thenReturn(true);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn("admin-1");
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var own = new GroupConversation();
+            own.setId("gc-1");
+            own.setUserId("admin-1");
+            var foreign = new GroupConversation();
+            foreign.setId("gc-2");
+            foreign.setUserId("user-1");
+            when(groupService.listGroupConversations("group-1", "admin-1", 0, 10))
+                    .thenReturn(new ArrayList<>(List.of(own, foreign)));
+
+            List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10, true);
+
+            assertEquals(1, result.size());
+            assertEquals("gc-1", result.get(0).getId());
             verify(groupService, never()).listGroupConversations("group-1", 0, 10);
         }
 

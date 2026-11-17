@@ -129,7 +129,16 @@ unsigned under its id, so verifying peers saw them withheld even when every agen
   the engine's own (`system`, with the member as its target). The rework note (*"Returned for
   rework (1/2): <subject> — the verifier's feedback is on the task"*) no longer quotes the
   verifier: every member is shown it as the engine's, and the feedback reaches the reworking member
-  through the task, whose note the records trace to the verifier's entry.
+  through the task, whose note the records trace to the verifier's entry. The rework and
+  task-failure notes name the task's subject as the group's records count it
+  (`TaskForceEngine.noteSubject`, via `GroupSigningGuard.recordedTask`): once a reader verifies, a
+  subject from a plan or task tool that does not verify for every reader is
+  `[withheld: this text could not be verified]` in the stored note, since a verifying member is
+  shown the note as the engine's text; a group nobody in which verifies gets the subject as
+  before. `recordTaskFailure` takes the group configuration for that (the old signature passes
+  none, which counts as a verifying reader). A verifying facilitator's briefing no longer quotes
+  the latest convergence note: it is recorded under the engine's name, but its text is the
+  judge's reply, written from what the judge was shown.
 - **Deleted facilitators.** A `FACILITATION` note under an agent id counts as an agent's
   (`GroupSigningGuard.writtenAsAnAgent`), so a facilitator that was never a member, and runs its
   turns under a key of its own, keeps its unsigned notes withheld after it is deleted. That was the
@@ -149,7 +158,12 @@ and record covered, and its "Not yet supported" row now names only what is still
 [`architecture.md`](../architecture.md#cryptographic-agent-identity) item 8 describes the combined
 behaviour of the signing changes: every prompt filtered, own entries checked when the member signs, the
 reserved names, withheld engine-named syntheses, the ballot taken from the voter's view and the
-group-wide records rule; the "Not filtered yet" sentence is gone. The Platform Operator's prompt
+group-wide records rule; the "Not filtered yet" sentence is gone. Item 8, the `GroupSigningGuard`
+class Javadoc and group-conversations.md call it opt-in per receiving member, not fail-closed (the
+wording #1366 settled on): a member without `requirePeerVerification` is shown the stored
+transcript, and entries no agent wrote reach a verifying member relabelled but unauthenticated.
+The `Verdict` enum keeps #1366's one-constant-per-line form, with `NOT_IN_TRANSCRIPT` (a record
+quoting an entry that is not in the view's transcript: withheld) added. The Platform Operator's prompt
 names the same rules and the two failure messages an admin will ask about (`The vote could not
 run: only 0 option(s) were available`, `Its task text could not be verified, and this member
 requires peer verification`); operator revision bumped. The Manager's "Require peer
@@ -212,8 +226,8 @@ makes, which cannot sign.
 
 ### Not done
 
-- Engine notes still quote a few short pieces of agent text (a task subject, the convergence
-  check's reason). Listed in the docs.
+- The note that a HUMAN-assigned task is not reworked (`GroupHumanTasks.withoutHumanAssignees`)
+  still quotes the task's subject as stored. Listed in the docs.
 - The cadence question quotes the pulled tasks under the user's name, and `onDecision` handoffs
   and inbox items a person accepted name no agent; documented, with `REVIEW` intake recommended.
 - A key revoked between a cadence pull and the task's turn still fails that task once (and charges

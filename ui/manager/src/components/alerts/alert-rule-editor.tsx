@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { AgentPicker } from "@/components/shared/agent-picker";
+import { Button } from "@eddi/ui";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { OutputMatchBuilder } from "./output-match-builder";
 import { alertErrorCode, useSaveAlertRule, useTestAlertRule } from "@/hooks/use-alerts";
-import { isApiError } from "@/lib/api-client";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import { ruleProblems, throttleProblems } from "@/lib/alert-rules";
 import {
   ALERT_LIMITS,
@@ -20,7 +20,7 @@ import {
   type DigestMode,
   type ErrorKind,
   type TestDelivery,
-} from "@/lib/api/alerts";
+} from "@eddi/app-kit/lib/api/alerts";
 
 const selectClass =
   "h-10 rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -77,7 +77,8 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
     const code = alertErrorCode(err);
     if (code === "ADMIN_SCOPE_REQUIRED") return t("alerts.errorAdminScope", "Only an administrator can watch every agent or several agents.");
     if (code === "WEBHOOK_ADMIN_ONLY") return t("alerts.errorWebhookAdmin", "Only an administrator can add a webhook target.");
-    if (code === "INVALID_RULE" && isApiError(err)) return err.message;
+    // The server's message names the field, or the full agent and the limit.
+    if ((code === "INVALID_RULE" || code === "RULE_LIMIT_REACHED") && isApiError(err)) return err.message;
     return t("alerts.saveFailed", "The rule could not be saved.");
   };
 

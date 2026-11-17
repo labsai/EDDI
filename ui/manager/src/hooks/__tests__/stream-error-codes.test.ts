@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
-import { translateStreamError } from "@/hooks/use-chat";
+import { translateStreamError } from "@eddi/app-kit/hooks/use-chat";
 
 /** A `t` that returns its own fallback, so these assert routing, not wording. */
 const t = ((_key: string, fallback: string) => fallback) as unknown as TFunction;

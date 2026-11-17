@@ -1595,11 +1595,11 @@ jobs:
 
   # ─── Job 2f: UI jobs ───────────────────────────────────────────
   # The Manager's and the Chat UI's own CI, carried over from their former repos
-  # (EDDI-Manager ci-cd.yml + the `UI E2E (MSW)` tier of its e2e.yml), as three
-  # parallel jobs so a Chat failure does not wait behind the Manager's tests.
-  # Their production builds are not repeated here: Build Image builds both UIs
-  # through Maven and checks the output. The tiers that need a running backend
-  # are in e2e-fullstack, against that image.
+  # (EDDI-Manager ci-cd.yml + the `UI E2E (MSW)` tier of its e2e.yml), plus
+  # Workforce's since it became its own app, as four parallel jobs so one app's
+  # failure does not wait behind another's tests. Build Image builds all three
+  # UIs through Maven and checks what is packaged. The tiers that need a running
+  # backend are in e2e-fullstack, against that image.
   ui-manager-checks:
     name: UI Manager Checks
     runs-on: ubuntu-latest
@@ -1613,15 +1613,25 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
+      # ui/ is an npm workspaces root with one lockfile for both apps (and the
+      # shared packages under ui/packages/), so the install runs there.
       - name: Install
+        working-directory: ui
         run: npm ci
+
+      # npm on Windows prunes the children of the optional
+      # @tailwindcss/oxide-wasm32-wasi package from the lock, and `npm ci` above
+      # would already have failed on that — this names the cause and also checks
+      # every other locked edge (ui/scripts/check-lockfile-platforms.mjs).
+      - name: Lockfile carries every platform's packages
+        working-directory: ui
+        run: npm run lockfile:check
 
       - name: Audit production dependencies
         run: npm run audit:prod
@@ -1631,7 +1641,7 @@ jobs:
 
       # Fails on any drift between the code and the locale files: a key passed to
       # t() that en.json lacks, a key en.json has that a locale lacks, or a leftover
-      # key in a locale. See ui/manager/scripts/check-i18n.mjs.
+      # key in a locale. See ui/scripts/check-i18n.mjs.
       - name: i18n drift check
         run: npm run i18n:check
 
@@ -1643,6 +1653,15 @@ jobs:
       # backend built from this same commit.
       - name: Unit tests with coverage
         run: npx vitest run --coverage
+
+      # First-load budget (frontend unification plan, phase 0): the gzipped
+      # scripts and stylesheets each HTML shell loads before any lazy chunk,
+      # against ui/bundle-budget.json. `vite build` alone: typecheck ran above.
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle budget
+        run: npm run budget
 
       - name: Upload coverage report
         if: ${{ !cancelled() }}
@@ -1668,14 +1687,14 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
@@ -1685,7 +1704,7 @@ jobs:
       # runner's own libraries already launch Chromium; the two steps below share it.
       - name: Install Playwright browsers
         timeout-minutes: 10
-        run: node scripts/install-playwright-chromium.mjs
+        run: node ../scripts/install-playwright-chromium.mjs
 
       # Two workers: the config's `workers: 1` on CI exists for the backend tiers,
       # whose specs share state in serial groups. Every MSW test gets its own mocked
@@ -1702,6 +1721,80 @@ jobs:
           path: ui/manager/playwright-report/
           retention-days: 14
 
+  # Workforce, its own app since phase 5 of the frontend unification plan, and
+  # @eddi/app-kit, the layer it shares with the Manager. One job: its unit suite
+  # and its MSW E2E tier are each a fraction of the Manager's.
+  ui-workforce:
+    name: UI Workforce
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui == 'true'
+    defaults:
+      run:
+        working-directory: ui/workforce
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      # @eddi/app-kit (ui/packages/app-kit) is compiled into the Manager and
+      # Workforce as source. Its lint holds the package boundaries (it never
+      # imports an app); its tests run in both apps' suites, which exercise it.
+      - name: "@eddi/app-kit: type check"
+        working-directory: ui/packages/app-kit
+        run: npm run typecheck
+
+      - name: "@eddi/app-kit: lint"
+        working-directory: ui/packages/app-kit
+        run: npm run lint
+
+      # Includes the app boundary: Workforce never imports Manager code.
+      - name: Lint
+        run: npm run lint
+
+      - name: i18n drift check
+        run: npm run i18n:check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # Workforce's own first-load budget (ui/bundle-budget.json), well below the
+      # Manager's: it loads only what it uses.
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle budget
+        run: npm run budget
+
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: node ../scripts/install-playwright-chromium.mjs
+
+      - name: UI E2E (MSW, no backend)
+        run: npm run test:e2e -- --workers=2
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ui-workforce-e2e-report
+          path: ui/workforce/playwright-report/
+          retention-days: 14
+
   ui-chat:
     name: UI Chat
     runs-on: ubuntu-latest
@@ -1715,15 +1808,61 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/chat/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install
+        working-directory: ui
         run: npm ci
+
+      # @eddi/core (ui/packages/core) is compiled into both apps as source; its
+      # own type check, lint (package boundaries) and tests run here, before the
+      # app's, so a contract break is reported against the package.
+      - name: "@eddi/core: type check"
+        working-directory: ui/packages/core
+        run: npm run typecheck
+
+      - name: "@eddi/core: lint"
+        working-directory: ui/packages/core
+        run: npm run lint
+
+      - name: "@eddi/core: unit tests"
+        working-directory: ui/packages/core
+        run: npm test
+
+      # @eddi/ui (ui/packages/ui): tokens, theme, i18n setup and primitives, also
+      # compiled into both apps as source. Its lint holds the boundaries that keep
+      # it free of API calls and app imports.
+      - name: "@eddi/ui: type check"
+        working-directory: ui/packages/ui
+        run: npm run typecheck
+
+      - name: "@eddi/ui: lint"
+        working-directory: ui/packages/ui
+        run: npm run lint
+
+      - name: "@eddi/ui: unit tests"
+        working-directory: ui/packages/ui
+        run: npm test
+
+      # @eddi/conversation (ui/packages/conversation): the AgentConversation
+      # controller, the one markdown renderer and the shared conversation
+      # components, compiled into both apps as source. Its lint keeps it
+      # router-free and away from window.__EDDI_*__.
+      - name: "@eddi/conversation: type check"
+        working-directory: ui/packages/conversation
+        run: npm run typecheck
+
+      - name: "@eddi/conversation: lint"
+        working-directory: ui/packages/conversation
+        run: npm run lint
+
+      - name: "@eddi/conversation: unit tests"
+        working-directory: ui/packages/conversation
+        run: npm test
 
       - name: Type check
         run: npm run typecheck
@@ -1734,6 +1873,13 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # First-load budget, as in UI Manager Checks (ui/bundle-budget.json).
+      - name: Build
+        run: npx vite build
+
+      - name: Bundle budget
+        run: npm run budget
+
   # ─── Job 2g: UI Gate ───────────────────────────────────────────
   # docker must not publish an image whose UI failed its checks — but a bare
   # `needs` on the ui-* jobs would SKIP docker on every backend-only push, because
@@ -1743,7 +1889,7 @@ jobs:
   ui-gate:
     name: UI Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, ui-manager-checks, ui-manager-e2e, ui-chat]
+    needs: [detect-changes, ui-manager-checks, ui-manager-e2e, ui-workforce, ui-chat]
     if: always()
     steps:
       - name: Require UI success only when the UI changed
@@ -1752,6 +1898,7 @@ jobs:
           CHANGED: ${{ needs.detect-changes.outputs.ui }}
           CHECKS: ${{ needs.ui-manager-checks.result }}
           E2E: ${{ needs.ui-manager-e2e.result }}
+          WORKFORCE: ${{ needs.ui-workforce.result }}
           CHAT: ${{ needs.ui-chat.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
@@ -1759,14 +1906,14 @@ jobs:
             exit 1
           fi
           if [ "$CHANGED" = "true" ]; then
-            for result in "ui-manager-checks=$CHECKS" "ui-manager-e2e=$E2E" "ui-chat=$CHAT"; do
+            for result in "ui-manager-checks=$CHECKS" "ui-manager-e2e=$E2E" "ui-workforce=$WORKFORCE" "ui-chat=$CHAT"; do
               if [ "${result#*=}" != "success" ]; then
                 echo "::error::the UI changed but $result"
                 exit 1
               fi
             done
           fi
-          echo "ui changed=$CHANGED, checks=$CHECKS, e2e=$E2E, chat=$CHAT — gate satisfied"
+          echo "ui changed=$CHANGED, checks=$CHECKS, e2e=$E2E, workforce=$WORKFORCE, chat=$CHAT — gate satisfied"
 
   # ─── Job 2c: Trivy Filesystem Scan ─────────────────────────────
   trivy-scan:
@@ -1907,7 +2054,7 @@ jobs:
             maven-v1-${{ runner.os }}-
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -1915,7 +2062,7 @@ jobs:
         run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
 
       - name: Generate CycloneDX SBOMs (npm)
-        # Both UIs are built into the jar, so their npm production dependencies are part
+        # All three UIs are built into the jar, so their npm production dependencies are part
         # of the shipped supply chain — and cyclonedx-maven-plugin inventories Maven only,
         # so without this the published SBOM described just over half the artifact.
         #
@@ -1923,19 +2070,25 @@ jobs:
         # needs no `npm ci` and cannot execute install scripts. --omit dev matches what
         # Vite actually bundles into dist/; ui/manager/.ds-sync is design-sync tooling
         # that never reaches the image, so it is deliberately not inventoried here.
+        #
+        # ui/ is an npm workspaces root with the one lockfile, so each document is read
+        # from ui/package.json and narrowed to one app with --workspace: the Manager's
+        # BOM lists no Chat UI dependency and vice versa. The document's root component
+        # is therefore the workspace root (eddi-ui), with the app as its component.
         run: |
           set -euo pipefail
-          for ui in manager chat; do
+          for ui in manager workforce chat; do
             npx --yes @cyclonedx/cyclonedx-npm@6.0.1 \
               --package-lock-only \
               --omit dev \
+              --workspace "$ui" \
               --output-format JSON \
               --output-file "target/bom-ui-$ui.json" \
-              "ui/$ui/package.json"
+              ui/package.json
           done
 
       - name: Upload SBOM
-        # Three CycloneDX documents rather than one merged file: merging across ecosystems
+        # Four CycloneDX documents rather than one merged file: merging across ecosystems
         # needs cyclonedx-cli, a GitHub-release binary we would have to fetch unverified,
         # and a hand-rolled merge of metadata/bom-refs/dependency graphs is exactly the
         # kind of thing that yields a plausible but invalid BOM. Each file here is a valid
@@ -1947,6 +2100,7 @@ jobs:
           path: |
             target/bom.json
             target/bom-ui-manager.json
+            target/bom-ui-workforce.json
             target/bom-ui-chat.json
           retention-days: 90
 
@@ -2095,17 +2249,15 @@ jobs:
             echo "- \`${DOCKER_IMAGE}:latest\`" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # frontend-maven-plugin vendors its own Node, but its `npm ci` reads and writes
-      # the same ~/.npm cache this restores; without it every run downloaded both
-      # dependency trees cold.
+      # frontend-maven-plugin vendors its own Node, but its `npm ci` (one, at the ui/
+      # workspaces root) reads and writes the same ~/.npm cache this restores;
+      # without it every run downloaded the dependency tree cold.
       - name: Set up Node ${{ env.NODE_VERSION }} (npm cache for the UI build)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
-            ui/chat/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       # frontend-maven-plugin 1.15.1 downloads Node from nodejs.org and verifies
       # nothing — no checksum, no signature — and it reuses any archive it finds
@@ -2144,8 +2296,8 @@ jobs:
           echo "Node ${NODE_VERSION} archive verified at ${ARCHIVE}"
 
       - name: Build application
-        # No -DskipUi: this is the build that ships, so it runs npm ci + npm run build
-        # for both UIs (frontend-maven-plugin vendors Node into ui/node) and copies
+        # No -DskipUi: this is the build that ships, so it runs npm ci at ui/ and
+        # npm run build for both UIs (frontend-maven-plugin vendors Node into ui/node) and copies
         # their dist/ into the jar. `clean` matters: copy-resources never prunes, so
         # an incremental build would package hashed assets from older builds.
         #
@@ -2157,19 +2309,20 @@ jobs:
         run: ./mvnw clean package -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen -Dquarkus.smallrye-openapi.store-schema-directory=target/openapi -B
 
       - name: Verify the built and packaged UI
-        # What EDDI serves by exact name must exist: the three Manager shells and the
-        # Chat shell and bundle. /assets/ is served `immutable` for a year, which is
-        # only safe while every file there carries a content hash. And copy-resources
-        # never prunes, so without `clean` above every hashed chunk of every earlier
-        # build would ship too (reproduced locally: 913 packaged assets against 737
-        # built) — the jar must carry exactly the assets Vite just emitted, and never
-        # the MSW dev worker.
+        # What EDDI serves by exact name must exist: the two Manager shells, the
+        # Workforce shell (its own app, ui/workforce), and the Chat shell and bundle.
+        # /assets/ is served `immutable` for a year, which is only safe while every
+        # file there carries a content hash. And copy-resources never prunes, so
+        # without `clean` above every hashed chunk of every earlier build would ship
+        # too (reproduced locally: 913 packaged assets against 737 built) — the jar
+        # must carry exactly the assets the Manager's and Workforce's Vite builds
+        # just emitted (both write assets/), and never the MSW dev worker.
         run: |
           set -euo pipefail
           packaged=$(cd target/classes/META-INF/resources/assets && find . -type f | sort)
-          built=$(cd ui/manager/dist/assets && find . -type f | sort)
+          built=$( (cd ui/manager/dist/assets && find . -type f; cd ../../../workforce/dist/assets && find . -type f) | sort -u)
           if [ "$packaged" != "$built" ]; then
-            echo "::error::target/classes/META-INF/resources/assets differs from ui/manager/dist/assets:"
+            echo "::error::target/classes/META-INF/resources/assets differs from ui/manager/dist/assets + ui/workforce/dist/assets:"
             diff <(echo "$built") <(echo "$packaged") || true
             exit 1
           fi
@@ -2177,13 +2330,16 @@ jobs:
             echo "::error::mockServiceWorker.js was packaged"
             exit 1
           fi
-          for shell in manage welcome workforce; do
-            [ -f "ui/manager/dist/$shell.html" ] || { echo "::error::ui/manager/dist/$shell.html was not built"; exit 1; }
+          for shell in manager/dist/manage manager/dist/welcome workforce/dist/workforce; do
+            [ -f "ui/$shell.html" ] || { echo "::error::ui/$shell.html was not built"; exit 1; }
+            [ -f "target/classes/META-INF/resources/$(basename "$shell").html" ] || { echo "::error::$(basename "$shell").html was not packaged"; exit 1; }
           done
-          if [ -e ui/manager/dist/index.html ]; then
-            echo "::error::ui/manager/dist/index.html was built — index.html is the dev-server entry and must not be a build input"
-            exit 1
-          fi
+          for app in manager workforce; do
+            if [ -e "ui/$app/dist/index.html" ]; then
+              echo "::error::ui/$app/dist/index.html was built — index.html is the dev-server entry and must not be a build input"
+              exit 1
+            fi
+          done
           unhashed=$(echo "$built" | sed 's#^\./##' | grep -vE '^.+[.-][A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$' || true)
           if [ -n "$unhashed" ]; then
             echo "::error::these assets carry no content hash, so the immutable cache header would pin a mutable file:"
@@ -2191,7 +2347,7 @@ jobs:
             exit 1
           fi
           ls ui/chat/dist/chat.html ui/chat/dist/scripts/js/chat-ui.*.js ui/chat/dist/scripts/css/chat-ui.*.css > /dev/null
-          echo "packaged assets match the build: $(echo "$built" | wc -l) hashed files, four shells, the Chat bundle"
+          echo "packaged assets match the builds: $(echo "$built" | wc -l) hashed files, four shells, the Chat bundle"
 
       - name: Upload the OpenAPI document
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -2262,7 +2418,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -2402,14 +2558,15 @@ jobs:
           echo "### Shipped shells verified ($(wc -l < deps.uniq) dependencies)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
+      # One install for both apps at the npm workspaces root (ui/package.json).
       - name: Install dependencies
-        working-directory: ui/manager
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
@@ -2418,7 +2575,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: node scripts/install-playwright-chromium.mjs
+        run: node ../scripts/install-playwright-chromium.mjs
 
       # Against the app EDDI serves on :7070 — the bundle in this image — not a Vite
       # dev server (see E2E_AGAINST_BACKEND in playwright.config.ts).
@@ -2524,11 +2681,11 @@ jobs:
           rm eddi-ci.tar.gz
 
       - name: Set up Node ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Generate the test realm
         # From helm/eddi/files/eddi-realm.json — the realm EDDI ships — plus a
@@ -2556,8 +2713,9 @@ jobs:
           docker compose -f "$COMPOSE" logs
           exit 1
 
+      # One install for both apps at the npm workspaces root (ui/package.json).
       - name: Install dependencies
-        working-directory: ui/manager
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
@@ -2566,7 +2724,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: node scripts/install-playwright-chromium.mjs
+        run: node ../scripts/install-playwright-chromium.mjs
 
       - name: Run auth tests
         working-directory: ui/manager
@@ -2591,6 +2749,114 @@ jobs:
         if: always()
         run: docker compose -f "$COMPOSE" down -v
 
+  # ─── Job 3e: Operator Activation E2E ────────────────────────────
+  # The Platform Operator activated through the shipped Manager against the image
+  # built from this commit: OpenAPI spec check against the allow-list, self-url,
+  # setup-api provisioning with the real prompt, deploy, gate read-back and dry
+  # run, the read and write canaries, and one chat turn whose tool call must
+  # reach the platform. The model is ui/manager/e2e/operator/llm-stub.mjs, a
+  # deterministic OpenAI-compatible server in the compose stack — no paid
+  # provider, no key, no network.
+  #
+  # 6.7.0 shipped with activation broken (setup-api refused the operator's
+  # ~110,000-character prompt at a 100,000 cap, HTTP 400) and every operator
+  # test was green, because all of them ran against MSW. This is the job that
+  # sends the real prompt to the real endpoint.
+  #
+  # MongoDB only: provisioning is not a datastore concern, and the Postgres leg
+  # of e2e-fullstack already proves the store swap.
+  e2e-operator:
+    name: Operator Activation E2E
+    runs-on: ubuntu-latest
+    # Bounded so a stalled runner fails in minutes rather than at GitHub's
+    # 6-hour default. The test itself takes under a minute.
+    timeout-minutes: 20
+    needs: [detect-changes, build-image]
+    if: needs.detect-changes.outputs.code == 'true'
+    env:
+      EDDI_IMAGE: labsai/eddi:ci
+      COMPOSE_FILES: -f ui/manager/docker-compose.integration.yml -f ui/manager/docker-compose.integration-operator.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Download the image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: eddi-ci-image
+
+      - name: Load the image
+        run: |
+          set -euo pipefail
+          gunzip -c eddi-ci.tar.gz | docker load
+          rm eddi-ci.tar.gz
+
+      - name: Start EDDI, MongoDB and the model stub
+        # COMPOSE_FILES is deliberately unquoted: it is two -f pairs.
+        run: docker compose $COMPOSE_FILES up -d --wait
+        timeout-minutes: 5
+
+      - name: Wait for EDDI health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:7070/q/health/live | grep -q '"UP"'; then
+              echo "Backend is healthy after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Backend did not become healthy within 120s"
+          docker compose $COMPOSE_FILES logs eddi
+          exit 1
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # One install for both apps at the npm workspaces root (ui/package.json).
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+
+      # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
+      # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
+      # a stall fast enough to re-run.
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        working-directory: ui/manager
+        run: node ../scripts/install-playwright-chromium.mjs
+
+      # Against the Manager EDDI serves on :7070 — the bundle in this image.
+      - name: Activate the Platform Operator
+        working-directory: ui/manager
+        env:
+          PORT: "7070"
+          E2E_AGAINST_BACKEND: "1"
+        run: npm run test:e2e:operator
+
+      - name: Collect logs
+        if: ${{ !cancelled() }}
+        run: docker compose $COMPOSE_FILES logs > operator-logs.txt 2>&1
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: operator-e2e-report
+          path: |
+            ui/manager/playwright-report/
+            ui/manager/test-results.json
+            operator-logs.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose $COMPOSE_FILES down -v
+
   # ─── Job 3a-gate: E2E Gate ──────────────────────────────────────
   # The requirable form of e2e-fullstack. A matrix job's check names carry the
   # matrix value, and when the job is skipped before its matrix expands the check
@@ -2599,7 +2865,7 @@ jobs:
   e2e-gate:
     name: E2E Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-image, openapi-snapshot, e2e-fullstack, e2e-auth]
+    needs: [detect-changes, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator]
     if: always()
     steps:
       - name: Require E2E success whenever the code changed
@@ -2610,16 +2876,17 @@ jobs:
           OPENAPI: ${{ needs.openapi-snapshot.result }}
           E2E: ${{ needs.e2e-fullstack.result }}
           AUTH: ${{ needs.e2e-auth.result }}
+          OPERATOR: ${{ needs.e2e-operator.result }}
         run: |
           if [ "$DETECT" != "success" ]; then
             echo "::error::detect-changes=$DETECT, so whether the code changed is unknown"
             exit 1
           fi
-          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$OPENAPI" != "success" ]               || [ "$E2E" != "success" ] || [ "$AUTH" != "success" ]; }; then
-            echo "::error::the code changed but build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                  "e2e-fullstack=$E2E, e2e-auth=$AUTH"
+          if [ "$CODE" = "true" ] && { [ "$IMAGE" != "success" ] || [ "$OPENAPI" != "success" ]               || [ "$E2E" != "success" ] || [ "$AUTH" != "success" ] || [ "$OPERATOR" != "success" ]; }; then
+            echo "::error::the code changed but build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                  "e2e-fullstack=$E2E, e2e-auth=$AUTH, e2e-operator=$OPERATOR"
             exit 1
           fi
-          echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                "e2e-fullstack=$E2E, e2e-auth=$AUTH — gate satisfied"
+          echo "code changed=$CODE, build-image=$IMAGE, openapi-snapshot=$OPENAPI,"                "e2e-fullstack=$E2E, e2e-auth=$AUTH, e2e-operator=$OPERATOR — gate satisfied"
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
@@ -2641,11 +2908,14 @@ jobs:
     #                     sends a real token, so the only one that proves a
     #                     role decides anything. Missing here, a push whose one
     #                     failure was authorization still built and published
+    #   e2e-operator      the Platform Operator activated against that image with
+    #                     a stub model — the only job that sends the operator's
+    #                     real prompt and allow-list to setup-api
     #   e2e-gate          the E2E jobs' own verdict, the check branch protection
     #                     names — so a job added to the gate cannot be forgotten
     #                     here
     #   ui-gate           the ui-* jobs, when the UI changed (see ui-gate)
-    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]
+    needs: [detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
     # NOTE: deliberately no always(). always() cancelled the implicit
     # needs-success gate, and the tag branch then short-circuited the explicit
     # one — so a tag on a commit with failing tests still built, pushed, tagged

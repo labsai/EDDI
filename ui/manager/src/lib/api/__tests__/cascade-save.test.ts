@@ -7,22 +7,22 @@ import {
   CascadeSaveError,
   nextCascadeContext,
   type CascadeContext,
-} from "../cascade-save";
-import type { ResourceTypeConfig } from "../resources";
-import type { WorkflowConfiguration } from "../workflows";
+} from "@eddi/app-kit/lib/api/cascade-save";
+import type { ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
+import type { WorkflowConfiguration } from "@eddi/app-kit/lib/api/workflows";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
-vi.mock("../resources", async () => {
-  const actual = await vi.importActual<typeof import("../resources")>("../resources");
+vi.mock("@eddi/app-kit/lib/api/resources", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/resources")>("@eddi/app-kit/lib/api/resources");
   return {
     ...actual,
     updateResource: vi.fn(),
   };
 });
 
-vi.mock("../workflows", async () => {
-  const actual = await vi.importActual<typeof import("../workflows")>("../workflows");
+vi.mock("@eddi/app-kit/lib/api/workflows", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/workflows")>("@eddi/app-kit/lib/api/workflows");
   return {
     ...actual,
     getWorkflow: vi.fn(),
@@ -31,8 +31,8 @@ vi.mock("../workflows", async () => {
   };
 });
 
-vi.mock("../agents", async () => {
-  const actual = await vi.importActual<typeof import("../agents")>("../agents");
+vi.mock("@eddi/app-kit/lib/api/agents", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/app-kit/lib/api/agents")>("@eddi/app-kit/lib/api/agents");
   return {
     ...actual,
     getAgent: vi.fn(),
@@ -41,9 +41,9 @@ vi.mock("../agents", async () => {
   };
 });
 
-import { updateResource } from "../resources";
-import { getWorkflow, getWorkflowCurrentVersion, updateWorkflow } from "../workflows";
-import { getAgent, getAgentCurrentVersion, updateAgent } from "../agents";
+import { updateResource } from "@eddi/app-kit/lib/api/resources";
+import { getWorkflow, getWorkflowCurrentVersion, updateWorkflow } from "@eddi/app-kit/lib/api/workflows";
+import { getAgent, getAgentCurrentVersion, updateAgent } from "@eddi/app-kit/lib/api/agents";
 
 // ── Fixtures ───────────────────────────────────────────────────────
 

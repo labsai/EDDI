@@ -191,6 +191,14 @@ public final class HitlApprovalAudit {
         if (r.reasonCode != null) {
             out.put("reasonCode", r.reasonCode);
         }
+        // 6.8: the plan the decision bound to (HitlPlanHash) and how — MATCHED,
+        // NOT_PRESENTED, SYSTEM or LEGACY_UNHASHED (HitlPlanBinding.Outcome).
+        if (r.planHash != null) {
+            out.put("planHash", r.planHash);
+        }
+        if (r.planBinding != null) {
+            out.put("planBinding", r.planBinding);
+        }
         List<Map<String, Object>> units = new ArrayList<>();
         for (HitlDecisionRecord.Unit unit : r.units) {
             var u = new LinkedHashMap<String, Object>();

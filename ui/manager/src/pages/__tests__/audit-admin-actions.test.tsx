@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { screen, waitFor, within, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { AuditPage } from "@/pages/audit";
-import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
-import { server } from "@/test/mocks/server";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 function renderAdminActions() {

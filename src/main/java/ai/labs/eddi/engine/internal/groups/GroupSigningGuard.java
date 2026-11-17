@@ -61,27 +61,33 @@ import java.util.function.Predicate;
  * same phase verifies, so a nonce that already appeared earlier in the
  * transcript is rejected as a duplicate.
  * <p>
- * <b>Fail-closed.</b> For a receiver that requires peer verification,
- * {@link #visibleTo} replaces every entry that another agent authored and that
- * does not verify (unsigned, tampered, copied, moved to another round,
- * duplicated, signed with an unknown or revoked key or with a key outside its
- * validity window) by a {@code [withheld: ...]} placeholder, before the
- * receiver's prompt and context are built. Every prompt the engine composes for
- * an agent reads the transcript through a {@link View} from here: a phase turn,
- * a role turn (judge, dissenter, facilitator, task executor, verifier, bidder),
- * a follow-up and a nested group's question; so do the task records it quotes
- * ({@link TaskRecordView}) and the records it keeps for every reader (the
- * negotiation table, the vote tally, a retrospective's lessons; see
+ * <b>Withheld, only for a receiver that asks.</b> For a receiver without
+ * {@code security.requirePeerVerification} (the default) nothing is verified or
+ * logged: it is shown the transcript as stored. For a receiver that requires
+ * peer verification, {@link #visibleTo} replaces every entry that another agent
+ * authored and that does not verify (unsigned, tampered, copied, moved to
+ * another round, duplicated, signed with an unknown or revoked key or with a
+ * key outside its validity window) by a {@code [withheld: ...]} placeholder,
+ * before the receiver's prompt and context are built. Every prompt the engine
+ * composes for an agent from the transcript reads it through a {@link View}
+ * from here: a phase turn ({@code GroupContextBuilder.buildPhaseInput}) and its
+ * {@code groupTranscript} context ({@code MemberTurnExecutor}), a role turn
+ * (convergence judge, dissenter, facilitator briefing, task executor, verifier,
+ * bidder), a follow-up and a nested group's question; so do the task records it
+ * quotes ({@link TaskRecordView}) and the records it keeps for every reader
+ * (the negotiation table, the vote tally, a retrospective's lessons; see
  * {@link #recordView}). Entries no agent authored (the user's question, a human
  * member's turn, a reviewer's edit, the engine's own notes, a nested group's
- * answer) carry no signature and pass through, but under a name that cannot
- * pass for a member agent's: signatures authenticate agents, not the engine's
- * own record. A synthesis under the engine's or the user's name is withheld:
- * the engine never records one there. An entry of an agent that has since been
- * deleted is withheld too: deleting an agent must not turn its entries into a
- * non-agent's. The receiver's own entries are checked like a peer's when it
- * signs; when it does not, it has nothing to check them against and they pass
- * as they are.
+ * answer) carry no signature and pass through, unauthenticated, but under a
+ * name that cannot pass for a member agent's: signatures authenticate agents,
+ * not the engine's own record. A synthesis under the engine's or the user's
+ * name is withheld: the engine never records one there. An entry of an agent
+ * that has since been deleted is withheld too: deleting an agent must not turn
+ * its entries into a non-agent's. The receiver's own entries are checked like a
+ * peer's when it signs; when it does not, it has nothing to check them against
+ * and they pass as they are. So the guard refuses an unverified agent entry
+ * only for a receiver with the setting; for every other reader (a member
+ * without it, the Manager, API readers) it is shown as stored.
  * <p>
  * Holds only caches: agent configurations by version (immutable), the outcome
  * of each Ed25519 check (a pure function of key, signature and signed bytes),
@@ -161,22 +167,45 @@ public class GroupSigningGuard {
     }
 
     /**
-     * The outcome of checking one transcript entry. Only trusted verdicts reach a
-     * receiver that requires peer verification unchanged.
+     * The outcome of checking one transcript entry for a receiver that requires
+     * peer verification; for any other receiver no verdict is computed and the
+     * transcript is shown as stored. A verdict without a reason is shown, some of
+     * them relabelled or stripped of their text (see {@link #viewFor}); a verdict
+     * with a reason is withheld, the reason naming why in the placeholder.
      */
     enum Verdict {
-        VERIFIED(null), NOT_AGENT_AUTHORED(null), RECEIVERS_OWN(null), UNSIGNED("it carries no signature"), UNKNOWN_KEY(
-                "the speaker declares no readable key of the version it was signed with"), REVOKED(
-                        "the key it was signed with has been revoked"), OUT_OF_WINDOW(
-                                "it was signed outside its key's validity window or before this conversation began"), BAD_SIGNATURE(
-                                        "its signature does not match its content, this conversation or its position in it"), WRONG_ROUND(
-                                                "it was signed in another round of this discussion"), DUPLICATE(
-                                                        "its signature already appears earlier in this conversation"), NOT_IN_TRANSCRIPT(
-                                                                "it is not part of this conversation's transcript"), ENGINE_SYNTHESIS(
-                                                                        "it is a synthesis under the engine's or the user's name, "
-                                                                                + "under which none is ever recorded"), NO_SUCH_AGENT(
-                                                                                        "the agent it is attributed to no longer exists"), STATUS_RECORD(
-                                                                                                null), NON_AGENT_STATUS_RECORD(null);
+        // @formatter:off
+        /** Signed by the speaker's current, unrevoked key and in place: shown as stored. */
+        VERIFIED(null),
+        /** No agent wrote it (user, engine note, human, nested group, reviewer): shown unauthenticated, relabelled. */
+        NOT_AGENT_AUTHORED(null),
+        /** The receiver's own entry, and the receiver does not sign: shown as stored, unchecked. */
+        RECEIVERS_OWN(null),
+        /** An agent's entry with no signature: withheld. */
+        UNSIGNED("it carries no signature"),
+        /** Signed with a key version the speaker does not declare, or its config is unreadable: withheld. */
+        UNKNOWN_KEY("the speaker declares no readable key of the version it was signed with"),
+        /** Signed with a revoked key, whatever time it claims: withheld. */
+        REVOKED("the key it was signed with has been revoked"),
+        /** Signed outside its key's window or before the conversation began: withheld. */
+        OUT_OF_WINDOW("it was signed outside its key's validity window or before this conversation began"),
+        /** The signature does not match the entry, this conversation or its position: withheld. */
+        BAD_SIGNATURE("its signature does not match its content, this conversation or its position in it"),
+        /** Validly signed, but in a round other than the one it sits in: withheld. */
+        WRONG_ROUND("it was signed in another round of this discussion"),
+        /** A later copy of a nonce that already verified in this transcript: withheld. */
+        DUPLICATE("its signature already appears earlier in this conversation"),
+        /** Quoted from a record ({@link View#of}) but not an entry of the transcript the view was taken of: withheld. */
+        NOT_IN_TRANSCRIPT("it is not part of this conversation's transcript"),
+        /** A synthesis under {@code system}, {@code user} or no speaker, where the engine records none: withheld. */
+        ENGINE_SYNTHESIS("it is a synthesis under the engine's or the user's name, under which none is ever recorded"),
+        /** Under the id of an agent no longer in the store that the discussion shows wrote it: withheld. */
+        NO_SUCH_AGENT("the agent it is attributed to no longer exists"),
+        /** A record with no content (skip, error, pass) under an agent's or the engine's id: shown without its text fields. */
+        STATUS_RECORD(null),
+        /** A record with no content under an id that names no agent: shown without its text fields, labelled not an agent. */
+        NON_AGENT_STATUS_RECORD(null);
+        // @formatter:on
 
         private final String reason;
 

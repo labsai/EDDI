@@ -5,7 +5,7 @@ import {
   isSafePathSegment,
   pathSegmentProblem,
   InvalidPathSegmentError,
-} from "../path-segment";
+} from "@eddi/app-kit/lib/api/path-segment";
 
 describe("seg", () => {
   it("passes ordinary EDDI ids through untouched", () => {
@@ -67,12 +67,12 @@ describe("request paths built from ids", () => {
   it("the API wrappers refuse a traversal id instead of sending the request", async () => {
     const get = vi.fn();
     const del = vi.fn();
-    vi.doMock("../../api-client", () => ({
+    vi.doMock("@eddi/app-kit/lib/api-client", () => ({
       api: { get, delete: del, post: vi.fn(), put: vi.fn(), getBaseUrl: () => "" },
     }));
-    const agents = await import("../agents");
-    const conversations = await import("../conversations");
-    const chat = await import("../chat");
+    const agents = await import("@eddi/app-kit/lib/api/agents");
+    const conversations = await import("@eddi/app-kit/lib/api/conversations");
+    const chat = await import("@eddi/app-kit/lib/api/chat");
 
     expect(() => agents.deleteAgent("a/../b", 1, { cascade: true })).toThrow(/Refusing to use an id/);
     expect(() => agents.getAgent("..")).toThrow(/Refusing to use an id/);
@@ -81,6 +81,6 @@ describe("request paths built from ids", () => {
     expect(() => conversations.deleteConversation("../administration", true)).toThrow(/Refusing to use an id/);
     expect(() => chat.endConversation("x/y")).toThrow(/Refusing to use an id/);
     expect(del).not.toHaveBeenCalled();
-    vi.doUnmock("../../api-client");
+    vi.doUnmock("@eddi/app-kit/lib/api-client");
   });
 });

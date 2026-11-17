@@ -1512,11 +1512,6 @@ public class AuditLedgerService implements UserErasureParticipant {
     }
 
     /**
-     * Apply the agent's Ed25519 signature to the entry. Signs the HMAC if available
-     * (covers full entry integrity), otherwise signs the entry ID. Gracefully
-     * returns the original entry if no signing key exists.
-     */
-    /**
      * How long after an erasure this node keeps rewriting the erased user's id in
      * new audit entries. It covers entries still produced by work the erasure
      * cancelled (a turn blocked in an LLM or HTTP call flushes its audit buffer

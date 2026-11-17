@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import {
   SecurityIdentitySection,
   CapabilitiesSection,
@@ -12,17 +12,17 @@ import {
   SessionManagementSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent } from "@eddi/app-kit/lib/api/agents";
 
 const mockOnChange = vi.fn();
 
-vi.mock("@/hooks/use-capabilities", () => ({
+vi.mock("@eddi/app-kit/hooks/use-capabilities", () => ({
   useSkills: () => ({
     data: ["summarization", "translation", "code_generation"],
   }),
 }));
 
-vi.mock("@/hooks/use-secrets", () => ({
+vi.mock("@eddi/app-kit/hooks/use-secrets", () => ({
   useSecrets: () => ({
     data: [{ keyName: "slack-bot-token", description: "Bot token" }, { keyName: "slack-signing-secret", description: "Signing secret" }],
     isLoading: false,
@@ -200,14 +200,39 @@ describe("SecurityIdentitySection", () => {
     expect(mockOnChange).not.toHaveBeenCalled();
   });
 
-  it("marks a revoked key and offers no Revoke for it", () => {
+  // Deleting a revoked key's private half is best effort, and revoking it again
+  // retries the delete, so a revoked key keeps its Revoke.
+  it("marks a revoked key and still offers Revoke for it, to retry the private-key delete", async () => {
+    const user = userEvent.setup();
+    const onRevoke = vi.fn();
     renderWithProviders(
-      <SecurityIdentitySection agent={agentWithTwoKeys} onChange={mockOnChange} signingKeyAction={{ onGenerate: vi.fn(), onRevoke: vi.fn(), pending: false }} />
+      <SecurityIdentitySection agent={agentWithTwoKeys} onChange={mockOnChange} signingKeyAction={{ onGenerate: vi.fn(), onRevoke, pending: false }} />
     );
 
     expect(screen.getByTestId("signing-key-revoked-1")).toHaveTextContent("Revoked");
-    expect(screen.queryByTestId("revoke-signing-key-1")).not.toBeInTheDocument();
     expect(screen.getByTestId("revoke-signing-key-2")).toBeEnabled();
+    await user.click(screen.getByTestId("revoke-signing-key-1"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke" }));
+
+    expect(onRevoke).toHaveBeenCalledWith(1);
+  });
+
+  // The backend treats a version as revoked when any entry of it is, whatever
+  // the order (AgentIdentity.signingKey()), and refuses signing with it.
+  it("warns that signing has no usable key when the newest version also has a revoked duplicate", () => {
+    const active = { version: 2, publicKeyB64: "GHIJKL1234567890ABCDEF1234567890" };
+    renderWithProviders(
+      <SecurityIdentitySection
+        agent={{
+          ...baseAgent,
+          security: { signInterAgentMessages: true },
+          identity: { keys: [active, { ...active, revoked: true }] },
+        }}
+        onChange={mockOnChange}
+      />
+    );
+
+    expect(screen.getByTestId("security-flag-warning")).toHaveTextContent(/newest one is revoked/);
   });
 
   it("offers Revoke for the legacy key as version 0", async () => {
@@ -602,7 +627,8 @@ describe("UserMemorySection", () => {
     expect(screen.getByText("LLM Model")).toBeInTheDocument();
     expect(screen.getByText("Max Cost/Run ($)")).toBeInTheDocument();
     expect(screen.getByText("Prune After (days)")).toBeInTheDocument();
-    expect(screen.getByText("Batch Size")).toBeInTheDocument();
+    // Batch Size was removed: the backend never read dream.batchSize.
+    expect(screen.queryByText("Batch Size")).not.toBeInTheDocument();
     expect(screen.getByText("Detect contradictions")).toBeInTheDocument();
     expect(screen.getByText("Summarize interactions")).toBeInTheDocument();
   });

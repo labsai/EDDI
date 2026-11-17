@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse, delay } from "msw";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
@@ -87,7 +87,10 @@ describe("conversation-detail while the stored pause catches up", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Approve" }));
     const summary = await screen.findByTestId("approval-decision-summary");
     expect(summary).toHaveAttribute("data-verdict", "APPROVED");
-    expect(screen.getByTestId("approval-decision-summary-call-call-1")).toHaveTextContent("setupAgent");
+    // The receipt reads the call's name in words and keeps the exact identifier as the tooltip.
+    const call = screen.getByTestId("approval-decision-summary-call-call-1");
+    expect(call).toHaveTextContent("Setup agent");
+    expect(call.querySelector('[title="setupAgent"]')).not.toBeNull();
   });
 
   it("re-reads for a few seconds when opened from a pause link before the pause is stored", async () => {

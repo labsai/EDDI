@@ -3,8 +3,8 @@ import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import type { ReactNode } from "react";
-import { server } from "@/test/mocks/server";
-import { useLoadConversation, useChatStore } from "@/hooks/use-chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useLoadConversation, useChatStore } from "@eddi/app-kit/hooks/use-chat";
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({
@@ -74,6 +74,46 @@ describe("useLoadConversation — pause re-establishment", () => {
     // Null from the snapshot ON PURPOSE: the simple snapshot never carries a
     // reason on the wire; the rendered reason overlays from approval-status.
     expect(useChatStore.getState().pauseReason).toBeNull();
+  });
+});
+
+describe("useLoadConversation — quick replies on resume", () => {
+  function mockWithQuickReplies(conversationState: string) {
+    server.use(
+      http.get("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          conversationId: "conv-x",
+          agentId: "a1",
+          agentVersion: 1,
+          conversationState,
+          environment: "production",
+          conversationSteps: [{ conversationStep: [] }, { conversationStep: [] }],
+          conversationOutputs: [
+            { output: [{ type: "text", text: "Hi" }], quickReplies: [{ value: "Old" }] },
+            { output: [{ type: "text", text: "Pick one" }], quickReplies: [{ value: "Red" }, { value: "Blue" }] },
+          ],
+          redoAvailable: false,
+        }),
+      ),
+    );
+  }
+
+  it("offers the last reply's quick replies again when a conversation is resumed", async () => {
+    mockWithQuickReplies("READY");
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-x" });
+    });
+    expect(useChatStore.getState().quickReplies).toEqual(["Red", "Blue"]);
+  });
+
+  it("offers none while the reopened conversation's turn is still executing", async () => {
+    mockWithQuickReplies("IN_PROGRESS");
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "a1", conversationId: "conv-x" });
+    });
+    expect(useChatStore.getState().quickReplies).toEqual([]);
   });
 });
 

@@ -1,17 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { type SSEEvent } from "@/lib/api/chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { type SSEEvent } from "@eddi/app-kit/lib/api/chat";
 
 // The streaming path yields these frames and then fails the way a dropped
 // connection does: by throwing out of the reader.
 const h = vi.hoisted(() => ({ frames: [] as Array<{ type: string; data: string }> }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* () {
@@ -23,8 +23,9 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { chatConversation, useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { RECONNECT_DELAYS_MS } from "@eddi/conversation";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -43,6 +44,8 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     useChatStore.getState().reset();
     useDebugStore.getState().reset();
     h.frames = [];
+    // The turn is lost: the reconnect (below) is its own case.
+    chatConversation.setOptions({ reconnectDelaysMs: [] });
     useChatStore.setState({ selectedAgentId: "agent1", conversationId: "conv1" });
   });
 
@@ -79,6 +82,43 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     expect(agents[1]!.isError).toBe(true);
   });
 
+  it("follows a turn whose stream dropped mid-reply and shows the reply it settled with", async () => {
+    chatConversation.setOptions({ reconnectDelaysMs: [0, 0] });
+    useChatStore.setState({ streamingEnabled: true, selectedAgentId: "a1", conversationId: "c1" });
+    h.frames = [{ type: "token", data: "Half an ans" }];
+    let reads = 0;
+    server.use(
+      http.get("*/agents/c1", () => {
+        reads += 1;
+        // The first read is the baseline taken as the turn is sent: the step
+        // stored before it. The follow-up reads find the turn's own step, settled.
+        return HttpResponse.json(
+          reads === 1
+            ? { conversationState: "IN_PROGRESS", conversationSteps: [{ timestamp: 1, conversationStep: [] }] }
+            : {
+                conversationState: "READY",
+                conversationSteps: [
+                  { timestamp: 1, conversationStep: [] },
+                  { timestamp: 2, conversationStep: [] },
+                ],
+                conversationOutputs: [{ output: [{ type: "text", text: "Half an answer, whole" }] }],
+              },
+        );
+      }),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    result.current.mutate({ message: "hi" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const state = useChatStore.getState();
+    const agents = state.messages.filter((m) => m.role === "agent");
+    expect(agents.map((m) => m.content)).toEqual(["Half an answer, whole"]);
+    expect(agents.some((m) => m.isError)).toBe(false);
+    expect(state.reconnecting).toBe(false);
+    expect(state.isProcessing).toBe(false);
+  });
+
   it("replaces the non-streaming typing indicator with the error and its HTTP detail", async () => {
     useChatStore.setState({ streamingEnabled: false });
     server.use(http.post("*/agents/:conversationId", () => new HttpResponse(null, { status: 500 })));
@@ -94,4 +134,8 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     expect(last.isError).toBe(true);
     expect(last.content).toContain("HTTP 500");
   });
+});
+
+afterEach(() => {
+  chatConversation.setOptions({ reconnectDelaysMs: RECONNECT_DELAYS_MS });
 });

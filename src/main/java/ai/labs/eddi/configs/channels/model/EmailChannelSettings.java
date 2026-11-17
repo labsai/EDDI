@@ -48,7 +48,7 @@ public record EmailChannelSettings(
         int port,
         String address,
         String folder,
-        String moveToFolder,
+        EmailProcessedAction processedAction,
         int pollSeconds,
         boolean requireAuthentication,
         List<String> senderAllowlist,
@@ -310,7 +310,12 @@ public record EmailChannelSettings(
 
     /** Whether processed mail is moved instead of flagged. */
     public boolean movesProcessed() {
-        return moveToFolder != null;
+        return moveToFolder() != null;
+    }
+
+    /** The folder processed mail is moved to ({@code move:<folder>}), or null. */
+    public String moveToFolder() {
+        return processedAction != null && processedAction.kind() == EmailProcessedAction.Kind.MOVE ? processedAction.target() : null;
     }
 
     /** The IMAP origin the connection's allowlist has to name. */
@@ -338,8 +343,9 @@ public record EmailChannelSettings(
      */
     public static EmailChannelSettings from(Map<String, String> platformConfig) {
         Map<String, String> pc = platformConfig == null ? Map.of() : platformConfig;
-        String processed = blankToNull(pc.get(KEY_PROCESSED_ACTION));
-        String moveTo = processed != null && processed.toLowerCase(Locale.ROOT).startsWith("move:") ? blankToNull(processed.substring(5)) : null;
+        EmailProcessedAction parsedAction = EmailProcessedAction.parse(pc.get(KEY_PROCESSED_ACTION));
+        // An unparseable value reads as the default; validate() reports it.
+        EmailProcessedAction processedAction = parsedAction == null ? EmailProcessedAction.FLAG : parsedAction;
         String address = blankToNull(pc.get(KEY_ADDRESS));
         String normalizedAddress = address == null ? null : AddressNormalizer.tryNormalize(address).orElse(null);
         String connection = blankToNull(pc.get(KEY_CONNECTION));
@@ -364,7 +370,7 @@ public record EmailChannelSettings(
                 : DEFAULT_AI_DISCLOSURE;
         return new EmailChannelSettings(mode, lower(blankToNull(pc.get(KEY_TRANSPORT))), connectionName(connection),
                 host == null ? null : host.toLowerCase(Locale.ROOT), (int) longValue(pc.get(KEY_PORT), DEFAULT_PORT), normalizedAddress,
-                orDefault(blankToNull(pc.get(KEY_FOLDER)), DEFAULT_FOLDER), moveTo,
+                orDefault(blankToNull(pc.get(KEY_FOLDER)), DEFAULT_FOLDER), processedAction,
                 (int) longValue(pc.get(KEY_POLL_SECONDS), DEFAULT_POLL_SECONDS),
                 // Conversation mode never runs mail from an unauthenticated From, whatever the
                 // key says: forced here, so no reader of these settings can see false.
@@ -466,21 +472,7 @@ public record EmailChannelSettings(
         if (folder != null && !validFolder(folder)) {
             errors.add("platformConfig.folder must be at most " + MAX_FOLDER_LENGTH + " characters without control characters.");
         }
-        String processed = blankToNull(pc.get(KEY_PROCESSED_ACTION));
-        if (processed != null) {
-            String lowered = processed.toLowerCase(Locale.ROOT);
-            if (lowered.startsWith("move:")) {
-                String target = blankToNull(processed.substring(5));
-                if (target == null || !validFolder(target)) {
-                    errors.add("platformConfig.processedAction 'move:<folder>' needs a folder name of at most " + MAX_FOLDER_LENGTH
-                            + " characters without control characters.");
-                } else if (target.equalsIgnoreCase(folder == null ? DEFAULT_FOLDER : folder)) {
-                    errors.add("platformConfig.processedAction cannot move mail into the folder that is polled.");
-                }
-            } else if (!"flag".equals(lowered)) {
-                errors.add("platformConfig.processedAction must be 'flag' or 'move:<folder>'. Processed mail is never deleted.");
-            }
-        }
+        validateProcessedAction(errors, pc, folder, transport);
 
         rangeCheck(errors, pc, KEY_POLL_SECONDS, MIN_POLL_SECONDS, MAX_POLL_SECONDS);
         booleanCheck(errors, pc, KEY_REQUIRE_AUTHENTICATION);
@@ -651,6 +643,41 @@ public record EmailChannelSettings(
             name = name.substring("${connection:".length(), name.length() - 1).trim();
         }
         return CONNECTION_NAME.matcher(name).matches() ? name : null;
+    }
+
+    /**
+     * {@code processedAction}: {@code flag}, {@code move:<folder>} or
+     * {@code label:<name>} ({@link EmailProcessedAction}). {@code label:} needs a
+     * transport with labels; IMAP has none, and its keyword is always
+     * {@code $EddiProcessed}, so an IMAP integration refuses it.
+     */
+    private static void validateProcessedAction(List<String> errors, Map<String, String> pc, String folder, String transport) {
+        String processed = blankToNull(pc.get(KEY_PROCESSED_ACTION));
+        if (processed == null) {
+            return;
+        }
+        String lowered = processed.toLowerCase(Locale.ROOT);
+        EmailProcessedAction action = EmailProcessedAction.parse(processed);
+        if (lowered.startsWith(EmailProcessedAction.MOVE_PREFIX)) {
+            String target = action == null ? null : action.target();
+            if (target == null || !validFolder(target)) {
+                errors.add("platformConfig.processedAction 'move:<folder>' needs a folder name of at most " + MAX_FOLDER_LENGTH
+                        + " characters without control characters.");
+            } else if (target.equalsIgnoreCase(folder == null ? DEFAULT_FOLDER : folder)) {
+                errors.add("platformConfig.processedAction cannot move mail into the folder that is polled.");
+            }
+        } else if (lowered.startsWith(EmailProcessedAction.LABEL_PREFIX)) {
+            String target = action == null ? null : action.target();
+            if (target == null || !validFolder(target)) {
+                errors.add("platformConfig.processedAction 'label:<name>' needs a label name of at most " + MAX_FOLDER_LENGTH
+                        + " characters without control characters.");
+            } else if (transport == null || TRANSPORT_IMAP.equalsIgnoreCase(transport)) {
+                errors.add("platformConfig.processedAction 'label:<name>' needs a transport with labels; IMAP has none. Use 'flag' (the "
+                        + "keyword $EddiProcessed) or 'move:<folder>'.");
+            }
+        } else if (action == null) {
+            errors.add("platformConfig.processedAction must be 'flag', 'move:<folder>' or 'label:<name>'. Processed mail is never deleted.");
+        }
     }
 
     private static boolean validFolder(String folder) {

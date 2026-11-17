@@ -19,6 +19,7 @@ import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
+import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -1517,12 +1518,14 @@ class ToolLoopRunner {
                                    List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
         // Live signals for streaming clients, announced here - the one place every
         // call passes through - so each call is closed exactly once whichever of the
-        // many exits of the pipeline below it leaves by. Name, call id, status and
-        // duration only: arguments and results may hold user data. The one exception
-        // is what the designer allow-listed in toolDisplay.
+        // many exits of the pipeline below it leaves by. Name, call id, status,
+        // duration and a redacted summary of the result (B6), never the raw
+        // arguments or result: they may hold user data. The one exception is what
+        // the designer allow-listed in toolDisplay.
         ConversationEventSink sink = memory != null ? memory.getEventSink() : null;
         long startedNanos = System.nanoTime();
         String status = TOOL_STATUS_ERROR;
+        int traceStart = trace.size();
         if (sink != null) {
             announceToolCall(sink, toolRequest, task, toolCanonicalNames);
         }
@@ -1533,14 +1536,62 @@ class ToolLoopRunner {
             status = toolStatusOf(result);
             return result;
         } finally {
-            if (sink != null) {
+            // A call a cascade timeout or a cancel aborted is not a finished call: no
+            // event (the turn ends without its result).
+            if (sink != null && !memory.isCancelled() && !Thread.currentThread().isInterrupted()) {
                 long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-                try {
-                    sink.onToolResult(toolRequest.name(), toolRequest.id(), status, durationMs);
-                } catch (RuntimeException e) {
-                    LOGGER.debug("Event sink failed on tool_result; ignoring", e);
+                emitToolResult(sink, toolRequest.name(), toolRequest.id(), status, durationMs, trace, traceStart);
+            }
+        }
+    }
+
+    /**
+     * The live "{tool} finished" signal for one call, outside a running loop (a
+     * test, or a caller that has only the call's result): its status from the
+     * result, no call id or duration. See
+     * {@link #emitToolResult(ConversationEventSink, String, String, String, long, List, int)}.
+     */
+    static void emitToolResult(IConversationMemory memory, String toolName, List<Map<String, Object>> trace, int traceStart,
+                               ToolCallResult result) {
+        if (memory == null || memory.getEventSink() == null) {
+            return;
+        }
+        emitToolResult(memory.getEventSink(), toolName, null, result == null ? TOOL_STATUS_ERROR : toolStatusOf(result), 0L, trace,
+                traceStart);
+    }
+
+    /**
+     * The live "{tool} finished" signal for streaming clients, paired with the
+     * {@code tool_call} that {@link #announceToolCall} sent before the call. Its
+     * summary (B6) is built from the trace entry the call just wrote - its result,
+     * or the refusal of a budget, quota or deadline gate - so it reports exactly
+     * what the turn-end {@code toolTrace} will, through the same redaction
+     * ({@link ToolTraceRedaction#summary}). A call that wrote no result entry, or
+     * only an error entry, is never reported {@code ok}. An event sink must never
+     * break the tool loop.
+     */
+    static void emitToolResult(ConversationEventSink sink, String toolName, String callId, String status, long durationMs,
+                               List<Map<String, Object>> trace, int traceStart) {
+        try {
+            String text = null;
+            boolean succeeded = false;
+            for (int i = trace.size() - 1; i >= traceStart && i >= 0; i--) {
+                Map<String, Object> entry = trace.get(i);
+                Object type = entry.get("type");
+                if ("tool_result".equals(type)) {
+                    text = entry.get("result") instanceof String r ? r : null;
+                    succeeded = true;
+                    break;
+                }
+                if ("tool_error".equals(type)) {
+                    text = entry.get("error") instanceof String e ? e : null;
+                    break;
                 }
             }
+            String reported = TOOL_STATUS_OK.equals(status) && !succeeded ? TOOL_STATUS_ERROR : status;
+            sink.onToolResult(toolName, callId, reported, durationMs, ToolTraceRedaction.summary(text));
+        } catch (RuntimeException e) {
+            LOGGER.debug("Event sink failed on tool_result; ignoring", e);
         }
     }
 
@@ -1557,7 +1608,13 @@ class ToolLoopRunner {
         if (result.notExecuted()) {
             return TOOL_STATUS_NOT_EXECUTED;
         }
-        return ToolOutcomeClassifier.classify(result.raw()).isFailure() ? TOOL_STATUS_ERROR : TOOL_STATUS_OK;
+        ToolOutcomeClassifier.Outcome outcome = ToolOutcomeClassifier.classify(result.raw());
+        if (outcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED) {
+            // A result that says it did not run (a mock suite's NOT_EXECUTED, a DENIED
+            // status).
+            return TOOL_STATUS_NOT_EXECUTED;
+        }
+        return outcome.isFailure() ? TOOL_STATUS_ERROR : TOOL_STATUS_OK;
     }
 
     /** Tells the sink a call is starting; a failing sink never breaks the loop. */
@@ -1857,44 +1914,6 @@ class ToolLoopRunner {
         // classifies it, and neither sends it anywhere.
         toolResult = SecretRedactionFilter.redact(toolResult);
 
-        // Apply response truncation (MCP governance).
-        //
-        // The provenance envelope is added AFTER this, so the budget handed to the
-        // truncator is reduced by the envelope's worst case. Otherwise a configured
-        // ceiling is exceeded by every single result — small individually, kilobytes
-        // across a long tool loop, and exactly the drift the ceiling exists to stop.
-        toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
-                toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
-
-        Map<String, Object> resultStep = new HashMap<>();
-        resultStep.put("type", "tool_result");
-        resultStep.put("tool", toolRequest.name());
-        withCallId(resultStep, toolRequest);
-        // Redacted for the same reason as the call step's arguments: an API
-        // response can echo a credential (its own, or one the request carried).
-        // toolResult was redacted above; it is scanned again because truncation
-        // (summarize strategy) can produce new text.
-        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
-        if (mockingExecutor != null) {
-            resultStep.put("mocked", true);
-        }
-        trace.add(resultStep);
-
-        // LAZY mode: after discover_tools returns, activate the matching built-in
-        // specs.
-        //
-        // Deliberately BEFORE the guardrail: discover_tools' output is an
-        // EDDI-authored control message this loop parses itself, and wrapping it in
-        // a provenance envelope first would make that parse fail. The envelope is
-        // for the model's benefit, and the model still gets one.
-        if (isLazy && "discover_tools".equals(toolRequest.name())) {
-            int before = activeSpecs.size();
-            activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
-            LazyToolCatalog.countActivation(activeSpecs.size() - before);
-            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
-        }
-
         // Govern what comes back. Until now the comment on the live loop's caller
         // read "append the raw result verbatim", which made every tool a
         // prompt-injection channel: third-party bulk text arrived in the same
@@ -1905,21 +1924,83 @@ class ToolLoopRunner {
         // the MCP resource bridge's executors return ordinary tool results —
         // resource content and listings for free.
         //
-        // Applied AFTER the trace entry above on purpose: the trace is a display
-        // record of what the TOOL returned, and showing an operator EDDI's own
-        // envelope back would obscure that.
+        // The WHOLE result is screened, before truncation. Screening the cut text
+        // left the rest ungoverned: the paginate strategy stores it as pages that
+        // come back through fetch_tool_response_page — a built-in tool, which a
+        // guardrail narrowed to ["mcp"] never screens — and the summarize strategy
+        // sent it to a second model. A directive in the part a cut drops now also
+        // triggers `block`.
         String source = toolSources == null ? null : toolSources.get(toolRequest.name());
-        var outcome = toolResultGuardrail.inspect(toolRequest.name(), source, toolResult,
-                task.getToolResultGuardrails());
-        if (!ToolResultGuardrail.ACTION_ALLOW.equals(outcome.action())) {
+        var guardrails = task.getToolResultGuardrails();
+        var screened = toolResultGuardrail.screen(toolRequest.name(), source, toolResult, guardrails);
+        String guardrailAction = screened.action();
+
+        // Apply response truncation (MCP governance).
+        //
+        // The provenance envelope is added AFTER this, so the budget handed to the
+        // truncator is reduced by the envelope's worst case. Otherwise a configured
+        // ceiling is exceeded by every single result — small individually, kilobytes
+        // across a long tool loop, and exactly the drift the ceiling exists to stop.
+        toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
+                toolRequest.name(), screened.result(), reserveEnvelopeBudget(task.getToolResponseLimits(), task),
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
+
+        // A summary is new text, written by a model from third-party content, and a
+        // summarizer that normalises an obfuscated instruction the pattern missed can
+        // produce one it matches — so it is screened in turn. The other strategies,
+        // and the truncation summarize falls back to, only remove text, and their
+        // output is not scanned twice. The equality check keeps a result that merely
+        // starts like a summary, and was not cut, from being screened again.
+        if (ToolResponseTruncator.isSummary(toolResult) && !toolResult.equals(screened.result())) {
+            var summary = toolResultGuardrail.screen(toolRequest.name(), source, toolResult, guardrails);
+            toolResult = summary.result();
+            if (!ToolResultGuardrail.ACTION_ALLOW.equals(summary.action())) {
+                guardrailAction = summary.action();
+            }
+        }
+
+        Map<String, Object> resultStep = new HashMap<>();
+        resultStep.put("type", "tool_result");
+        resultStep.put("tool", toolRequest.name());
+        withCallId(resultStep, toolRequest);
+        // Redacted for the same reason as the call step's arguments: an API
+        // response can echo a credential (its own, or one the request carried).
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
+        //
+        // The screened text, before the envelope: the trace is a display record of
+        // what the tool returned as the model received it, and showing an operator
+        // EDDI's own envelope back would obscure that.
+        resultStep.put("result", SecretRedactionFilter.redact(toolResult));
+        if (mockingExecutor != null) {
+            resultStep.put("mocked", true);
+        }
+        trace.add(resultStep);
+
+        // LAZY mode: after discover_tools returns, activate the matching built-in
+        // specs.
+        //
+        // From the raw result: discover_tools' output is an EDDI-authored control
+        // message this loop parses itself, and the envelope or a cut would make that
+        // parse fail. The envelope is for the model's benefit, and the model still
+        // gets one.
+        if (isLazy && "discover_tools".equals(toolRequest.name())) {
+            int before = activeSpecs.size();
+            activateDiscoveredTools(untruncatedResult, builtInSpecs, activeSpecs);
+            LazyToolCatalog.countActivation(activeSpecs.size() - before);
+            LazyToolCatalog.remember(memory, task, builtInSpecs, activeSpecs);
+        }
+
+        if (!ToolResultGuardrail.ACTION_ALLOW.equals(guardrailAction)) {
             Map<String, Object> guardrailStep = new HashMap<>();
             guardrailStep.put("type", "tool_result_guardrail");
             guardrailStep.put("tool", toolRequest.name());
-            guardrailStep.put("action", outcome.action());
+            guardrailStep.put("action", guardrailAction);
             trace.add(guardrailStep);
         }
 
-        return new ToolCallResult(outcome.result(), untruncatedResult, notExecuted);
+        return new ToolCallResult(toolResultGuardrail.mark(toolRequest.name(), source, toolResult, guardrails), untruncatedResult,
+                notExecuted);
     }
 
     /**

@@ -1,7 +1,7 @@
-import { api } from "../api-client";
-import type { SharedTaskList, TaskItem } from "./groups";
-import { seg } from "./path-segment";
-import type { WorkspaceHandoffs } from "./team-handoffs";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { SharedTaskList, TaskItem } from "@eddi/app-kit/lib/api/groups";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
+import type { WorkspaceHandoffs } from "@eddi/app-kit/lib/api/team-handoffs";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +
@@ -51,6 +51,8 @@ export interface Cadence {
 /** Per-member reliability counters (I13) — RECORDING only; nothing in v1 routes, weights, or filters assignment on these numbers. */
 export interface MemberStats {
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   tasksFailed: number;
 }
 
@@ -58,6 +60,8 @@ export interface MemberStats {
 export interface WorkspaceMetrics {
   discussions: number;
   tasksVerified: number;
+  /** Kept done because a person approved them (`hitlConfig.approvalCompletesBacklogTask`); absent on older documents. */
+  tasksApproved?: number;
   totalCost: number;
   lastRunAt: string | null;
   perMemberStats: Record<string, MemberStats>;

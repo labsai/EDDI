@@ -1,0 +1,14 @@
+## 🐛 fix(workforce): hand-off review fixes — secret input, failed starts, held team questions (2026-11-16)
+
+**Repo:** EDDI · **Branch:** `feat/workforce-teams-mention-artifacts` (PR #1317, review findings)
+
+- **Secret input never leaves through a hand-off.** Entering secret mode drops the chosen @mention target, and `handleSend` refuses the hand-off branch while secret mode is on, so a typed secret is sent as a secret turn in this chat — never as the plain first message of another agent's or team's conversation, and never into the browser's hand-off record ([`chat-panel.tsx`](../../ui/packages/app-kit/src/components/chat/chat-panel.tsx)). An edited message brought back by ↑ / Edit also drops a target picked before.
+- **A hand-off is linked only once its question arrived.** `onInitialConversationStarted` now fires after the first message was sent (through `mutateAsync`, whose promise settles even after the page unmounts), not after the conversation was created; when the start or the send fails, the question goes back into the composer instead of being lost. On the board, a handed-in question is linked from its own start's stream slot (`lib/team-handoff-link.ts`), never from whatever board is on screen, and a refused start hands the question back like a typed one.
+- **A team question that arrives while the board streams is held, on screen** (`board-held-question`): **Start it** (enabled once nothing streams) or **Discard**. It used to wait silently and start a paid discussion by itself when the running one ended.
+- **Marker wording.** "Recorded in this browser only" is visible text on both markers (it was a `title`, unreachable by touch, keyboard and most screen readers); "It did not start." became "Not linked yet." (`Workforce.handoff.notLinked`), which is also true while the question is on its way.
+- **Hand-off storage across tabs.** Writes start from what storage holds, not the cache, and the cache is dropped when the last subscriber leaves, so a tab that stopped listening cannot overwrite another tab's records ([`workforce-handoffs.ts`](../../ui/packages/app-kit/src/lib/workforce-handoffs.ts)).
+- **Home with teams but no agent** picks the first team, so it can send.
+- **Decision summary:** a `NONE` record with an unparsed ruling (`raw`) says "No structured decision was read: the conclusion is kept as prose below." (`groups.decisionPlain.unparsed`) instead of claiming no decision was reached.
+- **Turn notes:** escalation notes say "Another model was tried because …" — the note is recorded when the cascade moves on, before the next model answers. The operator prompt and the guide say the same.
+- i18n: 5 new keys and 1 renamed, in all eleven locales; the five escalation sentences reworded in all eleven.
+- Answered, not changed: the human-turn announcement with no signed-in principal ("It's your turn") — that only happens with auth off, where anyone may answer the turn.

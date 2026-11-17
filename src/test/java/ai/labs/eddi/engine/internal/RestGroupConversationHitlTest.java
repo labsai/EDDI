@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -81,7 +82,7 @@ class RestGroupConversationHitlTest {
                 groupService);
         restGroupConversation = new RestGroupConversation(
                 groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard,
-                resourceAccessGuard);
+                resourceAccessGuard, new CallerIdentityContext(null, null));
     }
 
     /** Creates a GC owned by the given userId. */

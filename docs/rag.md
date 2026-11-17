@@ -207,7 +207,9 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | `POST` | `/ragstore/rags` | Create a new KB |
 | `PUT` | `/ragstore/rags/{id}?version=N` | Update a KB |
 | `POST` | `/ragstore/rags/{id}?version=N` | Duplicate a KB |
-| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB |
+| `DELETE` | `/ragstore/rags/{id}?version=N` | Delete a KB (`permanent=true` removes the history too) |
+| `GET` | `/ragstore/rags/{id}/currentversion` | Current version number |
+| `POST` | `/ragstore/rags/{id}/currentversion` | `303` redirect to the latest version |
 
 > **There is no retrieval endpoint.** `/ragstore/rags/` covers configuration and ingestion only —
 > there is no `/query`, `/search` or `/retrieve`, and requests to those return `404`. Retrieval is
@@ -219,6 +221,7 @@ Retrieved vector-RAG context (Options 1 and 2) is **always** appended to the LLM
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/ragstore/rags/{id}/ingest?version=N&documentName=...` | Ingest a text document (returns 202 + ingestion ID). Add `replace=true` to supersede an earlier version of the same document (see below). `kbId` is deprecated — see below |
+| `DELETE` | `/ragstore/rags/{id}/documents?version=N&documentName=...` | Remove a document ingested through `/ingest` (see [Deleting a document](#deleting-a-document)) |
 | `GET` | `/ragstore/rags/{id}/ingestion/{ingestionId}/status` | Poll ingestion status |
 
 > **Documents always go into the knowledge base in the path.** `kbId` no longer selects a store. Up
@@ -258,7 +261,7 @@ Response:
 }
 ```
 
-Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that is unknown, expired or held by another instance reports `unknown`: status is kept per instance for one hour, so in a cluster poll the instance that accepted the upload.
+Status values: `pending` → `processing` → `completed` | `failed: <error message>`. An id that was never issued, whose status has expired (statuses are kept for at most one hour), or that belongs to a different knowledge base than the one in the path, answers 404 with status `unknown`. In a cluster (`eddi.messaging.type=nats`) the status is shared through the `RAG_INGESTION` KV bucket, so the poll may reach any instance, not only the one that accepted the upload. That holds while NATS is reachable: during an outage `SharedKvCache` falls back to node-local values, so a poll on another instance can answer 404 (or an older status) for a valid ingestion. A status written during the outage stays on the instance that wrote it. When that instance next reads the key (a poll of it does), the status is published to the bucket by compare-and-set, and only if no other instance wrote or deleted the key since: otherwise the bucket's newer value wins and the older local one is dropped. Until then other instances keep the older value or 404. Republishing starts a new one-hour bucket TTL (the KV API cannot preserve the original expiry), so after an outage a status can stay readable for up to about twice the TTL after its last update (the writing instance drops its own copy after one hour, so a status is republished only within that hour).
 
 **Re-ingesting a document.** By default this endpoint only adds: ingesting the same `documentName`
 twice stores both copies, and retrieval returns both — the old text alongside the new. Pass
@@ -276,6 +279,39 @@ is refused with a `400` without one: every document ingested without a name shar
 replacing that would delete all of them. On a vector store that cannot delete by metadata, the
 ingestion still completes and the status response carries a `warning` saying the previous version is
 still retrievable. The Manager's drop zone offers the same thing as a checkbox.
+
+#### Deleting a document
+
+```bash
+curl -X DELETE "http://localhost:7070/ragstore/rags/abc123/documents?version=1&documentName=pricing.md"
+```
+
+Removes everything ingested through `/ingest` under that `documentName` in this knowledge base — the
+same chunks `replace=true` supersedes: every version of the name, including chunks written before
+chunks carried an ingestion id, and nothing of another knowledge base sharing the store. It needs
+EDIT on the knowledge base, like ingesting, and it is synchronous.
+
+| Status | Meaning |
+| --- | --- |
+| `200` `{"status": "deleted", ...}` | The document's chunks are gone. A name nothing was ingested under is also `200`: there is nothing left to remove |
+| `200` with `warning` | The vector store cannot delete by metadata, so nothing was removed and the text is still retrievable (`status: "not_deleted"`) |
+| `400` | `documentName` is missing, blank or `unnamed` — every document ingested without a name shares `unnamed`, and deleting that would delete all of them |
+| `409` | An [ingestion source](#ingestion-sources) of this knowledge base holds a document by that name (an uploaded file's name or id, or a page a crawl has ingested), or a replacement of the same name is still embedding after 30 seconds |
+| `503` | The vector store (or the ingestion state, while checking the sources) failed. Nothing may have been removed; retry |
+
+**A delete and a replacement of one name never interleave.** Both take the same per-document lock, so
+a delete waits for a replacement in flight and then removes its chunks too, rather than landing
+between the replacement's store and its cleanup. As with replacements, the lock is per instance. An
+ingestion *without* `replace` takes no lock, so one still in flight when the delete answers can store
+its chunks afterwards.
+
+**What a source ingested is removed through the source.** Its chunks carry `sourceName` and a
+`sourceKey`, never the `source` key this endpoint matches on, so a delete could not touch them — and
+answering "deleted" while the source's text stays retrievable would be wrong. The endpoint therefore
+refuses a name a source holds with `409` and the source's id: delete an uploaded file through
+[its endpoint](#file-endpoints), or exclude a crawled page and run the source. The check is by name,
+so a document pushed through `/ingest` under the same name as a source's file cannot be deleted here
+until that file is gone.
 
 For documents that change over time, an [upload source](#uploaded-files-type-upload) is usually the
 better fit — it replaces by file name automatically and keeps the files, so a re-embed never needs
@@ -334,7 +370,9 @@ Rules enforced when a knowledge base is saved:
   digits, `_`, `-`, `.`, not starting with `-`/`_`/`+`): Elasticsearch reads it as an index expression, so
   a wildcard (`*`), a list (`a,b`) or an exclusion would search indexes the check never compared. If the
   deployment holds more knowledge bases than the collision check can scan (20,000), an explicit location is
-  refused rather than saved unchecked. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
+  refused rather than saved unchecked. So is a save during which another knowledge base cannot be read: it
+  may be the one that owns the location, so the save fails with a server error and the server log names it.
+  Try again, or repair or delete that knowledge base. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.
@@ -434,7 +472,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | `sitemapUrls` | empty | Sitemaps to discover pages from, besides any robots.txt lists — see [Sitemaps](#sitemaps). At most 20 |
 | `requestDelayMs` | `500` | Politeness delay between requests to one host. A `Crawl-delay` in robots.txt wins when it is slower |
 | `timeoutSeconds` | `15` | Per-request timeout. The body gets a multiple of it before it is cut off |
-| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.labs.ai)` | Sent on every request, and matched against robots.txt groups |
+| `userAgent` | `EDDI-Crawler/1.0 (+https://eddi.technology)` | Sent on every request, and matched against robots.txt groups |
 | `respectRobots` | `true` | Honour robots.txt, its `Crawl-delay` and its `Sitemap` entries |
 
 `settings` — what to do with what was crawled:
@@ -790,10 +828,11 @@ filters on the run id.
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata) |
 | `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 naming the cause when the provider or store fails) |
+| `POST` | `/ragstore/rags/{id}/evaluate?version=N` | EDIT | Benchmark retrieval: golden queries `{query, expected[], k?}` run through the same search and scored — first-hit rank, hit@k, reciprocal rank, recall@k, MRR — optionally against a baseline (one embedding call per query; see [Evaluating retrieval](#evaluating-retrieval)) |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
 Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
-design, and a run rewrites what every agent using it retrieves. Reading chunks and searching need EDIT
+design, and a run rewrites what every agent using it retrieves. Reading chunks, searching and evaluating need EDIT
 for the same reason in the other direction: they return the knowledge base's text and cost an
 embedding call each, while the document listing returns only ingestion state and needs VIEW.
 
@@ -855,11 +894,179 @@ same explanation instead of the buttons, because it has no id for the endpoints 
 ### Store support for replacement
 
 Replacing a document's chunks needs `removeAll(Filter)` on the vector store, with a compound filter
-(document id and owning source). Verified for `in-memory` and `pgvector`. The other supported stores —
-`mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma` — are expected to support it through their
-langchain4j drivers but are not covered by these tests. Where a store does not, the run still succeeds
-and reports `replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that
-backend.
+(document id and owning source). Verified for `in-memory`, `pgvector` and `chroma` — Chroma by
+`ChromaReplacementIT`, which runs a changed page, a page removed from the site and a deleted upload
+through the real ingestion pipeline against a `chromadb/chroma:1.1.0` container (the image
+`docker-compose.chroma.yml` ships, on the default `apiVersion` `V2`) and finds the stale chunks gone
+with `replaceUnsupported` not raised. The other supported stores — `mongodb-atlas`,
+`elasticsearch`, `qdrant` — are expected to support it through their langchain4j drivers but are not
+covered by these tests. Where a store does not, the run still succeeds and reports
+`replaceUnsupported`, meaning re-ingested documents accumulate stale chunks on that backend.
+The same `removeAll(Filter)` serves `replace=true` and
+[deleting a document](#deleting-a-document) on `/ingest`'s documents; where it is missing, both answer
+with a `warning` instead.
+
+## Evaluating retrieval
+
+`POST /ragstore/rags/{id}/search` shows what one query retrieves. To tell whether a change — a new
+chunk size, another embedding model, a different `minScore` — made retrieval better or worse, run a
+fixed set of **golden queries** through the same search and score the results:
+
+```
+POST /ragstore/rags/{id}/evaluate?version=N
+```
+
+Each query names the documents a good retrieval returns. The endpoint runs every query exactly as
+`/search` does (same embedding model in query mode, same isolation filter, same `sourceId` narrowing)
+and reports, per query, the rank of the first hit, hit@k and the reciprocal rank, and over all
+queries the hit rate, recall@k and MRR. It needs **EDIT**, like `/search`, and costs **one embedding
+call per query**; the request is synchronous.
+
+```json
+{
+  "k": 5,
+  "queries": [
+    { "id": "refunds", "query": "How do I get my money back?", "expected": ["refund-policy"] },
+    { "id": "shipping", "query": "Do you ship to Austria?", "expected": ["shipping-eu", "faq"], "k": 10 }
+  ]
+}
+```
+
+| Field | Default | Meaning |
+| ----- | ------- | ------- |
+| `queries` | — (required) | The golden queries: `query` (required, at most 2,000 characters), `expected` (required, at least one non-blank identifier, at most 100), optional `id` and `k` |
+| `k` | the knowledge base's `maxResults`, else 5 | Cut-off for queries that set none. Between 1 and 50, the most a search returns |
+| `minScore` | the knowledge base's `minScore`, else 0 | As for `/search`; between 0 and 1 |
+| `sourceId` | — | Narrows every query to one ingestion source's chunks |
+| `matchKeys` | `["source", "documentId", "url"]` | Which chunk metadata keys identify a document (at most 10) |
+| `baseline` | — | An earlier run to compare with (below) |
+
+At most `eddi.rag.evaluation.max-queries` queries (default 100) go in one request; more is a 400
+naming the setting, as is every other malformed request — all checked before the first embedding
+call. A provider or store failure is a 502 with the `queryIndex` it failed at; nothing partial is
+returned.
+
+### What counts as a hit
+
+A retrieved chunk is a hit for an expected document when the value of one of the `matchKeys` in the
+chunk's metadata **equals** the expected identifier — exactly and **case-sensitively** (the expected
+value is trimmed; nothing else is normalized). The defaults cover both ways documents get in:
+
+- `source` — the `documentName` of a document ingested with `POST /{id}/ingest`.
+- `documentId` and `url` — what an [ingestion source](#ingestion-sources) stores: the page URL for a
+  web source, the file id for an upload source (see the source's documents listing).
+
+To match on something else, say the file name an upload source stores as `title`, send
+`"matchKeys": ["title"]`. Several chunks of one document count once, and one chunk can satisfy two
+expected documents if it carries both identifiers.
+
+### The numbers
+
+| Metric | Per query | Aggregate (`summary`) |
+| ------ | --------- | --------------------- |
+| `firstHitRank` | 1-based rank of the first chunk that hits any expected document within the top `k`; null without one | — |
+| `hit` / `hitRate` | hit@k: whether there is a first hit | Share of queries with a hit |
+| `reciprocalRank` / `mrr` | `1 / firstHitRank`, 0 without a hit | Mean: MRR@k |
+| `recall` | recall@k: share of the **distinct** expected documents found in the top `k` | Mean over queries |
+
+Both hit rate and recall are returned because they differ as soon as a query expects more than one
+document: a query expecting `["a", "b"]` that retrieves only `a` has a hit but a recall of 0.5. Each
+query also lists `found`, `missing` and `retrieved` — every result's rank, score, identifiers and
+whether it was relevant — so a miss can be read without a second search. Chunk text is not returned;
+that is what `/search` is for.
+
+```json
+{
+  "k": 5,
+  "minScore": 0.0,
+  "matchKeys": ["source", "documentId", "url"],
+  "summary": { "queries": 2, "scoredQueries": 2, "hitRate": 1.0, "recall": 0.75, "mrr": 0.75 },
+  "queries": [
+    {
+      "id": "refunds", "query": "How do I get my money back?", "k": 5, "expected": ["refund-policy"],
+      "resultCount": 5, "firstHitRank": 2, "hit": true, "reciprocalRank": 0.5, "recall": 1.0,
+      "found": ["refund-policy"], "missing": [],
+      "retrieved": [
+        { "rank": 1, "score": 0.83, "ids": ["faq"], "relevant": false },
+        { "rank": 2, "score": 0.81, "ids": ["refund-policy"], "relevant": true }
+      ]
+    }
+  ]
+}
+```
+
+(The second query is left out above.)
+
+### Comparing with a baseline
+
+Send an earlier response's `queries` back as `baseline` — pasting the whole earlier response works,
+fields the comparison does not read are ignored — and the response gains a `comparison`:
+
+```json
+{
+  "queries": [ ... ],
+  "baseline": { "queries": [ { "id": "refunds", "k": 5, "hit": true, "reciprocalRank": 1.0, "recall": 1.0 } ] }
+}
+```
+
+```json
+"comparison": {
+  "comparedQueries": 1, "hitRateDelta": 0.0, "recallDelta": 0.0, "mrrDelta": -0.5,
+  "regressions": 1, "improvements": 0, "regressed": true,
+  "queries": [ { "key": "refunds", "hitBefore": true, "hitNow": true, "reciprocalRankDelta": -0.5,
+                 "recallDelta": 0.0, "regressed": true, "improved": false, "kChanged": false } ],
+  "onlyInCurrent": [], "onlyInBaseline": []
+}
+```
+
+- Queries are paired by `id`, or by their text when they have none. Two queries with one key on the
+  same side are a 400 — the pairing would be a guess.
+- A query **regressed** when its reciprocal rank or its recall went down; either is enough, so a
+  query that ranks its first hit higher but loses a second document is still flagged. It
+  **improved** when something went up and nothing went down.
+- The aggregate deltas are taken over the queries **both runs contain**, so adding or dropping a
+  query never moves them; those are listed in `onlyInCurrent` and `onlyInBaseline` instead.
+- `regressed` at the top is true when any query regressed or any aggregate went down.
+- `kChanged` marks a query scored at a different cut-off than in the baseline, where the deltas
+  compare different things. A baseline value left out (a hand-written baseline with only `recall`,
+  say) is simply not compared.
+
+The scores move with the knowledge base as well as with the configuration: re-ingesting or crawling
+in between changes what there is to find. Compare runs over the same content when the question is
+whether a configuration change helped.
+
+### Source connectors (for contributors)
+
+Each source `type` is served by one **source connector**, a CDI bean implementing
+`SourceConnector` (`modules/ingestion/connector`). The ingestion pipeline owns everything that is the
+same for every source: run claims, change detection, text extraction, embedding, chunk replacement,
+deletion reconciliation, budgets and run history. It never names a provider. A connector owns how to
+list the source, how to read one document, and what the provider's failures mean. `web`
+(`WebSourceConnector`, around the crawler) and `upload` (`UploadSourceConnector`, over the file store)
+are the two today. A new source type is one bean: `SourceConnectors` collects them by `type()` and
+refuses two beans for one type at startup.
+
+| Part | What it is |
+| --- | --- |
+| `discover(DiscoveryContext)` | Lists one partition from its cursor and hands each document to `context.accept(WorkItem)` as it is found, streamed rather than returned. Downloads nothing it does not have to. Returns a `DiscoveryResult`: the stop reason, the `Coverage`, and the next cursor |
+| `fetch(WorkItem, SourceContext)` | Reads one document as a `SourceDocument`. Not called for an item that arrived `prefetched`, which is what a crawler does, since it reads the page to find the next link |
+| `listPartitions` / `verifyAccess` | Drives, sites, mailboxes. The default is one implicit partition that is always accessible. **This version runs exactly one partition per source** |
+| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, and an optional prefetched document. When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched |
+| `SourceDocument` | `content`, which is one of three kinds: `HtmlPage` (page converter; blank text means navigation and is skipped), `FileBytes` (extracted by MIME type; no text means a definitive failure that retires older chunks) or `Text`. It also carries `versionToken` (the change key when present, otherwise the text hash), HTTP `validators`, `truncated` and `metadata` under `SourceMetadataKeys` |
+| `Coverage` | `FULL_LISTING`: an authoritative listing, where absence means deletion, even when the listing is empty. `FULL_TRAVERSAL`: a crawl; absence means deletion only if the run learned something definitive. `INCREMENTAL`: a change feed; absence means nothing, and deletions arrive as `DELETE` items. `PARTIAL`: nothing is concluded |
+| `SourceError` | `TRANSIENT`, `THROTTLED` (each with an optional retry-after), `AUTH`, `NOT_FOUND`, `PERMANENT`, `REJECTED`, `CURSOR_INVALID`. Only `NOT_FOUND` and `PERMANENT` count as evidence about a document. Use `PERMANENT` only when the answer concerns the document itself, such as a format that cannot be exported. A request the provider refuses as you made it (malformed, an unknown field) is `REJECTED`: it is a fault in the connector, and counting it would delete every document it touched. The others mean "could not look", and the document is kept. A failure reported without a document id is never evidence. Per-document failures go to `context.reportFailure` or are thrown from `fetch` as `SourceException`. A whole-source failure thrown from `discover` fails the run |
+| Cursor | Opaque to the framework: one string per partition, JSON by convention, versioned and read by the connector. **It is not stored yet**: the pipeline passes no cursor, so every run lists in full |
+
+The connector chooses its own discovery style: (A) a listing plus a change feed, (B) a single delta
+call, or (C) a listing only, as `web` and `upload` do. The framework depends only on the coverage the
+connector reports.
+
+`SourceMetadataKeys` also reserves `acl.principals`, a list of namespaced principals such as
+`google:user:a@x.com`, `entra:group:<object-id>`, `link:organization` or `anyone`. It is schema only,
+and nothing enforces it yet. The shared `filters` block (`SourceFilters`: `formats`,
+`excludeNamePatterns`, `includePaths`, `maxFileBytes`) and the shared `partitions` block
+(`SourcePartitions`: `mode` `LISTED` | `ALL_ACCESSIBLE`, `ids`) are config models that a file-shaped
+connector adopts. No source type reads them yet.
 
 ## Observability
 
@@ -871,7 +1078,7 @@ RAG operations write audit traces to conversation memory:
 | `rag:context:{taskId}` | Formatted context string injected into the LLM |
 | `rag:httpcall:trace:{taskId}` | httpCall RAG execution metadata (httpCall name, context length) |
 
-These are visible in the conversation memory snapshot and the audit ledger.
+All three are stored in the conversation document. `rag:context:{taskId}` is returned by a snapshot with `returnDetailed=true`; the two `:trace:` keys are withheld from that view and are read from the raw conversation (`GET /conversationstore/conversations/{conversationId}`, the conversation's owner or an admin). The audit ledger does not copy them, but its `llmDetail.compiledPrompt` contains the injected context.
 
 ## Troubleshooting
 
@@ -997,11 +1204,11 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host` (one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
-| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
-| `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host` (default `localhost`; one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port` (default `5432`), `database` (default `eddi`), `user` (default `eddi`), `table`, `dimension` (default `1536` — must match the embedding model's vector size). `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation). Index and throughput settings — `layout`, `vectorIndex`, `hnswM`, `hnswEfConstruction`, `hnswEfSearch`, `insertBatchSize` — are in [pgvector at scale](#pgvector-at-scale) |
+| `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName` (default `eddi`), `collectionName`, `indexName` (default `vector_index`) |
+| `elasticsearch` | — | `serverUrl` (default: `http://localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
-| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
+| `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName`; `tenantName` (default `default_tenant`), `databaseName` (default `default_database`), `apiVersion` (`V2` default, or `V1`) |
 
 > **`in-memory` is a dev/test option, not a small-corpus one.** For this store the object in the
 > EDDI process *is* the data, so it is kept apart from the cache of external-store clients: it is
@@ -1037,8 +1244,75 @@ parameter rather than ignoring it.
 > store was replaced or removed. Its remaining writes would otherwise land in a store nothing reads,
 > outside the cap. The next run re-embeds into the current store. Any agent expected to answer from a knowledge base after a restart needs a persistent store.
 > `storeType` still **defaults to** `in-memory`, so persistence is opt-in: `pgvector` is the
-> recommended choice, and — with `in-memory` — one of the two stores whose document-replacement
-> semantics are verified (see [Ingestion Sources](#ingestion-sources)).
+> recommended choice, and — with `in-memory` and `chroma` — one of the three stores whose
+> document-replacement semantics are verified (see [Ingestion Sources](#ingestion-sources)).
+
+
+### pgvector at scale
+
+A pgvector knowledge base whose table EDDI creates gets the **v2 layout**, built for tables of
+millions of chunks:
+
+- an **HNSW index** on the embedding (cosine distance, the operator retrieval orders by), so a query
+  reads a few hundred index entries instead of scanning every row;
+- metadata stored as **`jsonb`** with b-tree indexes on `(documentId, sourceKey)` and
+  `(sourceKey, runId)` — the keys every document replacement and every post-run sweep filters on —
+  so re-ingesting a changed document deletes its old chunks through an index instead of a full scan;
+- inserts in **batches** of `insertBatchSize` rows, so a large document is several short
+  transactions rather than one long one;
+- **pooled connections**, shared by every knowledge base on the same server and login
+  (`host`, `port`, `database`, `user`, password) instead of a new connection for every search,
+  insert and delete. A pool opens at most `eddi.rag.pgvector.pool.max-size` connections (default
+  `10`, see the [configuration reference](configuration-reference.md#knowledge-bases-rag)) and closes
+  idle ones after two minutes.
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `layout` | `auto` | `auto`: an existing table keeps the layout it has, a new table is created in `v2`. `v1` creates a new table the way EDDI did before (json metadata, no index). An explicit value that contradicts an existing table is refused |
+| `vectorIndex` | `hnsw` | `none` builds no vector index, so a new table searches exactly. An HNSW index that already exists stays in place and still serves searches; drop it by hand to return to exact search — for a small knowledge base, or to load a large one first and add the index by hand afterwards |
+| `hnswM` | `16` | HNSW graph degree (2–100). Higher: better recall, larger index, slower inserts. Applies when the index is created |
+| `hnswEfConstruction` | `64` | HNSW build-time candidate list (4–1000, at least 2 × `hnswM`). Applies when the index is created |
+| `hnswEfSearch` | `40` | HNSW query-time candidate list (1–1000), set on each connection the store borrows. Raise it if retrieval misses relevant chunks; it must be at least `maxResults` to return that many |
+| `insertBatchSize` | `500` | Rows per INSERT transaction (1–10000). Also applies to tables in the `v1` layout |
+
+**Existing tables are not changed.** A knowledge base whose table already exists — every pgvector
+knowledge base created before this layout — keeps reading and writing it exactly as before: EDDI
+recognises the old layout by its `json` metadata column, adds no index to it and converts nothing,
+because building an HNSW index over millions of rows blocks writes to the table for as long as it
+takes. Such a knowledge base still gets pooled connections and batched inserts. To move one to
+the v2 layout, re-embed it into a new table: set `storeParameters.table` to a new name (or, for a
+knowledge base still in the 6.5.0 name layout, migrate it to `"storeNamespace": "id"` — see
+[Knowledge base isolation](#knowledge-base-isolation)), then run its sources again. The old table
+is left in place; drop it once nothing uses it. Asking for `"layout": "v2"` on an existing v1 table
+is refused with that explanation rather than silently ignored.
+
+Limits worth knowing:
+
+- pgvector cannot build an HNSW index over more than **2000 dimensions**. A `v2` table with a larger
+  `dimension` (OpenAI `text-embedding-3-large` at its full 3072, for example) is created without the
+  vector index and logs a warning; retrieval then scans every row. Use the model's `dimensions`
+  setting to stay at or below 2000 for an indexed knowledge base.
+- HNSW needs **pgvector 0.5.0** or later. On an older server the index cannot be built; EDDI logs a
+  warning and the knowledge base works with exact scans, as before.
+- Retrieval filters on `kbId` after the index scan. On a table of its own (the default) that filter
+  matches every row and costs nothing. On a table **shared** by several knowledge bases, a query can
+  return fewer than `maxResults` chunks when the nearest `hnswEfSearch` candidates belong to another
+  knowledge base — raise `hnswEfSearch`, or give each knowledge base its own table.
+- `hnsw.ef_search` is a session setting; it is applied every time a connection is borrowed, one
+  extra statement per operation, because connections are shared by knowledge bases that may set
+  different values.
+
+Changing `hnswM` or `hnswEfConstruction` on an existing v2 table does not rebuild its index; drop
+the table's HNSW index by hand and EDDI recreates it with the new values the next time it
+builds the store — a build that blocks writes to a large table while it runs. To avoid that, create
+it yourself under the name EDDI looks for, with `CREATE INDEX CONCURRENTLY <index> ON <table> USING hnsw
+(embedding vector_cosine_ops) WITH (m = …, ef_construction = …)`; EDDI then finds it and leaves it alone.
+`<index>` is **unqualified** — an index lives in its table's schema — while `<table>` is qualified as the
+table is (`rag.kb`). It is the lower-case table name without its schema plus `_hnsw_idx`; when that
+would exceed 63 characters EDDI shortens it and adds a digest, so take it from the log line
+`pgvector table <table>: HNSW index name is <index>` written whenever the store is built. If a
+concurrent build fails, PostgreSQL leaves an invalid index under that name: EDDI refuses to build the
+store, naming the index, until you `DROP INDEX` it and build again.
 
 ## Capabilities
 

@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
 import ai.labs.eddi.engine.cluster.SharedBucket;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.modules.rag.RagIngestionService;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -471,6 +472,28 @@ class CacheFactoryTest {
 
         assertInstanceOf(SharedKvCache.class, cache);
         verify(nats).bucket(new SharedBucket("DEDUP", Duration.ofMinutes(10), -1));
+    }
+
+    @Test
+    @DisplayName("ingestion status is shared in a cluster through the RAG_INGESTION bucket, and stays node-local otherwise")
+    void ragIngestionStatusIsSharedInAClusterOnly() {
+        String name = RagIngestionService.INGESTION_CACHE_NAME;
+        assertTrue(CacheFactory.hasExplicitSize(name), "a status and a warning per ingestion: the 1,000 default would drop live ones");
+        assertInstanceOf(CacheImpl.class, factory.getCache(name, Duration.ofHours(1)), "single node: unchanged");
+
+        ClusterConfig clusterConfig = mock(ClusterConfig.class);
+        when(clusterConfig.isNats()).thenReturn(true);
+        NatsSharedStateFactory nats = mock(NatsSharedStateFactory.class);
+        when(nats.bucket(any(SharedBucket.class))).thenReturn(mock(ISharedKv.class));
+        @SuppressWarnings("unchecked")
+        Instance<NatsSharedStateFactory> instance = mock(Instance.class);
+        when(instance.get()).thenReturn(nats);
+        var clustered = new CacheFactory();
+        clustered.clusterConfig = clusterConfig;
+        clustered.natsSharedState = instance;
+
+        assertInstanceOf(SharedKvCache.class, clustered.getCache(name, Duration.ofHours(1)));
+        verify(nats).bucket(new SharedBucket("RAG_INGESTION", Duration.ofHours(1), -1));
     }
 
     @Test

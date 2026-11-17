@@ -18,16 +18,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
  * LLM tool for managing persistent user memories. Constructed per-invocation by
- * {@code AgentOrchestrator} with the conversation's userId, agentId, groupIds,
- * and memory configuration.
+ * {@code ContextualToolsProvider} with the conversation's userId, agentId,
+ * groupIds, and memory configuration.
  *
  * <p>
  * The LLM can call these tools to remember facts about the user, recall
@@ -37,7 +39,8 @@ import java.util.stream.Collectors;
  * @author ginccc
  * @since 6.0.0
  */
-@Vetoed // Instantiated per-invocation by AgentOrchestrator — must NOT be a CDI bean
+@Vetoed // Instantiated per-invocation by ContextualToolsProvider — must NOT be a CDI
+        // bean
 public class UserMemoryTool {
 
     private static final Logger LOGGER = Logger.getLogger(UserMemoryTool.class);
@@ -65,7 +68,19 @@ public class UserMemoryTool {
     private final AgentConfiguration.Guardrails guardrails;
     private final BooleanSupplier turnDiscarded;
     private final boolean peerVerification;
-    private int writesThisTurn = 0;
+    /**
+     * Writes this turn — remembers and forgets alike — against
+     * {@code maxWritesPerTurn}.
+     */
+    private final TurnCounter writesThisTurn;
+    /**
+     * Told the key of every fact {@code rememberFact} wrote. The store records a
+     * write {@code ACCEPTED}, so the conversation drops the key from its
+     * {@code contestedMemories} marker: the tool writes to the store directly and
+     * the conversation property is left as it was, so the end-of-turn persistence
+     * that lifts the marker for property writes never sees this one.
+     */
+    private final Consumer<String> keyWritten;
 
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config) {
@@ -82,7 +97,7 @@ public class UserMemoryTool {
      */
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded) {
-        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, false);
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, TurnCounter.local());
     }
 
     /**
@@ -92,7 +107,46 @@ public class UserMemoryTool {
      */
     public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
             AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, boolean peerVerification) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, TurnCounter.local(), key -> {
+        }, peerVerification);
+    }
+
+    /**
+     * @param writesThisTurn
+     *            the turn's write count, which {@code maxWritesPerTurn} bounds.
+     *            Pass {@link TurnCounter#onStep} so every instance built during one
+     *            turn — one per cascade step, another on a HITL resume — spends the
+     *            same budget; {@code null} counts per instance.
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, writesThisTurn, key -> {
+        });
+    }
+
+    /**
+     * @param keyWritten
+     *            called with the key of each fact this tool wrote, after the write
+     *            stood; {@code null} for none
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn,
+            Consumer<String> keyWritten) {
+        this(store, userId, agentId, conversationId, groupIds, config, turnDiscarded, writesThisTurn, keyWritten, false);
+    }
+
+    /**
+     * @param peerVerification
+     *            whether the agent requires peer verification: it then reads no
+     *            memory another agent wrote, which no signature covers
+     */
+    public UserMemoryTool(IUserMemoryStore store, String userId, String agentId, String conversationId, List<String> groupIds,
+            AgentConfiguration.UserMemoryConfig config, BooleanSupplier turnDiscarded, TurnCounter writesThisTurn,
+            Consumer<String> keyWritten, boolean peerVerification) {
         this.peerVerification = peerVerification;
+        this.keyWritten = keyWritten != null ? keyWritten : key -> {
+        };
+        this.writesThisTurn = writesThisTurn != null ? writesThisTurn : TurnCounter.local();
         this.turnDiscarded = turnDiscarded != null ? turnDiscarded : () -> false;
         this.store = store;
         this.userId = userId;
@@ -172,8 +226,10 @@ public class UserMemoryTool {
             // do it constantly — they do not see their earlier tool calls, so they save
             // the same facts again each turn — and counting it spent the whole
             // maxWritesPerTurn budget on re-saves, refusing the one new fact the user had
-            // just shared.
-            if (existing != null && Objects.equals(existing.value(), value) && Objects.equals(existing.category(), normalizedCategory)
+            // just shared. A contested or superseded entry is the exception: re-stating
+            // it is the user confirming the value, and only a write records that.
+            if (existing != null && existing.assessment() == UserMemoryEntry.Assessment.ACCEPTED && Objects.equals(existing.value(), value)
+                    && Objects.equals(existing.category(), normalizedCategory)
                     && existing.visibility() == vis
                     && (vis != Visibility.group || Set.copyOf(existing.groupIds()).equals(Set.copyOf(groupIds)))) {
                 return "✅ Already remembered (unchanged): %s = %s [%s, %s]".formatted(trimmedKey, value, normalizedCategory, vis);
@@ -197,9 +253,8 @@ public class UserMemoryTool {
             }
 
             // Guardrail: write-rate limit
-            if (writesThisTurn >= guardrails.getMaxWritesPerTurn()) {
-                return ("⚠️ Maximum writes per turn (%d) reached. Do not retry this turn — tell the user which facts were not "
-                        + "saved; they can be saved in the next turn.").formatted(guardrails.getMaxWritesPerTurn());
+            if (writeBudgetSpent()) {
+                return writeLimitRefusal();
             }
 
             // Check capacity — returns a user-facing message when the write must not
@@ -277,7 +332,8 @@ public class UserMemoryTool {
                     return overCap;
                 }
             }
-            writesThisTurn++;
+            writesThisTurn.increment();
+            keyWritten.accept(trimmedKey);
 
             LOGGER.debugf("[MEMORY] Tool rememberFact: user='%s', key='%s', category='%s', visibility='%s'", userId, key, normalizedCategory, vis);
 
@@ -303,8 +359,7 @@ public class UserMemoryTool {
                 return "No memories found for this user.";
             }
 
-            return entries.stream().map(e -> "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility()))
-                    .collect(Collectors.joining("\n"));
+            return entries.stream().map(UserMemoryTool::describe).collect(Collectors.joining("\n"));
 
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.errorf("[MEMORY] Failed to recall memories: %s", e.getMessage());
@@ -324,8 +379,7 @@ public class UserMemoryTool {
                 return "No memories matching '%s' found.".formatted(query);
             }
 
-            return entries.stream().map(e -> "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility()))
-                    .collect(Collectors.joining("\n"));
+            return entries.stream().map(UserMemoryTool::describe).collect(Collectors.joining("\n"));
 
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.errorf("[MEMORY] Failed to search memories: %s", e.getMessage());
@@ -368,12 +422,27 @@ public class UserMemoryTool {
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
             }
+            // A deletion is a write: without the budget, one injected "forget everything"
+            // deleted every memory of the user this agent owns in a single turn.
+            if (writeBudgetSpent()) {
+                return writeLimitRefusal();
+            }
             if (turnDiscarded.getAsBoolean()) {
                 return TURN_DISCARDED_REFUSAL;
             }
 
+            // The linked versions go first, the forgotten entry last. Each delete is its
+            // own statement on both stores, so a failure (or a crash) part way through
+            // leaves whatever was not yet deleted; in this order that is the forgotten
+            // entry and the versions still linked to it, which a retry finds and walks
+            // again. The other way round, a failure after the first delete left older
+            // versions whose replacement was gone — the loader served one again as the
+            // only entry for the key, and a retry starting from it could not reach the
+            // rest of the chain, so it answered "Forgotten" with a version still stored.
+            int linked = forgetSupersessionChain(key, target);
             store.deleteEntry(target.id());
-            LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s'", userId, key);
+            writesThisTurn.increment();
+            LOGGER.debugf("[MEMORY] Tool forgetFact: user='%s', key='%s', linkedVersions=%d", userId, key, linked);
 
             return "✅ Forgotten: %s".formatted(key);
 
@@ -381,6 +450,71 @@ public class UserMemoryTool {
             LOGGER.errorf("[MEMORY] Failed to forget fact: %s", e.getMessage());
             return "❌ Failed to forget memory: " + e.getMessage();
         }
+    }
+
+    private boolean writeBudgetSpent() {
+        return writesThisTurn.get() >= guardrails.getMaxWritesPerTurn();
+    }
+
+    private String writeLimitRefusal() {
+        return ("⚠️ Maximum writes per turn (%d) reached. Do not retry this turn — tell the user which facts were not "
+                + "saved or forgotten; that can be done in the next turn.").formatted(guardrails.getMaxWritesPerTurn());
+    }
+
+    /**
+     * Deletes the other versions of a forgotten fact: every entry under the same
+     * key that is linked to {@code forgotten} through {@code supersededBy} — the
+     * older entries it replaced, the newer one that replaced it, and so on along
+     * the chain. Without this, forgetting the newest version left the
+     * {@code SUPERSEDED} one behind, and the loader serves a superseded entry again
+     * once it is the reader's only entry for the key — the user asked to forget the
+     * fact and got its older value back.
+     * <p>
+     * Only entries this agent may see and delete, by the same two checks as the
+     * entry itself, are touched: a version that belongs to another agent or scope
+     * is left alone, and the chain is not followed through it. Each delete is
+     * conditional on the entry being unchanged since it was read, so a version
+     * rewritten meanwhile (which clears its {@code supersededBy}) survives. The
+     * walk is bounded: every pass adds at least one entry or ends.
+     *
+     * @return how many linked versions were deleted
+     */
+    private int forgetSupersessionChain(String key, UserMemoryEntry forgotten) throws IResourceStore.ResourceStoreException {
+        List<UserMemoryEntry> candidates = new ArrayList<>(store.getAllEntries(userId).stream()
+                .filter(e -> e != null && e.id() != null && key.equals(e.key()) && !e.id().equals(forgotten.id()))
+                .filter(this::isVisibleToThisAgent).filter(this::mayDelete).toList());
+        Set<String> chainIds = new HashSet<>(Set.of(forgotten.id()));
+        Set<String> replacements = new HashSet<>();
+        if (forgotten.supersededBy() != null) {
+            replacements.add(forgotten.supersededBy());
+        }
+        List<UserMemoryEntry> chain = new ArrayList<>();
+        boolean grew = true;
+        while (grew && !candidates.isEmpty()) {
+            grew = false;
+            for (var it = candidates.iterator(); it.hasNext();) {
+                UserMemoryEntry e = it.next();
+                if ((e.supersededBy() != null && chainIds.contains(e.supersededBy())) || replacements.contains(e.id())) {
+                    it.remove();
+                    chain.add(e);
+                    chainIds.add(e.id());
+                    if (e.supersededBy() != null) {
+                        replacements.add(e.supersededBy());
+                    }
+                    grew = true;
+                }
+            }
+        }
+        // Farthest first: every version in the chain was reached through one found
+        // before it, so deleting in reverse discovery order keeps what is left
+        // connected to the forgotten entry if this loop stops part way.
+        int deleted = 0;
+        for (UserMemoryEntry e : chain.reversed()) {
+            if (store.deleteEntryIfUnchanged(e.id(), e.updatedAt())) {
+                deleted++;
+            }
+        }
+        return deleted;
     }
 
     /**
@@ -440,6 +574,20 @@ public class UserMemoryTool {
         // A configured default must always be writable.
         allowed.add(defaultVisibility());
         return allowed;
+    }
+
+    /**
+     * One line of a recall or search answer. A disputed entry says so, so the model
+     * can ask the user rather than act on either value; the competing value is not
+     * shown — it may be another agent's private memory.
+     */
+    private static String describe(UserMemoryEntry e) {
+        String line = "• %s = %s [%s, %s]".formatted(e.key(), e.value(), e.category(), e.visibility());
+        return switch (e.assessment()) {
+            case CONTESTED -> line + " (contested: another memory holds a different value — confirm with the user)";
+            case SUPERSEDED -> line + " (superseded by a newer memory)";
+            case ACCEPTED -> line;
+        };
     }
 
     private static String globalKeyRefusal(String key) {

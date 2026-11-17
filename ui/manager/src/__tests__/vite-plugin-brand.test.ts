@@ -10,17 +10,21 @@
  */
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { build } from "vite";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   brandDefaults,
   DEFAULT_BRAND_SCRIPT,
   substituteBrandDefaults,
-} from "../../scripts/vite-plugin-brand.mjs";
+} from "../../../scripts/vite-plugin-brand.mjs";
 
 const ROOT = process.cwd();
-const SHELLS = ["manage.html", "welcome.html", "workforce.html"];
+/**
+ * The plugin is shared by the Manager and Workforce (ui/scripts), so it is
+ * graded against both apps' shells here; Workforce's are read as text.
+ */
+const SHELLS = ["manage.html", "welcome.html", "../workforce/workforce.html"];
 const PLACEHOLDER = /%BRAND_[A-Z_]+%/g;
 
 // realpath: on Windows tmpdir() can be an 8.3 short name, which Vite then
@@ -32,8 +36,9 @@ function shell(name: string): string {
   return readFileSync(resolve(ROOT, name), "utf8");
 }
 
-async function buildShell(name: string): Promise<string> {
-  const html = shell(name).replace(
+async function buildShell(path: string): Promise<string> {
+  const name = basename(path);
+  const html = shell(path).replace(
     '<script type="module" src="/src/main.tsx"></script>',
     '<script type="module" src="./entry.js"></script>',
   );
@@ -94,7 +99,7 @@ describe("dev-server defaults", () => {
     expect(welcome).toContain('content="EDDI — Open Source Conversational AI Platform"');
     expect(welcome).toContain("Loading EDDI…");
 
-    const workforce = substituteBrandDefaults(shell("workforce.html"), "workforce.html");
+    const workforce = substituteBrandDefaults(shell("../workforce/workforce.html"), "workforce.html");
     expect(workforce).toContain("<title>EDDI Workforce</title>");
     expect(workforce).toContain("Loading EDDI Workforce…");
 
@@ -114,6 +119,14 @@ describe("dev-server defaults", () => {
     const index = substituteBrandDefaults(html, "index.html");
     expect(index).toContain("<title>EDDI Manager</title>");
     expect(index).not.toMatch(PLACEHOLDER);
+
+    // Workforce's dev entry, the same way.
+    const wf = shell("../workforce/index.html");
+    expect(wf.indexOf("/branding/__brand__.js")).toBeLessThan(wf.indexOf("/src/main.tsx"));
+    expect(wf).toContain('<link rel="stylesheet" href="/branding/brand.css" />');
+    const wfIndex = substituteBrandDefaults(wf, "index.html");
+    expect(wfIndex).toContain("<title>EDDI Workforce</title>");
+    expect(wfIndex).not.toMatch(PLACEHOLDER);
   });
 
   it("is a dev-server-only plugin that serves the unbranded script", () => {

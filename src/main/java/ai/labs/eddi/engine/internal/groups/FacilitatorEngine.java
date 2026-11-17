@@ -705,15 +705,21 @@ public class FacilitatorEngine {
 
         // The transcript as the facilitator may see it: the excerpt is the latest
         // contribution it can take as written, never an unverified one.
-        List<TranscriptEntry> transcript = GroupSigningGuard.viewOf(signingGuard, fc.agentId(), gc).transcript();
+        var view = GroupSigningGuard.viewOf(signingGuard, fc.agentId(), gc);
+        List<TranscriptEntry> transcript = view.transcript();
         Map<TranscriptEntryType, Long> phaseCounts = transcript.stream()
                 .filter(e -> e.phaseIndex() == ctx.phaseIdx())
                 .collect(Collectors.groupingBy(TranscriptEntry::type, LinkedHashMap::new, Collectors.counting()));
+        // A convergence note is recorded under the engine's name, but its text is the
+        // judge's reply, which no signature covers and which the judge wrote from what
+        // it, not this facilitator, was shown. So, like the window summary, a
+        // verifying facilitator is not quoted it.
+        boolean quotesConvergence = !view.verifying();
         String latestConvergence = null;
         String latestExcerpt = null;
         for (int i = transcript.size() - 1; i >= 0; i--) {
             TranscriptEntry entry = transcript.get(i);
-            if (latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
+            if (quotesConvergence && latestConvergence == null && entry.type() == TranscriptEntryType.CONVERGENCE
                     && entry.content() != null) {
                 latestConvergence = truncate(entry.content(), 200);
             }
@@ -723,7 +729,7 @@ public class FacilitatorEngine {
                             || entry.type() == TranscriptEntryType.REVISION)) {
                 latestExcerpt = truncate(entry.content(), BRIEFING_EXCERPT_LENGTH);
             }
-            if (latestConvergence != null && latestExcerpt != null) {
+            if ((latestConvergence != null || !quotesConvergence) && latestExcerpt != null) {
                 break;
             }
         }

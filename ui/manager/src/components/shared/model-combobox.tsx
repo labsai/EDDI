@@ -1,8 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { groupModelSuggestions } from "@/lib/model-suggestions";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { groupModelSuggestions } from "@eddi/app-kit/lib/model-suggestions";
 
 type PassThroughInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,

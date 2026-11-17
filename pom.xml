@@ -15,7 +15,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1.2</quarkus.platform.version>
         <!-- langchain4j ships two release lines from the same reactor. Every
              dev.langchain4j artifact below is pinned to ONE of these two, and
              they must be bumped together: a split leaves modules resolving
@@ -27,12 +27,12 @@
              half-finished bump the likely outcome of any upgrade. -->
         <langchain4j.version>1.23.0</langchain4j.version>
         <langchain4j-beta.version>1.23.0-beta33</langchain4j-beta.version>
-        <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
+        <jandex-maven-plugin.version>3.6.1</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
         <failsafe-plugin.version>3.6.1</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <quarkus-mcp-server.version>2.0.3</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>2.0.4</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
@@ -40,10 +40,10 @@
              coverage gate. It follows skipTests, so -DskipTests still skips both. -->
         <skipTests>false</skipTests>
         <skipUTs>${skipTests}</skipUTs>
-        <!-- The Manager and Chat UIs (ui/manager, ui/chat) are built by Maven in
+        <!-- The three UIs (ui/manager, ui/workforce, ui/chat) are built by Maven in
              prepare-package and copied into target/classes just before the jar is
              assembled. compile, test and quarkus:dev therefore never run npm, while
-             package, verify and install always build both UIs unless -DskipUi=true.
+             package, verify and install always build all three unless -DskipUi=true.
              CI's Build Image job is the build that ships them. -->
         <skipUi>false</skipUi>
         <!-- 2.x needs Java 17 and Maven 3.6 (both far below this build) and changes no
@@ -84,18 +84,18 @@
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
-                <version>33.7.2-jre</version>
+                <version>33.8.0-jre</version>
             </dependency>
             <dependency>
                 <groupId>io.github.classgraph</groupId>
                 <artifactId>classgraph</artifactId>
-                <version>4.8.199</version>
+                <version>4.8.200</version>
             </dependency>
             <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
                 <groupId>com.hubspot.jinjava</groupId>
                 <artifactId>jinjava</artifactId>
-                <version>2.8.4</version>
+                <version>2.8.5</version>
             </dependency>
             <!-- Override jackson-core to fix GHSA-r7wm-3cxj-wff9 (async parser DoS, <2.22.1).
                  Managed transitively by the Quarkus BOM at 2.22.0. Trivy blocks the image
@@ -103,7 +103,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -117,7 +117,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -126,12 +126,12 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.4</version>
+                <version>2.23.0</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
                  Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
@@ -403,7 +403,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.23.2</version>
+            <version>1.24.1</version>
         </dependency>
         <!-- Mail core (engine/mail): MIME parsing and rendering, and later the
              IMAP/SMTP clients, which take their sockets from
@@ -433,7 +433,7 @@
         <dependency>
             <groupId>dnsjava</groupId>
             <artifactId>dnsjava</artifactId>
-            <version>3.6.5</version>
+            <version>3.7.1</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -501,7 +501,7 @@
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.21.0</version>
+            <version>3.22.0</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -598,7 +598,7 @@
         <dependency>
             <groupId>com.icegreen</groupId>
             <artifactId>greenmail</artifactId>
-            <version>2.1.14</version>
+            <version>2.1.15</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>
@@ -733,7 +733,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.3</version>
+                <version>3.7.0</version>
                 <executions>
                     <execution>
                         <id>ban-jackson3</id>
@@ -915,7 +915,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.15</version>
+                <version>0.8.16</version>
                 <!-- Plugin-level excludes: applied to report AND check goals.
                      Excludes CDI bootstrap wiring, external integration adapters,
                      REST client libraries, and import/export services that require
@@ -927,10 +927,13 @@
                         <exclude>**/bootstrap/**</exclude>
                         <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
-                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
-                             cannot be tested without live API keys. -->
-                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- The two LLM provider builders whose clients cannot be built offline:
+                             Vertex needs GCP credentials and OCI an ~/.oci/config. The rest of
+                             the builder package (parameter catalog, value parsing, the bounded
+                             HTTP client, every other provider) is unit-tested against
+                             langchain4j's real request mapping and counts towards the gate. -->
+                        <exclude>**/llm/impl/builder/VertexGeminiLanguageModelBuilder*</exclude>
+                        <exclude>**/llm/impl/builder/OracleGenAiLanguageModelBuilder*</exclude>
                         <!-- Slack integration adapter: requires live Slack webhook API,
                              not testable without external service -->
                         <exclude>**/integrations/slack/**</exclude>
@@ -1075,7 +1078,7 @@
                     <skip>${skipUi}</skip>
                     <nodeVersion>${node.version}</nodeVersion>
                     <!-- Node lands in ui/node/<node.version>/node (all of ui/node is gitignored),
-                         shared by both UIs. One directory PER VERSION: the plugin swaps in a new
+                         shared by every UI. One directory PER VERSION: the plugin swaps in a new
                          node binary over an existing install but unpacks the new npm over the old
                          one without clearing it, and the mixed npm tree crashes ("Class extends
                          value undefined"). A fixed ui/node therefore broke `package` on every
@@ -1086,7 +1089,7 @@
                 </configuration>
                 <!-- prepare-package, not generate-resources: `./mvnw compile`, `test` and
                      `quarkus:dev` never need the UI, and binding it earlier made every one of
-                     them reinstall node_modules and rebuild both UIs (and delete node_modules
+                     them reinstall node_modules and rebuild every UI (and delete node_modules
                      under a running `npm run dev`). copy-ui-bundles below shares the phase;
                      executions of one phase run in POM order, so this plugin must stay
                      declared before maven-clean-plugin (which drops the previous run's
@@ -1100,14 +1103,17 @@
                         <phase>prepare-package</phase>
                     </execution>
                     <execution>
-                        <id>manager-install</id>
+                        <!-- One install for all three UIs: ui/ is an npm workspaces root with a
+                             single package-lock.json (ui/package.json), and the per-app
+                             builds below resolve their dependencies from ui/node_modules. -->
+                        <id>ui-install</id>
                         <goals>
                             <goal>npm</goal>
                         </goals>
                         <phase>prepare-package</phase>
                         <configuration>
                             <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
+                            <workingDirectory>${project.basedir}/ui</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1126,14 +1132,17 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <id>chat-install</id>
+                        <!-- Workforce, its own app since phase 5 of the frontend
+                             unification plan: workforce.html and its chunks, copied
+                             beside the Manager's by copy-ui-bundles. -->
+                        <id>workforce-build</id>
                         <goals>
                             <goal>npm</goal>
                         </goals>
                         <phase>prepare-package</phase>
                         <configuration>
-                            <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
+                            <arguments>run build</arguments>
+                            <workingDirectory>${project.basedir}/ui/workforce</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1189,6 +1198,9 @@
                                 </fileset>
                                 <fileset>
                                     <directory>ui/manager/dist</directory>
+                                </fileset>
+                                <fileset>
+                                    <directory>ui/workforce/dist</directory>
                                 </fileset>
                                 <fileset>
                                     <directory>ui/chat/dist</directory>
@@ -1276,6 +1288,22 @@
                                     </excludes>
                                 </resource>
                                 <resource>
+                                    <!-- workforce.html at the root (RestWorkforceResource serves
+                                         it for every /workforce/** path) and its hashed chunks
+                                         under assets/, beside the Manager's: Vite names each
+                                         chunk by its content, so the two builds never collide. -->
+                                    <directory>${project.basedir}/ui/workforce/dist</directory>
+                                    <excludes>
+                                        <!-- Backend-owned files the default resource copy already
+                                             put here, as for the Manager above. -->
+                                        <exclude>index.html</exclude>
+                                        <exclude>robots.txt</exclude>
+                                        <exclude>scripts/js/landing-redirect.js</exclude>
+                                        <!-- The MSW dev worker never ships in the jar. -->
+                                        <exclude>mockServiceWorker.js</exclude>
+                                    </excludes>
+                                </resource>
+                                <resource>
                                     <directory>${project.basedir}/ui/chat/dist</directory>
                                     <excludes>
                                         <!-- Backend-owned files the default resource copy already
@@ -1317,7 +1345,7 @@
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>license-maven-plugin</artifactId>
-                        <version>2.7.1</version>
+                        <version>2.9.0</version>
                         <executions>
                             <!-- Generate THIRD-PARTY.txt listing all deps + their licenses -->
                             <execution>

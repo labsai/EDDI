@@ -14,17 +14,17 @@ import {
   MessagesSquare,
   Target,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { AgentPicker } from "@/components/shared/agent-picker";
-import { ENVIRONMENTS } from "@/lib/constants";
+import { Button } from "@eddi/ui";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
+import { ENVIRONMENTS } from "@eddi/app-kit/lib/constants";
 import {
   useUserConversation,
   useCreateUserConversation,
   useDeleteUserConversation,
 } from "@/hooks/use-user-conversations";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 
 export function UserConversationsPage({
   embedded,
@@ -360,7 +360,7 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
       maxWidth="max-w-lg"
       testId="uc-create-dialog"
     >
-      <div className="space-y-4">
+      <div className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor={intentId} className="mb-1 block text-xs font-medium text-muted-foreground">

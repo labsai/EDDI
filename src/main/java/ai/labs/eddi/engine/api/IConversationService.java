@@ -292,6 +292,14 @@ public interface IConversationService {
         }
 
         /**
+         * As the status-only form, with the redacted summary — see
+         * ConversationEventSink#onToolResult(String, String, String, long, String).
+         */
+        default void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            onToolResult(toolName, callId, status, durationMs);
+        }
+
+        /**
          * A resume stream only: the human decision was committed (the conversation left
          * AWAITING_HUMAN) and the continued turn is about to run. Sent once, before any
          * other event of the resumed turn.
@@ -706,6 +714,21 @@ public interface IConversationService {
      */
     class PauseMismatchException extends IllegalStateException {
         public PauseMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A decision named a plan ({@code HitlDecision.planHash}) that is not the
+     * current pause's, or the stored plan no longer hashes to the value it was
+     * committed with. Nothing ran; the pause is left untouched. A
+     * {@link PauseMismatchException}, so every surface that maps a changed pause to
+     * a conflict maps this one too; a surface that can say more catches it first.
+     *
+     * @since 6.8.0
+     */
+    class PlanMismatchException extends PauseMismatchException {
+        public PlanMismatchException(String message) {
             super(message);
         }
     }

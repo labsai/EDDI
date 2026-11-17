@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.userevents.GroupUserEvents;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -54,6 +56,7 @@ import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
+import ai.labs.eddi.engine.internal.groups.GroupApprovedResultActions;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
@@ -267,6 +270,14 @@ public class GroupConversationService implements IGroupConversationService, User
     TeamBudgetContext teamBudgetContext;
 
     /**
+     * Raises the per-user stream's team events ({@code GET /me/events}). Same
+     * field-injection pattern and null-safety as {@link #liveDiscussionRegistry}:
+     * {@code null} in the direct-construction unit tests, which then raise nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
+
+    /**
      * I8's lesson store. Same field-injection pattern and null-safety as
      * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
      * where a RETRO phase runs but persists nothing (warned, never failed).
@@ -289,6 +300,18 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     Instance<GroupApprovalContextRenderer> approvalContextRenderer;
+
+    /**
+     * Strict plan binding for the whole deployment (see {@code HitlPlanBinding}).
+     * Field-injected with its default, like the other optional knobs here.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /** Whether every human group decision must carry the pause's plan hash. */
+    public boolean planHashStrict() {
+        return planHashStrict;
+    }
 
     /**
      * The group approval-context renderer, or {@code null} when none is available.
@@ -910,6 +933,10 @@ public class GroupConversationService implements IGroupConversationService, User
                         gc.getId(), gc.getRound(), question, phaseList.size()));
             }
         }
+        if (startPhaseIndex == 0) {
+            // Round 1 or a continuation round; a resume after a pause is not a start.
+            GroupUserEvents.started(userEventPublisher, gc, config);
+        }
 
         // I1: set once the cost ceiling fires under SYNTHESIZE_NOW. From then on the
         // phase loop skips every non-SYNTHESIS phase but still runs any remaining
@@ -1260,7 +1287,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
                                         phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
                                         phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
-                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf());
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf(), phase.onApproved());
                                 phaseList.set(phaseIdx, phase);
                                 persistRuntimePhases(gc, phaseList);
                             }
@@ -1774,7 +1801,32 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.CANCELLED) {
                 cleanupEphemeralAgents(gc, config);
             }
+            // Last, once the state this leg leaves behind is settled (a pause converted to
+            // a cancel above included): paused, waiting for a human, or ended.
+            GroupUserEvents.afterLeg(userEventPublisher, gc, config);
         }
+    }
+
+    /**
+     * Raises the per-user stream's event for a discussion's current state outside a
+     * running leg — the cancel of a paused discussion. Best effort: the group's
+     * configuration is read for its HUMAN members, and without it only the owner is
+     * told.
+     */
+    public void announceUserEvents(GroupConversation gc) {
+        if (userEventPublisher == null || gc == null) {
+            return;
+        }
+        AgentGroupConfiguration config = null;
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Group %s not readable for its user events: %s", LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+        }
+        GroupUserEvents.afterLeg(userEventPublisher, gc, config);
     }
 
     // =================================================================
@@ -2319,10 +2371,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2356,6 +2404,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
@@ -2899,6 +2951,16 @@ public class GroupConversationService implements IGroupConversationService, User
         // What the RETRO phase quotes: the team's own reported outcomes, then the
         // lessons other teams chose to share with it. Each is empty when off.
         contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
+    }
+
+    /**
+     * Wires approved-result actions ({@code phase.onApproved}) into the approval
+     * resume. Initializer injection, same reason as {@link #wireOutcomeDigest}:
+     * builds made with {@code new} in tests run no actions.
+     */
+    @Inject
+    void wireApprovedResultActions(GroupApprovedResultActions approvedResultActions) {
+        hitlCoordinator.setApprovedResultActions(approvedResultActions);
     }
 
     @Inject
