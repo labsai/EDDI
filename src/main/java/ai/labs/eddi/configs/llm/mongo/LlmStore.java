@@ -19,6 +19,7 @@ import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.ToolDisplayConfigValidator;
 import ai.labs.eddi.modules.llm.tools.guardrail.ToolCallGuardrailConfigValidator;
@@ -86,13 +87,15 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     }
 
     /**
-     * Whether the task's {@code convertToObject} parameter is set to anything but
-     * {@code false}: a templated value is given the benefit of the doubt, an absent
-     * one is {@code false}.
+     * Whether the task's {@code convertToObject} parameter will turn the JSON parse
+     * on: a literal value must be {@code true} (ignoring case), as the runtime
+     * reads it with {@code Boolean.parseBoolean}, so {@code "yes"} or an empty
+     * string is off; a templated value is given the benefit of the doubt, and an
+     * absent one is {@code false}.
      */
     private static boolean convertsToObject(LlmConfiguration.Task task) {
         String value = task.getParameters() != null ? task.getParameters().get("convertToObject") : null;
-        return value != null && !"false".equalsIgnoreCase(value.trim());
+        return value != null && ("true".equalsIgnoreCase(value.trim()) || TemplatingEngine.containsTemplateExpression(value));
     }
 
     /**

@@ -409,10 +409,11 @@ export interface ResponseValidation {
   onContentFilter?: RetryableResponseValidationAction;
   /**
    * Action when a `convertToObject` reply is not valid JSON after the local
-   * repair. `retry` re-asks the same model with `correctiveMessage`.
-   * Default `ignore`.
+   * repair. `retry` re-asks the same model with `correctiveMessage`. `wrap`
+   * wraps prose into `wrapField` and recovers `recoverFields` (set it in the
+   * JSON view; the policy select does not offer it yet). Default `ignore`.
    */
-  onInvalidJson?: RetryableResponseValidationAction;
+  onInvalidJson?: RetryableResponseValidationAction | "wrap";
   /**
    * Action when a reply parses but breaks the response shape (`responseSchema`
    * or `nonBlankFields`). `retry` re-asks with the violation as the reason;

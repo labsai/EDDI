@@ -71,7 +71,11 @@ public record RescueOptions(String wrapField, Map<String, Object> wrapDefaults, 
     public static final RescueOptions NONE = new RescueOptions(null, Map.of(), DEFAULT_WRAP_MAX_CHARS, false, Map.of(), List.of());
 
     /** A top-level property name: no dots, no spaces, no brackets. */
-    private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$-]{0,127}");
+    /**
+     * Longest {@code recoverFields} entry; the parser's next-key check matches it.
+     */
+    public static final int MAX_FIELD_NAME_CHARS = 128;
+    private static final Pattern PLAIN_NAME = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$-]{0," + (MAX_FIELD_NAME_CHARS - 1) + "}");
 
     public RescueOptions {
         wrapField = wrapField == null || wrapField.isBlank() ? null : wrapField;

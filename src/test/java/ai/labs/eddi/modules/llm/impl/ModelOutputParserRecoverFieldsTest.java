@@ -11,12 +11,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -275,5 +277,64 @@ class ModelOutputParserRecoverFieldsTest {
     void braceEndsOnlyAtTheEnd() {
         assertEquals("x \"y\" use \"}\" z", map(parse("{\"htmlResponseText\": \"x \"y\" use \"}\" z\"}", recover(FIELD))).get(FIELD));
         assertEquals("done", map(parse("```json\n{\"htmlResponseText\": \"done\"}\n```", recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a field nested in another object is not a field of the root: nothing is lifted to the top level")
+    void nestedOccurrenceIsNotRecovered() {
+        JsonOutcome outcome = parse("{\"nested\":{\"htmlResponseText\":\"wrong", recover(FIELD));
+
+        assertFalse(outcome.recovered());
+        assertTrue(outcome.kind() != Kind.VALID, "the required top-level field is absent: " + outcome.kind());
+    }
+
+    @Test
+    @DisplayName("a nested occurrence before the real top-level member does not win")
+    void nestedBeforeTopLevel() {
+        String raw = "{\"meta\":{\"htmlResponseText\":\"nested\"},\"items\":[{\"htmlResponseText\":\"in array\"}],"
+                + "\"htmlResponseText\": \"top \"level\" text\", \"quickReplies\": [";
+
+        assertEquals("top \"level\" text", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a later occurrence is found when the first one sits inside another recovered field's text")
+    void laterOccurrenceAfterExcludedOne() {
+        String raw = "{\"htmlResponseText\":\"example \"summary\": \"fake\" inside\",\"summary\":\"real\",\"broken\":[";
+
+        Map<String, Object> result = map(parse(raw, recover(FIELD, "summary")));
+
+        assertEquals("example \"summary\": \"fake\" inside", result.get(FIELD));
+        assertEquals("real", result.get("summary"));
+    }
+
+    @Test
+    @DisplayName("a following key of 65 characters (within the 128 limit) still ends the value")
+    void longNextKeyEndsValue() {
+        String key = "a".repeat(65);
+        String raw = "{\"htmlResponseText\": \"bad \"x\" quote\", \"" + key + "\": \"v\"}";
+
+        assertEquals("bad \"x\" quote", map(parse(raw, recover(FIELD))).get(FIELD));
+    }
+
+    @Test
+    @DisplayName("a following key at the 128-character limit ends the value; a longer one stays in the text (nothing is skipped)")
+    void nextKeyLimit() {
+        String atLimit = "{\"htmlResponseText\": \"bad \"x\" quote\", \"" + "a".repeat(128) + "\": \"v\"}";
+        String over = "{\"htmlResponseText\": \"bad \"x\" quote\", \"" + "a".repeat(129) + "\": \"v\"}";
+
+        assertEquals("bad \"x\" quote", map(parse(atLimit, recover(FIELD))).get(FIELD));
+        assertTrue(((String) map(parse(over, recover(FIELD))).get(FIELD)).startsWith("bad \"x\" quote"));
+    }
+
+    @Test
+    @DisplayName("many candidate quotes followed by a brace are checked without copying the rest of the reply each time")
+    void manyBraceCandidatesStayLinear() {
+        String raw = "{\"htmlResponseText\":\"bad \"x\" " + "\"}".repeat(200_000);
+
+        JsonOutcome outcome = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> parse(raw, recover(FIELD)));
+
+        assertEquals(Kind.VALID, outcome.kind());
     }
 }

@@ -13,7 +13,6 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -332,30 +331,63 @@ public final class ModelOutputParser {
         if (!body.startsWith("{")) {
             return null;
         }
-        List<int[]> spans = new ArrayList<>();
         Map<String, Object> found = new LinkedHashMap<>();
-        // Order the fields by where they sit in the text, so an earlier unterminated
-        // value that swallows the rest cannot hide a field before it.
-        Map<Integer, String> byPosition = new TreeMap<>();
-        Map<String, Integer> valueStart = new LinkedHashMap<>();
+        Map<String, Pattern> patterns = new LinkedHashMap<>();
         for (String field : options.recoverFields()) {
-            Matcher m = Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\"").matcher(body);
-            if (m.find()) {
-                byPosition.put(m.start(), field);
-                valueStart.put(field, m.end());
-            }
+            patterns.put(field, Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\""));
         }
-        for (Map.Entry<Integer, String> e : byPosition.entrySet()) {
-            int keyPos = e.getKey();
-            if (insideAny(spans, keyPos)) {
+        // One pass over the root object's members, tracking object/array depth: a
+        // field is recovered only where it is a member of the root, so a key nested
+        // in another object is never lifted to the root. Every string value is read
+        // with the same lenient reader, so the pass resumes after the value (and not
+        // inside it) and a later occurrence of a field is still found when an
+        // earlier one sits inside another field's text.
+        int n = body.length();
+        int depth = 0;
+        char last = 0;
+        int i = 0;
+        while (i < n && depth >= 0) {
+            char c = body.charAt(i);
+            if (c == '"') {
+                boolean keyPosition = last == '{' || last == ',';
+                Map.Entry<String, Pattern> hit = null;
+                if (depth == 1 && keyPosition) {
+                    for (Map.Entry<String, Pattern> candidate : patterns.entrySet()) {
+                        if (!found.containsKey(candidate.getKey()) && candidate.getValue().matcher(body).region(i, n).lookingAt()) {
+                            hit = candidate;
+                            break;
+                        }
+                    }
+                }
+                int[] end = new int[1];
+                if (hit != null) {
+                    Matcher m = hit.getValue().matcher(body).region(i, n);
+                    m.lookingAt();
+                    String value = readLenientString(body, m.end(), options.wrapMaxChars(), end);
+                    if (value != null && !value.isBlank()) {
+                        found.put(hit.getKey(), value);
+                    }
+                    i = Math.max(end[0], m.end());
+                } else if (depth == 1 && last == ':') {
+                    // a root member's value: ends where a real next key begins (nested
+                    // content is skipped by its quotes, as it is not recovered)
+                    readLenientString(body, i + 1, 0, end);
+                    i = Math.max(end[0], i + 1);
+                } else {
+                    i = skipKey(body, i + 1);
+                }
+                last = '"';
                 continue;
             }
-            int[] end = new int[1];
-            String value = readLenientString(body, valueStart.get(e.getValue()), options.wrapMaxChars(), end);
-            if (value != null && !value.isBlank()) {
-                found.put(e.getValue(), value);
-                spans.add(new int[]{valueStart.get(e.getValue()), end[0]});
+            if (c == '{' || c == '[') {
+                depth++;
+            } else if (c == '}' || c == ']') {
+                depth--;
             }
+            if (!Character.isWhitespace(c)) {
+                last = c;
+            }
+            i++;
         }
         if (found.isEmpty()) {
             return null;
@@ -373,13 +405,21 @@ public final class ModelOutputParser {
         return new JsonOutcome(Kind.VALID, result, true, null, raw, false, true);
     }
 
-    private static boolean insideAny(List<int[]> spans, int position) {
-        for (int[] span : spans) {
-            if (position >= span[0] && position < span[1]) {
-                return true;
+    /** The index after a quoted key that starts just before {@code from}. */
+    private static int skipKey(String text, int from) {
+        int i = from;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            i++;
+            if (c == '"') {
+                break;
             }
         }
-        return false;
+        return i;
     }
 
     /**
@@ -406,7 +446,7 @@ public final class ModelOutputParser {
      * apostrophe); an unknown escape keeps the character after the backslash.</li>
      * <li>The value ends at the first <em>unescaped</em> quote that is followed
      * (after optional whitespace) by the end of the text, by a closing brace that
-     * ends the text, or by a comma and then the next key (a short quoted name and a
+     * ends the text, or by a comma and then the next key (a quoted name and a
      * colon) or the end. Any other unescaped quote, such as the one in
      * <code>style="color:red"</code> or a quotation, belongs to the value.</li>
      * <li>When the text ends first (a reply cut off mid-string), the value is
@@ -488,10 +528,13 @@ public final class ModelOutputParser {
     }
 
     /**
-     * What the next key of an object looks like after a comma: a short quoted name
-     * and a colon, or a quote and name cut off by the end of the text.
+     * What the next key of an object looks like after a comma: a quoted name and a
+     * colon, or a quote and name cut off by the end of the text. The name is
+     * bounded (one quantifier, so the match stays linear) at the longest name
+     * {@code recoverFields} accepts; a longer, unrecognised key is read as part of
+     * the value, which only ever keeps text, never skips a check.
      */
-    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{1,64}(?:\"\\s*:|\\z)");
+    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{1," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*:|\\z)");
 
     /**
      * Whether a quote followed by {@code text[from..]} closes a value. Prose can
@@ -508,8 +551,12 @@ public final class ModelOutputParser {
         }
         char c = text.charAt(i);
         if (c == '}') {
-            String rest = text.substring(i + 1).trim();
-            return rest.isEmpty() || rest.equals(FENCE);
+            // by index: a substring per candidate would copy the rest of the reply
+            int rest = skipWhitespace(text, i + 1);
+            if (rest >= text.length()) {
+                return true;
+            }
+            return text.startsWith(FENCE, rest) && skipWhitespace(text, rest + FENCE.length()) >= text.length();
         }
         if (c == ',') {
             int next = skipWhitespace(text, i + 1);

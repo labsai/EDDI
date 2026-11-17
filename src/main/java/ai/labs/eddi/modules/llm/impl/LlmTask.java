@@ -1971,8 +1971,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // 6. Invalid JSON (convertToObject only): after the parser's own local repair.
         // "retry" was already acted on by the executors; reaching it here means the
         // re-asks (and every cascade step) are spent, so fallbackAction applies.
-        if (convertObject && (responseContent == null || responseContent.isBlank()) && "retry".equalsIgnoreCase(validation.getOnInvalidJson())) {
-            // retry was spent on a blank reply (see FormatRetryRunner): out of recoveries
+        boolean blank = responseContent == null || responseContent.isBlank();
+        boolean unwrappableRetried = RescueOptions.WRAP.equalsIgnoreCase(validation.getOnInvalidJson())
+                && RescueOptions.ON_UNWRAPPABLE_RETRY.equalsIgnoreCase(validation.getOnUnwrappable());
+        if (convertObject && blank && ("retry".equalsIgnoreCase(validation.getOnInvalidJson()) || unwrappableRetried)) {
+            // retry was spent on a blank reply (see FormatRetryRunner): out of recoveries.
+            // Under wrap + onUnwrappable "retry" the action is "wrap", which applies
+            // fallbackAction exactly as after spent retries (a malformed first reply
+            // followed by an empty re-ask must not end without it)
             var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json", "LLM response is empty", responseContent, task,
                     currentStep, templateDataObjects, memory, convertObject);
             if (step.fallback() != null) {
