@@ -10,9 +10,10 @@ package ai.labs.eddi.engine.gdpr;
  * <p>
  * The service names every conversation-era store explicitly, because each needs
  * its own ordering and its own failure handling. Stores added since — the user
- * directory, workspace notifications — hold small, self-contained records keyed
- * by the principal, and need neither. Registering them as beans is also what
- * keeps a new store from being forgotten: a participant that exists is erased.
+ * directory, workspace notifications, ratings, the email ledger — hold small,
+ * self-contained records keyed by the principal, and need neither. Registering
+ * them as beans is also what keeps a new store from being forgotten: a
+ * participant that exists is erased.
  */
 public interface IGdprParticipant {
 

@@ -112,11 +112,6 @@ public class WebScraperTool {
     static final int DEFAULT_PARSE_THREADS = 2;
 
     /**
-     * jsoup pseudo-selectors that take a Java regular expression — or, for
-     * {@code :matchText}, rewrite the document — plus the {@code ~=} attribute
-     * operator, which jsoup also evaluates as a regex. Matched case-insensitively.
-     */
-    /**
      * Pseudo-selectors whose parenthesised argument is text or an index, never a
      * selector — exactly the names jsoup's {@code QueryParser} reads that way.
      */
@@ -124,6 +119,11 @@ public class WebScraperTool {
             "containsWholeText", "containsWholeOwnText", "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type", "eq",
             "lt", "gt");
 
+    /**
+     * jsoup pseudo-selectors that take a Java regular expression — or, for
+     * {@code :matchText}, rewrite the document — plus the {@code ~=} attribute
+     * operator, which jsoup also evaluates as a regex. Matched case-insensitively.
+     */
     private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
 
     /**

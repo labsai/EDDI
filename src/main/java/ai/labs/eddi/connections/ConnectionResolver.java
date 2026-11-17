@@ -67,9 +67,8 @@ public class ConnectionResolver {
     private final boolean authorizationEnabled;
 
     /**
-     * Supplies OAuth access tokens. Injected as an interface so Phase 2 (STATIC and
-     * BASIC only) has no OAuth machinery to carry and Phase 4 adds it without
-     * touching this class's structure.
+     * Supplies OAuth access tokens. Injected as an interface so this class carries
+     * no OAuth machinery of its own.
      */
     private final AccessTokenSupplier accessTokenSupplier;
 
@@ -338,21 +337,22 @@ public class ConnectionResolver {
      * Sending one user's credential there would pin that user's session, and their
      * permissions, onto everybody after them.
      * <p>
-     * That is a reason to withhold a {@link Binding#PER_USER} grant. It was
-     * mistakenly applied to <em>every</em> binding, and the consequence was that a
+     * That is a reason to withhold a {@link Binding#PER_USER} grant (and, for the
+     * same reason, a {@link Binding#CALLER_SUPPLIED} one). It was mistakenly
+     * applied to <em>every</em> binding, and the consequence was that a
      * connection-bound MCP server registered ZERO tools: discovery went out
      * unauthenticated, the server answered 401, and the failure surfaced as an
      * agent that silently had no tools. A {@link Binding#SERVICE} grant is the same
      * credential for everyone by definition, so there is nothing to leak and every
      * reason to send it.
      *
-     * @return the credential, or empty when the connection is {@code PER_USER} and
+     * @return the credential, or empty when the connection is {@code PER_USER} or
+     *         {@code CALLER_SUPPLIED} (see {@link #isWithheldFromDiscovery}) and
      *         genuinely has nothing a shared session may carry — the caller sends
      *         the request unauthenticated and lets the server decide
      * @throws ConnectionException
-     *             if a non-{@code PER_USER} connection cannot be resolved; a
-     *             discovery failure must be loud, not another silent empty tool
-     *             list
+     *             if any other connection cannot be resolved; a discovery failure
+     *             must be loud, not another silent empty tool list
      */
     public Optional<ResolvedCredential> resolveForDiscovery(String reference, URI targetUrl) {
         // Read the binding without resolving. An unknown name falls through to
@@ -479,7 +479,7 @@ public class ConnectionResolver {
      * and neither is visible from the other end: a turn that never carried the
      * credential (the calling system did not attach it) and a HITL resume that did
      * not carry it again (the credential lives for one request, and the resume is a
-     * new one — see the plan's §5.5 "HITL resume").
+     * new one — see {@code docs/connections.md}).
      */
     private ResolvedCredential callerSuppliedCredential(ConnectionConfiguration connection) {
         // The registry serves cached documents and does not re-run validate(), so the

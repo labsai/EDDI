@@ -106,12 +106,13 @@ public class WebhookEventHandler {
 
     /**
      * Occupancy of the dedup cache at which the fairness backstop starts: from
-     * here, only integrations above their share of it ({@code dedupRefuseAt /
-     * activeIntegrations}) are refused, so a new delivery is never reserved by an
-     * integration that is crowding the others out. The cache is sized at twice this
-     * (see {@code CacheFactory.RATE_SIZED_EVICTION_HEADROOM}), so it never has to
-     * evict a live key to admit a new one: an evicted key is a replay that would
-     * run again. The first line of defence is each integration's own
+     * here, only integrations above their share of it ({@code dedupRefuseAt / 2 /
+     * activeIntegrations} deliveries, as a delivery holds up to two keys) are
+     * refused, so a new delivery is never reserved by an integration that is
+     * crowding the others out. The cache is sized at twice this (see
+     * {@code CacheFactory.RATE_SIZED_EVICTION_HEADROOM}), so it never has to evict
+     * a live key to admit a new one: an evicted key is a replay that would run
+     * again. The first line of defence is each integration's own
      * {@code maxDeliveriesPerWindow}; this one only matters when many integrations
      * are each within theirs.
      */
@@ -384,6 +385,8 @@ public class WebhookEventHandler {
      *            the integration's resource id (from the URL)
      * @param integration
      *            the integration, secrets resolved
+     * @param settings
+     *            the integration's parsed webhook settings
      * @param event
      *            the parsed event
      * @param replayKey

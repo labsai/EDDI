@@ -19,8 +19,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Backs the three write-canary and gate-verification meters the Manager cannot
- * emit itself.
+ * Backs the write-canary and gate-verification meters the Manager cannot emit
+ * itself (the canary counter and duration timer, and two gate gauges).
  * <p>
  * Every meter here describes a fact the Manager establishes client-side — the
  * canary is a synthetic conversation it drives, the gate check is a set of

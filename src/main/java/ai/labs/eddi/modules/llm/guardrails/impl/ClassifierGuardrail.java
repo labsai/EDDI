@@ -32,11 +32,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * {@code classifier} — input and output. Asks a safety-classifier model for a
- * verdict on the text. The model is whatever the agent designer points it at
- * (Granite Guardian on vLLM, ShieldGemma on Ollama, a hosted moderation
- * endpoint, ...): EDDI ships and endorses none, and every model-specific detail
- * — prompt, labels, how to read the answer — is configuration.
+ * {@code classifier} — input, output and tool-call arguments. Asks a
+ * safety-classifier model for a verdict on the text. The model is whatever the
+ * agent designer points it at (Granite Guardian on vLLM, ShieldGemma on Ollama,
+ * a hosted moderation endpoint, ...): EDDI ships and endorses none, and every
+ * model-specific detail — prompt, labels, how to read the answer — is
+ * configuration.
  * <h3>Transport</h3> The call goes through {@link ChatModelRegistry} with the
  * same provider type and parameter vocabulary as an LLM task ({@code provider}
  * names the type; {@code baseUrl}, {@code apiKey}, {@code modelName} /

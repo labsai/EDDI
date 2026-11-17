@@ -15,7 +15,9 @@ import java.util.UUID;
 
 /**
  * Immutable snapshot of conversation state at a specific point in time. Used
- * for rollback after failed tool executions and for conversation forking.
+ * for rollback after failed tool executions. {@code parentConversationId} and
+ * {@link #withParent} are provision for conversation forking; nothing sets a
+ * parent yet.
  * <p>
  * Each checkpoint captures the current {@code stepIndex} and a deep copy of the
  * full {@link Property} objects (including scope and visibility) so that

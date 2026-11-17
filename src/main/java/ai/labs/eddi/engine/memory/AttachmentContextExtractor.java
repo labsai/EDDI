@@ -20,8 +20,13 @@ import java.util.Set;
 /**
  * Extracts {@link Attachment} objects from the conversation context map.
  * <p>
- * Supports two input paths from the client:
+ * Supports three input paths from the client, checked in this order:
  * <ul>
+ * <li><strong>Stored reference</strong>: {@code {"attachment_0":
+ * Context(type=object, value={"storageRef":"...","fileName":"a.pdf"})}} — an
+ * uploaded blob; the MIME type and size are resolved from the attachment store
+ * (see {@link #resolveAndGuard}), and any client-sent MIME type is
+ * ignored.</li>
  * <li><strong>URL reference</strong>: {@code {"attachment_0":
  * Context(type=object,
  * value={"mimeType":"image/png","url":"https://..."})}}</li>
@@ -32,7 +37,8 @@ import java.util.Set;
  * <p>
  * The {@link Context#getValue()} is expected to be a
  * {@code Map<String, Object>} containing the attachment fields directly
- * (mimeType, url/data, fileName).
+ * (storageRef, or mimeType with url/data, plus an optional fileName). An entry
+ * that is not a map, or has no usable field, is skipped with a log line.
  * <p>
  * Context keys matching {@code attachment_*} are extracted. Other context keys
  * are ignored.
