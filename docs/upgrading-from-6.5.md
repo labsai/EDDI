@@ -438,8 +438,9 @@ ruleset. Repair the two conditions differently:
 - **`deploymentContext` with `tagMatches`:** remove the `tagMatches` field. This changes what the
   rule does when it was negated. A negated `tagMatches` was always true, so the rule fired in every
   environment; after removing the field, a remaining `when` (for example `"production"`) is
-  evaluated for real and the rule no longer fires elsewhere. To keep it unconditional, remove the
-  condition together with its negation, or replace it with one that is always true.
+  evaluated for real, so the negation now fails in that environment: the rule stops firing in
+  production and keeps firing everywhere else. To keep it unconditional, remove the condition
+  together with its negation, or replace it with one that is always true.
 - **`dependency` without `reference`:** there is no field to remove. Add the `reference` naming the
   rule it depends on, or replace or remove the condition after checking what the rule was meant to
   do.
