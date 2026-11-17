@@ -54,7 +54,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * or due time);</li>
  * <li>{@code eddi.health.outcomes.lag.seconds} — how far the outcome feed's
  * watermark is behind the clock (a gauge over the shared state, like the
- * backlog gauges).</li>
+ * backlog gauges);</li>
+ * <li>{@code eddi.health.events} — business events of {@code health-outcomes}
+ * webhook targets (H5), tagged {@code outcome}: {@code accepted},
+ * {@code duplicate}, {@code refused} (an item the ingest refused),
+ * {@code matched}, {@code expired} (unmatched within
+ * {@code eddi.health.event-match-window}, then deleted), {@code restricted}
+ * (its user's processing is restricted, GDPR Art. 18 — dropped) and
+ * {@code erased} (its user is being erased — dropped).</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -89,6 +96,15 @@ public class HealthMetrics {
     static final String OUTCOME_SESSIONS = "eddi.health.outcomes.sessions";
     static final String OUTCOME_FAILURES = "eddi.health.outcomes.failures";
     static final String OUTCOME_LAG = "eddi.health.outcomes.lag.seconds";
+    static final String EVENTS = "eddi.health.events";
+
+    static final String EVENT_ACCEPTED = "accepted";
+    static final String EVENT_DUPLICATE = "duplicate";
+    static final String EVENT_REFUSED = "refused";
+    static final String EVENT_MATCHED = "matched";
+    static final String EVENT_EXPIRED = "expired";
+    static final String EVENT_RESTRICTED = "restricted";
+    static final String EVENT_ERASED = "erased";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -126,6 +142,20 @@ public class HealthMetrics {
                 .register(registry);
         this.outcomeFailures = Counter.builder(OUTCOME_FAILURES).description("Conversations whose health outcome evaluation failed")
                 .register(registry);
+        for (String outcome : List.of(EVENT_ACCEPTED, EVENT_DUPLICATE, EVENT_REFUSED, EVENT_MATCHED, EVENT_EXPIRED, EVENT_RESTRICTED, EVENT_ERASED)) {
+            event0(outcome);
+        }
+    }
+
+    /** Counts business events by what became of them. */
+    void events(String outcome, long count) {
+        if (count > 0) {
+            event0(outcome).increment(count);
+        }
+    }
+
+    private Counter event0(String outcome) {
+        return Counter.builder(EVENTS).description("Agent Health business events").tag("outcome", outcome).register(registry);
     }
 
     /**

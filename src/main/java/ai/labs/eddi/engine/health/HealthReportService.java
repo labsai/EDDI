@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.health.HealthMeasures.PeriodData;
 import ai.labs.eddi.engine.health.HealthMeasures.RatingStats;
 import ai.labs.eddi.engine.health.HealthMeasures.Totals;
 import ai.labs.eddi.engine.health.HealthPeriods.Window;
+import ai.labs.eddi.engine.health.model.HealthEventCount;
 import ai.labs.eddi.engine.health.model.HealthMarker;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -29,6 +30,7 @@ import ai.labs.eddi.engine.health.report.HealthReports.HealthSeries;
 import ai.labs.eddi.engine.health.report.HealthReports.Marker;
 import ai.labs.eddi.engine.health.report.HealthReports.Measure;
 import ai.labs.eddi.engine.health.report.HealthReports.Period;
+import ai.labs.eddi.engine.health.report.HealthReports.Section;
 import ai.labs.eddi.engine.health.report.HealthReports.Series;
 import ai.labs.eddi.engine.health.report.HealthReports.SeriesPoint;
 import ai.labs.eddi.engine.model.Deployment;
@@ -38,6 +40,7 @@ import ai.labs.eddi.engine.ratings.model.RatingGroupBy;
 import ai.labs.eddi.engine.ratings.model.RatingKind;
 import ai.labs.eddi.engine.ratings.model.RatingSummary;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -106,6 +109,38 @@ public class HealthReportService {
     private final HealthQueryCache cache;
     /** The session outcomes; {@code null} when built by hand without them. */
     private IHealthOutcomeStore outcomeStore;
+
+    /**
+     * The business events and the declared event types (H5). Field-injected and
+     * null-checked: tests build this class by hand ({@link #withEvents}).
+     */
+    @Inject
+    Instance<IHealthEventStore> eventStoreInstance;
+    @Inject
+    Instance<HealthConfigPolicy> configPolicyInstance;
+    private IHealthEventStore eventStore;
+    private HealthConfigPolicy configPolicy;
+
+    /** With the business events — for tests. */
+    HealthReportService withEvents(IHealthEventStore eventStore, HealthConfigPolicy configPolicy) {
+        this.eventStore = eventStore;
+        this.configPolicy = configPolicy;
+        return this;
+    }
+
+    private IHealthEventStore events() {
+        if (eventStore == null && eventStoreInstance != null && eventStoreInstance.isResolvable()) {
+            eventStore = eventStoreInstance.get();
+        }
+        return eventStore;
+    }
+
+    private HealthConfigPolicy configs() {
+        if (configPolicy == null && configPolicyInstance != null && configPolicyInstance.isResolvable()) {
+            configPolicy = configPolicyInstance.get();
+        }
+        return configPolicy;
+    }
 
     /** How far before a window the returning-user look-back reaches, at most. */
     static final int RETURNING_LOOKBACK_DAYS = 30;
@@ -192,10 +227,49 @@ public class HealthReportService {
         PeriodData current = periodData(scope.agentId(), window, scope.version(), origins, rows, selected, qualityAllowed);
         PeriodData before = periodData(scope.agentId(), baseline, scope.version(), origins, rows, selected, qualityAllowed);
         Map<String, Object> sections = HealthMeasures.sections(current, before, !qualityAllowed);
+        sections.put(HealthDefaults.BUSINESS, new Section(false, business(scope.agentId(), window, scope.version(), origins)));
 
         return new AgentHealth(scope.agentId(), agentName, period(window), new DateRange(baseline.from().toString(), baseline.to().toString()),
                 scope.version(), origins, null, List.of(), preset, clock.instant().toString(), dataThrough(scope.agentId()).toString(), sections,
                 List.of(goldenSuite(scope.agentId())));
+    }
+
+    /**
+     * The business measures ({@link HealthBusinessMeasures}): one per event type
+     * the agent's current version declares, empty when it declares none.
+     */
+    List<Measure> business(String agentId, Window window, Integer version, List<String> origins) {
+        HealthConfigPolicy policy = configs();
+        if (policy == null) {
+            return List.of();
+        }
+        Map<String, String> declared = policy.current(agentId).outcomeEvents();
+        if (declared.isEmpty()) {
+            return List.of();
+        }
+        Window baseline = window.baseline();
+        List<HealthEventCount> now = eventCounts(new HealthUsageQuery(agentId, window.from(), window.to(), version, origins), false);
+        List<HealthEventCount> before = baseline.from().isBefore(oldestTurnDay())
+                ? null
+                : eventCounts(new HealthUsageQuery(agentId, baseline.from(), baseline.to(), version, origins), false);
+        double ratio = exposureDays(baseline) > 0 ? exposureDays(window) / exposureDays(baseline) : 1.0;
+        String hint = window.from().isBefore(oldestTurnDay()) ? HealthBusinessMeasures.HINT_RETENTION : null;
+        return HealthBusinessMeasures.measures(declared, now, before, ratio, hint);
+    }
+
+    /** Matched business-event counts, cached; null when unavailable. */
+    List<HealthEventCount> eventCounts(HealthUsageQuery query, boolean perDay) {
+        IHealthEventStore store = events();
+        if (store == null || query.from().isBefore(oldestTurnDay())) {
+            return null;
+        }
+        try {
+            return cache.get(List.of("events", query, perDay), () -> store.counts(query, perDay));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not count the business events of agent %s for Agent Health: %s", sanitize(query.agentId()),
+                    sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     /**

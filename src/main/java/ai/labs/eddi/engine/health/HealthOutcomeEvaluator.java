@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.health.HealthConfigPolicy.Resolved;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
+import ai.labs.eddi.engine.health.model.HealthEvent;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
@@ -15,6 +16,7 @@ import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -127,6 +129,13 @@ public class HealthOutcomeEvaluator {
      */
     private Executor ratingExecutor;
     private ExecutorService ownedExecutor;
+    /**
+     * The matched business events (H5) — they decide outcomes above everything
+     * else. Field-injected and null-checked: tests build this class by hand.
+     */
+    @Inject
+    Instance<IHealthEventStore> eventStore;
+
     /** {@link #MAX_RANGE_TURNS}, lowered by tests. */
     private int maxRangeTurns = MAX_RANGE_TURNS;
 
@@ -347,7 +356,7 @@ public class HealthOutcomeEvaluator {
         Integer firstSessionNo = stored.containsKey(from) && firstRead > from ? Integer.valueOf(from) : null;
         List<HealthOutcome> sessions = new ArrayList<>(HealthSessionEvaluator.evaluate(new HealthSessionEvaluator.Input(conversationId, live,
                 origin, version -> configPolicy.windowOf(origin, configOf(configs, agentId, version)), version -> configOf(configs, agentId, version),
-                knownFirstOutput, firstSessionNo, new LazyRatings(conversationId), evaluatedAt)));
+                knownFirstOutput, firstSessionNo, new LazyRatings(conversationId), evaluatedAt, events(conversationId, from, to))));
         int deleteBefore = to == null ? Integer.MAX_VALUE : to;
         if (truncated && !sessions.isEmpty()) {
             // The last session read may go on past the rows read: leave it as stored.
@@ -371,6 +380,25 @@ public class HealthOutcomeEvaluator {
             return 0;
         }
         return sessions.size();
+    }
+
+    /**
+     * The business events matched into the range {@code from} (inclusive) to
+     * {@code to} (exclusive, {@code null} for open) — read only when an event store
+     * exists. A read failure fails the evaluation (it is retried): judging without
+     * them would let a weaker source overwrite an external outcome.
+     */
+    List<HealthEvent> events(String conversationId, int from, Integer to) {
+        if (eventStore == null || !eventStore.isResolvable()) {
+            return List.of();
+        }
+        List<HealthEvent> events = new ArrayList<>();
+        for (HealthEvent e : eventStore.get().findMatchedByConversation(conversationId)) {
+            if (e.matchedStep() != null && e.matchedStep() >= from && (to == null || e.matchedStep() < to)) {
+                events.add(e);
+            }
+        }
+        return events;
     }
 
     private Resolved configOf(Map<Integer, Resolved> configs, String agentId, Integer version) {
