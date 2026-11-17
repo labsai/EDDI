@@ -45,11 +45,15 @@ public class Property {
      * before it will resolve a credential reference that arrived through
      * {@code {properties.x}}.
      * <p>
-     * <b>Exactly one writer.</b> Nothing else sets it, no property instruction
-     * field maps to it ({@code PropertySetterTask.convertPropertyInstructions}
-     * reads a fixed set of keys, and this is not among them), and no REST endpoint
-     * accepts a {@code Property} as a request body. So "marked" means "this process
-     * vaulted it", not "this value looks vaulted".
+     * <b>Exactly one writer.</b> Nothing else sets it. A property instruction never
+     * carries it into a conversation:
+     * {@code PropertySetterTask.convertToProperties} reads a fixed set of keys
+     * (this is not among them), and {@code PropertyInstructionExecutor} builds the
+     * stored property fresh from the instruction's value, scope and visibility. (A
+     * {@code PropertyInstruction} inside an httpcalls config is bound by Jackson
+     * and inherits this field, but its value is never copied.) And no REST endpoint
+     * takes a conversation property as a request body. So "marked" means "this
+     * process vaulted it", not "this value looks vaulted".
      * <p>
      * <b>Unmarked is refused, deliberately.</b> {@code null} covers two cases that
      * cannot be told apart — a property written from conversation data, and one

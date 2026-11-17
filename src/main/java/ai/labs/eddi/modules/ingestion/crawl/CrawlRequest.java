@@ -17,6 +17,14 @@ import java.util.List;
  *
  * @param seedUrl
  *            where the crawl starts
+ * @param scope
+ *            where the crawler may go; {@code null} means
+ *            {@link Scope#defaults()}
+ * @param limits
+ *            what stops the crawl; {@code null} means {@link Limits#defaults()}
+ * @param politeness
+ *            how the crawler treats the site; {@code null} means
+ *            {@link Politeness#defaults()}
  * @param sitemapUrls
  *            sitemaps to seed from in addition to those robots.txt advertises
  */
@@ -45,9 +53,16 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
     /**
      * Where the crawler may go.
      *
+     * @param sameSiteOnly
+     *            stay on the seed's host (a leading {@code www.} is ignored)
      * @param includeSubdomains
      *            off by default — a crawl seeded at a docs site should not wander
      *            into every subdomain the company owns
+     * @param pathPrefix
+     *            only URLs under this path are crawled; normalized to a leading and
+     *            trailing slash, {@code /} by default
+     * @param maxDepth
+     *            link hops from the seed; a value of zero or less becomes 3
      * @param excludePatterns
      *            globs matched against the URL <em>path</em>; see
      *            {@link UrlPattern}
@@ -74,21 +89,24 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
      * What stops the crawl.
      *
      * @param maxPages
-     *            pages handed to the sink
+     *            pages handed to the sink; a value of zero or less becomes 200
      * @param maxFetchAttempts
-     *            requests made, successful or not. Separate from {@code maxPages}
+     *            requests made, successful or not; a value of zero or less becomes
+     *            three times {@code maxPages}. Separate from {@code maxPages}
      *            because a page-only cap bounds nothing: a documentation site
      *            linking 5,000 assets would fetch all 5,000 while emitting almost
      *            none, which is exactly what the draft did.
      * @param maxBytesPerPage
      *            cap on a single response body, so one oversized file cannot
-     *            exhaust the heap
+     *            exhaust the heap; default 5 MiB
      * @param maxTotalBytes
-     *            cap on the whole crawl's download
+     *            cap on the whole crawl's download; default 512 MiB
      * @param timeBudget
-     *            wall-clock ceiling. A scheduled run has a lease; a crawl that
-     *            outlives it is cancelled mid-flight and its partial results are
-     *            worse than a clean stop.
+     *            wall-clock ceiling, default 10 minutes. A scheduled run has a
+     *            lease; a crawl that outlives it is cancelled mid-flight and its
+     *            partial results are worse than a clean stop.
+     * @param requestTimeout
+     *            per-request timeout, default 15 seconds
      */
     public record Limits(
             int maxPages,
@@ -120,6 +138,10 @@ public record CrawlRequest(String seedUrl, Scope scope, Limits limits, Politenes
     /**
      * How the crawler behaves towards the site.
      *
+     * @param requestDelay
+     *            pause between requests, default 500 ms
+     * @param userAgent
+     *            sent on every request; blank means {@link #DEFAULT_USER_AGENT}
      * @param respectRobots
      *            on by default. EDDI installations crawl sites their operators do
      *            not own, on a schedule; ignoring robots.txt gets the installation

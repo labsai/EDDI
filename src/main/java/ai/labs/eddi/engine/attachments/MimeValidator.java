@@ -139,7 +139,8 @@ public final class MimeValidator {
 
     /**
      * Whether a declared type is a text format: {@code text/*}, a JSON or XML type
-     * (including {@code +json}/{@code +xml} suffixes), YAML, CSV or JavaScript.
+     * (including {@code +json}/{@code +xml} suffixes), NDJSON, YAML, CSV, SQL or
+     * JavaScript.
      */
     public static boolean isTextual(String declaredMime) {
         String mime = normalize(declaredMime);
@@ -249,13 +250,14 @@ public final class MimeValidator {
     /**
      * Validate an upload: the declared type must be compatible with the content.
      * <p>
-     * Text declared as text is always compatible. Signatures are short prefixes, so
-     * a text file can begin with one by accident — a CSV whose first column is
-     * {@code BMI}, notes that open with {@code ID3} or {@code GIF8}, Markdown with
-     * a line reading {@code %PDF-1.7} — and refusing it as a "mislabelled image" is
-     * a false positive. Content that reads as text and is declared as text is
-     * stored as text and never forwarded to a model as an image or PDF, so
-     * accepting it widens nothing. Everything else falls through to
+     * Content that reads as text ({@link #looksLikeText}) and is declared as a text
+     * type ({@link #isTextual}) is always compatible. Signatures are short
+     * prefixes, so a text file can begin with one by accident — a CSV whose first
+     * column is {@code BMI}, notes that open with {@code ID3} or {@code GIF8},
+     * Markdown with a line reading {@code %PDF-1.7} — and refusing it as a
+     * "mislabelled image" is a false positive. Content that reads as text and is
+     * declared as text is stored as text and never forwarded to a model as an image
+     * or PDF, so accepting it widens nothing. Everything else falls through to
      * {@link #isCompatible(String, String)}.
      *
      * @param declaredMime

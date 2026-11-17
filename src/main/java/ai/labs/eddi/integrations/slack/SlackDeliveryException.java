@@ -6,8 +6,9 @@ package ai.labs.eddi.integrations.slack;
 
 /**
  * Thrown when a Slack API call fails with a retryable error (network timeout,
- * HTTP 429/500/503, or connection refused). Non-retryable failures (e.g.,
- * {@code ok:false} with {@code channel_not_found}) do NOT throw this exception.
+ * HTTP 429/500/502/503/504, or connection refused). Non-retryable failures
+ * (e.g., {@code ok:false} with {@code channel_not_found}) do NOT throw this
+ * exception.
  *
  * @since 6.0.0
  */

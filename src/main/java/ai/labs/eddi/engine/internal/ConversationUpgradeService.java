@@ -244,8 +244,7 @@ public class ConversationUpgradeService {
         boolean truncated = nextAfter != null;
         // An interrupted scan stops with the flag set on purpose. Cleared for this one
         // read, or the store's driver refuses it and the caller loses the report and
-        // its
-        // cursor; restored afterwards.
+        // its cursor; restored afterwards.
         boolean interrupted = Thread.interrupted();
         try {
             countEnded(agentId, requested, targetGeneration, tallies);
@@ -278,7 +277,9 @@ public class ConversationUpgradeService {
     /**
      * Pages through the candidates and fills {@code tallies}.
      *
-     * @return whether the limit stopped the scan with candidates left
+     * @return the cursor (last conversation id seen) to continue from when the
+     *         limit or an interrupt stopped the scan with candidates left, or
+     *         {@code null} when the scan reached the end
      */
     private String scan(String agentId, TreeSet<Integer> requested, int targetGeneration, boolean dryRun, int maxCandidates, String startAfter,
                         Map<Integer, Tally> tallies) {
