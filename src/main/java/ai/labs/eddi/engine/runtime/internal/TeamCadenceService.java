@@ -557,7 +557,7 @@ public class TeamCadenceService {
                 RecordedFeedback recorded = outcome != null ? groupConversationService.recordedFeedback(gc, outcome) : null;
                 workspace.addBacklogFeedback(recorded != null
                         ? new BacklogFeedback(backlogTask.id(), gc.getId(), feedbackSlice(recorded.text()), recorded.authorAgentId(),
-                                recorded.verified())
+                                recorded.verified(), recorded.authorKeyVersion())
                         : new BacklogFeedback(backlogTask.id(), gc.getId(), "not completed this run", null, true));
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         backlogTask.description(),
@@ -724,9 +724,9 @@ public class TeamCadenceService {
             int withheld = 0;
             for (BacklogFeedback feedback : workspace.feedbackFor(task.id())) {
                 boolean quoted = feedback.authorAgentId() == null || trusted.computeIfAbsent(
-                        feedback.authorAgentId() + (feedback.verified() ? "|verified" : "|unchecked"),
+                        feedback.authorAgentId() + (feedback.verified() ? "|verified" : "|unchecked") + "|v" + feedback.authorKeyVersion(),
                         key -> groupConversationService.recordsTrustFeedback(workspace.getGroupId(), feedback.authorAgentId(),
-                                feedback.verified()));
+                                feedback.verified(), feedback.authorKeyVersion()));
                 if (quoted && feedback.text() != null) {
                     description = appendFeedbackBounded(description, feedback.runId(), feedback.text());
                 } else if (!quoted) {

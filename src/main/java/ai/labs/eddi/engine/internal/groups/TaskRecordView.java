@@ -184,6 +184,25 @@ final class TaskRecordView {
         return untrusted;
     }
 
+    /**
+     * The version of {@code author}'s key that signed a trusted entry holding
+     * {@code text} (a verification note, which an entry contains, or a result,
+     * which it equals), or {@code null} when there is none.
+     */
+    Integer verifiedKeyVersion(String author, String text, boolean contained) {
+        String wanted = text != null ? stripEnds(text) : "";
+        if (author == null || wanted.isEmpty()) {
+            return null;
+        }
+        for (TranscriptEntry entry : view.stored()) {
+            if (entry != null && author.equals(entry.speakerAgentId()) && entry.content() != null && entry.signatureKeyVersion() != null
+                    && view.trusts(entry) && (contained ? entry.content().contains(wanted) : entry.content().equals(text))) {
+                return entry.signatureKeyVersion();
+            }
+        }
+        return null;
+    }
+
     private String note(TaskItem task) {
         String note = task.verificationNote();
         if (note == null || note.isBlank()) {

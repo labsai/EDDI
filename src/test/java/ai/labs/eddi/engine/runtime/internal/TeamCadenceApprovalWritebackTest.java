@@ -61,7 +61,7 @@ class TeamCadenceApprovalWritebackTest {
         // stored.
         when(groupConversationService.recordedFeedback(any(), any()))
                 .thenAnswer(inv -> GroupSigningGuard.recordedFeedback(null, inv.getArgument(0), null, inv.getArgument(1)));
-        when(groupConversationService.recordsTrustFeedback(any(), any(), anyBoolean())).thenReturn(true);
+        when(groupConversationService.recordsTrustFeedback(any(), any(), anyBoolean(), any())).thenReturn(true);
         service = new TeamCadenceService(workspaceStore, mock(IGroupConversationStore.class),
                 groupConversationService, mock(ITemplatingEngine.class), new SimpleMeterRegistry(),
                 TeamCadenceService.DEFAULT_CLAIM_TTL);

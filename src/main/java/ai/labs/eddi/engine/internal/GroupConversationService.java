@@ -2351,8 +2351,8 @@ public class GroupConversationService implements IGroupConversationService, User
      * {@link GroupSigningGuard#recordsTrustFeedback}. A group whose configuration
      * cannot be read is counted as verifying.
      */
-    public boolean recordsTrustFeedback(String groupId, String authorAgentId, boolean verified) {
-        return GroupSigningGuard.recordsTrustFeedback(signingGuard, recordsConfigOf(groupId), authorAgentId, verified);
+    public boolean recordsTrustFeedback(String groupId, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+        return GroupSigningGuard.recordsTrustFeedback(signingGuard, recordsConfigOf(groupId), authorAgentId, verified, authorKeyVersion);
     }
 
     /**

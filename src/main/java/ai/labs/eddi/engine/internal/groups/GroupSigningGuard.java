@@ -558,8 +558,16 @@ public class GroupSigningGuard {
      * @param verified
      *            whether the records it was counted by verify, so it had to verify
      *            to be kept as written
+     * @param authorKeyVersion
+     *            the version of the author's key that verified the text, so a later
+     *            run can tell whether that key was revoked since; {@code null} when
+     *            there is no author or the text was not verified by a signature
      */
-    public record RecordedFeedback(String text, String authorAgentId, boolean verified) {
+    public record RecordedFeedback(String text, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+
+        public RecordedFeedback(String text, String authorAgentId, boolean verified) {
+            this(text, authorAgentId, verified, null);
+        }
     }
 
     /**
@@ -576,10 +584,14 @@ public class GroupSigningGuard {
         TaskRecordView view = TaskRecordView.of(records, null, gc, config);
         TaskItem seen = view.seen(task);
         if (seen.verificationNote() != null) {
-            return new RecordedFeedback(seen.verificationNote(), view.noteAuthor(task), records.verifying());
+            String author = view.noteAuthor(task);
+            return new RecordedFeedback(seen.verificationNote(), author, records.verifying(),
+                    records.verifying() ? view.verifiedKeyVersion(author, task.verificationNote(), true) : null);
         }
         if (seen.result() != null) {
-            return new RecordedFeedback(seen.result(), view.resultAuthor(task), records.verifying());
+            String author = view.resultAuthor(task);
+            return new RecordedFeedback(seen.result(), author, records.verifying(),
+                    records.verifying() ? view.verifiedKeyVersion(author, task.result(), false) : null);
         }
         return null;
     }
@@ -593,14 +605,20 @@ public class GroupSigningGuard {
      * So feedback written while no reader verified is not quoted as an agent's once
      * one does. {@code config} is {@code null} when it could not be read, which
      * counts as a reader that requires verification.
+     * <p>
+     * What vouches is the key that verified the text, {@code authorKeyVersion}, not
+     * whichever key the author signs with now: if that version has been revoked the
+     * text is withheld even after a replacement key is provisioned. Agent feedback
+     * with no recorded version (written by an older build) is withheld, since
+     * nothing says which key vouched for it.
      */
     public static boolean recordsTrustFeedback(GroupSigningGuard guard, AgentGroupConfiguration config, String authorAgentId,
-                                               boolean verified) {
+                                               boolean verified, Integer authorKeyVersion) {
         if (authorAgentId == null || guard == null || guard.agentStore == null || guard.agentSigningService == null
                 || !recordsVerify(guard, config)) {
             return true;
         }
-        return verified && guard.signsVerifiably(authorAgentId);
+        return verified && authorKeyVersion != null && guard.keyStillVouches(authorAgentId, authorKeyVersion);
     }
 
     /**
@@ -904,6 +922,19 @@ public class GroupSigningGuard {
         int keyVersion = identity.signingKeyVersion();
         return identity.getKeyForVersion(keyVersion) != null && !isRevoked(identity, keyVersion)
                 && keyValidAt(identity, keyVersion, System.currentTimeMillis());
+    }
+
+    /**
+     * Whether {@code agentId} is an agent that still signs and key
+     * {@code keyVersion}, the one that verified some text of it earlier, is still
+     * declared and not revoked. The window is not re-checked: it limits when a key
+     * may sign, and was checked when the text verified.
+     */
+    private boolean keyStillVouches(String agentId, int keyVersion) {
+        Speaker speaker = lookUpSpeaker(agentId);
+        AgentIdentity identity = speaker.identity();
+        return speaker.isAgent() && speaker.signs() && identity != null && identity.getKeyForVersion(keyVersion) != null
+                && !isRevoked(identity, keyVersion);
     }
 
     private Requirement requirementOf(String receiverAgentId) {

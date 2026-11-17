@@ -189,8 +189,20 @@ public class GroupWorkspace {
      *            was written, so the text had to verify to be recorded. Feedback
      *            written while no reader verified was never checked, and a run
      *            whose readers verify does not quote it as an agent's
+     * @param authorKeyVersion
+     *            the version of the author's signing key that verified the text
+     *            when it was recorded; {@code null} when no agent wrote it, or in a
+     *            document written before this field existed. A run whose readers
+     *            verify quotes agent feedback only while that key is still not
+     *            revoked, so rotating to a new key does not revive text a revoked
+     *            key vouched for. Optional in stored JSON
      */
-    public record BacklogFeedback(String taskId, String runId, String text, String authorAgentId, boolean verified) {
+    public record BacklogFeedback(String taskId, String runId, String text, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+
+        /** Feedback with no recorded key version, as older documents hold it. */
+        public BacklogFeedback(String taskId, String runId, String text, String authorAgentId, boolean verified) {
+            this(taskId, runId, text, authorAgentId, verified, null);
+        }
     }
 
     /**
