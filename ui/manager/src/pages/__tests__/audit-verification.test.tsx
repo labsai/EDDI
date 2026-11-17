@@ -25,6 +25,7 @@ function report(overrides: Partial<AuditVerificationReport> = {}): AuditVerifica
     recoverySkipped: 0,
     invalid: 0,
     unsigned: 0,
+    agentSignatureUnproven: 0,
     chainStatus: "INTACT",
     missingSequences: [],
     undeliveredSequences: [],
@@ -92,11 +93,87 @@ describe("audit integrity banner", () => {
     await searchConversation();
     const banner = await verdictShown();
     expect(banner.dataset.verdict).toBe("tampered");
-    expect(banner).toHaveTextContent(/do not match/);
+    expect(within(banner).getByTestId("tampered-content")).toBeInTheDocument();
     expect(screen.queryByText("VERIFIED")).not.toBeInTheDocument();
     // The failing entry is marked where it is shown.
     expect(within(screen.getByTestId("audit-entry-audit-2")).getByTestId("entry-verify-invalid")).toBeInTheDocument();
     expect(screen.getAllByTestId("entry-verify-invalid")).toHaveLength(1);
+  });
+
+  it("marks an entry whose agent signature does not verify, and says the content is intact", async () => {
+    serveVerification(
+      report({
+        valid: 3,
+        invalid: 1,
+        problems: [
+          {
+            entryId: "audit-2",
+            conversationId: "conv1",
+            sequence: 1,
+            timestamp: "2026-09-26T10:00:00Z",
+            status: "AGENT_SIGNATURE_INVALID",
+            hmacVersion: "v5",
+          },
+        ],
+      }),
+    );
+    await searchConversation();
+    const banner = await verdictShown();
+    expect(banner.dataset.verdict).toBe("tampered");
+    // The backend's own definition: the content is intact, the signature was
+    // altered or forged. Saying the entry was changed would send an auditor after
+    // edited content that does not exist.
+    expect(within(banner).getByTestId("tampered-agent-signature")).toBeInTheDocument();
+    expect(within(banner).queryByTestId("tampered-content")).not.toBeInTheDocument();
+    const entry = screen.getByTestId("audit-entry-audit-2");
+    expect(within(entry).getByTestId("entry-verify-invalid").dataset.problem).toBe("AGENT_SIGNATURE_INVALID");
+    expect(within(entry).queryByTestId("entry-verify-unproven")).not.toBeInTheDocument();
+  });
+
+  it("names both causes when content and an agent signature fail", async () => {
+    const problem = (entryId: string, status: "INVALID" | "AGENT_SIGNATURE_INVALID") => ({
+      entryId,
+      conversationId: "conv1",
+      sequence: 1,
+      timestamp: "2026-09-26T10:00:00Z",
+      status,
+      hmacVersion: "v5",
+    });
+    serveVerification(
+      report({
+        valid: 2,
+        invalid: 2,
+        problems: [problem("audit-1", "INVALID"), problem("audit-2", "AGENT_SIGNATURE_INVALID")],
+      }),
+    );
+    await searchConversation();
+    const banner = await verdictShown();
+    expect(within(banner).getByTestId("tampered-content")).toBeInTheDocument();
+    expect(within(banner).getByTestId("tampered-agent-signature")).toBeInTheDocument();
+  });
+
+  it("reports an agent signature that cannot vouch as unverified, not tampered", async () => {
+    serveVerification(
+      report({
+        valid: 3,
+        agentSignatureUnproven: 1,
+        problems: [
+          {
+            entryId: "audit-2",
+            conversationId: "conv1",
+            sequence: 1,
+            timestamp: "2026-09-26T10:00:00Z",
+            status: "AGENT_SIGNATURE_MISSING",
+            hmacVersion: "v5",
+          },
+        ],
+      }),
+    );
+    await searchConversation();
+    const banner = await verdictShown();
+    expect(banner.dataset.verdict).toBe("unverified");
+    expect(within(banner).getByTestId("unverified-reasons").dataset.reasons).toBe("agent-signature");
+    expect(within(screen.getByTestId("audit-entry-audit-2")).getByTestId("entry-verify-unproven")).toBeInTheDocument();
   });
 
   it("reports a broken chain — a deleted entry leaves no signature to fail", async () => {
@@ -286,6 +363,10 @@ describe("auditVerdict", () => {
     expect(uncoveredCount(clean, 300)).toBe(0);
     // A disproof over the window stays a disproof, however much is loaded.
     expect(auditVerdict(report({ entriesChecked: 10, invalid: 1 }), 500)).toBe("tampered");
+  });
+
+  it("treats an agent signature that cannot vouch as unverified, not tampered", () => {
+    expect(auditVerdict(report({ valid: 3, agentSignatureUnproven: 1 }))).toBe("unverified");
   });
 
   it("treats an agent sweep's not-applicable chain as clean and a missing key as unchecked", () => {

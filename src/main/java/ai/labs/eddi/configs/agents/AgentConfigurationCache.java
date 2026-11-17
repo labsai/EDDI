@@ -45,7 +45,12 @@ public class AgentConfigurationCache {
     static final int MAX_ENTRIES = 1_000;
     static final Duration EXPIRE_AFTER_ACCESS = Duration.ofMinutes(30);
 
-    private record Key(String agentId, int version) {
+    /**
+     * {@code includingDeleted} keeps what {@link #readIncludingDeleted} read apart
+     * from what {@link #read} read, so a running agent is never handed a deleted
+     * version.
+     */
+    private record Key(String agentId, int version, boolean includingDeleted) {
     }
 
     private final IAgentStore agentStore;
@@ -69,7 +74,7 @@ public class AgentConfigurationCache {
      */
     public AgentConfiguration read(String agentId, int version) throws ResourceNotFoundException, ResourceStoreException {
         Objects.requireNonNull(agentId, "agentId");
-        Key key = new Key(agentId, version);
+        Key key = new Key(agentId, version, false);
         AgentConfiguration cached = cache.getIfPresent(key);
         if (cached != null) {
             return cached;
@@ -77,6 +82,38 @@ public class AgentConfigurationCache {
         // Read outside the cache's own loading, which would hold a lock across the
         // round trip; two racing misses simply read the same immutable document twice.
         AgentConfiguration read = agentStore.read(agentId, version);
+        if (read != null) {
+            cache.put(key, read);
+        }
+        return read;
+    }
+
+    /**
+     * As {@link #read}, but also finds a version of an agent deleted without
+     * {@code permanent=true}: a soft delete flags that version and leaves it in the
+     * store unchanged. For callers that look back at what a version declared — the
+     * audit ledger checking an old entry's agent signature — never for running one.
+     * A version {@link #read} already holds is served from there, since its content
+     * is the same either way.
+     *
+     * @throws ResourceNotFoundException
+     *             when the version does not exist, or was deleted permanently (not
+     *             remembered)
+     * @throws ResourceStoreException
+     *             when the store fails (not remembered)
+     */
+    public AgentConfiguration readIncludingDeleted(String agentId, int version) throws ResourceNotFoundException, ResourceStoreException {
+        Objects.requireNonNull(agentId, "agentId");
+        AgentConfiguration live = cache.getIfPresent(new Key(agentId, version, false));
+        if (live != null) {
+            return live;
+        }
+        Key key = new Key(agentId, version, true);
+        AgentConfiguration cached = cache.getIfPresent(key);
+        if (cached != null) {
+            return cached;
+        }
+        AgentConfiguration read = agentStore.readIncludingDeleted(agentId, version);
         if (read != null) {
             cache.put(key, read);
         }
