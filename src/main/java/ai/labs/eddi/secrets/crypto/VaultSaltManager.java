@@ -18,10 +18,11 @@ import java.util.Base64;
 /**
  * Manages a per-deployment cryptographic salt for KEK derivation.
  * <p>
- * On first boot, generates a 16-byte random salt and persists it to the
- * vault-meta collection. On subsequent boots, loads the existing salt. This
- * ensures each EDDI deployment uses a unique salt, preventing cross-deployment
- * rainbow table attacks on the KEK.
+ * On first boot, generates a 16-byte random salt and persists it to the vault
+ * metadata store ({@code secretvault_meta} on MongoDB,
+ * {@code secret_vault_meta} on PostgreSQL). On subsequent boots, loads the
+ * existing salt. This ensures each EDDI deployment uses a unique salt,
+ * preventing cross-deployment rainbow table attacks on the KEK.
  * <p>
  * For backward compatibility, when no persisted salt is found and the vault
  * already contains DEKs (i.e., this is an upgrade from pre-6.0.2), the legacy
@@ -294,7 +295,8 @@ public class VaultSaltManager {
 
     /**
      * Migrates from the legacy salt to {@code newSalt}: persists it as the
-     * deployment's salt, clears the pending marker and updates the in-memory state.
+     * deployment's salt, clears the pending marker and the legacy-salt boot record,
+     * and updates the in-memory state.
      * <p>
      * Called by {@code VaultSecretProvider.rotateKek()} after every DEK has been
      * re-wrapped under the KEK derived from {@code newSalt} — which

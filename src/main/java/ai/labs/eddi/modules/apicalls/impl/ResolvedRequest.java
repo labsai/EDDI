@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
  * with what body. The approver sees this, and {@link #fingerprint()} is
  * re-derived immediately before execution so what runs is what was approved.
  *
- * <h2>Headers: fingerprinted redacted. Body: fingerprinted raw.</h2>
+ * <h2>Headers: fingerprinted redacted. Body, URI and query: fingerprinted
+ * raw.</h2>
  *
  * The asymmetry is deliberate, and it is not a compromise on either side.
  * <p>
@@ -47,7 +48,8 @@ import java.util.stream.Collectors;
  * <em>different</em> credentials to one marker and so to one fingerprint,
  * letting a swapped secret pass the pre-execution check unnoticed. The
  * fingerprint is never exposed to any client, so hashing the raw body reveals
- * nothing.
+ * nothing. The URI and the query parameters follow the body: hashed as
+ * resolved, stored redacted.
  */
 public record ResolvedRequest(
         String method,

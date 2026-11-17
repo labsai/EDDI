@@ -20,9 +20,9 @@ import jakarta.inject.Inject;
  * {@link MongoResourceStorage} instances backed by the injected
  * {@link MongoDatabase}.
  * <p>
- * Future database backends (e.g., PostgreSQL) can override this by providing an
- * alternative {@code @ApplicationScoped} bean activated via
- * {@code @LookupIfProperty}.
+ * The PostgreSQL backend provides its own factory,
+ * {@link ai.labs.eddi.datastore.postgres.PostgresResourceStorageFactory}, which
+ * is used when {@code eddi.datastore.type=postgres}.
  */
 @ApplicationScoped
 @DefaultBean

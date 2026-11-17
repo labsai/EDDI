@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.GroupWorkspace.BacklogFeedback;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.Cadence;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace.MemberStats;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
@@ -20,6 +21,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
+import ai.labs.eddi.engine.internal.groups.GroupSigningGuard.RecordedFeedback;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffLineage;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -36,10 +38,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Executes team cadences (I13): scheduled pulls from a {@link GroupWorkspace}'s
@@ -264,16 +268,31 @@ public class TeamCadenceService {
                 }
             }
 
-            // 2. Pull: top-N executable backlog tasks, highest priority first.
-            List<TaskItem> pulled = workspace.getBacklog().findExecutableTasks().stream()
-                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed())
-                    .limit(cadence.maxBacklogTasksPerRun())
-                    .toList();
+            // 2. Pull: top-N executable backlog tasks, highest priority first. A task
+            // another team's agent handed off waits while a member that requires peer
+            // verification could not take its text as that agent's: the member would
+            // fail it unasked on every run, and the question would quote it to them.
+            Map<String, Boolean> trusted = new HashMap<>();
+            List<TaskItem> pulled = new ArrayList<>();
+            List<TaskItem> held = new ArrayList<>();
+            for (TaskItem task : workspace.getBacklog().findExecutableTasks().stream()
+                    .sorted(Comparator.comparingInt(TaskItem::priority).reversed()).toList()) {
+                if (pulled.size() == cadence.maxBacklogTasksPerRun()) {
+                    break;
+                }
+                if (task.createdByAgentId() == null
+                        || trusted.computeIfAbsent(task.createdByAgentId(), agent -> trustsHandoffsOf(groupId, cadenceId, agent))) {
+                    pulled.add(task);
+                } else {
+                    held.add(task);
+                }
+            }
             if (pulled.isEmpty()) {
                 cadenceRunsSkipped.increment();
-                LOGGER.infof("Cadence %s for group %s: no executable backlog tasks — skipping this fire",
-                        LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId));
-                return CadenceResult.skipped(groupId, cadenceId, "No executable backlog tasks");
+                String reason = held.isEmpty() ? "No executable backlog tasks" : heldHandoffsReason(held);
+                LOGGER.infof("Cadence %s for group %s skips this fire: %s", LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId),
+                        LogSanitizer.sanitize(reason));
+                return CadenceResult.skipped(groupId, cadenceId, reason);
             }
 
             // 3. Prepare — the conversation is created so the claim can carry the
@@ -282,12 +301,13 @@ public class TeamCadenceService {
             // might already be inside phase 0 (and a graceful cancel lets the
             // current phase finish): an unclaimed run spent money and worked tasks
             // another run now owned.
-            String question = renderQuestion(cadence, workspace, pulled);
+            Map<String, String> descriptions = descriptionsForRun(workspace, pulled);
+            String question = renderQuestion(cadence, workspace, pulled, descriptions);
             String userId = cadence.createdBy() != null && !cadence.createdBy().isBlank()
                     ? cadence.createdBy()
                     : FALLBACK_USER_ID;
             GroupConversationService.CadenceDiscussion prepared = groupConversationService.prepareCadenceDiscussion(
-                    groupId, question, userId, toTaskDefinitions(pulled), cadence.maxCostPerRun(), null);
+                    groupId, question, userId, toTaskDefinitions(pulled, descriptions), cadence.maxCostPerRun(), null);
             GroupConversation gc = prepared.conversation();
             HandoffLineage.stamp(gc, pulled, workspace);
 
@@ -413,8 +433,10 @@ public class TeamCadenceService {
             // instead wedged the whole standing team -- the claim is held, every
             // later fire is skipped as "still running", and the pulled tasks stay
             // IN_PROGRESS on the backlog until claim-ttl (default PT24H) elapses,
-            // or forever on a non-positive TTL. This is the only remaining switch
-            // over the enum in src/main; keep it exhaustive by hand.
+            // or forever on a non-positive TTL. This is the only switch over the enum
+            // in src/main with a default arm, and that arm would hide a state added
+            // later: when
+            // adding one, decide by hand which arm it belongs to.
             case FAILED, REJECTED, CANCELLED -> writebackFailure(workspace, gc);
             // IN_PROGRESS, SYNTHESIZING, AWAITING_* — still running, unless the claim
             // has been held past its TTL. See reclaimIfStale.
@@ -469,8 +491,9 @@ public class TeamCadenceService {
      * Writeback for a COMPLETED cadence discussion: match every pulled backlog task
      * against the discussion's task list by subject — VERIFIED outcomes stay
      * VERIFIED on the backlog (and credit the assignee's stats); anything else
-     * returns to PENDING with the reviewer feedback appended to the description,
-     * which is the cross-run retry loop.
+     * returns to PENDING with the reviewer feedback kept for it
+     * ({@link GroupWorkspace#getBacklogFeedback}, with who wrote it), which the
+     * next run quotes after the description: the cross-run retry loop.
      * <p>
      * With {@code hitlConfig.approvalCompletesBacklogTask} on, a third outcome
      * stays done: a task a person approved at a TASK gate. It lands COMPLETED (not
@@ -487,6 +510,8 @@ public class TeamCadenceService {
         SharedTaskList discussionTasks = gc.getTaskList();
         boolean approvalCountsAsDone = !workspace.getPulledTaskIds().isEmpty()
                 && approvalCompletesBacklogTask(workspace.getGroupId());
+        // Feedback of a task that left the backlog has nothing left to retry.
+        workspace.retainBacklogFeedback(taskId -> workspace.getBacklog().findById(taskId) != null);
         for (String pulledId : workspace.getPulledTaskIds()) {
             TaskItem backlogTask = workspace.getBacklog().findById(pulledId);
             if (backlogTask == null) {
@@ -503,6 +528,7 @@ public class TeamCadenceService {
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
                         Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+                workspace.retainBacklogFeedback(taskId -> !taskId.equals(backlogTask.id()));
                 workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
                 if (outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
@@ -516,17 +542,25 @@ public class TeamCadenceService {
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), false, backlogTask.priority(), backlogTask.createdAt(),
                         Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
+                workspace.retainBacklogFeedback(taskId -> !taskId.equals(backlogTask.id()));
                 workspace.getMetrics().setTasksApproved(workspace.getMetrics().getTasksApproved() + 1);
                 if (outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksApproved(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksApproved() + 1);
                 }
             } else {
-                String feedback = outcome != null && outcome.verificationNote() != null
-                        ? outcome.verificationNote()
-                        : (outcome != null && outcome.result() != null ? outcome.result() : "not completed this run");
+                // The feedback is kept as the group's records count it (text that does not
+                // verify for a member that requires peer verification is withheld, not
+                // laundered) and with who wrote it, apart from the description: the next
+                // run's readers may verify where these did not, and it is checked again
+                // for them when it is quoted (descriptionsForRun).
+                RecordedFeedback recorded = outcome != null ? groupConversationService.recordedFeedback(gc, outcome) : null;
+                workspace.addBacklogFeedback(recorded != null
+                        ? new BacklogFeedback(backlogTask.id(), gc.getId(), feedbackSlice(recorded.text()), recorded.authorAgentId(),
+                                recorded.verified(), recorded.authorKeyVersion())
+                        : new BacklogFeedback(backlogTask.id(), gc.getId(), "not completed this run", null, true));
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
-                        appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
+                        backlogTask.description(),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
                         backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
                         backlogTask.bet()));
@@ -650,21 +684,71 @@ public class TeamCadenceService {
     /** One failed run's feedback slice — enough context, never a whole turn. */
     static final int MAX_FEEDBACK_CHARS = 500;
 
+    /** One quoted feedback line: the run it came from, then its capped slice. */
+    static String feedbackLine(String runId, String feedback) {
+        return "\n[Cadence run " + runId + "] " + feedbackSlice(feedback);
+    }
+
     /**
-     * Bounded feedback append (final-review finding): {@code outcome.result()} is
-     * the agent's ENTIRE turn output, and a task failing every run appended it to a
-     * PERSISTED description each time — unbounded document growth that also rode
-     * into the next run's PLAN/bid prompts. The feedback is capped per run and the
-     * accumulated description trimmed from the FRONT (oldest feedback first) to the
-     * shared task-description ceiling.
+     * The task's description followed by the quoted feedback lines (oldest first),
+     * within the shared task-description ceiling. The description is never cut to
+     * make room: the room it takes is reserved first, and the OLDEST feedback lines
+     * are dropped until the rest fits. A trailing note counts what was withheld as
+     * unverified.
      */
-    static String appendFeedbackBounded(String description, String runId, String feedback) {
-        String slice = feedback.length() <= MAX_FEEDBACK_CHARS
-                ? feedback
-                : feedback.substring(0, MAX_FEEDBACK_CHARS) + "…";
-        String combined = (description != null ? description : "") + "\n[Cadence run " + runId + "] " + slice;
-        int cap = SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH;
-        return combined.length() <= cap ? combined : "…" + combined.substring(combined.length() - cap + 1);
+    static String composeDescription(String description, List<String> feedbackLines, int withheld) {
+        String base = description != null ? description : "";
+        String withheldNote = withheld > 0 ? "\n(" + withheld + " earlier cadence feedback item(s) withheld: not verified)" : "";
+        int budget = SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH - base.length() - withheldNote.length();
+        int first = feedbackLines.size();
+        int used = 0;
+        while (first > 0 && used + feedbackLines.get(first - 1).length() <= budget) {
+            used += feedbackLines.get(first - 1).length();
+            first--;
+        }
+        StringBuilder out = new StringBuilder(base);
+        for (int i = first; i < feedbackLines.size(); i++) {
+            out.append(feedbackLines.get(i));
+        }
+        return out.append(withheldNote).toString();
+    }
+
+    private static String feedbackSlice(String feedback) {
+        return feedback.length() <= MAX_FEEDBACK_CHARS ? feedback : feedback.substring(0, MAX_FEEDBACK_CHARS) + "…";
+    }
+
+    /**
+     * Each pulled task's description as this run shows it, by task id: the
+     * description, then the retry feedback earlier runs left, oldest first, each
+     * item only if the group's records may quote it as the readers stand now
+     * ({@link GroupConversationService#recordsTrustFeedback}). Feedback an agent
+     * wrote while no reader verified, or whose author no longer signs verifiably,
+     * is not quoted to a run whose readers verify; it is counted as withheld, as
+     * the negotiation table counts concessions. Feedback no agent wrote is quoted.
+     * Feedback a workspace written before {@link BacklogFeedback} existed appended
+     * to the description stays part of it.
+     */
+    private Map<String, String> descriptionsForRun(GroupWorkspace workspace, List<TaskItem> pulled) {
+        Map<String, Boolean> trusted = new HashMap<>();
+        Map<String, String> descriptions = new HashMap<>();
+        for (TaskItem task : pulled) {
+            List<String> lines = new ArrayList<>();
+            int withheld = 0;
+            for (BacklogFeedback feedback : workspace.feedbackFor(task.id())) {
+                boolean quoted = feedback.authorAgentId() == null || trusted.computeIfAbsent(
+                        feedback.authorAgentId() + (feedback.verified() ? "|verified" : "|unchecked") + "|v" + feedback.authorKeyVersion(),
+                        key -> groupConversationService.recordsTrustFeedback(workspace.getGroupId(), feedback.authorAgentId(),
+                                feedback.verified(), feedback.authorKeyVersion()));
+                if (quoted && feedback.text() != null) {
+                    lines.add(feedbackLine(feedback.runId(), feedback.text()));
+                } else if (!quoted) {
+                    withheld++;
+                }
+            }
+            String description = composeDescription(task.description(), lines, withheld);
+            descriptions.put(task.id(), description);
+        }
+        return descriptions;
     }
 
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
@@ -676,14 +760,49 @@ public class TeamCadenceService {
     /**
      * Pulled backlog items as a runtime task plan. Dependencies are dropped on
      * purpose: {@code findExecutableTasks} already guaranteed every pulled task's
-     * dependencies are met, and backlog ids mean nothing inside the discussion.
+     * dependencies are met, and backlog ids mean nothing inside the discussion. The
+     * agent that filed an item (a handoff) stays its creator, so the run shows it
+     * to a member that requires peer verification as it shows a task filed with the
+     * task tool, not as configured text.
      */
-    private static List<TaskDefinition> toTaskDefinitions(List<TaskItem> pulled) {
+    private static List<TaskDefinition> toTaskDefinitions(List<TaskItem> pulled, Map<String, String> descriptions) {
         List<TaskDefinition> defs = new ArrayList<>(pulled.size());
         for (TaskItem task : pulled) {
-            defs.add(new TaskDefinition(task.subject(), task.description(), "ALL", List.of(), task.priority()));
+            defs.add(new TaskDefinition(task.subject(), descriptions.get(task.id()), "ALL", List.of(), task.priority(), null,
+                    task.createdByAgentId()));
         }
         return defs;
+    }
+
+    /**
+     * Whether group {@code groupId}'s records take the backlog tasks agent
+     * {@code agentId} handed off as that agent's, so this fire may pull them. A
+     * task held back stays {@code PENDING} on the backlog, so each fire that leaves
+     * one logs it; a fire it leaves with nothing to run also gives the reason in
+     * the fire history ({@link #heldHandoffsReason}).
+     */
+    private boolean trustsHandoffsOf(String groupId, String cadenceId, String agentId) {
+        boolean trusted = groupConversationService.recordsTrustAgentText(groupId, agentId);
+        if (!trusted) {
+            LOGGER.infof("Cadence %s for group %s leaves the backlog tasks agent '%s' handed off waiting: a reader of the group "
+                    + "requires peer verification (or the group could not be read) and that agent does not sign verifiably",
+                    LogSanitizer.sanitize(cadenceId), LogSanitizer.sanitize(groupId), LogSanitizer.sanitize(agentId));
+        }
+        return trusted;
+    }
+
+    /**
+     * Why a fire left with only held handoffs runs nothing. The tasks are
+     * {@code PENDING} with their dependencies met, so the backlog shows them as
+     * work to do; the fire history is where this says otherwise, and how to free
+     * them. It names the agents, never the tasks' text, which is theirs and
+     * unverified.
+     */
+    private static String heldHandoffsReason(List<TaskItem> held) {
+        String agents = held.stream().map(TaskItem::createdByAgentId).distinct().collect(Collectors.joining(", "));
+        return held.size() + " handed-off backlog task(s) wait unpulled: a reader of this team requires peer verification (or the team "
+                + "could not be read) and the agent(s) that filed them (" + agents + ") do not sign verifiably. Give the agent a signing key "
+                + "again (or turn its signing back on), or delete the task and file it again.";
     }
 
     /**
@@ -692,12 +811,13 @@ public class TeamCadenceService {
      * default — a cadence must not stop pulling work because its prose template
      * broke.
      */
-    private String renderQuestion(Cadence cadence, GroupWorkspace workspace, List<TaskItem> pulled) {
+    private String renderQuestion(Cadence cadence, GroupWorkspace workspace, List<TaskItem> pulled, Map<String, String> descriptions) {
         StringBuilder summary = new StringBuilder("Work the following backlog tasks:\n");
         for (TaskItem task : pulled) {
             summary.append("- ").append(HandoffLineage.promptPrefix(task, workspace)).append(task.subject());
-            if (task.description() != null && !task.description().isBlank()) {
-                summary.append(": ").append(task.description());
+            String description = descriptions.get(task.id());
+            if (description != null && !description.isBlank()) {
+                summary.append(": ").append(description);
             }
             summary.append('\n');
         }

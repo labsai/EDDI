@@ -662,10 +662,6 @@ class ToolLoopResumer {
     }
 
     /**
-     * Builds the reviewer-rejection envelope with the tool name and free-text note
-     * JSON-escaped via Jackson — NEVER string-concatenated with raw reviewer text.
-     */
-    /**
      * Deciders that are not a person ({@code system:timeout},
      * {@code system:group}).
      */
@@ -681,6 +677,12 @@ class ToolLoopResumer {
     static final String DECLINED_INSTRUCTION = "The reviewer declined this action. Do not retry this exact call; "
             + "explain the situation to the user and offer alternatives.";
 
+    /**
+     * Builds the reviewer-rejection envelope with the tool name and free-text note
+     * JSON-escaped via Jackson — NEVER string-concatenated with raw reviewer text.
+     * The note instruction is used only for a person's note; an automated decider
+     * ({@code system:*}) or an empty note gets {@link #DECLINED_INSTRUCTION}.
+     */
     String rejectionEnvelope(String toolName, String note, String decidedBy) {
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("status", "REJECTED_BY_REVIEWER");

@@ -68,6 +68,22 @@ export interface WorkspaceMetrics {
 }
 
 /**
+ * One cadence run's retry feedback on a backlog task (backend
+ * `GroupWorkspace.BacklogFeedback`), kept beside the task's description. The text
+ * is model-written: render it as plain text only.
+ */
+export interface BacklogFeedback {
+  taskId: string;
+  /** The cadence discussion that left it. */
+  runId: string;
+  text: string;
+  /** The agent whose text it is, or `null` when none wrote it (a person, an approver's edit, the engine). */
+  authorAgentId: string | null;
+  /** Whether a reader required peer verification when it was written. */
+  verified: boolean;
+}
+
+/**
  * A group's standing-team workspace (I13): a persistent backlog + metrics +
  * cadence list, auto-created empty on first `GET` if the group has none yet.
  * `backlog` here is the FULL `SharedTaskList` shape (`{tasks, awardedBids}`) —
@@ -86,6 +102,8 @@ export interface GroupWorkspace {
   pulledTaskIds: string[];
   /** Cross-team handoff state: the intake inbox and the origin of handed-off tasks. Absent on a backend that predates handoff. */
   handoffs?: WorkspaceHandoffs;
+  /** Retry feedback of the backlog tasks, oldest first, at most 8 per task. Absent on older workspaces. */
+  backlogFeedback?: BacklogFeedback[];
   created: string;
   lastModified: string;
   revision: string;

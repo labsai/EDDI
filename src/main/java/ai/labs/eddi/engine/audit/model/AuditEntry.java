@@ -110,7 +110,8 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
 
     /**
      * Return a copy of this entry with the environment field set. Used by
-     * ConversationService to enrich entries built by LifecycleManager.
+     * ConversationService and ConversationHitlService to enrich entries built by
+     * LifecycleManager.
      */
     public AuditEntry withEnvironment(String env) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, env, stepIndex, taskId, taskType, taskIndex, durationMs, input,

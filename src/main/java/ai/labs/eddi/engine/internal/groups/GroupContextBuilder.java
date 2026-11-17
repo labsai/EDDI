@@ -132,17 +132,18 @@ public class GroupContextBuilder {
      *            could never obtain its configured number of lessons.
      *            <p>
      *            When a signing guard is wired and {@code gc} is given, an AGENT
-     *            speaker that requires peer verification is shown the transcript
-     *            with every unverified peer entry withheld, before anything else
-     *            reads it, and is never shown the stored window summary.
+     *            speaker that requires peer verification, or a GROUP speaker one of
+     *            whose agents does (this prompt becomes the question each of them
+     *            is asked), is shown the transcript with every unverified peer
+     *            entry withheld, before anything else reads it, and is never shown
+     *            the stored window summary.
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc,
                                   AgentGroupConfiguration.RetroConfig retroConfig) {
-        List<TranscriptEntry> stored = transcript;
         boolean verifying = false;
         GroupSigningGuard guard = signingGuard;
-        if (guard != null && gc != null && speaker.memberType() == MemberType.AGENT) {
+        if (guard != null && gc != null && (speaker.memberType() == MemberType.AGENT || speaker.memberType() == MemberType.GROUP)) {
             var view = guard.viewFor(speaker.agentId(), gc, transcript);
             transcript = view.transcript();
             verifying = view.requirement() != GroupSigningGuard.Requirement.NOT_REQUIRED;
@@ -280,12 +281,14 @@ public class GroupContextBuilder {
                 // I14: the ballot prompt renders the options and the JSON contract.
                 // Scope is NONE (save-time enforced), so no transcript context rides
                 // along — blindness is structural, not this template's doing. The
-                // options are resolved from the stored transcript, as the tally
-                // resolves them: a ballot is counted against those options, so a
-                // verifying voter from whom the synthesis they come from is withheld
-                // is still shown what it is voting on.
+                // options come from the voter's own view: a synthesis withheld from a
+                // verifying voter offers it none, and the tally then has none either,
+                // since it counts only entries that verify once any reader requires it.
+                // EXPLICIT options are shown as they are: the author's config, or a
+                // facilitator's vote, which is called only while the facilitator signs
+                // verifiably once a reader verifies (FacilitatorEngine.executeCallVote).
                 var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
-                data.put("options", VoteTallyEngine.resolveOptions(voteConfig, stored));
+                data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
                 data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));
             }
             case PROPOSAL, BARGAIN -> {

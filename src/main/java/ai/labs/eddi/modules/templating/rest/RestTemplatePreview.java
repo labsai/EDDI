@@ -27,7 +27,9 @@ import java.util.*;
  * <p>
  * Uses the real Qute {@link ITemplatingEngine} to resolve templates against
  * either a real conversation's memory data or built-in sample defaults.
- * Includes all prompt snippets from {@link PromptSnippetService}.
+ * Includes all prompt snippets from {@link PromptSnippetService}; a caller who
+ * does not see every resource gets the snippet names with the contents
+ * redacted.
  *
  * @since 6.0.0
  */
@@ -92,7 +94,8 @@ public class RestTemplatePreview implements IRestTemplatePreview {
             templateData.putIfAbsent("vars", globalVars);
         }
 
-        // Inject prompt snippets — same as LlmTask.execute(), except that a caller
+        // Inject prompt snippets — like LlmTask, except that this preview offers all
+        // of them (getAll()) rather than the ones scoped to one agent, and a caller
         // who does not see everything gets the NAMES with the contents replaced.
         //
         // The redaction has to happen here, in the map the template is rendered

@@ -154,6 +154,9 @@ public class ZipArchive implements IZipArchive {
      *             than this deployment accepts. Whatever was written before the
      *             limit tripped is left in {@code targetDir}; every caller unpacks
      *             into a scratch directory it removes in a {@code finally}.
+     * @throws MalformedArchiveException
+     *             when an entry would land outside {@code targetDir}, is nested too
+     *             deeply, or the archive is corrupt or truncated
      */
     @Override
     public void unzip(InputStream zipFile, File targetDir) throws IOException {
@@ -397,7 +400,7 @@ public class ZipArchive implements IZipArchive {
      * An archive this deployment refuses because of its shape — an entry that would
      * land outside the extraction directory (zip-slip), a name that is not a path,
      * corrupt or truncated data — so a caller can answer 400 with the reason rather
-     * than 500. The refusal itself always worked; only the status was wrong.
+     * than 500.
      */
     public static class MalformedArchiveException extends IOException {
         public MalformedArchiveException(String message) {
