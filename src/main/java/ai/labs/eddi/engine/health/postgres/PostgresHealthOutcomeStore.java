@@ -73,6 +73,7 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
                 first_output_step INTEGER,
                 last_actions TEXT[],
                 evaluated_at_ms BIGINT,
+                refs TEXT[],
                 PRIMARY KEY (conversation_id, session_no)
             )
             """;
@@ -83,12 +84,21 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
             "CREATE INDEX IF NOT EXISTS idx_health_outcomes_due ON health_outcomes (due_at_ms) WHERE due_at_ms IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_health_outcomes_evaluated ON health_outcomes (evaluated_at_ms)"};
 
+    /**
+     * Added in H5 (business references); checked in the catalog first, like
+     * {@code health_turns.self_reported_outcome}: an {@code ALTER TABLE} locks the
+     * table on every node start even with {@code IF NOT EXISTS}.
+     */
+    static final String HAS_REFS_COLUMN = "SELECT 1 FROM information_schema.columns WHERE table_name = 'health_outcomes' AND column_name = 'refs'";
+    static final String ADD_REFS_COLUMN = "ALTER TABLE health_outcomes ADD COLUMN IF NOT EXISTS refs TEXT[]";
+    static final String CREATE_REFS_INDEX = "CREATE INDEX IF NOT EXISTS idx_health_outcomes_refs ON health_outcomes USING GIN (refs)";
+
     /** The rollup's state table, shared with the dirty-day store. */
     static final String CREATE_STATE = "CREATE TABLE IF NOT EXISTS health_rollup_state (name VARCHAR(64) PRIMARY KEY, at_ms BIGINT NOT NULL)";
 
     static final List<String> COLUMNS = List.of("conversation_id", "session_no", "agent_id", "agent_version", "user_id", "origin", "engaged",
             "started_at_ms", "ended_at_ms", "turns", "cost_usd", "failures", "outcome", "evidence", "provisional", "day", "due_at_ms",
-            "first_output_step", "last_actions", "evaluated_at_ms");
+            "first_output_step", "last_actions", "evaluated_at_ms", "refs");
 
     static final String UPSERT = "INSERT INTO health_outcomes (" + String.join(", ", COLUMNS) + ") VALUES ("
             + COLUMNS.stream().map(c -> "?").collect(Collectors.joining(", ")) + ") ON CONFLICT (conversation_id, session_no) DO UPDATE SET "
@@ -106,6 +116,7 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     static final String MARK_DUE = "UPDATE health_outcomes SET due_at_ms = ? WHERE conversation_id = ? AND (due_at_ms IS NULL OR due_at_ms > ?)";
     static final String MARK_DUE_SESSIONS = MARK_DUE + " AND session_no = ANY(?)";
     static final String BY_USER = SELECT + "WHERE user_id = ? ORDER BY ended_at_ms DESC LIMIT ?";
+    static final String BY_REFS = SELECT + "WHERE agent_id = ? AND refs && ? ORDER BY started_at_ms DESC NULLS LAST LIMIT ?";
     static final String EVALUATED_SINCE = "SELECT DISTINCT conversation_id FROM health_outcomes WHERE evaluated_at_ms >= ? LIMIT ?";
     static final String READ_WATERMARK = "SELECT at_ms FROM health_rollup_state WHERE name = ?";
     static final String WRITE_WATERMARK = "INSERT INTO health_rollup_state (name, at_ms) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET at_ms = "
@@ -165,6 +176,14 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
             }
+            boolean hasRefs;
+            try (ResultSet column = statement.executeQuery(HAS_REFS_COLUMN)) {
+                hasRefs = column != null && column.next();
+            }
+            if (!hasRefs) {
+                statement.execute(ADD_REFS_COLUMN);
+            }
+            statement.execute(CREATE_REFS_INDEX);
             statement.execute(CREATE_STATE);
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -214,7 +233,8 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
         setLong(s, i++, millis(o.dueAt()));
         setInteger(s, i++, o.firstOutputStep());
         s.setArray(i++, connection.createArrayOf("text", o.lastActions().toArray(new String[0])));
-        setLong(s, i, millis(o.evaluatedAt()));
+        setLong(s, i++, millis(o.evaluatedAt()));
+        s.setArray(i, connection.createArrayOf("text", o.refs().toArray(new String[0])));
     }
 
     @Override
@@ -367,6 +387,18 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
+    public List<HealthOutcome> findByRefs(String agentId, Collection<String> refs, int limit) {
+        if (agentId == null || refs == null || refs.isEmpty()) {
+            return List.of();
+        }
+        return query(BY_REFS, "Could not read the health sessions of a reference", (c, s) -> {
+            s.setString(1, agentId);
+            s.setArray(2, c.createArrayOf("text", new LinkedHashSet<>(refs).toArray(new String[0])));
+            s.setInt(3, Math.max(1, limit));
+        });
+    }
+
+    @Override
     public List<HealthOutcome> findByUserId(String userId, int limit) {
         return query(BY_USER, "Could not read a user's health outcomes", (c, s) -> {
             s.setString(1, userId);
@@ -468,7 +500,20 @@ public class PostgresHealthOutcomeStore implements IHealthOutcomeStore {
                 r.getString("user_id"), r.getString("origin"), r.getBoolean("engaged"), instant(r, "started_at_ms"), instant(r, "ended_at_ms"),
                 r.getInt("turns"), r.getDouble("cost_usd"), r.getInt("failures"), r.getString("outcome"), r.getString("evidence"),
                 r.getBoolean("provisional"), r.getObject("day", LocalDate.class), instant(r, "due_at_ms"), integer(r, "first_output_step"), actions,
-                instant(r, "evaluated_at_ms"));
+                instant(r, "evaluated_at_ms"), textArray(r, "refs"));
+    }
+
+    private static List<String> textArray(ResultSet r, String column) throws SQLException {
+        List<String> values = new ArrayList<>();
+        Array array = r.getArray(column);
+        if (array != null && array.getArray() instanceof Object[] entries) {
+            for (Object value : entries) {
+                if (value != null) {
+                    values.add(String.valueOf(value));
+                }
+            }
+        }
+        return values;
     }
 
     private static Long millis(Instant instant) {

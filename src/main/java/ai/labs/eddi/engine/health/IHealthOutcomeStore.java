@@ -98,6 +98,13 @@ public interface IHealthOutcomeStore {
     Map<String, HealthPortfolioSessions> portfolioSessions(Collection<String> agentIds, LocalDate baselineFrom, LocalDate windowFrom, LocalDate to,
                                                            Collection<String> interactive, Collection<String> origins);
 
+    /**
+     * Sessions of one agent that carry any of the given business references (stored
+     * forms, {@code HealthRefs}), newest start first, at most {@code limit} — what
+     * an outcome event is matched by.
+     */
+    List<HealthOutcome> findByRefs(String agentId, Collection<String> refs, int limit);
+
     /** A user's sessions, newest first, at most {@code limit} — GDPR export. */
     List<HealthOutcome> findByUserId(String userId, int limit);
 

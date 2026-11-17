@@ -91,17 +91,35 @@ import java.util.List;
  * @param selfReportedOutcome
  *            the outcome the agent's model claimed with
  *            {@code report_conversation_outcome} on this turn, or {@code null}
+ * @param refs
+ *            the business references the turn ended with — the agent's
+ *            {@code healthConfig.externalRefs} that held a value — each as
+ *            {@code name=value} (plain) or {@code name#<hmac>} (with
+ *            {@code hashRefs}); see {@code HealthRefs}
  */
 public record HealthTurn(String conversationId, int stepIndex, String executionId, String agentId, Integer agentVersion,
         Integer previousAgentVersion, String userId, String origin, LocalDate day, Instant timestamp, Instant updatedAt, Double costUsd,
         Double discardedCostUsd,
         Long inputTokens, Long outputTokens, Long totalTokens, Long durationMs, String errorKind, boolean paused, List<HealthFailure> failures,
         boolean fallbackServed, int toolCalls, int toolFailures, int toolRefusals, int guardrailTrips, boolean userInput, boolean agentOutput,
-        boolean lastOutputWasQuestion, List<String> actions, boolean discarded, String selfReportedOutcome) {
+        boolean lastOutputWasQuestion, List<String> actions, boolean discarded, String selfReportedOutcome, List<String> refs) {
 
     public HealthTurn {
         failures = failures == null ? List.of() : List.copyOf(failures);
         actions = actions == null ? List.of() : List.copyOf(actions);
+        refs = refs == null ? List.of() : List.copyOf(refs);
+    }
+
+    /** A row without business references (H3). */
+    public HealthTurn(String conversationId, int stepIndex, String executionId, String agentId, Integer agentVersion, Integer previousAgentVersion,
+            String userId, String origin, LocalDate day, Instant timestamp, Instant updatedAt, Double costUsd, Double discardedCostUsd,
+            Long inputTokens, Long outputTokens, Long totalTokens, Long durationMs, String errorKind, boolean paused, List<HealthFailure> failures,
+            boolean fallbackServed, int toolCalls, int toolFailures, int toolRefusals, int guardrailTrips, boolean userInput, boolean agentOutput,
+            boolean lastOutputWasQuestion, List<String> actions, boolean discarded, String selfReportedOutcome) {
+        this(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp, updatedAt, costUsd,
+                discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed, toolCalls,
+                toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, discarded, selfReportedOutcome,
+                List.of());
     }
 
     /** A row without a self-reported outcome. */
@@ -112,7 +130,7 @@ public record HealthTurn(String conversationId, int stepIndex, String executionI
             boolean lastOutputWasQuestion, List<String> actions, boolean discarded) {
         this(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp, updatedAt, costUsd,
                 discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed, toolCalls,
-                toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, discarded, null);
+                toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, discarded, null, List.of());
     }
 
     /**
@@ -178,6 +196,14 @@ public record HealthTurn(String conversationId, int stepIndex, String executionI
         return new HealthTurn(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp,
                 updatedAt, costUsd, discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed,
                 toolCalls, toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, true,
-                selfReportedOutcome);
+                selfReportedOutcome, refs);
+    }
+
+    /** This row with {@code refs} as its business references. */
+    public HealthTurn withRefs(List<String> refs) {
+        return new HealthTurn(conversationId, stepIndex, executionId, agentId, agentVersion, previousAgentVersion, userId, origin, day, timestamp,
+                updatedAt, costUsd, discardedCostUsd, inputTokens, outputTokens, totalTokens, durationMs, errorKind, paused, failures, fallbackServed,
+                toolCalls, toolFailures, toolRefusals, guardrailTrips, userInput, agentOutput, lastOutputWasQuestion, actions, discarded,
+                selfReportedOutcome, refs);
     }
 }

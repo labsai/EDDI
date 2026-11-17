@@ -233,4 +233,31 @@ public interface HealthOutcomeStoreContract {
         store().setWatermark(T0.plusSeconds(5));
         assertEquals(T0.plusSeconds(5), store().watermark().orElseThrow());
     }
+
+    @Test
+    @DisplayName("findByRefs finds an agent's sessions carrying any of the references, newest start first (H5)")
+    default void findByRefs() {
+        HealthOutcome a = withRefs(closed("c1", 0, T0, "RESOLVED", "agent_action"), List.of("orderId=A-1"));
+        HealthOutcome b = withRefs(closed("c2", 0, T0.plusSeconds(3_600), "RESOLVED", "agent_action"), List.of("orderId#ff", "ticketId=9"));
+        HealthOutcome other = withRefs(session("c3", 0, "other", "user", T0, "api", true, "RESOLVED", "agent_action", false, null),
+                List.of("orderId=A-1"));
+        store().upsert(List.of(a, b, other, closed("c4", 0, T0, "RESOLVED", "agent_action")));
+        assertEquals(List.of("orderId=A-1"), store().findByConversation("c1").get(0).refs(), "round-trips");
+        assertTrue(store().findByConversation("c4").get(0).refs().isEmpty());
+        assertEquals(List.of("c2", "c1"),
+                store().findByRefs("agent", List.of("orderId=A-1", "orderId#ff"), 10).stream().map(HealthOutcome::conversationId).toList());
+        assertEquals(List.of("c2"), store().findByRefs("agent", List.of("ticketId=9"), 10).stream().map(HealthOutcome::conversationId).toList());
+        assertTrue(store().findByRefs("agent", List.of("orderId=nope"), 10).isEmpty());
+        assertTrue(store().findByRefs("agent", List.of(), 10).isEmpty());
+        // A re-evaluation without refs removes them.
+        store().upsert(List.of(closed("c1", 0, T0, "RESOLVED", "agent_action")));
+        assertTrue(store().findByRefs("agent", List.of("orderId=A-1"), 10).isEmpty());
+    }
+
+    private static HealthOutcome withRefs(HealthOutcome o, List<String> refs) {
+        return new HealthOutcome(o.conversationId(), o.sessionNo(), o.agentId(), o.agentVersion(), o.userId(), o.origin(), o.engaged(), o.startedAt(),
+                o.endedAt(), o.turns(), o.costUsd(), o.failures(), o.outcome(), o.evidence(), o.provisional(), o.day(), o.dueAt(),
+                o.firstOutputStep(),
+                o.lastActions(), o.evaluatedAt(), refs);
+    }
 }
