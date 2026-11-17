@@ -4329,6 +4329,8 @@
     "addTask": "Adicionar tarefa",
     "backToGroup": "Voltar ao grupo",
     "backlogEmpty": "Ainda não há tarefas na lista de pendências.",
+    "feedbackRun": "Feedback para nova tentativa, execução {{run}}",
+    "feedbackVerified": "Verificado",
     "backlogTitle": "Lista de pendências ({{count}})",
     "cadenceAdded": "Cadência adicionada",
     "cadenceDeleted": "Cadência eliminada",

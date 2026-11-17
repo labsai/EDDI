@@ -87,11 +87,13 @@ public class ComplianceStartupChecks {
     /**
      * Surface an unsigned audit ledger.
      * <p>
-     * {@code eddi.vault.master-key} ships empty, so out of the box
-     * {@code AuditLedgerService} derives no HMAC key and writes every entry
-     * unsigned — while the documentation presents the ledger as evidence-grade and
-     * the EU AI Act Art. 12/19 obligations it is sold against assume tamper
-     * evidence. Nothing warned about that until now.
+     * {@code eddi.vault.master-key} ships empty (and so does
+     * {@code eddi.audit.hmac-key}), so out of the box {@code AuditLedgerService}
+     * derives no HMAC key and writes every entry unsigned — while the documentation
+     * presents the ledger as evidence-grade and the EU AI Act Art. 12/19
+     * obligations it is sold against assume tamper evidence. This check is what
+     * warns about that. It does nothing when the ledger is disabled or either key
+     * is set.
      * <p>
      * Advisory by default (an unsigned ledger is still a useful log). Deployments
      * that actually rely on the ledger as evidence set

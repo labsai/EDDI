@@ -4288,6 +4288,8 @@
     "addTask": "タスクを追加",
     "backToGroup": "グループに戻る",
     "backlogEmpty": "バックログのタスクはまだありません。",
+    "feedbackRun": "再試行のフィードバック、実行 {{run}}",
+    "feedbackVerified": "検証済み",
     "backlogTitle": "バックログ（{{count}}）",
     "cadenceAdded": "ケイデンスを追加しました",
     "cadenceDeleted": "ケイデンスを削除しました",

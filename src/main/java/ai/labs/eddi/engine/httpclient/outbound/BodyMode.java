@@ -11,8 +11,9 @@ import java.util.Objects;
 
 /**
  * How a response body is read, and the most of it that may be read. Every mode
- * but {@link #discard()} carries a cap enforced <em>while</em> reading: an
- * oversized body is never buffered whole and then measured.
+ * but {@link #discard()} takes a cap (a {@link #stream} caller may waive it)
+ * that is enforced <em>while</em> reading: an oversized body is never buffered
+ * whole and then measured.
  *
  * @param <T>
  *            what {@link OutboundResponse#body()} holds

@@ -1874,8 +1874,10 @@ jobs:
         run: npm test
 
       # First-load budget, as in UI Manager Checks (ui/bundle-budget.json).
+      # Both bundles: the widget, and the /chat/embed.js launcher, which has a
+      # budget of its own (vite.embed.config.ts, as `npm run build` does).
       - name: Build
-        run: npx vite build
+        run: npx vite build && npx vite build --config vite.embed.config.ts
 
       - name: Bundle budget
         run: npm run budget

@@ -16,6 +16,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
+ * Recognises an ordinal number such as {@code 3rd} or {@code 3.} (see
+ * {@code LanguageUtilities#extractOrdinalValue}) and emits an
+ * {@code ordinal_number} expression carrying the number.
+ *
  * @author ginccc
  */
 public class OrdinalNumbersDictionary implements IDictionary {

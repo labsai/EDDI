@@ -69,9 +69,10 @@ public interface IConversationService {
     void endConversation(String conversationId);
 
     /**
-     * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
-     * READY — only while it is still in {@code expectedState}, as one
-     * compare-and-set, and the cache follows the store. Admin-only operation.
+     * Reset the state of a stuck conversation (ERROR, EXECUTION_INTERRUPTED or
+     * AWAITING_HUMAN) to READY — only while it is still in {@code expectedState},
+     * as one compare-and-set, and the cache follows the store. Admin-only
+     * operation.
      * <p>
      * The caller reads the state to decide whether a reset is allowed; without the
      * compare-and-set a turn that started, or an end that landed, between that read
@@ -141,8 +142,9 @@ public interface IConversationService {
      * accepted call — {@code onComplete} when the turn executed (the snapshot may
      * carry state {@code AWAITING_HUMAN} if THIS turn paused the conversation), or
      * {@code onSkipped} when the turn was dropped without consuming the input
-     * (conversation paused or busy at execution time). Calls rejected up-front
-     * throw instead and never invoke the handler.
+     * (conversation paused or busy at execution time) or {@code onCallerGone} when
+     * the caller's own deadline had passed while the turn was still queued. Calls
+     * rejected up-front throw instead and never invoke the handler.
      *
      * @throws AgentMismatchException
      *             if agentId doesn't match the conversation's agent

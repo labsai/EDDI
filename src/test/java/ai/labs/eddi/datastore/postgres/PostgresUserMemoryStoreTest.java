@@ -681,6 +681,7 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
         @Test
         @DisplayName("other agents' entries do not take the places of the reader's own within the limit")
         void theLimitCountsOnlyWhatTheReaderIsShown() throws Exception {
+            store.countEntries("user-1"); // force schema creation before raw SQL
             // Stored before writers were recorded (no last writer): the owner stands in.
             insertLegacyRow("user-1", "own", "self", "agent-v", "[]", 50);
             insertLegacyRow("user-1", "users", "global", null, "[]", 40);

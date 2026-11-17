@@ -4301,6 +4301,8 @@
     "failed": "Failed",
     "backlogTitle": "Backlog ({{count}})",
     "backlogEmpty": "No backlog tasks yet.",
+    "feedbackRun": "Retry feedback, run {{run}}",
+    "feedbackVerified": "Verified",
     "taskSubjectPlaceholder": "Task subject",
     "taskDescriptionPlaceholder": "Description (optional)",
     "priority": "Priority",

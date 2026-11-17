@@ -205,8 +205,9 @@ public class PhaseExecutionEngine {
      * Ordering is deliberate: the deterministic all-abstained check runs first and
      * short-circuits, so a unanimously silent round never pays for a judge call to
      * tell it what it already knows. The judge runs only when that fails,
-     * convergence is enabled, {@code minRepeats} has elapsed, and there is a
-     * previous round to compare against.
+     * convergence is enabled, {@code minRepeats} has elapsed, and — in SIMILARITY
+     * mode; VERDICT mode compares nothing — there is a previous round to compare
+     * against.
      * <p>
      * A judge failure is never fatal to the discussion: {@code executeAgentTurn}
      * already converts an agent failure into a SKIPPED/ERROR entry rather than
@@ -416,11 +417,12 @@ public class PhaseExecutionEngine {
      * How many member turns a repeat of {@code phase} schedules — the denominator
      * "did everyone abstain?" must be measured against.
      * <p>
-     * A peer-targeted phase runs one turn per (speaker, other-member) pair, so its
-     * count is N×(N-1), not N. Sequential and parallel phases run one turn per
-     * speaker. Using the speaker count for all three made unanimity mean different
-     * things per turn order — the kind of mismatch that reads as correct until a
-     * three-member critique round quietly ends itself.
+     * A peer-targeted phase runs one turn per (speaker, target) pair minus the
+     * self-pairs — N×(N-1) when speakers and targets are the same N members, not N.
+     * Sequential and parallel phases run one turn per speaker. Using the speaker
+     * count for all three made unanimity mean different things per turn order — the
+     * kind of mismatch that reads as correct until a three-member critique round
+     * quietly ends itself.
      */
     private static int expectedTurnsFor(DiscussionPhase phase, List<GroupMember> speakers, List<GroupMember> targets) {
         int n = speakers != null ? speakers.size() : 0;
@@ -659,7 +661,7 @@ public class PhaseExecutionEngine {
 
     /**
      * One moderator turn choosing among the unresolved options. The reply is
-     * resolved by the same exact-scan rule as a tier-2 ballot; an unreadable reply
+     * resolved by the same exact-scan rule as a tier-3 ballot; an unreadable reply
      * keeps the tally's honest NONE.
      */
     private DecisionRecord moderatorTiebreak(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
@@ -878,7 +880,7 @@ public class PhaseExecutionEngine {
                     config.getRetroConfig());
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
-            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
+            input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(), recordsOf(gc, config));
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
@@ -998,7 +1000,8 @@ public class PhaseExecutionEngine {
                                 GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                                 config.getRetroConfig());
                         // I11: see the sequential loop — appended, not templated.
-                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig());
+                        input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(),
+                                recordsOf(gc, config));
                         return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener, cancellation);
                     } catch (MemberTurnCancelledException e) {
                         // The orchestrator stopped waiting for this batch — surface the

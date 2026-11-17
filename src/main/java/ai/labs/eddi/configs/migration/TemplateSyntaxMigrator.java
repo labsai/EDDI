@@ -369,7 +369,8 @@ public class TemplateSyntaxMigrator {
      * rendered literal text. Generating template syntax from a template has no
      * counterpart this converter can emit, so the shape is refused instead: any
      * string literal inside {@code [[…]]} or {@code [(…)]} that contains {@code
-     * [[}, {@code [(}, <code>${</code>, {@code ]]} or {@code )]}.
+     * [[}, {@code [(} or <code>${</code>. A lone closer ({@code ]]}, {@code )]}) is
+     * only text and does not refuse the template.
      * </p>
      *
      * <p>

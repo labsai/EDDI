@@ -321,6 +321,24 @@ public class GroupSigningGuard {
         }
 
         /**
+         * Whether {@code speakerId} has an entry in this view that no agent wrote (a
+         * HUMAN member's turn): its author names no live agent, and the discussion did
+         * not record the entry as an agent's, which is what a deleted agent's are.
+         */
+        boolean hasNonAgentEntry(String speakerId) {
+            if (verdicts == null || speakerId == null) {
+                return false;
+            }
+            for (int i = 0; i < stored.size(); i++) {
+                TranscriptEntry entry = stored.get(i);
+                if (entry != null && speakerId.equals(entry.speakerAgentId()) && verdicts.get(i) == Verdict.NOT_AGENT_AUTHORED) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
          * Whether the reader may take text the engine recorded for agent
          * {@code agentId} outside the transcript (a task it filed with its task tool)
          * as that agent's: the agent signs, with a key that is declared, not revoked
@@ -521,12 +539,109 @@ public class GroupSigningGuard {
         if (guard == null || task == null) {
             return task;
         }
-        View records = config != null
+        return TaskRecordView.of(recordsOf(guard, gc, config), null, gc, config).seen(task);
+    }
+
+    /**
+     * The retry feedback a standing team's cadence keeps from a task, as the
+     * group's records count it ({@link #recordedTask}), with who wrote it, so a
+     * later run can count it again for its own readers
+     * ({@link #recordsTrustFeedback}).
+     *
+     * @param text
+     *            the verification note, or the result when there is none
+     * @param authorAgentId
+     *            the agent whose text it is: the verifier whose
+     *            {@code VERIFICATION} entry holds the note, or the assignee;
+     *            {@code null} when no agent wrote it (a HUMAN member, an approver's
+     *            edit, a note only the engine recorded)
+     * @param verified
+     *            whether the records it was counted by verify, so it had to verify
+     *            to be kept as written
+     * @param authorKeyVersion
+     *            the version of the author's key that verified the text, so a later
+     *            run can tell whether that key was revoked since; {@code null} when
+     *            there is no author or the text was not verified by a signature
+     */
+    public record RecordedFeedback(String text, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+
+        public RecordedFeedback(String text, String authorAgentId, boolean verified) {
+            this(text, authorAgentId, verified, null);
+        }
+    }
+
+    /**
+     * {@code task}'s feedback as {@link RecordedFeedback} describes it, or
+     * {@code null} when it has neither a verification note nor a result.
+     * {@code guard} and {@code config} are read as by {@link #recordedTask}.
+     */
+    public static RecordedFeedback recordedFeedback(GroupSigningGuard guard, GroupConversation gc, AgentGroupConfiguration config,
+                                                    TaskItem task) {
+        if (task == null) {
+            return null;
+        }
+        View records = recordsOf(guard, gc, config);
+        TaskRecordView view = TaskRecordView.of(records, null, gc, config);
+        TaskItem seen = view.seen(task);
+        if (seen.verificationNote() != null) {
+            String author = view.noteAuthor(task);
+            return new RecordedFeedback(seen.verificationNote(), author, records.verifying(),
+                    records.verifying() ? view.verifiedKeyVersion(author, task.verificationNote(), true) : null);
+        }
+        if (seen.result() != null) {
+            String author = view.resultAuthor(task);
+            return new RecordedFeedback(seen.result(), author, records.verifying(),
+                    records.verifying() ? view.verifiedKeyVersion(author, task.result(), false) : null);
+        }
+        return null;
+    }
+
+    /**
+     * Whether the records of the group configured as {@code config} may quote retry
+     * feedback {@link #recordedFeedback} kept: no agent wrote it (as a HUMAN
+     * member's concession counts, see {@link View#hasNonAgentEntry}), no reader of
+     * the group requires peer verification now, or it was {@code verified} when it
+     * was written and its author still signs verifiably ({@link View#vouchesFor}).
+     * So feedback written while no reader verified is not quoted as an agent's once
+     * one does. {@code config} is {@code null} when it could not be read, which
+     * counts as a reader that requires verification.
+     * <p>
+     * What vouches is the key that verified the text, {@code authorKeyVersion}, not
+     * whichever key the author signs with now: if that version has been revoked the
+     * text is withheld even after a replacement key is provisioned. Agent feedback
+     * with no recorded version (written by an older build) is withheld, since
+     * nothing says which key vouched for it.
+     */
+    public static boolean recordsTrustFeedback(GroupSigningGuard guard, AgentGroupConfiguration config, String authorAgentId,
+                                               boolean verified, Integer authorKeyVersion) {
+        if (authorAgentId == null || guard == null || guard.agentStore == null || guard.agentSigningService == null
+                || !recordsVerify(guard, config)) {
+            return true;
+        }
+        return verified && authorKeyVersion != null && guard.keyStillVouches(authorAgentId, authorKeyVersion);
+    }
+
+    /**
+     * The records {@link #recordedTask} counts {@code gc}'s tasks by: as
+     * {@link #recordView} for the group's readers or, when {@code config} could not
+     * be read, as for a reader that requires verification.
+     */
+    private static View recordsOf(GroupSigningGuard guard, GroupConversation gc, AgentGroupConfiguration config) {
+        if (guard == null || guard.agentStore == null || guard.agentSigningService == null) {
+            return new View(Requirement.NOT_REQUIRED, snapshotOf(gc.getTranscript()));
+        }
+        return config != null
                 ? recordView(guard, gc, readersOf(config, gc))
-                : guard.agentStore == null || guard.agentSigningService == null
-                        ? new View(Requirement.NOT_REQUIRED, snapshotOf(gc.getTranscript()))
-                        : guard.filtered(Requirement.UNKNOWN, null, "the group's own records", gc, snapshotOf(gc.getTranscript()));
-        return TaskRecordView.of(records, null, gc, config).seen(task);
+                : guard.filtered(Requirement.UNKNOWN, null, "the group's own records", gc, snapshotOf(gc.getTranscript()));
+    }
+
+    /**
+     * Whether a reader of the group configured as {@code config} requires peer
+     * verification or has a setting nobody knows; {@code null} (unreadable) counts
+     * as one that does.
+     */
+    private static boolean recordsVerify(GroupSigningGuard guard, AgentGroupConfiguration config) {
+        return config == null || readersOf(config, null).stream().anyMatch(reader -> guard.requirementOf(reader) != Requirement.NOT_REQUIRED);
     }
 
     /**
@@ -543,7 +658,7 @@ public class GroupSigningGuard {
         if (agentId == null || guard == null || guard.agentStore == null || guard.agentSigningService == null) {
             return true;
         }
-        if (config != null && readersOf(config, null).stream().allMatch(reader -> guard.requirementOf(reader) == Requirement.NOT_REQUIRED)) {
+        if (!recordsVerify(guard, config)) {
             return true;
         }
         return guard.signsVerifiably(agentId);
@@ -807,6 +922,19 @@ public class GroupSigningGuard {
         int keyVersion = identity.signingKeyVersion();
         return identity.getKeyForVersion(keyVersion) != null && !isRevoked(identity, keyVersion)
                 && keyValidAt(identity, keyVersion, System.currentTimeMillis());
+    }
+
+    /**
+     * Whether {@code agentId} is an agent that still signs and key
+     * {@code keyVersion}, the one that verified some text of it earlier, is still
+     * declared and not revoked. The window is not re-checked: it limits when a key
+     * may sign, and was checked when the text verified.
+     */
+    private boolean keyStillVouches(String agentId, int keyVersion) {
+        Speaker speaker = lookUpSpeaker(agentId);
+        AgentIdentity identity = speaker.identity();
+        return speaker.isAgent() && speaker.signs() && identity != null && identity.getKeyForVersion(keyVersion) != null
+                && !isRevoked(identity, keyVersion);
     }
 
     private Requirement requirementOf(String receiverAgentId) {

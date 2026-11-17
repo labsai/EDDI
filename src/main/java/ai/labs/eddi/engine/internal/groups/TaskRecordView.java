@@ -145,6 +145,64 @@ final class TaskRecordView {
         return trustedContents().getOrDefault(assignee, Set.of()).contains(result);
     }
 
+    /**
+     * The agent whose text {@code task}'s result is: its assignee, or {@code null}
+     * when there is no result or no agent wrote it (a HUMAN member's, or one an
+     * approver replaced).
+     */
+    String resultAuthor(TaskItem task) {
+        String assignee = task.assignedAgentId();
+        return task.result() == null || assignee == null || isHuman.test(assignee) || editedByReviewer.test(task.id()) ? null : assignee;
+    }
+
+    /**
+     * The agent whose {@code VERIFICATION} entry holds {@code task}'s note, traced
+     * as {@link #note} traces it: one the reader trusts first, otherwise any.
+     * {@code null} when no agent's entry holds it (the engine's notes and a HUMAN
+     * member's are not agent-authored).
+     */
+    String noteAuthor(TaskItem task) {
+        String note = task.verificationNote();
+        String text = note != null ? stripEnds(note) : "";
+        if (text.isEmpty()) {
+            return null;
+        }
+        String untrusted = null;
+        for (TranscriptEntry entry : view.stored()) {
+            if (entry == null || entry.type() != TranscriptEntryType.VERIFICATION || entry.content() == null
+                    || !entry.content().contains(text) || entry.speakerAgentId() == null
+                    || ENGINE_SPEAKERS.contains(entry.speakerAgentId()) || isHuman.test(entry.speakerAgentId())) {
+                continue;
+            }
+            if (view.trusts(entry)) {
+                return entry.speakerAgentId();
+            }
+            if (untrusted == null) {
+                untrusted = entry.speakerAgentId();
+            }
+        }
+        return untrusted;
+    }
+
+    /**
+     * The version of {@code author}'s key that signed a trusted entry holding
+     * {@code text} (a verification note, which an entry contains, or a result,
+     * which it equals), or {@code null} when there is none.
+     */
+    Integer verifiedKeyVersion(String author, String text, boolean contained) {
+        String wanted = text != null ? stripEnds(text) : "";
+        if (author == null || wanted.isEmpty()) {
+            return null;
+        }
+        for (TranscriptEntry entry : view.stored()) {
+            if (entry != null && author.equals(entry.speakerAgentId()) && entry.content() != null && entry.signatureKeyVersion() != null
+                    && view.trusts(entry) && (contained ? entry.content().contains(wanted) : entry.content().equals(text))) {
+                return entry.signatureKeyVersion();
+            }
+        }
+        return null;
+    }
+
     private String note(TaskItem task) {
         String note = task.verificationNote();
         if (note == null || note.isBlank()) {

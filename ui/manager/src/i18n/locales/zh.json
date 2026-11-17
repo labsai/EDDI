@@ -4288,6 +4288,8 @@
     "addTask": "添加任务",
     "backToGroup": "返回群组",
     "backlogEmpty": "暂无待办任务。",
+    "feedbackRun": "重试反馈,运行 {{run}}",
+    "feedbackVerified": "已验证",
     "backlogTitle": "待办事项（{{count}}）",
     "cadenceAdded": "已添加节奏",
     "cadenceDeleted": "已删除节奏",

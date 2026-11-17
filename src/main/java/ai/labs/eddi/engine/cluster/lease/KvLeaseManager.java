@@ -61,11 +61,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>a release notification addressed to this node by the holder, which this
  * node told that it is waiting (core NATS, sub-millisecond; it carries the
  * delete marker's revision, so the wake-up acquires in one round trip),</li>
- * <li>a jittered poll every {@code ttl/4}, at most {@value #MAX_POLL_MILLIS}
- * ms, which also notices that a crashed holder's lease expired on the server
+ * <li>a jittered poll roughly every {@code ttl/4} (that base capped at
+ * {@value #MAX_POLL_MILLIS} ms and floored at 50 ms, then spread over 0.5x to
+ * 1.5x), which also notices that a crashed holder's lease expired on the server
  * (server-side TTL, so no clock skew between nodes is involved), and</li>
- * <li>fast takeover: a lease whose holder's presence record is gone (or carries
- * a different boot id, i.e. it restarted) is deleted by compare-and-set and
+ * <li>fast takeover: a lease whose holder's presence record carries a different
+ * boot id (it restarted), or is missing while this node has seen the lease's
+ * revision unchanged for three heartbeats, is deleted by compare-and-set and
  * re-acquired at once.</li>
  * </ul>
  * <b>Validity</b>: a lease is trusted for {@code ttl − 2×heartbeat} after the
@@ -181,6 +183,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
     /**
      * Result of {@link #forceRelease}.
      *
+     * @param outcome
+     *            what the call did
      * @param holder
      *            the holder the lease had, or {@code null}
      * @param currentRevision

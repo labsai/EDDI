@@ -4452,6 +4452,8 @@
     "addTask": "إضافة مهمة",
     "backToGroup": "العودة إلى المجموعة",
     "backlogEmpty": "لا توجد مهام معلّقة بعد.",
+    "feedbackRun": "ملاحظات إعادة المحاولة، التشغيل {{run}}",
+    "feedbackVerified": "تم التحقق",
     "backlogTitle": "المهام المعلّقة ({{count}})",
     "cadenceAdded": "تمت إضافة الوتيرة",
     "cadenceDeleted": "تم حذف الوتيرة",

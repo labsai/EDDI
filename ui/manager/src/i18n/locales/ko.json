@@ -4288,6 +4288,8 @@
     "addTask": "작업 추가",
     "backToGroup": "그룹으로 돌아가기",
     "backlogEmpty": "아직 백로그 작업이 없습니다.",
+    "feedbackRun": "재시도 피드백, 실행 {{run}}",
+    "feedbackVerified": "검증됨",
     "backlogTitle": "백로그({{count}}개)",
     "cadenceAdded": "케이던스가 추가되었습니다",
     "cadenceDeleted": "케이던스가 삭제되었습니다",
