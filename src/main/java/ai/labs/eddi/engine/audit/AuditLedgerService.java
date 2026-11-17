@@ -1864,7 +1864,17 @@ public class AuditLedgerService implements UserErasureParticipant {
                     boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
                     AuditEntry rewritten = entry.withUserId(target).withPayload(redactionMarker(entry.hmac(), before), null, null, null);
                     if (verified && isSigningEnabled()) {
-                        rewritten = reseal(rewritten);
+                        try {
+                            rewritten = reseal(rewritten);
+                        } catch (RuntimeException e) {
+                            // Agent verification hit a store failure: leave the row untouched
+                            // (count it failed) rather than rewrite it without its signature.
+                            LOGGER.errorv("[GDPR] Could not verify the agent signature of audit entry {0}, left unredacted: {1}",
+                                    sanitize(entry.id()), sanitize(e.getMessage()));
+                            failed++;
+                            stayInFilter++;
+                            continue;
+                        }
                     }
                     boolean replaced;
                     try {
@@ -1988,15 +1998,13 @@ public class AuditLedgerService implements UserErasureParticipant {
             return entry;
         }
         AuditEntry resealed = entry.withHmac(AuditHmac.computeHmac(entry, signingKey));
-        AuditVerificationStatus agentStatus;
-        try {
-            agentStatus = withAgentSignature(entry, AuditVerificationStatus.VALID);
-        } catch (RuntimeException e) {
-            // Whether the signature is a finding cannot be told: sign nothing rather than
-            // sign on trust. Verification then reports the row as missing its signature.
-            LOGGER.warnv("Resealed audit entry {0} is not agent-signed: {1}", sanitize(entry.id()), sanitize(e.getMessage()));
-            return resealed.withAgentSignature(null);
-        }
+        // A store failure while checking the old signature propagates: the signature
+        // may
+        // be the finding, it covers the old HMAC and cannot be restored onto the new
+        // one, so rewriting the row without it would erase that evidence for a
+        // transient
+        // outage. The row stays as it was and the erasure can be retried.
+        AuditVerificationStatus agentStatus = withAgentSignature(entry, AuditVerificationStatus.VALID);
         return switch (agentStatus) {
             case AGENT_SIGNATURE_INVALID, AGENT_SIGNATURE_MISSING -> resealed;
             // Nothing could check the old signature, so nothing shows the agent vouched

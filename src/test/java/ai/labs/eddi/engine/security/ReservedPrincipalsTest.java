@@ -51,6 +51,7 @@ class ReservedPrincipalsTest {
             Map.entry("dead-letter-replay:", "Idempotency-Key prefix (ClusterAdminService), not a principal"),
             Map.entry("fire:", "toolQuotas run id of a scheduled fire (hashed into a counter name, never a principal)"),
             Map.entry("legacy:", "ChannelTargetRouter warn-once key for a legacy Slack connector's credentials"),
+            Map.entry("eddi-audit-entry:", "audit agent-signature domain-separation prefix (AuditAgentSigner.SIGNED_PREFIX), not a principal"),
             Map.entry("agent:", "tool-cache scope tag"),
             Map.entry("context:", "cache/template key"),
             Map.entry("file:", "URL scheme"),

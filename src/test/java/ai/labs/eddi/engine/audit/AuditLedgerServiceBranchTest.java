@@ -478,6 +478,26 @@ class AuditLedgerServiceBranchTest {
             afterDeletion.shutdown();
         }
 
+        @Test
+        @DisplayName("a store failure while checking the old agent signature leaves the row unredacted and counts it failed")
+        void erasureKeepsTheSignatureWhenTheAgentStoreFails() throws Exception {
+            service.submit(entry("id1", "conv1", "agent1"));
+            AuditEntry stored = flushedEntry(service);
+            service.shutdown();
+            when(agentStore.read("agent1", 1)).thenThrow(new IllegalStateException("socket timeout"));
+            when(agentStore.readIncludingDeleted("agent1", 1)).thenThrow(new IllegalStateException("socket timeout"));
+            var failing = signingLedger(new AuditAgentSigner(signingService, new AgentConfigurationCache(agentStore), agentStore), true);
+            when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(stored));
+            when(auditStore.redactEntry(any(), eq(stored.hmac()))).thenReturn(true);
+
+            var result = failing.eraseUser("user1");
+
+            assertEquals(0, result.resealed());
+            assertFalse(result.complete(), "the row was not redacted, so the erasure is incomplete");
+            verify(auditStore, never()).redactEntry(any(), any());
+            failing.shutdown();
+        }
+
         /** The row an erasure re-signs, once the sweep has run over {@code row}. */
         private AuditEntry erasedRow(AuditEntry row) {
             when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(row));
@@ -593,16 +613,23 @@ class AuditLedgerServiceBranchTest {
 
         /**
          * Whether the row's signature is a finding cannot be told while the agent store
-         * is down, so the reseal signs nothing rather than signing on trust.
+         * is down, so the erasure leaves the row as it was (counted failed) rather than
+         * rewrite it without a signature that cannot be restored.
          */
         @Test
-        @DisplayName("an erasure that cannot read the agent store leaves the resealed row unsigned")
-        void erasureLeavesTheRowUnsignedWhenTheAgentStoreFails() throws Exception {
+        @DisplayName("an erasure that cannot read the agent store leaves the row untouched and incomplete")
+        void erasureLeavesTheRowUntouchedWhenTheAgentStoreFails() throws Exception {
             service.submit(entry("id1", "conv1", "agent1"));
             AuditEntry stored = flushedEntry(service);
             when(agentStore.getNewestVersionIncludingDeleted("agent1")).thenThrow(new IllegalStateException("socket timeout"));
+            when(auditStore.getEntriesByUserId(eq("user1"), eq(0), anyInt())).thenReturn(List.of(stored));
+            when(auditStore.redactEntry(any(), eq(stored.hmac()))).thenReturn(true);
 
-            assertNull(erasedRow(stored).agentSignature());
+            var result = service.eraseUser("user1");
+
+            assertEquals(0, result.resealed());
+            assertFalse(result.complete());
+            verify(auditStore, never()).redactEntry(any(), any());
             service.shutdown();
         }
     }
