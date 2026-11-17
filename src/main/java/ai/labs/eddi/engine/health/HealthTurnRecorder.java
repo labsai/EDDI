@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health;
 
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.health.HealthTurnFactory.Capture;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -18,9 +19,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -212,20 +213,39 @@ public class HealthTurnRecorder {
         }
         try {
             IHealthTurnStore turns = store.get();
+            // A late row carries the time of its write, in the same write: the self-heal
+            // finds it by that, so no dirty mark has to survive for its days to be
+            // re-rolled. Every row's days are still noted for the next flush. An on-time
+            // row
+            // is written exactly as before, through the methods without the stamp.
+            Instant lateWrittenAt = lateWrittenAt(turn);
+            boolean late = lateWrittenAt != null;
             if (!capture.settled()) {
                 // What the conversation keeps may be the earlier execution, or nothing at
                 // all: never replace a row on the strength of this one.
-                turns.insertIfAbsent(turn);
+                if (late) {
+                    turns.insertIfAbsent(turn, lateWrittenAt);
+                } else {
+                    turns.insertIfAbsent(turn);
+                }
                 markDirty(turn, turn.day() == null ? Set.of() : Set.of(turn.day()));
             } else {
-                turns.upsert(turn);
+                if (late) {
+                    turns.upsert(turn, lateWrittenAt);
+                } else {
+                    turns.upsert(turn);
+                }
                 // The stored row keeps the day it was first recorded on: a turn resumed
                 // after midnight changed yesterday's numbers, not today's.
                 markDirty(turn, storedDays(turns, turn.conversationId(), List.of(turn.executionId()), turn.day()));
                 // After the new row: the discard is only true once the replacing turn
                 // exists.
                 if (!capture.discardedExecutionIds().isEmpty()) {
-                    turns.markDiscarded(turn, capture.discardedExecutionIds());
+                    if (late) {
+                        turns.markDiscarded(turn, capture.discardedExecutionIds(), lateWrittenAt);
+                    } else {
+                        turns.markDiscarded(turn, capture.discardedExecutionIds());
+                    }
                     markDirty(turn, storedDays(turns, turn.conversationId(), capture.discardedExecutionIds(), null));
                 }
             }
@@ -255,16 +275,10 @@ public class HealthTurnRecorder {
     private void removeIfDeletedMeanwhile(HealthTurn turn) {
         try {
             if (erased(turn) || conversationGone(turn.conversationId())) {
-                IHealthTurnStore turns = store.get();
-                Map<String, Set<LocalDate>> days = Map.of();
-                try {
-                    days = turns.agentDaysOfConversation(turn.conversationId());
-                } catch (RuntimeException e) {
-                    // Best effort: the delete must not depend on it.
-                }
-                turns.deleteByConversationId(turn.conversationId());
+                HealthDeletedRows deleted = store.get().deleteConversationReturningDays(turn.conversationId());
                 if (dirtyDays != null) {
-                    dirtyDays.markDeleted(days);
+                    // Unknown days fall back to the agent's whole retained range.
+                    dirtyDays.markDeletedRows(turn.conversationId(), turn.agentId() == null ? List.of() : List.of(turn.agentId()), deleted);
                 }
                 metrics.dropped(HealthMetrics.REASON_ERASED);
             }
@@ -320,10 +334,31 @@ public class HealthTurnRecorder {
         return fallback == null ? Set.of() : Set.of(fallback);
     }
 
+    /**
+     * Notes the row's days for the next flush. A mark lost with the node is
+     * recovered by the self-heal: an on-time row is found by its capture time, a
+     * late one by the stamp it was written with.
+     */
     private void markDirty(HealthTurn turn, Set<LocalDate> days) {
-        if (dirtyDays != null && turn.agentId() != null) {
-            dirtyDays.note(turn.agentId(), days);
+        if (dirtyDays == null || turn.agentId() == null) {
+            return;
         }
+        dirtyDays.note(turn.agentId(), days);
+    }
+
+    /**
+     * The time of this write when the row reaches the store late enough that the
+     * rollup's self-heal watermark (one {@link HealthRollupService#SELF_HEAL_GRACE}
+     * behind the clock) may already have passed its capture time — judged at half
+     * the grace, to leave room for clock skew between nodes — else {@code null}.
+     * The stamp is taken as the write starts, so the self-heal finds the row as
+     * long as the write commits within the grace of it (less the clock skew between
+     * nodes) — a looser bound than an on-time row's, whose capture time may already
+     * be half the grace old when its write starts.
+     */
+    Instant lateWrittenAt(HealthTurn turn) {
+        Instant now = clock.instant();
+        return turn.updatedAt() != null && turn.updatedAt().isBefore(now.minus(HealthRollupService.SELF_HEAL_GRACE.dividedBy(2))) ? now : null;
     }
 
     private static boolean due(AtomicLong last) {

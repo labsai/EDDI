@@ -5,7 +5,6 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.modules.rules.impl.RuleSet;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -15,8 +14,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Behavior rule condition that matches on the deployment environment and
- * optional agent tags. Composable with {@code actionmatcher} — a rule can emit
+ * Behavior rule condition that matches on the deployment environment.
+ * Composable with {@code actionmatcher} — a rule can emit
  * {@code force_cautious} that triggers a {@code langchain} task with
  * {@code counterweight.level=strict}.
  * <p>
@@ -26,16 +25,19 @@ import java.util.Map;
  * {
  *   "type": "deploymentContext",
  *   "configs": {
- *     "when": "production",
- *     "tagMatches": "high-risk"
+ *     "when": "production"
  *   }
  * }
  * }</pre>
  * <p>
  * Passes when the current deployment env (system property
  * {@code eddi.deployment.env} → env var {@code EDDI_DEPLOYMENT_ENV} → default
- * {@code "development"}) matches {@code when}, AND if {@code tagMatches} is
- * set, the current agent's tags list (from context) contains that value.
+ * {@code "development"}) matches {@code when}, ignoring case; a missing or
+ * blank {@code when} matches every environment.
+ * <p>
+ * A non-blank {@code tagMatches} is refused by
+ * {@link #validateConfiguration()}. It used to require the agent's tags to
+ * contain the value, but agents carry no tags, so such a rule could never fire.
  *
  * @since 6.0.0
  */
@@ -77,32 +79,28 @@ public class DeploymentContextCondition implements IRuleCondition {
         }
     }
 
+    /**
+     * Refuses a non-blank {@code tagMatches}. Nothing has ever written agent tags —
+     * {@code AgentConfiguration} has no tags field — so the condition always
+     * failed, and a safety rule such as "be cautious for high-risk agents in
+     * production" silently never fired. Refusing it names the rule when the ruleset
+     * is saved or deployed instead.
+     */
+    @Override
+    public void validateConfiguration() {
+        if (tagMatches != null && !tagMatches.isBlank()) {
+            throw new IllegalArgumentException(String.format("'%s' is not supported: agents carry no tags, so this condition could never"
+                    + " match. Remove it, or match a value the client sends with a 'contextmatcher' condition.", CONFIG_TAG_MATCHES));
+        }
+    }
+
     @Override
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
-        // Resolve current deployment env
-        String currentEnv = resolveDeploymentEnv();
-
-        // Check "when" match
-        if (when != null && !when.isBlank()) {
-            if (!when.equalsIgnoreCase(currentEnv)) {
-                return ExecutionState.FAIL;
-            }
+        if (when == null || when.isBlank()) {
+            return ExecutionState.SUCCESS;
         }
 
-        // Check "tagMatches" if configured
-        if (tagMatches != null && !tagMatches.isBlank()) {
-            IData<List<String>> tagsData = memory.getCurrentStep().getLatestData("agent:tags");
-            if (tagsData == null || tagsData.getResult() == null) {
-                return ExecutionState.FAIL;
-            }
-            boolean found = tagsData.getResult().stream()
-                    .anyMatch(tag -> tagMatches.equalsIgnoreCase(tag));
-            if (!found) {
-                return ExecutionState.FAIL;
-            }
-        }
-
-        return ExecutionState.SUCCESS;
+        return when.equalsIgnoreCase(resolveDeploymentEnv()) ? ExecutionState.SUCCESS : ExecutionState.FAIL;
     }
 
     /**

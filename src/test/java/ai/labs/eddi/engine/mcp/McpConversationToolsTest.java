@@ -71,7 +71,7 @@ class McpConversationToolsTest {
     private McpConversationTools tools;
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
         agentAdmin = mock(IRestAgentAdministration.class);
         AgentStore = mock(IRestAgentStore.class);
@@ -81,6 +81,8 @@ class McpConversationToolsTest {
         auditStore = mock(IRestAuditStore.class);
         AgentTriggerStore = mock(IRestAgentTriggerStore.class);
         userConversationStore = mock(IUserConversationStore.class);
+        // The claim is the store's default method; let it run over the stubs below.
+        lenient().when(userConversationStore.createOrAdopt(any())).thenCallRealMethod();
         RestAgentEngine = mock(IRestAgentEngine.class);
         // Default: lenient serialize returns empty JSON
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
@@ -570,7 +572,7 @@ class McpConversationToolsTest {
     @Test
     void chatManaged_noTriggerConfigured_returnsError() throws Exception {
         when(userConversationStore.readUserConversation("no_trigger", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+                .thenReturn(null);
         when(AgentTriggerStore.readAgentTrigger("no_trigger")).thenReturn(null);
 
         String result = tools.chatManaged("no_trigger", "user1", "hello", "production");
@@ -582,7 +584,7 @@ class McpConversationToolsTest {
     void chatManaged_happyPath_createsConversationAndSendsMessage() throws Exception {
         // No existing UserConversation
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+                .thenReturn(null);
 
         // Trigger exists with a deployment
         var trigger = new AgentTriggerConfiguration();
@@ -688,7 +690,7 @@ class McpConversationToolsTest {
         tools.chatManaged("support", "user1", "Hello!", "production");
 
         // Should clean up stale mapping and create a new one
-        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).deleteUserConversationIfMatches("support", "user1", "deleted-conv-id");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
     }
@@ -728,7 +730,7 @@ class McpConversationToolsTest {
         String result = tools.chatManaged("support", "user1", "Hello!", "production");
 
         assertFalse(result.contains("\"error\""), "expected a reply, got: " + result);
-        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).deleteUserConversationIfMatches("support", "user1", "purged-conv-id");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
     }
@@ -771,7 +773,7 @@ class McpConversationToolsTest {
         tools.chatManaged("support", "user1", "Hello!", "production");
 
         // Should delete ended conversation and create a new one
-        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).deleteUserConversationIfMatches("support", "user1", "ended-conv-id");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
     }
@@ -797,6 +799,7 @@ class McpConversationToolsTest {
         // Should NOT delete the mapping — transient errors must propagate,
         // not silently discard a valid conversation
         verify(userConversationStore, never()).deleteUserConversation(any(), any());
+        verify(userConversationStore, never()).deleteUserConversationIfMatches(any(), any(), any());
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Database connection timeout"));
@@ -843,13 +846,8 @@ class McpConversationToolsTest {
         verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
     }
 
-    @Test
-    void chatManaged_conversationCreationFails_returnsError() throws Exception {
-        // No existing UserConversation
-        when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
-
-        // Trigger exists
+    /** A trigger for "support" with one production deployment of AGENT_ID. */
+    private void givenSupportTrigger() throws Exception {
         var trigger = new AgentTriggerConfiguration();
         trigger.setIntent("support");
         var deployment = new AgentDeployment();
@@ -858,14 +856,136 @@ class McpConversationToolsTest {
         deployment.setInitialContext(Collections.emptyMap());
         trigger.setAgentDeployments(List.of(deployment));
         when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+    }
 
-        // Conversation creation fails — agent not deployed
+    /** Every turn on {@code conversationId} completes with an empty snapshot. */
+    private void givenTurnsComplete(String conversationId) throws Exception {
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq(conversationId), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+    }
+
+    @Test
+    void chatManaged_agentNotReady_returnsUnavailable() throws Exception {
+        // Startup or a rolling deploy: no version of the trigger's agent is ready.
+        // REST answers 503 + Retry-After; MCP used to answer a generic failure.
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(null);
+        givenSupportTrigger();
         when(conversationService.startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap()))
                 .thenThrow(new IConversationService.AgentNotReadyException("Agent not deployed"));
 
         String result = tools.chatManaged("support", "user1", "hello", "production");
 
-        assertTrue(result.contains("error"));
-        assertTrue(result.contains("Agent not deployed"));
+        assertTrue(result.contains("\"errorCode\":\"UNAVAILABLE\""), result);
+        assertTrue(result.contains("not ready yet; retry shortly"), result);
+        assertFalse(result.contains("Failed to chat"), result);
+        verify(userConversationStore, never()).createUserConversation(any());
+    }
+
+    @Test
+    void chatManaged_mappingReadFails_doesNotCreateASecondConversation() throws Exception {
+        // A store failure on the read is not "no mapping": creating one would leave
+        // the user's existing conversation unreachable.
+        when(userConversationStore.readUserConversation("support", "user1"))
+                .thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+        givenSupportTrigger();
+
+        String result = tools.chatManaged("support", "user1", "hello", "production");
+
+        assertTrue(result.contains("error"), result);
+        verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
+        verify(userConversationStore, never()).createUserConversation(any());
+    }
+
+    @Test
+    void chatManaged_concurrentFirstCall_adoptsWinnerAndEndsOwnConversation() throws Exception {
+        // Two first calls for the same intent and user: both find no mapping, both
+        // start a conversation, and the other one stored its mapping first.
+        var winner = new UserConversation("support", "user1", Environment.production, AGENT_ID, "winner-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(null).thenReturn(winner);
+        givenSupportTrigger();
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("own-conv-id", URI.create("eddi://conv/own-conv-id")));
+        doThrow(new IResourceStore.ResourceAlreadyExistsException("duplicate key"))
+                .when(userConversationStore).createUserConversation(any());
+        givenTurnsComplete("winner-conv-id");
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenAnswer(inv -> inv.getArgument(0).toString());
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertTrue(result.contains("conversationId=winner-conv-id"), result);
+        verify(conversationService).say(eq("winner-conv-id"), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
+        verify(conversationService, never()).say(eq("own-conv-id"), anyBoolean(), anyBoolean(), anyList(), any(InputData.class),
+                anyBoolean(), any(ConversationResponseHandler.class));
+        verify(conversationService).endConversation("own-conv-id", "system:lost-create-race");
+    }
+
+    @Test
+    void chatManaged_concurrentReplaceOfEndedConversation_keepsTheWinnersMapping() throws Exception {
+        // Both calls found the same ended conversation. The other one replaced it
+        // first, so the conditional delete here matches nothing and this call adopts
+        // the winner instead of deleting its fresh mapping.
+        var ended = new UserConversation("support", "user1", Environment.production, AGENT_ID, "ended-conv-id");
+        var winner = new UserConversation("support", "user1", Environment.production, AGENT_ID, "winner-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(ended).thenReturn(winner);
+        givenSupportTrigger();
+        when(RestAgentEngine.getConversationState("ended-conv-id")).thenReturn(ConversationState.ENDED);
+        when(userConversationStore.deleteUserConversationIfMatches("support", "user1", "ended-conv-id")).thenReturn(false);
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("own-conv-id", URI.create("eddi://conv/own-conv-id")));
+        doThrow(new IResourceStore.ResourceAlreadyExistsException("duplicate key"))
+                .when(userConversationStore).createUserConversation(any());
+        givenTurnsComplete("winner-conv-id");
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertFalse(result.contains("\"error\""), result);
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
+        verify(conversationService).say(eq("winner-conv-id"), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
+        verify(conversationService).endConversation("own-conv-id", "system:lost-create-race");
+    }
+
+    @Test
+    void chatManaged_claimFails_endsOwnConversation() throws Exception {
+        // The mapping cannot be stored at all: the conversation just started is
+        // unreachable, so it is ended rather than left live.
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(null);
+        givenSupportTrigger();
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("own-conv-id", URI.create("eddi://conv/own-conv-id")));
+        doThrow(new IResourceStore.ResourceStoreException("write timeout"))
+                .when(userConversationStore).createUserConversation(any());
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertTrue(result.contains("error"), result);
+        verify(conversationService).endConversation("own-conv-id", "system:lost-create-race");
+        verify(conversationService, never()).say(any(), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
+    }
+
+    @Test
+    void chatManaged_claimFailsUnchecked_endsOwnConversation() throws Exception {
+        // The MongoDB store lets driver failures through unchecked (PostgreSQL wraps
+        // them as ResourceStoreException). The conversation just started is just as
+        // unreachable, so it is ended on both stores.
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(null);
+        givenSupportTrigger();
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("own-conv-id", URI.create("eddi://conv/own-conv-id")));
+        doThrow(new IllegalStateException("Timed out while waiting for a server"))
+                .when(userConversationStore).createUserConversation(any());
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertTrue(result.contains("error"), result);
+        verify(conversationService).endConversation("own-conv-id", "system:lost-create-race");
+        verify(conversationService, never()).say(any(), anyBoolean(), anyBoolean(), anyList(), any(InputData.class), anyBoolean(),
+                any(ConversationResponseHandler.class));
     }
 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import jakarta.enterprise.inject.Instance;
@@ -75,7 +76,7 @@ class HealthRollupScheduleTest {
     }
 
     @Test
-    @DisplayName("an erasure reads the user's (agent, day)s before the delete and marks them dirty")
+    @DisplayName("an erasure marks the (agent, day)s its delete returned dirty")
     @SuppressWarnings("unchecked")
     void erasureMarksDays() {
         IHealthTurnStore turns = mock(IHealthTurnStore.class);
@@ -84,12 +85,12 @@ class HealthRollupScheduleTest {
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(dirty);
         Map<String, Set<LocalDate>> days = Map.of("agent", Set.of(LocalDate.of(2026, 11, 10)));
-        when(turns.agentDaysOfUser(eq("alice"), anyInt())).thenReturn(days);
-        when(turns.deleteByUserId("alice")).thenReturn(3L);
+        HealthDeletedRows deleted = new HealthDeletedRows(3L, days);
+        when(turns.deleteByUserIdReturningDays("alice")).thenReturn(deleted);
         HealthTurnGdprParticipant participant = new HealthTurnGdprParticipant(turns);
         participant.dirtyDays = instance;
 
         assertEquals(3L, participant.erase("alice"));
-        verify(dirty).markDeleted(days);
+        verify(dirty).markErasedRows(Set.of(), deleted);
     }
 }

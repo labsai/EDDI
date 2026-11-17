@@ -239,26 +239,6 @@ class SharedTaskListTest {
         assertEquals("Task A", executable.getFirst().subject());
     }
 
-    // --- 16. findTasksForAgent ---
-
-    @Test
-    void findTasksForAgent() {
-        var t1 = list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
-        var t2 = list.addTask(new SharedTaskList.TaskItem("Task 2", "desc", 1));
-        var t3 = list.addTask(new SharedTaskList.TaskItem("Task 3", "desc", 2));
-
-        list.assignTask(t1.id(), "agent-alpha", "Alpha");
-        list.assignTask(t2.id(), "agent-beta", "Beta");
-        list.assignTask(t3.id(), "agent-alpha", "Alpha");
-
-        var alphaTasks = list.findTasksForAgent("agent-alpha");
-        var betaTasks = list.findTasksForAgent("agent-beta");
-
-        assertEquals(2, alphaTasks.size(), "agent-alpha should have 2 tasks");
-        assertEquals(1, betaTasks.size(), "agent-beta should have 1 task");
-        assertTrue(alphaTasks.stream().allMatch(t -> "agent-alpha".equals(t.assignedAgentId())));
-    }
-
     // --- 17–18. Cycle detection ---
 
     @Test
@@ -537,12 +517,6 @@ class SharedTaskListTest {
     }
 
     // --- Additional branch coverage ---
-
-    @Test
-    void findTasksForAgent_null_returnsEmpty() {
-        list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
-        assertTrue(list.findTasksForAgent(null).isEmpty());
-    }
 
     @Test
     void assignTask_fromAssigned_throws() {

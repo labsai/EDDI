@@ -52,6 +52,8 @@ public final class HitlDecisionRecord {
     ApprovalCategories.ApprovalCategory category;
     String reasonCode;
     String note;
+    String planHash;
+    String planBinding;
     final Map<String, Object> legacy = new LinkedHashMap<>();
     final List<Unit> units = new ArrayList<>();
 
@@ -131,6 +133,17 @@ public final class HitlDecisionRecord {
 
     public HitlDecisionRecord note(String note) {
         this.note = note;
+        return this;
+    }
+
+    /**
+     * The plan the decision applied to and how it was bound to it (see
+     * {@code HitlPlanBinding}); both null when the decision was not admitted
+     * through a plan check (a cancellation).
+     */
+    public HitlDecisionRecord plan(String planHash, String planBinding) {
+        this.planHash = planHash;
+        this.planBinding = planBinding;
         return this;
     }
 

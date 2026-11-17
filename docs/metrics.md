@@ -6,13 +6,13 @@ E.D.D.I exposes comprehensive metrics via [Micrometer](https://micrometer.io/) i
 
 E.D.D.I ships three dashboards that the Kubernetes monitoring component and
 `docker-compose.monitoring.yml` provision into Grafana. The compose file also provisions a fourth,
-`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 22 panels, NATS cluster mode; see
+`eddi-cluster-dashboard.json` (uid `eddi-cluster`, 36 panels, NATS cluster mode; see
 [Clustering](clustering.md)), which the Kubernetes component does not ship:
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
 | **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 212 panels, 26 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 240 panels, 28 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
@@ -87,7 +87,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Platform Operator` · `Cluster mode (when eddi.messaging.type=nats)` · `Backup — Export, Import & Sync` ·
 `RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)` · `LLM Guardrails` ·
-`Conversation Ratings` · `Alerts`
+`Model Pricing` · `Team Budgets` · `Conversation Ratings` · `Alerts`
 
 ---
 
@@ -303,6 +303,7 @@ eddi_group_continue_count_total             # Continuation rounds
 eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
+eddi_group_approved_action_total{outcome}   # phase.onApproved calls: succeeded|failed|outcome_unknown|skipped
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
@@ -331,6 +332,24 @@ panel shows "no refusals" rather than "no data".
 eddi_team_budget_metering_total             # Charges of root-discussion spend to the owning team; tags: outcome (recorded|unavailable|error)
 eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup|handoff), reason (exhausted|tenant|unavailable)
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
+```
+
+### Spend-Control Change Metrics
+
+Writes to the model price catalog and tenant quotas over MCP, and the decisions on the looser ones
+([Spend-Control Changes](spend-control-changes.md)).
+
+```text
+eddi_spendcontrol_changes_total             # tags: kind (MODEL_PRICES|TENANT_QUOTA), result (APPLIED|PROPOSED|APPROVED|REJECTED|WITHDRAWN|STALE|EXPIRED)
+```
+
+### Input Parser Metrics
+
+The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The counter appears on the
+first consultation, so a deployment whose parsers have no `semanticFallback` shows no data.
+
+```text
+eddi_parser_semantic_fallback_total         # Turns the dictionaries did not understand that were sent to the embedding model; tags: outcome (match|no_match) — a provider failure, or a consultation skipped during the back-off after one, counts as no_match; not the provider request volume
 ```
 
 ### Scheduled Trigger Metrics
@@ -409,6 +428,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_conversation_titles_total{outcome}     # Conversation titles: auto / auto_skipped (already titled) / llm / llm_skipped (owner renamed meanwhile) / llm_empty / llm_busy / llm_refused_budget / llm_refused_unpriced / llm_error / error
 eddi_tenant_cost_reservation_total{outcome} # Hard-ceiling reservations (opt-in): reserved / refused / unavailable / release_failed
 eddi_tenant_cost_reservation_usd_total{direction} # USD held (held) and given back (released) by those reservations
 eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
@@ -489,7 +509,7 @@ eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
 backlog: work is arriving faster than it drains. Both coordinators register the
-same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+same seven meters (from their shared base class); `dead_letters > 0` means a turn failed and is waiting for an
 operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
 
 `dead_lettered_total` counts turns that failed after they had started (alert
@@ -696,8 +716,8 @@ eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: s
 Requests through the outbound HTTP facade: the built-in tools, the RAG crawler, OAuth token requests, attachment downloads, A2A peers and Slack (profile `default`), and remote agent sync (profile `internal-peer`). `httpcalls` and the LLM providers use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
 
 ```text
-eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)
-eddi_http_outbound_duration_seconds         # Exchange time, to the end of a buffered body or the headers of a streamed one; tags: profile, outcome
+eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, engine (jdk|vertx), method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)
+eddi_http_outbound_duration_seconds         # Exchange time, to the end of a buffered body or the headers of a streamed one; tags: profile, engine, outcome
 eddi_http_outbound_blocked_total            # Refused by policy; tags: profile, reason (ssrf|cap|redirect)
 eddi_http_outbound_bytes_total              # Response body bytes read into memory or a file; tag: profile
 ```
@@ -857,7 +877,7 @@ eddi_snippets_cache_misses_total            # Prompt-snippet cache misses
 eddi_counterweight_activation_count_total   # Counterweight activations; tag: level (normal|cautious|strict|unknown)
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
-eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
+eddi_guardrail_toolresult_count_total       # Tool results screened by the tool-result guardrail, whole and before truncation (a `summarize` summary is screened and counted again); tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output/tool-call guardrail fired; tags: phase (input|output|tool_call), type, action (block|redact|reprompt|warn)
 eddi_guardrail_toolcall_decisions_total     # One tool call screened by toolCallGuardrails; tags: stage (live|resume), outcome (allowed|rewritten|blocked|reprompted|undecided)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout|spend_refused)
@@ -916,6 +936,7 @@ eddi_health_rollup_lag_seconds      # Gauge: age of the oldest waiting agent day
 eddi_health_outcomes_sessions_total # Session outcome rows the outcome evaluation wrote (each re-evaluation counts again)
 eddi_health_outcomes_failures_total # Conversation evaluations that failed (the feed retries them for up to an hour, then with their next change or due time)
 eddi_health_outcomes_lag_seconds    # Gauge: how far the outcome evaluation's watermark is behind the clock (shared state, cached 10 s)
+eddi_health_outcomes_rating_overflow_total # Rating changes the outcome hand-off queue had no room for, or whose mark the store refused; tag: result (deferred = marked once it catches up or at the node's next pass | dropped = lost, with a rate-limited WARN; both should stay at zero)
 ```
 
 No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
@@ -1081,6 +1102,9 @@ eddi_dream_users_processed_total            # Users a dream cycle worked through
 eddi_dream_entries_pruned_total             # Stale memory entries removed
 eddi_dream_entries_summarized_total         # Entries folded into a consolidation
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
+eddi_dream_contradictions_contested_total   # Entries marked CONTESTED (mark_contested / supersede_older)
+eddi_dream_contradictions_superseded_total  # Older entries marked SUPERSEDED (supersede_older)
+eddi_dream_contradictions_cleared_total     # Contests lifted and superseded entries restored once the disagreement was gone
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
 eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
@@ -1105,7 +1129,17 @@ the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user
 did **not** make because the memory was written after the cycle read it — every Dream write is a
 compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
 on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
-a quieter hour helps.
+a quieter hour helps. An assessment Dream could not write for the same reason
+(`contradictionResolution`) counts here too.
+
+`contested` and `superseded` stay at zero under the default
+`contradictionResolution: keep_newest`, which only detects. With `mark_contested` or
+`supersede_older`, they count entries newly marked — an entry already marked is not counted
+again. `cleared` counts entries returned to `ACCEPTED` because the other side of the
+disagreement was rewritten, deleted or retired, and it is **not** limited to those two
+strategies: a stale verdict is lifted under every strategy, `keep_newest` included, so after
+switching back to the default `cleared` still rises while the next cycles lift the flags the
+earlier strategy left. See [user-memory.md](user-memory.md#contradiction-resolution).
 
 ### Conversation Summarization Metrics
 
@@ -1113,7 +1147,18 @@ a quieter hour helps.
 eddi_summarization_calls_total              # Rolling-summary generations attempted
 eddi_summarization_errors_total             # Rolling-summary generations that failed
 eddi_summarization_duration_seconds         # Summarization duration (timer)
+eddi_summary_citation_checks_total          # Summaries checked under citeSources, by source and outcome
 ```
+
+`eddi_summary_citation_checks_total` carries `source` (`conversation` for the rolling summary,
+`dream` for a Dream consolidation group) and `outcome`: `passed` (the first answer passed),
+`retried` (it failed and the one retry passed), `kept` (it failed and was stored anyway under
+`onValidationFailure: keep`) and `fallback` (it failed and was discarded — the previous summary,
+or for Dream the original entries, stay). It stays at zero unless `citeSources` is on. A steady
+`fallback` rate on `conversation` is worth a look: each one leaves the summary boundary where it
+was, so the next turn pays for another summarizer call. See
+[langchain.md](langchain.md#traceable-summaries-citesources) and
+[user-memory.md](user-memory.md#traceable-consolidation-citesources).
 
 ### RAG Ingestion Metrics
 
@@ -1272,7 +1317,7 @@ They cover availability (`EddiDown`, `EddiMetricsAbsent`, `EddiRestartLoop`),
 the 5xx ratio, the coordinator backlog and dead letters, pipeline task errors,
 executor saturation, LLM error ratio and p95 latency, the tool failure ratio, the
 vault, the Platform Operator gate and canary, audit drops, queue fill and chain
-collisions, quota-store failures, schedule and NATS dead letters, and heap after
+collisions, quota-store failures, schedule dead letters, and heap after
 GC. Every rule has a runbook in
 [monitoring-guide.md → Alert runbooks](monitoring/monitoring-guide.md#alert-runbooks),
 linked from its `runbook_url` annotation; `promtool test rules` cases in
@@ -1311,6 +1356,23 @@ GET    /llm/tools/costs/conversation/{conversationId}
 GET    /llm/tools/costs/tool/{toolName}
 POST   /llm/tools/costs/reset
 ```
+
+The history endpoint reads the conversation's stored tool-loop trace and answers
+`{"toolCalls": [...], "hasErrors": bool}`. Each call carries `toolName`,
+`callId`, `arguments`, `result`, `success` and `error`. `success` is false for a
+result the tool-outcome classifier (the one the repeat guard uses) reads as a
+failure, such as a non-2xx `httpCode`, an `{"error": ...}` object or an `Error:`
+string; for a call refused before it ran (argument schema, budget, quota,
+repeat guard, call cap, not-yet-activated LAZY tool, a gated call a human
+rejected or the resume refused); and for a result the tool-result guardrail
+blocked. `error` says why: the trace's own error code or message, the
+refusal's trace type (such as `hitl_rejected`), or the result's outcome
+(`failed_retryable`, `failed_terminal`, `not_executed`). Two kinds of call are
+not listed, because the trace cannot identify them: a call a
+`toolCallGuardrails` entry refused, and an approved call replayed from the
+HITL journal. The trace records no per-call timing, cost or cache hits, so the
+history does not report them; a conversation's tool spend comes from
+`/llm/tools/costs/conversation/{conversationId}`.
 
 > The pre-v6 prefix `/langchain/tools` still answers, because
 > `LegacyPathRewriteFilter` rewrites it to `/llm/tools`. That is a compatibility

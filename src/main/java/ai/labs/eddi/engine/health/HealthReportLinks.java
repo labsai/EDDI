@@ -199,7 +199,7 @@ public class HealthReportLinks {
         }
         String token = newToken();
         List<String> teams = accessGuard == null ? List.of() : accessGuard.currentTeamSubjects();
-        boolean admin = accessGuard != null && accessGuard.callerIsAdmin();
+        boolean admin = accessGuard != null && accessGuard.isAdmin();
         HealthReportLink link = new HealthReportLink("r-" + UUID.randomUUID(), agentId, hash(token), sections, p, now, creator,
                 now.plus(Duration.ofDays(days)), teams, admin);
         store.create(link);

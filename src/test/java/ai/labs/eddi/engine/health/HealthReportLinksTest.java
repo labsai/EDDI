@@ -220,7 +220,7 @@ class HealthReportLinksTest {
         // Creation snapshots the creator's teams and admin flag and is audited without
         // the token.
         when(guard.currentTeamSubjects()).thenReturn(List.of("team:ops"));
-        when(guard.callerIsAdmin()).thenReturn(true);
+        when(guard.isAdmin()).thenReturn(true);
         CreatedReportLink created = links.create("a", null, HealthReportLinks.DEFAULT_SECTIONS, null, "alice", "");
         ArgumentCaptor<HealthReportLink> stored = ArgumentCaptor.forClass(HealthReportLink.class);
         verify(store).create(stored.capture());

@@ -25,6 +25,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -53,26 +54,33 @@ import java.util.function.Predicate;
  * be re-issued, and the timeout schedule is re-armed.</li>
  * <li><b>Regular conversations stuck IN_PROGRESS without a bookmark</b>:
  * transitioned to EXECUTION_INTERRUPTED via CAS (unlocks say()).</li>
+ * <li><b>Group discussions left IN_PROGRESS or SYNTHESIZING by a crash</b>:
+ * cancelled. A group discussion persists a running state for its whole
+ * (potentially long) run, so the state alone does not tell a dead leg from a
+ * live one; the age does. On a single node every leg this process runs was
+ * started or resumed after the JVM started, and each of those transitions
+ * stamps {@code lastModified}, so a running discussion last written before the
+ * process started belongs to a leg that died with the previous process. Nothing
+ * resumes it, and continue/follow-up need COMPLETED, so it used to stay stuck
+ * until someone cancelled it by hand.</li>
  * </ul>
- *
- * <p>
- * Group discussions that are IN_PROGRESS are never touched — unlike the regular
- * surface, a group discussion legitimately persists IN_PROGRESS for its whole
- * (potentially long) run, so a crashed leg cannot be distinguished from an
- * active one on another pod.
  *
  * <p>
  * <b>Cluster mode:</b> with {@code eddi.messaging.type=nats} this observer runs
  * no startup pass; {@code ClusterHitlRecovery} sweeps periodically under leader
- * election instead. The caveat below applies to a startup pass only.
+ * election instead, and does not sweep running group discussions (a group holds
+ * no conversation lease that could prove its leg dead). The caveat below
+ * applies to a startup pass only.
  *
  * <p>
  * <b>Rolling-restart caveat:</b> during a rolling restart, another pod may be
  * actively resuming a conversation this observer sees as stuck IN_PROGRESS. The
  * restore is CAS-guarded and the active resume's final store wins, but a brief
- * window exists in which a second resume could be accepted. Set
+ * window exists in which a second resume could be accepted. Worse for groups: a
+ * discussion another pod has been running since before this pod started looks
+ * interrupted, and is cancelled. Set
  * {@code eddi.hitl.crash-recovery.recover-in-progress=false} in multi-pod
- * deployments if this risk is unacceptable.
+ * deployments without NATS; it turns off both IN_PROGRESS recoveries.
  *
  * <p>
  * Config: {@code eddi.hitl.crash-recovery.enabled} (default {@code true}),
@@ -122,6 +130,12 @@ public class HitlCrashRecoveryObserver {
     /** Upper bound of paused conversations scanned per recovery pass. */
     private static final int RECOVERY_SCAN_LIMIT = 10_000;
 
+    /**
+     * The states a group leg persists while it runs — what a crash leaves behind.
+     */
+    private static final List<GroupConversationState> RUNNING_GROUP_STATES = List.of(
+            GroupConversationState.IN_PROGRESS, GroupConversationState.SYNTHESIZING);
+
     /** Upper bound of paused conversations scanned per retention sweep. */
     private static final int RETENTION_SCAN_LIMIT = 10_000;
 
@@ -154,19 +168,32 @@ public class HitlCrashRecoveryObserver {
         Thread.ofVirtual().name("hitl-crash-recovery").start(this::runRecovery);
     }
 
-    /** Package-private for tests — runs one full recovery pass synchronously. */
+    /** Runs one full recovery pass synchronously, against this JVM's start. */
     void runRecovery() {
+        runRecovery(Instant.ofEpochMilli(ManagementFactory.getRuntimeMXBean().getStartTime()));
+    }
+
+    /**
+     * Package-private for tests — one full recovery pass, synchronously.
+     *
+     * @param processStart
+     *            when this process started: a running group discussion last written
+     *            before it belongs to a leg that died with an earlier process
+     */
+    void runRecovery(Instant processStart) {
         LOGGER.info("HITL crash recovery running...");
         int rearmedRegular = repairRegularPaused();
         int recoveredInProgress = recoverRegularInProgress();
         // Two independent sweeps: a failing AWAITING_APPROVAL query must not
         // silently skip the AWAITING_HUMAN_INPUT re-arm (I6), or vice versa.
         int rearmedGroup = repairGroupPaused() + repairGroupHumanPaused();
+        int cancelledGroups = cancelInterruptedGroups(processStart);
 
-        if (rearmedRegular > 0 || recoveredInProgress > 0 || rearmedGroup > 0) {
+        if (rearmedRegular > 0 || recoveredInProgress > 0 || rearmedGroup > 0 || cancelledGroups > 0) {
             LOGGER.warnf("HITL crash recovery: re-armed %d regular + %d group timeout schedule(s), "
-                    + "recovered %d stuck IN_PROGRESS conversation(s).",
-                    rearmedRegular, rearmedGroup, recoveredInProgress);
+                    + "recovered %d stuck IN_PROGRESS conversation(s), "
+                    + "cancelled %d group discussion(s) interrupted by the restart.",
+                    rearmedRegular, rearmedGroup, recoveredInProgress, cancelledGroups);
         } else {
             LOGGER.info("HITL crash recovery: nothing to repair.");
         }
@@ -404,6 +431,52 @@ public class HitlCrashRecoveryObserver {
             LOGGER.warnf("Error during IN_PROGRESS recovery: %s", e.getMessage());
             return 0;
         }
+    }
+
+    /**
+     * Cancels the group discussions a crash left running (see the class Javadoc for
+     * why a write older than the process start marks a dead leg). Gated like the
+     * regular IN_PROGRESS recovery, and the startup pass only:
+     * {@link #runClusterRecovery} never calls it.
+     * <p>
+     * Through {@link IGroupConversationService#cancelDiscussion}, the path a manual
+     * cancel of a stored discussion takes: a state CAS (a writer that moved the
+     * discussion on since the scan wins), and the HITL timeout schedule removed. A
+     * standing team's next cadence fire then sees CANCELLED and returns the pulled
+     * backlog tasks to PENDING. Cancelled, not restored: unlike a regular turn, a
+     * resumed group leg keeps no bookmark to restore — the approve CAS clears it.
+     * Each state is scanned on its own, so a failing query skips only that state.
+     */
+    private int cancelInterruptedGroups(Instant processStart) {
+        if (!recoverInProgress) {
+            return 0;
+        }
+        int count = 0;
+        for (GroupConversationState state : RUNNING_GROUP_STATES) {
+            try {
+                var running = groupConversationStore.findByState(state, null, RECOVERY_SCAN_LIMIT);
+                for (GroupConversation gc : running) {
+                    Instant lastModified = gc.getLastModified();
+                    if (lastModified == null || !lastModified.isBefore(processStart)) {
+                        continue; // unknown age, or a leg this process started
+                    }
+                    String groupConversationId = gc.getId();
+                    try {
+                        if (groupConversationService.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL)) {
+                            LOGGER.warnf("Cancelled group discussion %s interrupted by a restart (%s, last written %s)",
+                                    groupConversationId, state, lastModified);
+                            count++;
+                        }
+                    } catch (Exception e) {
+                        LOGGER.warnf("Failed to cancel interrupted group discussion %s: %s",
+                                groupConversationId, e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Error during interrupted group discussion recovery (%s): %s", state, e.getMessage());
+            }
+        }
+        return count;
     }
 
     private int repairGroupPaused() {

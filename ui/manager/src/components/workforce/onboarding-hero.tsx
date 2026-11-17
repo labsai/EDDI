@@ -11,7 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { BrandIcon } from "@/components/layout/brand-logo";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";

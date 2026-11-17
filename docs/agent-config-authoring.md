@@ -17,7 +17,7 @@ EDDI v6 uses **Qute templates** with `{expression}` syntax, NOT Thymeleaf `[[${e
 ❌ WRONG:     {properties.agentName.valueString}  → fails at runtime (String has no .valueString)
 ```
 
-This is because `ConversationProperties.put()` stores `property.getValueString()` (or `getValueObject()`, etc.) directly into the internal `propertiesMap`. By the time templates see it, the Property wrapper is gone.
+This is because `ConversationProperties.toMap()` unwraps each `Property` to its value (`valueString`, `valueObject`, etc.) every time the template map is built, and omits properties whose value is null. By the time templates see it, the Property wrapper is gone.
 
 ### Template variables available in all contexts
 
@@ -100,7 +100,7 @@ Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 7 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
+> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 
@@ -213,7 +213,7 @@ request is written to conversation memory. Disable with
 
 ### Requesting specialized input fields from the UI
 
-The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both the **Manager** (`SecretInputField` in `ui/manager`'s `secret-input-field.tsx`, rendered by `chat-panel.tsx`) and the **Chat UI** (`SecretInput.tsx` in `ui/chat`) handle this natively.
 
 ```json
 {
@@ -226,7 +226,7 @@ The output system supports an `inputField` output type that tells the UI to swit
 }
 ```
 
-Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+Supported `subType` values: `"password"` (the default when omitted), `"text"`, `"email"`. The Chat UI masks and sends only a `password` response as a secret turn; the Manager sends the response of all three subtypes as a secret turn and masks it in the conversation. The item also accepts `defaultValue` and a `validation` object (`minLength`, `maxLength`, `validationErrorMessage`). Neither the Chat UI nor the Manager enforces `validation`, so a response can be shorter or longer than the limits; validate it in the agent's own rules. A `sizematcher` is not a safe length check for this: it reads a numeric string as a number, so `"123"` has size 123 and passes a minimum of 8. Do not rely on it to enforce a minimum length for numeric input. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
 
@@ -305,9 +305,121 @@ most sessions and are not mapped yet.
 
 The save is refused (400 naming the field) for an unknown outcome, a reserved
 action that cannot be mapped, an empty or overlong action name, more than 100
-mappings, or a window of an unknown origin or outside 1–720 hours. An agent that
-reached the store another way (a ZIP import of an older version) is read
-leniently: an invalid entry is ignored.
+mappings, or a window of an unknown origin or outside 1–720 hours. A `create`
+or `merge` ZIP import runs the same checks before it writes anything, snippets
+and connections included, and is refused with the same 400. An `upgrade` import
+or a sync that adopts the source agent's settings runs every check the agent
+update applies to them (these, plus HITL, ratings, continuation, Dream and
+presentation) before its first write, and is refused with the same 400 (a
+signing flag the target cannot honour is turned off with a warning instead):
+nothing is written, and a batch sync reports it on that agent's row. No
+`healthConfig` that a save accepted is refused either way. An agent
+stored without them — written by hand, say — is read leniently: an invalid
+entry is ignored.
+
+## Agent Presentation (`appearance`, `conversationControls`)
+
+Two optional blocks on the **agent** configuration decide how chat windows show
+it. Both are served — together with the name, the review notice and the rating
+controls — by `GET /agents/{agentId}/profile`, which answers anyone who may
+*use* the agent, so a chat client reads them before the first message. They
+follow the deployed version, like the rest of the profile.
+
+```json
+"appearance": {
+  "displayName": "Ava",
+  "avatar": "https://cdn.example.com/ava.png",
+  "accentColor": "#4f46e5",
+  "starters": ["Track my order", "Talk to a human"]
+},
+"conversationControls": {
+  "undo": true,
+  "redo": true,
+  "attachments": false,
+  "rating": true,
+  "quickReplies": true,
+  "streaming": true,
+  "rawHtml": false
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `appearance.displayName` | the agent's name | Name the chat shows; ≤ 80 characters, not blank, no control characters |
+| `appearance.avatar` | none | An `https` URL (no credentials in it), or a `data:image/png`, `jpeg`, `gif` or `webp` base64 URI of ≤ 64 KB. SVG and plain `http` are refused. The viewer's browser loads it, never EDDI, so the Chat UI's `img-sources` policy applies ([chat-ui-embedding.md](chat-ui-embedding.md#3-images-in-agent-output)) |
+| `appearance.accentColor` | the theme's | `#rgb` or `#rrggbb` |
+| `appearance.starters` | `[]` | ≤ 6 one-click starters of ≤ 200 characters, sent as the user's message exactly as written |
+| `conversationControls.undo` · `redo` · `attachments` · `quickReplies` · `streaming` | shown | `false` hides the control; absent keeps it |
+| `conversationControls.rating` | shown | `false` hides the rating controls `ratingConfig` enables; it cannot switch ratings on |
+| `conversationControls.rawHtml` | **`false`** | The configured default, as the profile reports it: `true` asks clients to render HTML in the agent's replies (through their sanitizer), absent or `false` to show it as text. **The Chat UI widget does not apply it yet** and still renders HTML for every agent; see the upgrade note |
+
+The profile returns `conversationControls` with every default applied
+(booleans, never absent), and `appearance` as stored or `null`. These are
+presentation switches: hiding undo does not disable the undo endpoint. A save
+with an invalid value answers 400 naming the field — on every write path,
+including ZIP import and agent sync, which carry both blocks unchanged.
+
+> **Upgrade note — `rawHtml` defaults to off.** From 6.7.0 the profile reports
+> `rawHtml: false` for every agent that does not set it. That is the configured
+> default, not yet what the widget does: the Chat UI keeps rendering HTML in
+> every agent's replies until the release whose widget reads
+> `conversationControls`, so leaving `rawHtml` off changes nothing visible today.
+> An agent whose replies are meant to contain HTML should get
+> `"conversationControls": { "rawHtml": true }` now, so it keeps rendering once
+> the widget follows the setting; see
+> [chat-ui-embedding.md](chat-ui-embedding.md#upgrading-html-in-replies-is-off-by-default).
+
+## Conversation Titles (`titleGeneration`)
+
+Every conversation gets a title, shown in the owner's conversation list
+(`GET /conversationstore/conversations` returns `title`, `titleSource` and
+`pinned` on each descriptor). By default it is the **first user message that was
+not secret**, whitespace collapsed and cut at a word to
+`eddi.conversations.title-max-length` characters (default 80). A turn is never
+used when the client flagged its input `secretInput` (a secret `inputField` does
+that), when a `scope: "secret"` property vaulted the input, when the input
+carries a secret context value, or when an input guardrail withheld it; the next
+usable message titles the conversation instead, and with none it stays untitled.
+
+The owner renames or pins a conversation with
+`PATCH /conversationstore/conversations/{conversationId}` and a body
+`{"title": "…", "pinned": true}` (either field). Owner or `eddi-admin` only; a
+title is ≤ 200 characters. **A title the owner set is never replaced** by a
+generated one.
+
+`titleGeneration` on the agent opts into a model-written title instead:
+
+```json
+"titleGeneration": {
+  "enabled": true,
+  "llmProvider": "openai",
+  "llmModel": "gpt-4o-mini",
+  "parameters": { "apiKey": "${vault:openai-key}" },
+  "inputPricePer1M": 0.15,
+  "outputPricePer1M": 0.60,
+  "maxLength": 60
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Ask a model for the title after the first exchange |
+| `llmProvider`, `llmModel` | — | Required when enabled; a small model is plenty |
+| `parameters` | `{}` | Credentials and endpoint. A background call has no task to inherit them from (as for Dream), so set them here — as vault references |
+| `inputPricePer1M`, `outputPricePer1M` | catalog price | Prices for the cost charge; absent takes the Model Prices catalog's |
+| `maxLength` | `60` | 10–200 characters; a longer answer is cut |
+| `instructions` | standard wording | Replaces the instruction to the model, ≤ 2000 characters |
+
+The call runs once per conversation, in the background — it never delays the
+turn. It sees the first exchange as stored, secret input already replaced by its
+placeholder. It is refused when the tenant's cost budget is spent or the model is
+unpriced under a strict pricing policy, and its priced spend is charged to the
+tenant budget and reported to spend sinks as `CONVERSATION_TITLE`. If it fails,
+the default title stays. Outcomes are counted on `eddi.conversation.titles`.
+
+Titles are conversation content: GDPR export carries each conversation's
+`title` and `pinned`, and erasure removes them with the conversation's
+descriptor ([gdpr-compliance.md](gdpr-compliance.md)).
 
 ## ZIP Structure for Agent Import
 
@@ -400,5 +512,7 @@ Always use v6 canonical URIs in new configs:
 - HTTP call template syntax. Do not copy its request-body pattern: it splices free-text input such as the system prompt into JSON string literals, which a value like `hi","deploy":true` can break out of. In your own configs serialise values with `{json:serialize(properties.x)}` (see [HTTP Calls](httpcalls.md)). The fixture also uses the legacy key `retryHttpCallInstruction` (a `@JsonAlias`; write `retryApiCallInstruction`) and sets `expressionsAsActions: true` in its behavior config, which is a simplification: keep it off when an action triggers something that matters
 - Output with quick replies
 - Provider-aware branching (local vs. cloud LLM providers). Its provider chooser is a worked example, not a provider catalogue — [LLM Integration](langchain.md) is the source of truth for what EDDI supports, so don't "complete" the fixture to match it.
+
+`docs/agent-configs/google-workspace-tools/` is the LLM-agent counterpart: a `PER_USER` OAuth connection under `connections/` and two httpcalls configurations used as LLM tools, each with an `argumentSchema`. It is the worked example for `${connection:…}` headers and for building a value Gmail wants base64url-encoded with `{encoder:base64Url(...)}` — see [Google Workspace](google-workspace.md).
 
 **For contributors:** two unit tests sweep `docs/agent-configs`, so breaking this config fails the plain unit run — but mind what they actually check. `StrictBoundaryShippedConfigsTest` parses only files whose suffix is in its `BY_SUFFIX` map (descriptors, patches and unmapped names are counted as *skipped*, not passed), and `RuleSetStoreShippedRulesetsTest` validates only documents containing `behaviorGroups`. Neither opens a ZIP. So a green sweep means "the config documents this fixture supplies still parse and still save", not "every file here is valid".

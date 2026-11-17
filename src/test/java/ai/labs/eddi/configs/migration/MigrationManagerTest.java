@@ -923,27 +923,44 @@ class MigrationManagerTest {
         }
     }
 
-    // ─── isCurrentlyRunning guard ────────────────────────────────
+    // ─── every call reports completion ────────────────────────────────
 
+    /**
+     * Concurrent callers are serialised by the method being {@code synchronized}.
+     * There used to be a running flag as well, which only a call from the same
+     * thread could ever see - and that call was then skipped and its callback never
+     * run, leaving whoever waited on it waiting.
+     */
     @Nested
-    @DisplayName("isCurrentlyRunning guard")
-    class ReentrancyGuard {
+    @DisplayName("every call reports completion")
+    class EveryCallCompletes {
 
         @Test
-        @DisplayName("concurrent call should not execute migration twice")
-        void concurrentCallGuarded() {
+        @DisplayName("two calls in a row both complete")
+        void sequentialCallsBothComplete() {
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION))
                     .thenReturn(new MigrationLog(MIGRATION_CONFIRMATION));
 
-            // First call
             var completed1 = new boolean[]{false};
             migrationManager.startMigrationIfFirstTimeRun(() -> completed1[0] = true);
             assertTrue(completed1[0]);
 
-            // Second call — should also work since isCurrentlyRunning is reset
             var completed2 = new boolean[]{false};
             migrationManager.startMigrationIfFirstTimeRun(() -> completed2[0] = true);
             assertTrue(completed2[0]);
+        }
+
+        @Test
+        @DisplayName("a call made from a completion callback runs its own callback too")
+        void callFromTheCallbackCompletes() {
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION))
+                    .thenReturn(new MigrationLog(MIGRATION_CONFIRMATION));
+
+            var nestedCompleted = new boolean[]{false};
+            migrationManager.startMigrationIfFirstTimeRun(
+                    () -> migrationManager.startMigrationIfFirstTimeRun(() -> nestedCompleted[0] = true));
+
+            assertTrue(nestedCompleted[0], "the nested call must not be skipped with its callback dropped");
         }
     }
 

@@ -134,9 +134,17 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         CurrentConnection current = requireCurrentConnection(name);
         ConnectionConfiguration connection = current.configuration();
 
-        if (connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE) {
-            throw new BadRequestException("Connection '" + name + "' is " + connection.getAuthType()
-                    + ", which needs no per-user authorization. Only OAUTH2_AUTHORIZATION_CODE connections are linked by a user.");
+        // The same shape the callback insists on before it redeems the code. A write
+        // can no longer store an authorization-code connection on another binding, but
+        // one saved before that rule still loads, and letting it through here sent the
+        // user across the provider's consent screen only to come back to
+        // exchange_failed.
+        if (!takesPerUserGrants(connection)) {
+            throw new BadRequestException(connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE
+                    ? "Connection '" + name + "' is " + connection.getAuthType()
+                            + ", which needs no per-user authorization. Only OAUTH2_AUTHORIZATION_CODE connections are linked by a user."
+                    : "Connection '" + name + "' is OAUTH2_AUTHORIZATION_CODE with binding " + connection.getBinding()
+                            + ", so an account linked to it could never be used. Set binding PER_USER to link accounts.");
         }
         endpointAllowlist.require(connection.getOauth().getAuthorizationUrl(), "oauth.authorizationUrl");
         endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
@@ -325,7 +333,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         }
 
         try {
-            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientSecret(connection), code, oauthState.getCodeVerifier(),
+            TokenResponse token = tokenClient.authorizationCode(connection, resolveClientCredential(connection), code, oauthState.getCodeVerifier(),
                     oauthState.getRedirectUri());
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
@@ -632,10 +640,12 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return name;
     }
 
-    private String resolveClientSecret(ConnectionConfiguration connection) {
-        // Checked against the token endpoint, where the client secret is sent.
-        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+    private String resolveClientCredential(ConnectionConfiguration connection) {
+        // Checked against the token endpoint, where the client secret — or an
+        // assertion signed by the private key — is sent.
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().clientCredentialReference(connection.getAuthType()),
+                connection.getOauth().getTokenUrl(), connection.getName(),
+                connection.getOauth().clientCredentialDescription(connection.getAuthType()));
     }
 
     /**
@@ -779,10 +789,10 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * work has one place to change. Until {@code TenantContext} lands this is the
      * default tenant, which is also what every connection document defaults to.
      * <p>
-     * It does not move alone. {@link #requireConnection} looks the connection up
-     * under the same default and must take its tenant from the same source;
-     * {@code ConnectionConfiguration.tenantId} has to be populated from the tenant
-     * context rather than from the stored document; and
+     * It does not move alone. {@link #requireCurrentConnection} looks the
+     * connection up under the same default and must take its tenant from the same
+     * source; {@code ConnectionConfiguration.tenantId} has to be populated from the
+     * tenant context rather than from the stored document; and
      * {@code RestConnectionStore.requireDefaultTenant()}, which today refuses any
      * other tenant at the write boundary precisely because this method cannot see
      * one, comes out at that point. Changing any one of the four on its own files a

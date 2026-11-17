@@ -265,6 +265,24 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("a delete that read v1 before a permanent removal erased it leaves nothing behind")
+        void deleteRacingAPermanentRemovalDoesNotResurrectTheResource() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // the delete read v1, then the erasure ran to completion, then the delete
+            // arrives
+            var tombstone = storage.newHistoryResourceFor(v1, true);
+            storage.removeAllPermanently(id);
+
+            storage.storeHistoryAndRemove(tombstone, id, 1);
+
+            assertNull(storage.readHistory(id, 1), "the erased resource's data must not come back as a tombstone");
+            assertNull(storage.readHistoryLatest(id));
+            assertEquals(-1, storage.getCurrentVersion(id));
+        }
+
+        @Test
         @DisplayName("replaceHistory rewrites an existing history row and reports a missing one")
         void replaceHistory() throws Exception {
             var id = UUID.randomUUID().toString();

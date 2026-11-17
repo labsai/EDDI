@@ -18,6 +18,7 @@ import ai.labs.eddi.backup.model.UpgradeResult;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.rest.RestAgentStore;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -68,6 +69,7 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -194,6 +196,42 @@ public class UpgradeExecutor {
      *            whether the new agent version continues the previous one's
      *            compatibility generation
      */
+    /**
+     * Refuses, before the caller writes anything of its own, agent settings that
+     * {@link #executeUpgrade} would refuse: the same preview, the same selection,
+     * the same checks. A ZIP upgrade imports the archive's connections before it
+     * calls the upgrade, and a refusal there could only roll them back on a best
+     * effort basis; checked here first, nothing is written. Settings the upgrade
+     * would not adopt (no change, or an unselected conflict) are not checked.
+     *
+     * @throws jakarta.ws.rs.BadRequestException
+     *             naming the offending field
+     */
+    public void checkAdoptedSettings(IResourceSource source, String targetAgentId, Set<String> selectedSourceIds) throws IOException {
+        if (resourceAccessGuard != null) {
+            resourceAccessGuard.requireAccess(targetAgentId, AccessLevel.EDIT, "agent");
+        }
+        ImportPreview preview = structuralMatcher.buildPreview(source, targetAgentId, true);
+        String agentSettings = adoptedSettings(preview, selectedSourceIds, new Outcome());
+        if (agentSettings != null) {
+            validateAdoptedSettings(agentSettings);
+        }
+    }
+
+    /**
+     * The source agent's settings the upgrade will write: the preview's agent row
+     * when it is an UPDATE, a CONFLICT only when named; {@code null} otherwise.
+     */
+    private String adoptedSettings(ImportPreview preview, Set<String> selectedSourceIds, Outcome outcome) {
+        ResourceDiff agentDiff = preview.resources().stream()
+                .filter(diff -> "agent".equals(diff.resourceType()))
+                .findFirst().orElse(null);
+        DiffAction agentAction = agentDiff != null && isSelected(selectedSourceIds, agentDiff.sourceId())
+                ? resolveConflict(agentDiff, selectedSourceIds, "agent", agentDiff.name(), outcome)
+                : null;
+        return agentAction == DiffAction.UPDATE ? agentDiff.sourceContent() : null;
+    }
+
     public UpgradeResult executeUpgrade(IResourceSource source,
                                         String targetAgentId,
                                         Set<String> selectedSourceIds,
@@ -222,6 +260,23 @@ public class UpgradeExecutor {
             // Build a lookup: sourceId → ResourceDiff
             Map<String, ResourceDiff> diffMap = preview.resources().stream()
                     .collect(Collectors.toMap(ResourceDiff::sourceId, d -> d, (a, b) -> a));
+
+            // The agent's own settings — HITL, capabilities, memory policy, channels.
+            // Only workflows were ever written, so a changed setting showed as an
+            // agent UPDATE in the preview and then never arrived. The preview's
+            // source content is already rewritten onto the target (its workflows, its
+            // identity, its secrets), so it is exactly what is written.
+            // A CONFLICT — settings changed here since the last sync — is taken only
+            // when named; the workflow changes below are written either way.
+            String agentSettings = adoptedSettings(preview, selectedSourceIds, outcome);
+
+            // Refused before the first write. The agent store checks these settings
+            // only at the agent update, the LAST write: an invalid healthConfig or
+            // HITL gate then failed the run with a generic 500 after the snippets,
+            // extensions and workflows had landed, and none of them were rolled back.
+            if (agentSettings != null) {
+                validateAdoptedSettings(agentSettings);
+            }
 
             // 2. Process snippets first (they must exist before other resources reference
             // them)
@@ -352,21 +407,6 @@ public class UpgradeExecutor {
                 }
             }
 
-            // The agent's own settings — HITL, capabilities, memory policy, channels.
-            // Only workflows were ever written, so a changed setting showed as an
-            // agent UPDATE in the preview and then never arrived. The preview's
-            // source content is already rewritten onto the target (its workflows, its
-            // identity, its secrets), so it is exactly what is written.
-            ResourceDiff agentDiff = preview.resources().stream()
-                    .filter(diff -> "agent".equals(diff.resourceType()))
-                    .findFirst().orElse(null);
-            // A CONFLICT — settings changed here since the last sync — is taken only
-            // when named; the workflow changes above are written either way.
-            DiffAction agentAction = agentDiff != null && isSelected(selectedSourceIds, agentDiff.sourceId())
-                    ? resolveConflict(agentDiff, selectedSourceIds, "agent", agentDiff.name(), outcome)
-                    : null;
-            String agentSettings = agentAction == DiffAction.UPDATE ? agentDiff.sourceContent() : null;
-
             boolean agentMayChange = !updatedWorkflowUris.isEmpty()
                     || !newWorkflowUris.isEmpty()
                     || !removedWorkflowIds.isEmpty()
@@ -433,6 +473,8 @@ public class UpgradeExecutor {
         private Boolean compatible;
         private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
+        /** See {@link UpgradeResult#warnings()}. */
+        private final List<String> warnings = new ArrayList<>();
         /**
          * Target resource id -> the version this run's own update produced. A resource
          * two target workflows share is written once per workflow, and the second write
@@ -454,7 +496,8 @@ public class UpgradeExecutor {
 
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
             return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
-                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null);
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null,
+                    agentUpdated ? warnings : List.of());
         }
     }
 
@@ -1498,20 +1541,6 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Whether the source workflow's steps may replace the target's, or the reason
-     * they may not.
-     * <p>
-     * Only when both sides wire up the same extensions. A source step referencing
-     * something the target workflow does not have would be written pointing at a
-     * resource id from the other instance — a pipeline step loading a config that
-     * is not in this database. That is the same refusal
-     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
-     * the step that would reference it.
-     *
-     * @return null when the source config can be adopted, otherwise the reason for
-     *         the operator
-     */
-    /**
      * A copy of the workflow whose steps' maps and lists are its own, so repointing
      * a reference in it leaves the original as it was.
      */
@@ -1550,6 +1579,20 @@ public class UpgradeExecutor {
         return value;
     }
 
+    /**
+     * Whether the source workflow's steps may replace the target's, or the reason
+     * they may not.
+     * <p>
+     * Only when both sides wire up the same extensions. A source step referencing
+     * something the target workflow does not have would be written pointing at a
+     * resource id from the other instance — a pipeline step loading a config that
+     * is not in this database. That is the same refusal
+     * {@link #processWorkflowExtensions} makes for a CREATE extension, applied to
+     * the step that would reference it.
+     *
+     * @return null when the source config can be adopted, otherwise the reason for
+     *         the operator
+     */
     private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs,
                                          Set<String> createdForAdoption) {
         for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {
@@ -1648,6 +1691,22 @@ public class UpgradeExecutor {
     // ==================== Agent Config Update ====================
 
     /**
+     * Refuses agent settings the agent update would refuse, with the same 400
+     * naming the field ({@link RestAgentStore#validateSettings}). They are the
+     * preview's source content; the workflow list is not checked here, since the
+     * update replaces it with the target's own, and neither is the signing flag,
+     * which {@link #signOnlyIfTargetCan} turns off rather than refuses. The refusal
+     * is a {@code BadRequestException}, which {@link #executeUpgrade} passes on as
+     * is.
+     */
+    private void validateAdoptedSettings(String adoptedSettings) throws IOException {
+        AgentConfiguration adopted = jsonSerialization.deserialize(adoptedSettings, AgentConfiguration.class);
+        if (adopted != null) {
+            RestAgentStore.validateSettings(adopted);
+        }
+    }
+
+    /**
      * Updates the agent configuration:
      * <ul>
      * <li>Takes the source's agent-level settings, when the preview said they
@@ -1716,6 +1775,7 @@ public class UpgradeExecutor {
                 // StructuralMatcher.adoptableAgentJson.
                 adopted.setIdentity(current.getIdentity());
                 adopted.setWorkflows(originalWorkflows);
+                signOnlyIfTargetCan(agentId, adopted, outcome);
                 String adoptedJson = jsonSerialization.serialize(adopted);
                 settingsChanged = adoptedJson == null || !adoptedJson.equals(jsonSerialization.serialize(current));
             }
@@ -1726,6 +1786,11 @@ public class UpgradeExecutor {
                 return null;
             }
             AgentConfiguration agentConfig = settingsChanged ? adopted : current;
+            if (!settingsChanged) {
+                // The target's own flag: written back unchanged, it would be refused all
+                // the same, and with it every workflow change this run made.
+                signOnlyIfTargetCan(agentId, agentConfig, outcome);
+            }
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
@@ -1754,6 +1819,29 @@ public class UpgradeExecutor {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Turns {@code signInterAgentMessages} off in {@code config}, and says so in
+     * the result's warnings, when the target agent cannot sign. A sync never
+     * replaces the target's identity — its private keys are this instance's — so
+     * the source's "sign" is only honoured where the target's own newest key is
+     * usable; otherwise the agent save would be refused, and with it every workflow
+     * change this run wrote.
+     */
+    private void signOnlyIfTargetCan(String agentId, AgentConfiguration config, Outcome outcome) {
+        var security = config.getSecurity();
+        if (security == null || !security.isSignInterAgentMessages()) {
+            return;
+        }
+        String problem = agentStore.signingKeyProblem(agentId);
+        if (problem == null) {
+            return;
+        }
+        security.setSignInterAgentMessages(false);
+        String warning = "Agent " + agentId + ": signInterAgentMessages was turned off: " + problem;
+        outcome.warnings.add(warning);
+        LOGGER.warnf("Sync: %s", LogSanitizer.sanitize(warning));
     }
 
     /**

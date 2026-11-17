@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Bot, CheckCheck, Download, MessageSquareHeart, Star } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { EmptyState } from "@/components/shared/empty-state";

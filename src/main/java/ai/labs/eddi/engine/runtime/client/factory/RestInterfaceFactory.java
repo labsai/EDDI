@@ -12,7 +12,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.RestClientBuilder;
 
 import java.net.URI;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * Builds REST clients for EDDI's own API.
@@ -33,6 +36,17 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     /** Whether {@link #apiServerURI} is known to be this process's own listener. */
     private final boolean selfResolved;
+
+    /**
+     * One {@code currentversion} client per store address and trust level, shared
+     * by every routed client. Programmatically built clients are never closed by
+     * the factory's callers, so building one per {@link #get} would leave one more
+     * behind per call. Sharing is safe: {@link LoopbackCallerAuthFilter} reads the
+     * caller's identity per request, not when the client is built. Only
+     * {@link #get(Class)} uses it, whose base address is fixed, so the map holds at
+     * most two entries per store interface.
+     */
+    private final Map<String, CurrentVersionRouting.CurrentVersionEndpoint> currentVersionEndpoints = new ConcurrentHashMap<>();
 
     /**
      * The loopback address is derived from the HTTP listener by
@@ -61,14 +75,30 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
         this.selfResolved = true;
     }
 
+    /**
+     * A loopback client for {@code clazz}. On a store interface,
+     * {@code getCurrentVersion} is sent over HTTP like every other endpoint
+     * ({@link CurrentVersionRouting} says why it otherwise would not be).
+     */
     @Override
     public <T> T get(Class<T> clazz) {
-        RestClientBuilder builder = RestClientBuilder.newBuilder().baseUri(URI.create(apiServerURI));
         LoopbackCallerAuthFilter filter = selfResolved ? resolveAuthFilter() : null;
-        if (filter != null) {
-            builder = builder.register(filter);
-        }
-        return builder.build(clazz);
+        T client = loopbackBuilder(URI.create(apiServerURI), filter).build(clazz);
+        return CurrentVersionRouting.route(clazz, client, apiServerURI,
+                storeUri -> currentVersionEndpoint(storeUri, filter != null,
+                        uri -> loopbackBuilder(uri, filter).build(CurrentVersionRouting.CurrentVersionEndpoint.class)));
+    }
+
+    /** The shared endpoint client for {@code storeUri}, built on first use. */
+    CurrentVersionRouting.CurrentVersionEndpoint currentVersionEndpoint(URI storeUri, boolean withCallerCredential,
+                                                                        Function<URI, CurrentVersionRouting.CurrentVersionEndpoint> build) {
+        String key = (withCallerCredential ? "caller|" : "anonymous|") + storeUri;
+        return currentVersionEndpoints.computeIfAbsent(key, k -> build.apply(storeUri));
+    }
+
+    private static RestClientBuilder loopbackBuilder(URI baseUri, LoopbackCallerAuthFilter filter) {
+        RestClientBuilder builder = RestClientBuilder.newBuilder().baseUri(baseUri);
+        return filter != null ? builder.register(filter) : builder;
     }
 
     /** The address {@link #get(Class)} clients call. */
@@ -83,7 +113,12 @@ public class RestInterfaceFactory implements IRestInterfaceFactory {
 
     @Override
     public <T> T get(Class<T> clazz, String serverUrl) {
-        return RestClientBuilder.newBuilder().baseUri(URI.create(serverUrl)).build(clazz);
+        T client = RestClientBuilder.newBuilder().baseUri(URI.create(serverUrl)).build(clazz);
+        return CurrentVersionRouting.route(clazz, client, serverUrl,
+                // Not cached: serverUrl is arbitrary, so a shared map would grow with
+                // every server ever named. The routed client builds its endpoint
+                // client lazily, once, and both are dropped together.
+                storeUri -> RestClientBuilder.newBuilder().baseUri(storeUri).build(CurrentVersionRouting.CurrentVersionEndpoint.class));
     }
 
     /**

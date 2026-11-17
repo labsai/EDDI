@@ -360,6 +360,22 @@ class RestImportServiceConnectionsTest {
         verify(documentDescriptorStore).deleteAllDescriptor(CREATED_CONNECTION_ID);
     }
 
+    @Test
+    @DisplayName("strategy=upgrade refuses agent settings the upgrade would refuse before it creates a connection")
+    void upgradeRefusedSettingsCreateNoConnection() throws Exception {
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+        doThrow(new BadRequestException("healthConfig.outcomes.order_confirmed")).when(upgradeExecutor)
+                .checkAdoptedSettings(any(), eq(TARGET_AGENT_ID), any());
+
+        try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
+            assertThrows(BadRequestException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "upgrade", null, TARGET_AGENT_ID, null));
+        }
+
+        verify(restConnectionStore, never()).createConnection(any());
+        verify(upgradeExecutor, never()).executeUpgrade(any(), any(), any(), any(), anyBoolean());
+    }
+
     private static UpgradeResult upgraded() {
         return new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET_AGENT_ID + "?version=2"), true, 1, 0, 0, List.of());
     }

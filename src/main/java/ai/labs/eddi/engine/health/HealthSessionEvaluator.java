@@ -208,7 +208,8 @@ public final class HealthSessionEvaluator {
                 ? decide(rows, last, closed, in.configOf().apply(last.agentVersion()), in.ratings(), sessionNo, startedAt, closesAt)
                 : new Decision(null, null, !closed);
         Instant dueAt = decision.provisional() ? closesAt : null;
-        List<String> lastActions = last.actions().size() > MAX_LAST_ACTIONS ? last.actions().subList(0, MAX_LAST_ACTIONS) : last.actions();
+        List<String> actions = last.actions();
+        List<String> lastActions = actions.size() > MAX_LAST_ACTIONS ? actions.subList(actions.size() - MAX_LAST_ACTIONS, actions.size()) : actions;
         return new HealthOutcome(in.conversationId(), sessionNo, last.agentId(), last.agentVersion(), last.userId(), in.origin(), engaged, startedAt,
                 endedAt, rows.size(), cost, failures, decision.outcome(), decision.evidence(), decision.provisional(),
                 LocalDate.ofInstant(endedAt, ZoneOffset.UTC), dueAt, firstOutput, lastActions, in.now());

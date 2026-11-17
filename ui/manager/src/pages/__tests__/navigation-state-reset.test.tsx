@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { AgentDetailPage } from "@/pages/agent-detail";
 import { ResourceListPage } from "@/pages/resource-list";

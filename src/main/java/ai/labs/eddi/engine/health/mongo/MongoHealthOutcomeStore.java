@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.health.mongo;
 
 import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthOutcomeStore;
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -45,21 +46,20 @@ import java.util.function.Consumer;
 
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
-import static com.mongodb.client.model.Filters.gt;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.ne;
-import static com.mongodb.client.model.Filters.or;
 
 /**
  * MongoDB implementation of {@link IHealthOutcomeStore}: collection
  * {@code healthoutcomes}, one document per session, {@code _id}
  * {@code <conversationId>|<sessionNo>}, written by {@code replaceOne(upsert)}.
  * {@code day} is an ISO {@code yyyy-MM-dd} string, as in {@code healthturns}.
- * The incremental feed's watermark lives in {@code healthrollupstate} (the
- * rollup's own state collection) under {@value #WATERMARK_ID}.
+ * The incremental feed's cursor (its watermark and the overlap replay's
+ * position) lives in {@code healthrollupstate} (the rollup's own state
+ * collection) as the one document {@value #WATERMARK_ID}.
  */
 @ApplicationScoped
 @DefaultBean
@@ -90,6 +90,9 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     static final String FIELD_LAST_ACTIONS = "lastActions";
     static final String FIELD_EVALUATED = "evaluatedAt";
     static final String FIELD_AT = "at";
+    static final String FIELD_AFTER = "afterId";
+    static final String FIELD_REPLAY_AT = "replayAt";
+    static final String FIELD_REPLAY_AFTER = "replayAfterId";
 
     private final MongoCollection<Document> outcomes;
     private final MongoCollection<Document> state;
@@ -190,7 +193,9 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
         }
         try {
             Date when = Date.from(at);
-            List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId), or(eq(FIELD_DUE, null), gt(FIELD_DUE, when))));
+            // Every session named, even one due earlier: still due, and the mark now
+            // postdates an evaluation that is running, so its upsert keeps it.
+            List<Bson> filters = new ArrayList<>(List.of(eq(FIELD_CONVERSATION, conversationId)));
             if (sessionNos != null) {
                 filters.add(in(FIELD_SESSION, sessionNos));
             }
@@ -398,22 +403,38 @@ public class MongoHealthOutcomeStore implements IHealthOutcomeStore {
     }
 
     @Override
-    public Optional<Instant> watermark() {
+    public Optional<HealthFeedCursor> feedCursor() {
         try {
             Document d = state.find(eq("_id", WATERMARK_ID)).first();
-            return d == null || d.getDate(FIELD_AT) == null ? Optional.empty() : Optional.of(d.getDate(FIELD_AT).toInstant());
+            if (d == null || d.getDate(FIELD_AT) == null) {
+                return Optional.empty();
+            }
+            // A document written before the cursor had the watermark alone.
+            Date replayAt = d.getDate(FIELD_REPLAY_AT);
+            return Optional.of(new HealthFeedCursor(d.getDate(FIELD_AT).toInstant(), d.getString(FIELD_AFTER),
+                    replayAt == null ? null : replayAt.toInstant(), d.getString(FIELD_REPLAY_AFTER)));
         } catch (MongoException e) {
-            throw new HealthStoreException("Could not read the health outcome watermark", e);
+            throw new HealthStoreException("Could not read the health outcome feed cursor", e);
         }
     }
 
     @Override
-    public void setWatermark(Instant at) {
+    public void setFeedCursor(HealthFeedCursor cursor) {
         try {
-            state.replaceOne(eq("_id", WATERMARK_ID), new Document("_id", WATERMARK_ID).append(FIELD_AT, Date.from(at)),
-                    new ReplaceOptions().upsert(true));
+            // One document, replaced whole: both positions change together.
+            Document d = new Document("_id", WATERMARK_ID).append(FIELD_AT, Date.from(cursor.watermark()));
+            if (cursor.afterId() != null) {
+                d.append(FIELD_AFTER, cursor.afterId());
+            }
+            if (cursor.replayAt() != null) {
+                d.append(FIELD_REPLAY_AT, Date.from(cursor.replayAt()));
+                if (cursor.replayAfterId() != null) {
+                    d.append(FIELD_REPLAY_AFTER, cursor.replayAfterId());
+                }
+            }
+            state.replaceOne(eq("_id", WATERMARK_ID), d, new ReplaceOptions().upsert(true));
         } catch (MongoException e) {
-            throw new HealthStoreException("Could not store the health outcome watermark", e);
+            throw new HealthStoreException("Could not store the health outcome feed cursor", e);
         }
     }
 

@@ -93,6 +93,6 @@ business owner without Manager access can read a **branded, read-only report** t
 
 ### Still open
 
-- Manager UI for profiles, links and the report page (REST/MCP only for now); the HEALTH source in the alert-rule editor.
-- Review items M3 is implemented as a read-time creator-rights re-check plus revoke-on-delete; a revoke on space move is not separate.
+- Manager UI for profiles, links and the report page (REST/MCP only for now); the `HEALTH` source in the alert-rule editor.
+- Review item M3 is implemented as a read-time creator-rights re-check plus revoke-on-delete; a revoke on space move is not separate.
 - No dedicated MCP tool for revoking all links of an agent (REST only).

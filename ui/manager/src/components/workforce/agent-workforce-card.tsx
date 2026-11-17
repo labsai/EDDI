@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn, getInitials } from "@/lib/utils";
 
@@ -13,6 +14,10 @@ export interface AgentWorkforceCardProps {
   /** Click handler — navigates to 1:1 chat or placeholder */
   onClick?: () => void;
   className?: string;
+  /** The agent's own avatar (B4 `appearance`), replacing the hashed initials. */
+  avatar?: ReactNode;
+  /** The agent's accent colour (B4), already checked to be `#rgb`/`#rrggbb`. */
+  accentColor?: string | null;
 }
 
 // ─── Component ───────────────────────────────────────────────────
@@ -23,6 +28,8 @@ export function AgentWorkforceCard({
   description,
   onClick,
   className,
+  avatar,
+  accentColor,
 }: AgentWorkforceCardProps) {
   const { t } = useTranslation();
 
@@ -39,8 +46,10 @@ export function AgentWorkforceCard({
         className,
       )}
       title={description ?? name}
+      style={accentColor ? { borderColor: accentColor } : undefined}
     >
-      {/* Avatar — color-hashed by agentId */}
+      {/* Avatar — the agent's own, else color-hashed by agentId */}
+      {avatar ?? (
       <div
         className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-transform duration-200 group-hover:scale-105"
         style={{
@@ -51,6 +60,7 @@ export function AgentWorkforceCard({
       >
         {getInitials(name)}
       </div>
+      )}
 
       {/* Name */}
       <p className="w-full text-sm font-medium text-foreground truncate">{name}</p>
