@@ -296,7 +296,16 @@ public class AuditAgentSigner {
             return verifyLegacy(entry, config, stored);
         }
         Matcher matcher = STORED_FORM.matcher(stored);
-        if (identity == null || !matcher.matches() || Integer.parseInt(matcher.group(1)) != identity.signingKeyVersion()) {
+        if (identity == null || !matcher.matches()) {
+            return Verdict.INVALID;
+        }
+        int storedVersion;
+        try {
+            storedVersion = Integer.parseInt(matcher.group(1));
+        } catch (NumberFormatException e) {
+            return Verdict.INVALID;
+        }
+        if (storedVersion != identity.signingKeyVersion()) {
             return Verdict.INVALID;
         }
         int keyVersion = identity.signingKeyVersion();

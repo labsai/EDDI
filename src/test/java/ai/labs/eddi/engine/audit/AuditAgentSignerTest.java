@@ -328,6 +328,14 @@ class AuditAgentSignerTest {
     }
 
     @Test
+    void aKeyVersionThatOverflowsIntIsInvalid() throws Exception {
+        agentVersion(1, signing(List.of(generate(1))));
+        AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
+
+        assertEquals(Verdict.INVALID, signer.verify(signed.withAgentSignature(signed.agentSignature().replaceFirst("^v1:", "v99999999999:"))));
+    }
+
+    @Test
     void aMalformedSignatureIsInvalid() throws Exception {
         agentVersion(1, signing(List.of(generate(1))));
         AuditEntry signed = signer.sign(TENANT, entry(1, HMAC));
