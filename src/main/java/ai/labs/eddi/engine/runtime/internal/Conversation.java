@@ -1963,7 +1963,7 @@ public class Conversation implements IConversation {
     /**
      * Nulls the transient tool-pause state on the live memory (pause type, pending
      * batch, in-JVM resume decision). Distinct from {@link #clearHitlBookmark()},
-     * which owns only the seven bookmark fields — this must NOT touch those.
+     * which owns only the eight bookmark fields — this must NOT touch those.
      */
     private void clearToolPauseState() {
         conversationMemory.setHitlPauseType(null);
@@ -2059,7 +2059,7 @@ public class Conversation implements IConversation {
             // Stash the decision on the live memory BEFORE clearing the bookmark so
             // LlmTask.executeResume (reached at the same index) can consume it. The
             // pending batch + pauseType survive clearHitlBookmark() — that method only
-            // owns the seven bookmark fields — and are cleared by LlmTask after
+            // owns the eight bookmark fields — and are cleared by LlmTask after
             // consumption (Task 9) or by the finally safety-net below.
             if (toolPause) {
                 conversationMemory.setHitlResumeDecision(decision);

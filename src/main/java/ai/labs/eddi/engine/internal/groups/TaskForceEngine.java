@@ -785,7 +785,9 @@ public class TaskForceEngine {
      * VERIFY phase: the first resolved speaker (the moderator by default) reviews
      * all COMPLETED tasks and provides pass/fail assessments, which are parsed and
      * applied to the task list. A task that fails is sent back for rework up to
-     * {@code maxReworks} times and verified again.
+     * {@code maxReworks} times and verified again (not a HUMAN-assigned task, not
+     * when the EXECUTE phase gates each task for approval, and not once the turn or
+     * cost budget is spent).
      */
     public void executeTaskVerificationPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                              DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,

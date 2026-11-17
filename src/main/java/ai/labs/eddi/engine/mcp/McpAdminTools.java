@@ -1013,7 +1013,6 @@ public class McpAdminTools {
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
             + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
-
             + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
             + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")

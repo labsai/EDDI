@@ -998,8 +998,8 @@ public class GroupConversation {
      * @param terms
      *            the proposal's terms — a String in v1, deliberately untyped
      * @param status
-     *            OPEN or SUPERSEDED (the proposer made a newer proposal); no code
-     *            path sets any other status
+     *            OPEN or SUPERSEDED (the proposer made a newer proposal or accepted
+     *            another one); no code path sets any other status
      * @param acceptedBy
      *            agent ids that accepted these terms
      * @param acceptanceEntryIndices

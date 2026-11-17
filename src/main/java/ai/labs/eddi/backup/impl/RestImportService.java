@@ -3976,9 +3976,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * <p>
      * A {@link RemoteApiResourceSource.RemoteReadException} anywhere in the cause
      * chain means the source could not be read: {@code 502 Bad Gateway}, because
-     * this deployment is fine and the one it was told to read is not. Anything else
-     * is this deployment's own failure and stays a {@code 500} — with a body. An
-     * access refusal anywhere in the chain is a {@code 403}.
+     * this deployment is fine and the one it was told to read is not. Otherwise an
+     * access refusal anywhere in the chain is a {@code 403}, and anything else is
+     * this deployment's own failure and stays a {@code 500} — with a body.
      */
     private WebApplicationException syncFailure(String what, Exception cause) {
         String reason = cause.getMessage() == null || cause.getMessage().isBlank()
