@@ -14,6 +14,9 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.Subjects;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -246,6 +249,57 @@ class WorkspaceNotificationsTest {
     }
 
     @Nested
+    @DisplayName("the event stream")
+    class EventStream {
+
+        @Test
+        @DisplayName("a delivered notification is announced to its recipient by id and type, never by what it says")
+        void announcedToRecipient() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            sut.userEventPublisher = publisher;
+            ownedBy("alice");
+
+            sut.requestAccess(RESOURCE, AccessLevel.VIEW, "please, it is for the board meeting");
+
+            var stored = ArgumentCaptor.forClass(WorkspaceNotification.class);
+            verify(store).add(stored.capture());
+            var event = ArgumentCaptor.forClass(UserEvent.class);
+            var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+            verify(publisher).publish(event.capture(), audience.capture());
+            assertEquals(UserEvent.KIND_NOTIFICATION_CREATED, event.getValue().kind());
+            assertEquals(stored.getValue().id(), event.getValue().notificationId());
+            assertEquals("ACCESS_REQUESTED", event.getValue().notificationType());
+            assertEquals(UserEventAudience.principal("alice"), audience.getValue());
+            assertFalse(event.getValue().toString().contains("board meeting"));
+        }
+
+        @Test
+        @DisplayName("a deployment notice is announced to the administrators")
+        void systemNoticeToAdministrators() {
+            var publisher = mock(UserEventPublisher.class);
+            sut.userEventPublisher = publisher;
+
+            sut.onUpdateAvailable("9.9.9", null);
+
+            var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+            verify(publisher).publish(any(), audience.capture());
+            assertEquals(UserEventAudience.administrators(), audience.getValue());
+        }
+
+        @Test
+        @DisplayName("a notification that could not be stored is not announced")
+        void notStoredNotAnnounced() {
+            var publisher = mock(UserEventPublisher.class);
+            sut.userEventPublisher = publisher;
+            doThrow(new IllegalStateException("down")).when(store).add(any());
+
+            sut.onUpdateAvailable("9.9.9", null);
+
+            verify(publisher, never()).publish(any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("update notices")
     class UpdateNotices {
 
@@ -285,7 +339,7 @@ class WorkspaceNotificationsTest {
         @DisplayName("cannot be read through a principal that is named like the shared inbox")
         void reservedPrincipal() {
             when(spaceContext.currentPrincipal()).thenReturn(WorkspaceNotifications.SYSTEM_ADMINS);
-            when(guard.callerIsAdmin()).thenReturn(false);
+            when(guard.isAdmin()).thenReturn(false);
 
             sut.inbox(false, 50);
             sut.unreadCount();
@@ -310,7 +364,7 @@ class WorkspaceNotificationsTest {
         @Test
         @DisplayName("are read by an administrator in addition to their own inbox, newest first")
         void administratorReadsBoth() {
-            when(guard.callerIsAdmin()).thenReturn(true);
+            when(guard.isAdmin()).thenReturn(true);
             var own = new WorkspaceNotification("a", "bob", WorkspaceNotification.Type.SHARED_WITH_YOU, "r", null, "R", "al", "Al", "VIEW", null,
                     Instant.parse("2026-01-01T00:00:00Z"), null);
             var update = new WorkspaceNotification("b", WorkspaceNotifications.SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, "9.9.9",
@@ -327,7 +381,7 @@ class WorkspaceNotificationsTest {
         @Test
         @DisplayName("are invisible to a caller who is not an administrator")
         void hiddenFromOthers() {
-            when(guard.callerIsAdmin()).thenReturn(false);
+            when(guard.isAdmin()).thenReturn(false);
 
             sut.inbox(false, 50);
             sut.unreadCount();
@@ -342,7 +396,7 @@ class WorkspaceNotificationsTest {
         @DisplayName("reach an administrator when authorization is off and there is no principal")
         void anonymousAdministrator() {
             when(spaceContext.currentPrincipal()).thenReturn(null);
-            when(guard.callerIsAdmin()).thenReturn(true);
+            when(guard.isAdmin()).thenReturn(true);
 
             sut.markRead(null);
 

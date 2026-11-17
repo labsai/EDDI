@@ -39,11 +39,12 @@ import static com.mongodb.client.model.Filters.eq;
 
 /**
  * MongoDB implementation of {@link ISecretPersistence}. Stores encrypted
- * secrets and DEKs in two collections: {@code secretvault_secrets} and
- * {@code secretvault_deks}.
+ * secrets and DEKs in {@code secretvault_secrets} and {@code secretvault_deks},
+ * and vault metadata (such as the KEK salt) in {@code secretvault_meta}.
  * <p>
- * This is the default implementation ({@code @DefaultBean}), active unless the
- * PostgreSQL profile overrides it.
+ * Active unless {@code eddi.datastore.type=postgres}:
+ * {@code DataStoreProducers} selects between this and
+ * {@link PostgresSecretPersistence}.
  *
  * @author ginccc
  * @since 6.0.0

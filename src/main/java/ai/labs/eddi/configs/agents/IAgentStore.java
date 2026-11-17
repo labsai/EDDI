@@ -28,6 +28,18 @@ public interface IAgentStore extends IResourceStore<AgentConfiguration> {
     Integer update(String id, Integer version, AgentConfiguration agentConfiguration, boolean compatible)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException;
 
+    /**
+     * The agent's newest version, a soft-deleted one included. A soft delete leaves
+     * no current version, so {@link #getCurrentResourceId(String)} throws, while
+     * the deleted version — and whatever it recorded, a key revocation for instance
+     * — stays readable through {@link #readIncludingDeleted(String, Integer)}.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if the agent has no version left (deleted permanently, or never
+     *             created)
+     */
+    Integer getNewestVersionIncludingDeleted(String id) throws IResourceStore.ResourceNotFoundException;
+
     List<DocumentDescriptor> getAgentDescriptorsContainingWorkflow(String workflowId, Integer workflowVersion, boolean includePreviousVersions)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 }

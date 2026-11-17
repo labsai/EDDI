@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { Environment } from "@/lib/constants";
+import type { Environment } from "@eddi/app-kit/lib/constants";
 
 const ENV_LABEL_KEYS: Record<Environment, { key: string; fallback: string }> = {
   production: { key: "environments.production", fallback: "Production" },

@@ -148,6 +148,9 @@ explanations of a change are useful.
   task summary read — and is noted in `SharedTaskList.reviewerEdits`. The agent's original stays in its signed
   `TASK_RESULT` transcript entry.
 - A per-task `note` is that task's feedback under `onTaskRejection: RETRY` / `FAIL`.
+- When the paused EXECUTE phase has an `onApproved` action, the edited result is what that action sends — verbatim,
+  with no member turn in between — and the action's record and audit entry say `edited: true`. See [Group
+  Approved-Result Actions](group-approved-result-actions.md).
 - `decision.editedAnswer` on a PHASE pause is valid only when the paused phase is a `SYNTHESIS` phase ("phase outputs
   other than a synthesis cannot be edited"). It is appended as an **unsigned** `SYNTHESIS` transcript entry (speaker
   `hitl:<decidedBy>`, display name "Reviewer", `errorReason: "reviewer-edit"`) and becomes the "last synthesis" every
@@ -205,6 +208,8 @@ raw map: it reads schema 1 and 2 into `HitlDecisionUnit`s.
 | `timeoutPolicy` | the pause's effective timeout policy |
 | `approvalCategory`, `approvalCategorySource` | the pause's category; `CONFIG` \| `DERIVED` |
 | `reasonCode`, `note` | the decision's |
+| `planHash` | since 6.8: the [plan hash](hitl.md#plan-binding-planhash) of the pause the decision applied to (`v1:` + hex); absent for a pause committed before plan hashing and on a cancellation |
+| `planBinding` | since 6.8: how the decision was bound to that plan — `MATCHED` (it carried the hash), `NOT_PRESENTED` (it carried none; strict binding off), `SYSTEM` (an automated decision), `LEGACY_UNHASHED` (the pause has no hash), `PLAN_HASH_UNAVAILABLE` (the pause's hash could not be computed when it was committed, and strict binding is off; `planHash` is then `"unavailable"`; see [Plan Binding](hitl.md#plan-binding-planhash)) |
 | `groupId`, `phaseName`, `mode`, `pauseReason`, `toolDecisions`, `onRejection` | legacy / context fields |
 | `units` | below |
 

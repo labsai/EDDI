@@ -56,6 +56,15 @@ public interface IAgent {
     }
 
     /**
+     * Whether the agent sets {@code security.requirePeerVerification}: it is then
+     * shown no agent text that no signature covers, a memory another agent wrote
+     * included.
+     */
+    default boolean isPeerVerificationRequired() {
+        return false;
+    }
+
+    /**
      * The agent's {@code turnDeadlineMs}; {@code null} when no deadline is
      * configured.
      *

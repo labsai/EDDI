@@ -23,7 +23,12 @@ public final class OriginMatcher {
     private OriginMatcher() {
     }
 
-    /** Build a normalized {@code scheme://host[:port]} string. */
+    /**
+     * Build a normalized {@code scheme://host:port} string: the scheme and host
+     * lower-cased and the port always spelled out (the scheme's default when none
+     * is given). Returns {@code null} when the scheme or host is missing, or when
+     * there is no port and the scheme is neither http nor https.
+     */
     public static String normalize(String scheme, String host, int port) {
         if (scheme == null || host == null || host.isBlank()) {
             return null;

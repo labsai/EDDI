@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SlidersHorizontal, Plus, X } from "lucide-react";
-import { EditorSection } from "../../editor-section";
-import type { CascadeHeuristic } from "../types";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
+import type { CascadeHeuristic } from "@eddi/app-kit/components/editors/llm/types";
 
 /** Compact editor for a list of phrases (chips + add input). */
 function PhraseList({

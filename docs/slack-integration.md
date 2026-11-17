@@ -607,7 +607,7 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 | Key | Required | Description |
 |-----|----------|-------------|
 | `channelType` | ✅ | Must be `"slack"` |
-| `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
+| `platformConfig.channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`). One integration per channel across the deployment: a second one is refused with 400, and a save whose check cannot read the stored integrations is refused with 503 — retry it |
 | `platformConfig.botToken` | ✅ | Bot User OAuth Token. Use vault reference. |
 | `platformConfig.signingSecret` | ✅ | Slack Signing Secret. Use vault reference. |
 | `platformConfig.teamId` | ❌ (recommended) | Slack workspace id (`T…`). The only source of the workspace in user ids; events claiming another workspace are rejected. Without it, users get team-less ids — see [Slack User Identity](#slack-user-identity). |
@@ -616,6 +616,9 @@ Run several replicas in cluster mode (`eddi.messaging.type=nats`, see [Clusterin
 | `targets[].type` | ✅ | `AGENT` or `GROUP` |
 | `targets[].targetId` | ✅ | Agent ID or Group Config ID |
 | `targets[].triggers` | ❌ | List of trigger keywords (case-insensitive) |
+| `targets[].observeMode` | ❌ | `true` makes an `AGENT` target answer plain channel traffic — see [Observe Mode](#observe-mode-passive-watching) |
+| `targets[].observeConfig` | ❌ | `triggerKeywords`, `triggerMimeTypes`, `cooldownSeconds` (default `60`), `maxDailyResponses` (default `50`), `maxCostPerDay` (default `5.0`) |
+| `platformConfig.hitlApprovalChannel`, `platformConfig.hitlApproverUserIds` | ❌ | Slack approval cards — see [HITL → Slack Integration](hitl.md#slack-integration) |
 
 ### Legacy ChannelConnector (on Agent, deprecated)
 

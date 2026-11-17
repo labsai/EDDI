@@ -11,9 +11,9 @@ import {
   dismissDeadLetter,
   getFireLogs,
   getFailedFires,
-} from "@/lib/api/schedules";
-import type { ScheduleConfiguration } from "@/lib/api/schedules";
-import { patchQueries } from "@/lib/optimistic";
+} from "@eddi/app-kit/lib/api/schedules";
+import type { ScheduleConfiguration } from "@eddi/app-kit/lib/api/schedules";
+import { patchQueries } from "@eddi/app-kit/lib/optimistic";
 
 // ==================== Query Keys ====================
 

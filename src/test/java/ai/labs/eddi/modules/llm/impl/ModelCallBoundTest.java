@@ -44,7 +44,8 @@ class ModelCallBoundTest {
         long promptTokens = ModelCallBound.promptTokens(prompt(3000));
         double expected = promptTokens * 2.0 / 1_000_000 + 500 * 10.0 / 1_000_000;
 
-        double bound = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, prompt(3000), Map.of("maxTokens", "500"), "openai", "gpt-x", 4096);
+        double bound = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, false, prompt(3000), Map.of("maxTokens", "500"), "openai", "gpt-x",
+                4096);
 
         assertEquals(expected, bound, 1e-12);
     }
@@ -52,23 +53,34 @@ class ModelCallBoundTest {
     @Test
     @DisplayName("a model that sets no output cap is sized with the configured default")
     void defaultOutputCap() {
-        double withDefault = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, prompt(30), Map.of(), "openai", "gpt-x", 1000);
-        double withLarger = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, prompt(30), Map.of(), "openai", "gpt-x", 2000);
+        double withDefault = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, false, prompt(30), Map.of(), "openai", "gpt-x", 1000);
+        double withLarger = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, false, prompt(30), Map.of(), "openai", "gpt-x", 2000);
 
         assertTrue(withLarger > withDefault);
         assertEquals(1000 * 10.0 / 1_000_000, withDefault - ModelCallBound.promptTokens(prompt(30)) * 2.0 / 1_000_000, 1e-12);
     }
 
     @Test
-    @DisplayName("an agent-mode task is 1 + maxToolIterations rounds, later rounds carrying the tool context cap")
+    @DisplayName("a tool-loop task is 1 + maxToolIterations rounds, later rounds carrying the tool context cap")
     void toolLoopRounds() {
-        double plain = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096);
-        double loop = ModelCallBound.phaseMaxUsd(pricedTask(true, 3), false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096);
+        double plain = ModelCallBound.phaseMaxUsd(pricedTask(false, null), false, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m",
+                4096);
+        double loop = ModelCallBound.phaseMaxUsd(pricedTask(true, 3), false, true, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096);
 
         // 4 rounds: each pays prompt + output; rounds 2-4 also pay the 1000-token tool
         // context cap
         double expected = 4 * plain + 3 * 1000 * 2.0 / 1_000_000;
         assertEquals(expected, loop, 1e-12);
+    }
+
+    @Test
+    @DisplayName("the round count follows the tool loop, not the task's own tool configuration (workflow httpcall / mcpcall tools)")
+    void workflowToolsCountTheirRounds() {
+        var workflowTools = pricedTask(false, 3);
+        double plain = ModelCallBound.phaseMaxUsd(workflowTools, false, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096);
+        double loop = ModelCallBound.phaseMaxUsd(workflowTools, false, true, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096);
+
+        assertEquals(4 * plain + 3 * 1000 * 2.0 / 1_000_000, loop, 1e-12);
     }
 
     @Test
@@ -81,8 +93,8 @@ class ModelCallBoundTest {
 
         assertEquals(ToolContextBudget.DEFAULT_MAX_TOOL_CONTEXT_TOKENS, ModelCallBound.toolContextTokens(disabled));
         assertEquals(
-                ModelCallBound.phaseMaxUsd(defaulted, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096),
-                ModelCallBound.phaseMaxUsd(disabled, false, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096), 1e-12);
+                ModelCallBound.phaseMaxUsd(defaulted, false, true, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096),
+                ModelCallBound.phaseMaxUsd(disabled, false, true, prompt(300), Map.of("maxTokens", "100"), "openai", "m", 4096), 1e-12);
 
         var batch = new PendingToolCallBatch();
         batch.setChatTranscriptJson("y".repeat(300));
@@ -98,7 +110,8 @@ class ModelCallBoundTest {
         LlmConfiguration.Task task = new LlmConfiguration.Task();
         task.setType("openai");
 
-        assertEquals(0.0, ModelCallBound.phaseMaxUsd(task, false, prompt(3000), Map.of("maxTokens", "500"), "openai", "no-such-model", 4096), 0.0);
+        assertEquals(0.0, ModelCallBound.phaseMaxUsd(task, false, false, prompt(3000), Map.of("maxTokens", "500"), "openai", "no-such-model", 4096),
+                0.0);
     }
 
     @Test

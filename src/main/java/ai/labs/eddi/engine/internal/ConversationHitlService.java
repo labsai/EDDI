@@ -15,6 +15,8 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.hitl.HitlPlanBinding;
+import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
@@ -98,11 +100,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * {@code say}/step machinery a normal turn uses — a second, resume-shaped copy
  * of turn execution is how post-approval behaviour drifts from ordinary
  * behaviour without anyone noticing. Hence the back-reference to
- * {@link ConversationService} for the seven facade members this cluster calls
- * ({@code say}, {@code getAgent}, {@code createPropertiesHandler},
+ * {@link ConversationService} for the facade members this cluster calls (among
+ * them {@code getAgent}, {@code createPropertiesHandler},
  * {@code storeConversationMemoryIfState}, {@code cacheConversationState},
- * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError}) plus
- * {@code rejectIfShuttingDown}. Same pattern and the same safety argument as
+ * {@code waitForExecutionFinishOrTimeout}, {@code logConversationError} and
+ * {@code rejectIfShuttingDown}). Same pattern and the same safety argument as
  * {@code GroupHitlCoordinator} in R1: the constructor only stores it, never
  * calls through it before the facade's own construction completes.
  * <p>
@@ -357,6 +359,39 @@ class ConversationHitlService {
         }
     }
 
+    /**
+     * Refuse a decision that names a plan other than the pause's — the pre-CAS half
+     * of {@link HitlPlanBinding#check}. A decision without a hash is not judged
+     * here: strict binding needs the agent configuration, read once the resume is
+     * committed to the snapshot.
+     */
+    private static void requireDecisionMatchesPlan(String conversationId, HitlDecision decision, String committedPlanHash) {
+        try {
+            HitlPlanBinding.check(conversationId, decision, committedPlanHash, () -> false);
+        } catch (HitlPlanBinding.PlanMismatch mismatch) {
+            throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+        }
+    }
+
+    /**
+     * Whether a human decision on this agent's pauses must carry the plan hash: the
+     * deployment says so ({@code eddi.hitl.plan-hash.strict}), or the paused agent
+     * version's {@code hitlConfig.requirePlanHash} does. A failed config read
+     * counts as strict — an unknown policy must not relax a binding the agent may
+     * require.
+     */
+    boolean planBindingStrict(String agentId, Integer agentVersion) {
+        if (conversationService.planHashStrict) {
+            return true;
+        }
+        AgentConfigLookup lookup = lookupAgentConfigPinned(agentId, agentVersion);
+        if (lookup.readFailed()) {
+            return true;
+        }
+        AgentConfiguration config = lookup.config();
+        return config != null && config.getHitlConfig() != null && Boolean.TRUE.equals(config.getHitlConfig().getRequirePlanHash());
+    }
+
     private static IConversationService.PauseMismatchException pauseMismatch(String conversationId) {
         LOGGER.infof("Refusing a HITL decision for conversation %s: it names a pause that is no longer current",
                 sanitize(conversationId));
@@ -364,6 +399,12 @@ class ConversationHitlService {
                 "The pending approval changed since this decision was made — the conversation was resumed and has "
                         + "paused again on a different request. Review the current request and decide again.");
     }
+
+    /**
+     * Resumes a conversation paused {@code AWAITING_HUMAN} with the human's (or the
+     * timeout policy's) decision. {@code handler} may be {@code null} for an
+     * internally driven resume that has no client to answer.
+     */
     public void resumeConversation(String conversationId,
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
@@ -457,7 +498,9 @@ class ConversationHitlService {
         boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
         boolean hasResumeContext = decision.getContext() != null && !decision.getContext().isEmpty();
         boolean hasReviewFields = HitlDecisionValidator.hasReviewFields(decision);
-        if (hasToolDecisions || namesPause || hasResumeContext || hasReviewFields) {
+        HitlPlanBinding.requireWellFormed(decision);
+        boolean namesPlan = decision.namesPlan();
+        if (hasToolDecisions || namesPause || namesPlan || hasResumeContext || hasReviewFields) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
                 // A decision made for an earlier pause must not consume this one.
@@ -470,6 +513,12 @@ class ConversationHitlService {
                 // the state) — "pause changed" would misdescribe it.
                 if (preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                     requireDecisionMatchesPause(conversationId, decision, preCasSnapshot.getHitlPausedAt());
+                    // A decision for another plan is refused before the CAS too; the
+                    // authoritative check (and the strict missing-hash refusal) runs
+                    // again on the snapshot the resume actually executes.
+                    if (namesPlan) {
+                        requireDecisionMatchesPlan(conversationId, decision, preCasSnapshot.getHitlPlanHash());
+                    }
                 }
                 if (hasToolDecisions) {
                     validateToolDecisions(decision, preCasSnapshot);
@@ -494,8 +543,8 @@ class ConversationHitlService {
         conversationService.cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
         // From here on the pause's STATE has been consumed
-        // (AWAITING_HUMAN->IN_PROGRESS):
-        // EVERY failure path must restore it, or the approval is wedged IN_PROGRESS.
+        // (AWAITING_HUMAN->IN_PROGRESS): EVERY failure path must restore it, or the
+        // approval is wedged IN_PROGRESS.
         // The timeout schedule is deliberately NOT deleted yet (see below): a failure
         // before that point — a transient snapshot-load hiccup or an undeployed agent —
         // then leaves the original finite-policy timeout armed, so it still fires on
@@ -537,6 +586,24 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw pauseMismatch(conversationId);
             }
+            // Plan binding (HitlPlanHash): a decision for another plan, or a human
+            // decision without one under strict binding, is refused here, on the
+            // snapshot this resume runs. The pause is put back untouched (its timeout
+            // schedule is still armed), exactly as for a changed pause.
+            final String committedPlanHash = snapshot.getHitlPlanHash();
+            final HitlPlanBinding.Outcome planOutcome;
+            final String agentIdForStrict = snapshot.getAgentId();
+            final Integer agentVersionForStrict = snapshot.getAgentVersion();
+            try {
+                planOutcome = HitlPlanBinding.check(conversationId, decision, committedPlanHash,
+                        () -> planBindingStrict(agentIdForStrict, agentVersionForStrict));
+            } catch (HitlPlanBinding.PlanMismatch mismatch) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException(mismatch.getMessage());
+            } catch (HitlPlanBinding.PlanHashRequired planHashRequired) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw planHashRequired;
+            }
             // GDPR Art. 18 — the same admission rule as start and say. A resume runs the
             // rest of the turn (tools, a model call, a rejection-note revision) for the
             // conversation's OWNER, so an owner whose processing an administrator has
@@ -551,6 +618,18 @@ class ConversationHitlService {
             }
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            // Execution side of the binding: re-derive the hash from the plan this
+            // resume is about to run and refuse when it is not the committed one —
+            // whatever changed the stored plan after the pause, the approval was not
+            // given for it.
+            if (!HitlPlanBinding.verifies(committedPlanHash, HitlPlanHash.forPause(memory))) {
+                LOGGER.warnf("hitl.plan.changed: the stored plan of the pause of conversation %s no longer matches the hash it was "
+                        + "committed with — refusing the decision; nothing was run", sanitize(conversationId));
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new IConversationService.PlanMismatchException("The pending approval's plan no longer matches the plan it was "
+                        + "committed with — nothing was run. Cancel the conversation or contact an administrator.");
+            }
+            decision.bindPlan(committedPlanHash, planOutcome.name());
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
@@ -561,7 +640,8 @@ class ConversationHitlService {
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
             prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
-        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException e) {
+        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
+                | HitlPlanBinding.PlanHashRequired e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -821,8 +901,7 @@ class ConversationHitlService {
                         // land between that check and this store, and an unconditional
                         // full-document replace would then overwrite ENDED/
                         // EXECUTION_INTERRUPTED with READY — resurrecting a terminated
-                        // conversation that then accepts new conversationService.say() input. The
-                        // atomic
+                        // conversation that then accepts new say() input. The atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
                         // A resumed turn that settled may ask to continue, like any turn:
@@ -1269,10 +1348,8 @@ class ConversationHitlService {
             return false;
         }
         // Both the flag and the placeholder: the scrub always writes the placeholder
-        // with
-        // secret=true, while a non-secret entry that happens to carry the placeholder
-        // text
-        // was never a secret and must not be re-supplied.
+        // with secret=true, while a non-secret entry that happens to carry the
+        // placeholder text was never a secret and must not be re-supplied.
         if (stored instanceof Context context) {
             return Boolean.TRUE.equals(context.getSecret()) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(context.getValue());
         }
@@ -1456,8 +1533,7 @@ class ConversationHitlService {
         }
 
         // The auto-approval CAP being reached is its own guard signal (distinct from
-        // the
-        // fixed >=2 no-progress threshold) — record it so operators can tell a
+        // the fixed >=2 no-progress threshold) — record it so operators can tell a
         // config-limited stop from the built-in loop breaker.
         if (capReached) {
             recordGuard("auto_approve_cap");
@@ -1871,6 +1947,9 @@ class ConversationHitlService {
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
         populateTimeoutBookmark(memory);
         renderApprovalContext(memory);
+        // Last: after the turn's secret scrub (done before this is called) and before
+        // the store, so the hash covers exactly what is persisted.
+        HitlPlanHash.commit(memory);
     }
 
     /**
@@ -1889,8 +1968,8 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
             // An agent without hitlConfig can still pause on a task-level toolApprovals
-            // rule: the renderer then
-            // takes the blocks of the effective configuration stored on the pending batch.
+            // rule: the renderer then takes the blocks of the effective configuration
+            // stored on the pending batch.
             memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
                     hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
@@ -1965,7 +2044,7 @@ class ConversationHitlService {
     void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
         // Fix #1: the TOOL-LEVEL source is the config that ACTUALLY gated the paused
         // batch — the task-level override rides on the batch (persisted by
-        // AgentOrchestrator.buildPendingBatch). Prefer it; fall back to the
+        // ToolApprovalGateSupport.buildPendingBatch). Prefer it; fall back to the
         // agent-level hitlConfig.toolApprovals for a legacy batch (null field) or a
         // null batch. The inherit-from-outer fallback and the AUTO_APPROVE-demotion
         // below still read the OUTER hitlConfig — Task 10 semantics unchanged.

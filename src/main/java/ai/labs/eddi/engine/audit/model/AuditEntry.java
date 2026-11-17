@@ -68,8 +68,9 @@ import java.util.Map;
  * @param hmac
  *            HMAC-SHA256 integrity hash of all fields above
  * @param agentSignature
- *            Optional cryptographic agent signature for tamper-evident identity
- *            proof (null when signing not configured)
+ *            The agent's Ed25519 signature over {@code hmac}, stored as
+ *            {@code v<keyVersion>:<Base64 signature>}; null when the agent
+ *            version does not sign (see {@code AuditAgentSigner})
  * @param sequence
  *            0-based, gap-free position of this entry within its conversation,
  *            or {@link #UNSEQUENCED} when the backing store cannot persist it.
@@ -110,7 +111,8 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
 
     /**
      * Return a copy of this entry with the environment field set. Used by
-     * ConversationService to enrich entries built by LifecycleManager.
+     * ConversationService and ConversationHitlService to enrich entries built by
+     * LifecycleManager.
      */
     public AuditEntry withEnvironment(String env) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, env, stepIndex, taskId, taskType, taskIndex, durationMs, input,

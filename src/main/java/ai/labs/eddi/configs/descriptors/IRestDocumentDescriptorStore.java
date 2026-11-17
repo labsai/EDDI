@@ -76,7 +76,8 @@ public interface IRestDocumentDescriptorStore {
     @PATCH
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Partial update descriptor.")
+    @Operation(description = "Partial update descriptor: name and/or description only. A document setting any other field is "
+            + "refused with 400 and changes nothing; visibility, space, owner and grants are changed under /descriptorstore/descriptors/{id}/shares.")
     void patchDescriptor(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,

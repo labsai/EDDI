@@ -10,7 +10,9 @@ This includes all images pushed after signing was enabled:
 - Every build pushed from `main` (e.g., `labsai/eddi:6.0.0-b42`)
 - Every release candidate (e.g., `labsai/eddi:6.0.0-RC2`)
 - Every general availability release (e.g., `labsai/eddi:6.6.0`)
-- The `latest` tag (updated on release tag pushes)
+- The `latest`, major and minor aliases (moved only by a stable `MAJOR.MINOR.PATCH` tag, never by a release candidate)
+
+The signature is made on the pushed image's **digest**, not on a tag, so it stays bound to the exact bytes CI tested; `cosign verify …:<tag>` resolves the tag to its digest and checks that. Each pushed image also gets a **SLSA build-provenance attestation** (`actions/attest-build-provenance`, pushed to the registry), and each GitHub release carries a `SHA256SUMS` of the files the installers download (the compose files, the Keycloak realm and theme, the monitoring assets) with a keyless cosign bundle, `SHA256SUMS.sigstore.json`.
 
 > **Note:** Images published before v6.0.0 are not signed. Signature verification only applies to images built after this feature was enabled.
 
@@ -128,11 +130,28 @@ cosign verify \
 
 This outputs the full certificate chain and Rekor log entry as JSON.
 
+### Verify the Provenance and the Release Checksums
+
+```bash
+# How the image was built (this workflow, this commit, this runner)
+gh attestation verify oci://docker.io/labsai/eddi:<tag> --repo labsai/EDDI
+
+# The checksum list attached to a GitHub release, signed at that tag
+gh release download <tag> --repo labsai/EDDI --pattern 'SHA256SUMS*'
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/<tag>" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+gh attestation verify SHA256SUMS --repo labsai/EDDI
+```
+
+`install.sh` and `install.ps1` check the files they download against that `SHA256SUMS`, and verify its bundle against the same identity when cosign is installed.
+
 ---
 
 ## Git Tag Signing
 
-For version tags in the Git repository (e.g., `6.3.0`, `6.3.0-RC2`), maintainers sign tags using GPG or SSH keys:
+Git tags are **not** signed today: the published release tags are lightweight or unsigned annotated tags, so `git tag -v` has nothing to verify on them. The image signature, the provenance attestation and the signed `SHA256SUMS` above are the release's integrity guarantees. A maintainer who wants to add a signed tag on top creates it with a GPG or SSH key:
 
 ```bash
 # Create a signed tag
@@ -148,7 +167,7 @@ git tag -v 6.3.0
 > described on this page. Signing the tag does not change that; a signed `v6.3.0` is just as inert.
 > See [Release & Versioning Strategy](release-versioning.md#version-format).
 >
-> **Note:** The primary release integrity guarantee is provided by the Docker image signing described above. Git tag signing provides an additional layer of assurance that the tag was created by an authorized maintainer.
+> **Note:** The primary release integrity guarantee is provided by the Docker image signing described above. A signed Git tag would add assurance that the tag was created by an authorized maintainer.
 
 ---
 

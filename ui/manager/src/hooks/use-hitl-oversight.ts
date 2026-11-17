@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { oversightKeys } from "@/lib/query-keys";
-import { isApiError } from "@/lib/api-client";
+import { oversightKeys } from "@eddi/app-kit/lib/query-keys";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   applyRecommendation,
   countPendingSamples,
@@ -15,7 +15,7 @@ import {
   type OversightQuery,
   type SampleStatus,
   type SampleVerdict,
-} from "@/lib/api/hitl-oversight";
+} from "@eddi/app-kit/lib/api/hitl-oversight";
 
 /** The error code of an EDDI `{error, message}` body, if any. */
 export function oversightErrorCode(error: unknown): string | undefined {

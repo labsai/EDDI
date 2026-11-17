@@ -119,7 +119,8 @@ public class ApprovalContextRenderer {
      *            the agent-level {@code toolApprovals}, used when the batch does
      *            not carry the config that gated it; may be null
      * @return the context, or {@code null} when no block applies (nothing
-     *         configured) or the rendering failed as a whole — never throws
+     *         configured), every block rendered blank, or the rendering failed as a
+     *         whole — never throws
      */
     public RenderedApprovalContext renderForConversation(IConversationMemory memory, List<ApprovalContextBlock> agentBlocks,
                                                          ToolApprovalsConfig fallbackToolApprovals) {

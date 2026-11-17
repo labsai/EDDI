@@ -1,9 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { api } from "@/lib/api-client";
-import { AuthProvider } from "../auth-provider";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { AuthProvider } from "@eddi/app-kit/components/auth/auth-provider";
 
 const kc = vi.hoisted(() => ({
   init: vi.fn(),

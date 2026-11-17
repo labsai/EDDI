@@ -151,8 +151,8 @@ public class SafeSocketConnector {
 
     /**
      * A host and port that passed the policy, with the one address it may connect
-     * to. Only {@link #resolve} creates one, so holding an {@code Endpoint} is
-     * proof of the check.
+     * to. Only {@link #resolve} and {@link #resolveOperator} create one, so holding
+     * an {@code Endpoint} is proof of the check.
      */
     public static final class Endpoint {
         private final String host;

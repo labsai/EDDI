@@ -167,10 +167,11 @@ class RestAgentAdministrationUndeployResilienceTest {
         verify(agentFactory).undeployAgent(ENV, AGENT, 1);
         verify(conversationMemoryStore, never()).loadActiveConversationMemorySnapshot(any(), any());
         verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(any());
-        // Descriptor reads: the access check and the ENDED mark of ending it — not a
-        // third
-        // one for a last-interaction time nothing here uses.
-        verify(conversationDescriptorStore, times(2)).readDescriptor(conversationId, 0);
+        // One descriptor read, for the access check. The ENDED mark is a single field
+        // update that reads nothing, and no read is made for a last-interaction time
+        // nothing here uses.
+        verify(conversationDescriptorStore, times(1)).readDescriptor(conversationId, 0);
+        verify(conversationDescriptorStore).markEnded(conversationId);
     }
 
     @Test

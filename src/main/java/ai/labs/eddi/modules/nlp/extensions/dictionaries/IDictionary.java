@@ -58,6 +58,13 @@ public interface IDictionary {
 
     List<IFoundWord> lookupTerm(String value);
 
+    /**
+     * For a {@link RegularDictionary}: whether its regular-expression entries are
+     * also tried when a word or phrase has already matched the token (otherwise
+     * they only run when nothing else matched). The built-in programmatic
+     * dictionaries return a constant. The parser itself reads this flag only on
+     * corrections, to decide whether to correct an already-known input part.
+     */
     boolean lookupIfKnown();
 
     default void setConfig(Map<String, Object> config) throws IllegalExtensionConfigurationException {

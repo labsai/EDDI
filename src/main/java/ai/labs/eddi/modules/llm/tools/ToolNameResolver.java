@@ -20,9 +20,9 @@ import java.util.Map;
  *
  * <p>
  * <strong>The switch is exhaustive and exact — deliberately no substring
- * matching.</strong> The neighbouring {@code ToolCacheService.getSmartTTL}
- * falls back to {@code lowerToolName.contains(key)}, and that is precisely how
- * this bug shipped unnoticed: {@code getCurrentDateTime} happens to contain
+ * matching.</strong> The neighbouring {@code ToolCacheService} TTL lookup falls
+ * back to {@code lowerToolName.contains(key)}, and that is precisely how this
+ * bug shipped unnoticed: {@code getCurrentDateTime} happens to contain
  * "datetime" and resolved correctly, while {@code calculate} does not contain
  * "calculator" and silently fell through to a default. A lookup that is right
  * by coincidence for some inputs is worse than one that is wrong for all of
@@ -49,7 +49,7 @@ public final class ToolNameResolver {
      * client proxy. {@code CalculatorTool_ClientProxy} is not a case here and
      * yields {@code null}, which would put every built-in back at the default price
      * and the default TTL — the same defect wearing a different coat.
-     * {@code AgentOrchestrator.buildToolSetup} already unwraps the proxy before
+     * {@code ToolObjectReflector.reflect} already unwraps the proxy before
      * reflecting over {@code @Tool} methods; reuse that unwrapped class.
      * </p>
      *
@@ -89,15 +89,14 @@ public final class ToolNameResolver {
 
     /**
      * Resolves a dispatch name to its canonical slug using the map built by
-     * {@code AgentOrchestrator.buildToolSetup}.
+     * {@code ToolObjectReflector.reflect}.
      *
      * <p>
-     * Tools with no mapping — http, mcp, a2a and the dynamic-agent tools, whose
-     * dispatch name IS their configured name — resolve to themselves, so callers
-     * never need a null check. A key present with a {@code null} value is treated
-     * the same as an absent key: {@code getOrDefault} would hand back the stored
-     * {@code null}, which would break that guarantee and propagate a null slug into
-     * price and TTL lookups.
+     * Tools with no mapping — http, mcp and a2a tools, whose dispatch name IS their
+     * configured name — resolve to themselves, so callers never need a null check.
+     * A key present with a {@code null} value is treated the same as an absent key:
+     * {@code getOrDefault} would hand back the stored {@code null}, which would
+     * break that guarantee and propagate a null slug into price and TTL lookups.
      * </p>
      *
      * @param dispatchName

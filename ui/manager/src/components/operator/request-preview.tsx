@@ -8,9 +8,9 @@ import { parseJsonPatchBody } from "@/lib/operator/json-patch";
 import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
 import { CascadeSummary } from "@/components/operator/cascade-summary";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
-import { getResource } from "@/lib/api/resources";
-import { useAuth } from "@/hooks/use-auth";
-import type { ResolvedRequestPreview } from "@/lib/api/hitl";
+import { getResource } from "@eddi/app-kit/lib/api/resources";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import type { ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 /** Approver-facing text per escalating setting — see `escalation-flags.ts`. */
 const ESCALATION_TEXT: Record<string, string> = {

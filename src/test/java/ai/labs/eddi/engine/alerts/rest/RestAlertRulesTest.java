@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.alerts.AlertMaintenanceSchedule;
 import ai.labs.eddi.engine.alerts.AlertRuleCache;
 import ai.labs.eddi.engine.alerts.AlertSenders;
 import ai.labs.eddi.engine.alerts.AlertSenders.AlertDeliveryException;
+import ai.labs.eddi.engine.alerts.AlertSettings;
 import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
@@ -83,7 +84,7 @@ class RestAlertRulesTest {
         when(store.create(any())).thenAnswer(inv -> ((AlertRule) inv.getArgument(0)).withId(RULE_ID));
         when(store.update(any())).thenReturn(true);
         rest = new RestAlertRules(store, eventStore, cache, new AlertAccess(guard, conversationGuard), senders, schedule,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                AlertSettings.defaults(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private void asEditor() {
@@ -280,6 +281,110 @@ class RestAlertRulesTest {
             // The agent-scoped Slack rule is fine.
             rest.createRule(scoped(AlertScope.agent(AGENT), SLACK));
             verify(store).create(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("at most eddi.alerts.max-rules-per-agent rules per agent, and as many over every agent")
+    class RuleCap {
+
+        private final int max = AlertSettings.defaults().maxRulesPerAgent();
+
+        @Test
+        @DisplayName("a create for an agent that already has the maximum is RULE_LIMIT_REACHED naming the agent and the property; nothing stored")
+        void createAtCapIsRefused() {
+            asEditor();
+            when(store.count(AGENT, false)).thenReturn((long) max);
+
+            WebApplicationException e = assertThrows(WebApplicationException.class, () -> rest.createRule(scoped(AlertScope.agent(AGENT), SLACK)));
+
+            assertEquals(409, e.getResponse().getStatus());
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = (Map<String, String>) e.getResponse().getEntity();
+            assertEquals(AlertErrors.RULE_LIMIT_REACHED, body.get("error"));
+            assertTrue(body.get("message").contains(AGENT) && body.get("message").contains("eddi.alerts.max-rules-per-agent"),
+                    body.get("message"));
+            verify(store, never()).create(any());
+            verify(cache, never()).invalidate();
+        }
+
+        @Test
+        @DisplayName("one below the maximum is stored")
+        void belowCapIsStored() {
+            asEditor();
+            when(store.count(AGENT, false)).thenReturn((long) max - 1);
+            assertEquals(201, rest.createRule(scoped(AlertScope.agent(AGENT), SLACK)).getStatus());
+            verify(store).create(any());
+        }
+
+        @Test
+        @DisplayName("a rule over several agents is refused when any one of them is full")
+        void severalAgentsOneFull() {
+            asAdmin();
+            when(store.count(OTHER_AGENT, false)).thenReturn((long) max);
+            assertError(409, AlertErrors.RULE_LIMIT_REACHED,
+                    () -> rest.createRule(scoped(new AlertScope(false, List.of(AGENT, OTHER_AGENT)), SLACK)));
+            verify(store, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("an every-agent rule counts against the every-agent rules, not against one agent")
+        void everyAgentCap() {
+            asAdmin();
+            when(store.countAllAgents()).thenReturn((long) max);
+            assertError(409, AlertErrors.RULE_LIMIT_REACHED, () -> rest.createRule(scoped(new AlertScope(true, List.of()), SLACK)));
+            verify(store, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("an update that keeps the rule's agents is not counted again, so a full agent's rules stay editable")
+        void updateKeepingScopeIsAllowed() {
+            asEditor();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), SLACK)));
+            when(store.count(AGENT, false)).thenReturn((long) max + 5);
+
+            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), SLACK));
+
+            verify(store).update(any());
+        }
+
+        @Test
+        @DisplayName("an update that adds a full agent, or widens to every agent while those are full, is refused")
+        void updateWideningIsChecked() {
+            asAdmin();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), SLACK)));
+            when(store.count(AGENT, false)).thenReturn((long) max);
+            when(store.count(OTHER_AGENT, false)).thenReturn((long) max);
+            when(store.countAllAgents()).thenReturn((long) max);
+
+            assertError(409, AlertErrors.RULE_LIMIT_REACHED,
+                    () -> rest.updateRule(RULE_ID, scoped(new AlertScope(false, List.of(AGENT, OTHER_AGENT)), SLACK)));
+            assertError(409, AlertErrors.RULE_LIMIT_REACHED, () -> rest.updateRule(RULE_ID, scoped(new AlertScope(true, List.of()), SLACK)));
+            verify(store, never()).update(any());
+
+            // Already an every-agent rule: editing it is not counted again.
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(new AlertScope(true, List.of()), SLACK)));
+            rest.updateRule(RULE_ID, scoped(new AlertScope(true, List.of()), SLACK));
+            verify(store).update(any());
+        }
+
+        @Test
+        @DisplayName("access is checked first: a caller without EDIT learns nothing about how many rules an agent has")
+        void accessBeforeCount() {
+            asEditor();
+            doThrow(new ForbiddenException("no")).when(guard).requireAccess(AGENT, AccessLevel.EDIT, "agent");
+            when(store.count(AGENT, false)).thenReturn((long) max);
+            assertThrows(ForbiddenException.class, () -> rest.createRule(scoped(AlertScope.agent(AGENT), SLACK)));
+            verify(store, never()).count(anyString(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a test send stores nothing and is not counted")
+        void testSendIsNotCounted() {
+            asEditor();
+            when(store.count(AGENT, false)).thenReturn((long) max);
+            rest.testRule(scoped(AlertScope.agent(AGENT), SLACK));
+            verify(store, never()).count(anyString(), anyBoolean());
         }
     }
 

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -237,26 +239,6 @@ class SharedTaskListTest {
         // Task A is executable (PENDING, no deps), Task B is blocked
         assertEquals(1, executable.size());
         assertEquals("Task A", executable.getFirst().subject());
-    }
-
-    // --- 16. findTasksForAgent ---
-
-    @Test
-    void findTasksForAgent() {
-        var t1 = list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
-        var t2 = list.addTask(new SharedTaskList.TaskItem("Task 2", "desc", 1));
-        var t3 = list.addTask(new SharedTaskList.TaskItem("Task 3", "desc", 2));
-
-        list.assignTask(t1.id(), "agent-alpha", "Alpha");
-        list.assignTask(t2.id(), "agent-beta", "Beta");
-        list.assignTask(t3.id(), "agent-alpha", "Alpha");
-
-        var alphaTasks = list.findTasksForAgent("agent-alpha");
-        var betaTasks = list.findTasksForAgent("agent-beta");
-
-        assertEquals(2, alphaTasks.size(), "agent-alpha should have 2 tasks");
-        assertEquals(1, betaTasks.size(), "agent-beta should have 1 task");
-        assertTrue(alphaTasks.stream().allMatch(t -> "agent-alpha".equals(t.assignedAgentId())));
     }
 
     // --- 17–18. Cycle detection ---
@@ -537,12 +519,6 @@ class SharedTaskListTest {
     }
 
     // --- Additional branch coverage ---
-
-    @Test
-    void findTasksForAgent_null_returnsEmpty() {
-        list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
-        assertTrue(list.findTasksForAgent(null).isEmpty());
-    }
 
     @Test
     void assignTask_fromAssigned_throws() {
@@ -963,5 +939,40 @@ class SharedTaskListTest {
         list.reworkTask(id, "try again");
 
         assertEquals(0, list.getReviewerEdits().size(), "an edit recorded against the superseded result no longer describes the task");
+    }
+
+    /**
+     * The per-discussion cap bounds what members file with their task tools. A task
+     * the run was seeded with keeps the agent that wrote it as its creator, for
+     * peer verification, but no member of this discussion filed it.
+     */
+    @Test
+    void theAgentFiledCapCountsOnlyTasksFiledThroughTheTaskTool() {
+        for (int i = 0; i < 3; i++) {
+            list.addTask(new SharedTaskList.TaskItem("handed off " + i, "from another team", 0).filedBy("source-agent"));
+        }
+
+        for (int i = 0; i < 3; i++) {
+            var filed = list.addAgentTask("member task " + i, "", List.of(), 0, "member", "member", "Member", 3);
+            assertTrue(filed.accepted(), "a seeded task used up the members' budget: " + filed.rejectionReason());
+        }
+        var overCap = list.addAgentTask("one too many", "", List.of(), 0, "member", "member", "Member", 3);
+
+        assertFalse(overCap.accepted(), "the cap still holds for what members file");
+        assertEquals(3, list.getAgentFiledTaskCount());
+    }
+
+    /** A filing the list refuses is not counted, and the count survives a save. */
+    @Test
+    void aRefusedFilingIsNotCountedAndTheCountIsPersisted() throws Exception {
+        list.addAgentTask("same", "", List.of(), 0, "member", "member", "Member", 5);
+        assertFalse(list.addAgentTask("same", "", List.of(), 0, "member", "member", "Member", 5).accepted(), "a duplicate subject");
+
+        // As the discussion stores read it back: derived getters such as isEmpty are
+        // written but not read.
+        var mapper = new ObjectMapper().findAndRegisterModules().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        var restored = mapper.readValue(mapper.writeValueAsString(list), SharedTaskList.class);
+
+        assertEquals(1, restored.getAgentFiledTaskCount(), "a resumed discussion keeps what its members filed");
     }
 }

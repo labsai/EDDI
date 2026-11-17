@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { type ReactNode } from "react";
 import {
   useDashboardStats,
@@ -13,7 +13,7 @@ import {
 import { useLatestVersions, getVersionInfo } from "@/hooks/use-latest-versions";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 function createWrapper() {
   const queryClient = new QueryClient({

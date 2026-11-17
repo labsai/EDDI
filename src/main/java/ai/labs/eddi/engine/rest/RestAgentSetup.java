@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.api.IRestAgentSetup;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupForbiddenException;
+import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupInternalException;
 import ai.labs.eddi.engine.setup.ApiAgentSyncService;
 import ai.labs.eddi.engine.setup.ApiAgentSyncService.AgentSyncNotFoundException;
 import ai.labs.eddi.engine.setup.ApiAgentSyncService.DanglingReferencesException;
@@ -19,6 +20,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import java.util.Map;
+import java.util.UUID;
 import org.jboss.logging.Logger;
 
 /**
@@ -48,13 +50,13 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupForbiddenException e) {
             return Response.status(Response.Status.FORBIDDEN).entity(Map.of("error", e.getMessage())).build();
+        } catch (AgentSetupInternalException e) {
+            return internalError(e);
         } catch (AgentSetupException e) {
             LOGGER.warnf("Agent setup validation failed: %s", e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
-            LOGGER.error("Agent setup failed", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Agent setup failed: " + e.getMessage()))
-                    .build();
+            return opaqueServerError("Agent setup failed", e);
         }
     }
 
@@ -67,13 +69,13 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(dryRun ? Response.Status.OK : Response.Status.CREATED).entity(result).build();
         } catch (AgentSetupForbiddenException e) {
             return Response.status(Response.Status.FORBIDDEN).entity(Map.of("error", e.getMessage())).build();
+        } catch (AgentSetupInternalException e) {
+            return internalError(e);
         } catch (AgentSetupException e) {
             LOGGER.warnf("API agent setup validation failed: %s", e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
-            LOGGER.error("API agent setup failed", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Map.of("error", "API agent setup failed: " + e.getMessage())).build();
+            return opaqueServerError("API agent setup failed", e);
         }
     }
 
@@ -85,13 +87,39 @@ public class RestAgentSetup implements IRestAgentSetup {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", e.getMessage())).build();
         } catch (DanglingReferencesException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage(), "references", e.references())).build();
+        } catch (AgentSetupInternalException e) {
+            return internalError(e);
         } catch (AgentSetupException e) {
             LOGGER.warnf("API agent sync refused: %s", e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         } catch (Exception e) {
-            LOGGER.error("API agent sync failed", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "API agent sync failed: " + e.getMessage()))
-                    .build();
+            return opaqueServerError("API agent sync failed", e);
         }
+    }
+
+    /**
+     * A failure the setup service already classified as not the caller's. It logged
+     * the cause under the correlation id its message carries, and the message holds
+     * nothing taken from the cause, so it is answered as it is — as a 500, not the
+     * 400 a validation {@link AgentSetupException} gets.
+     */
+    private static Response internalError(AgentSetupInternalException e) {
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", e.getMessage())).build();
+    }
+
+    /**
+     * The answer to a failure none of the arms above maps to a 4xx. Its message is
+     * not written for the caller: a database timeout names the replica it waited
+     * for, a REST proxy failure the store it could not reach. So the full exception
+     * goes to the log under a correlation id and the caller gets only the context
+     * and the id, as from {@code ResourceStoreExceptionMapper} and
+     * {@code RestAgentManagement}. The body keeps its {@code error} key, which the
+     * Manager reads.
+     */
+    private static Response opaqueServerError(String context, Exception e) {
+        String correlationId = UUID.randomUUID().toString();
+        LOGGER.errorf(e, "%s [correlationId=%s]", context, correlationId);
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", context + " (correlationId: " + correlationId + ")"))
+                .build();
     }
 }

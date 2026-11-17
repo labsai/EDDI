@@ -53,11 +53,7 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -121,11 +117,7 @@ class McpAdminToolsSwitchCoverageTest {
     @Mock
     private IJsonSerialization jsonSerialization;
     @Mock
-    private IScheduleStore scheduleStore;
-    @Mock
-    private ScheduleFireExecutor scheduleFireExecutor;
-    @Mock
-    private SchedulePollerService schedulePollerService;
+    private IRestScheduleStore scheduleStore;
     @Mock
     private SecurityIdentity identity;
 
@@ -162,7 +154,7 @@ class McpAdminToolsSwitchCoverageTest {
         openMocks(this);
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 strictConfigurationParser(),
-                scheduleStore, scheduleFireExecutor, schedulePollerService,
+                scheduleStore,
                 identity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
 
         // Wire up all store mocks through restInterfaceFactory

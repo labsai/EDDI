@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderPage } from "@/test/test-utils";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 
 function renderPropertySetterPage(id = "res1") {

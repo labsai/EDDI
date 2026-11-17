@@ -556,7 +556,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
      */
     private static String withoutResumeOnlyFields(String document) {
         return "(" + document + " #- '{hitlPendingToolCalls,chatTranscriptJson}' #- '{hitlPendingToolCalls,gatingAssistantMessageJson}' "
-                + "#- '{hitlPendingToolCalls,traceSoFar}' #- '{hitlPendingToolCalls,fingerprint}')";
+                + "#- '{hitlPendingToolCalls,traceSoFar}' #- '{hitlPendingToolCalls,fingerprint}' #- '{hitlPendingToolCalls,planNonce}')";
     }
 
     /**
@@ -1340,7 +1340,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // hitlPauseType / pending batch lingers on an ended or cancelled document.
         String sql = "UPDATE conversation_memories SET data = data "
                 + "- 'hitlPausedWorkflowId' - 'hitlPausedAbsoluteTaskIndex' - 'hitlPausedAt' "
-                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' - 'hitlApprovalContext' "
+                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' - 'hitlApprovalContext' - 'hitlPlanHash' "
                 + "- 'hitlPauseType' - 'hitlPendingToolCalls' "
                 + "WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {

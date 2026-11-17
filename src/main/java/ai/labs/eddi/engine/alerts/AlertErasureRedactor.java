@@ -25,11 +25,12 @@ import java.util.function.LongSupplier;
  * claim, or the claim expires (a node that died mid-send). So erasure completes
  * only once no send of the erased content can still start.
  * <p>
- * The wait is bounded by {@link #MAX_WAIT}, ten times the send lease: a claim
- * always expires within one lease, so only a store that keeps failing to apply
- * the update — or deliveries re-claiming the same event without pause, which
- * the retry backoff rules out — can reach it, and then the step is reported as
- * failed rather than hanging the erasure.
+ * The wait is bounded by {@link #MAX_WAIT}, ten times the base send lease
+ * ({@link AlertDeliveryService#SEND_CLAIM_LEASE}): a claim always expires
+ * within one lease, so only a store that keeps failing to apply the update — or
+ * deliveries re-claiming the same event without pause, which the retry backoff
+ * rules out — can reach it, and then the step is reported as failed rather than
+ * hanging the erasure.
  */
 @ApplicationScoped
 public class AlertErasureRedactor {

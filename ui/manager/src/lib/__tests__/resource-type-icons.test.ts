@@ -3,8 +3,8 @@ import {
   RESOURCE_TYPE_ICONS,
   UNKNOWN_RESOURCE_TYPE_ICON,
   getResourceTypeIcon,
-} from "../resource-type-icons";
-import { RESOURCE_TYPES } from "../api/resources";
+} from "@eddi/app-kit/lib/resource-type-icons";
+import { RESOURCE_TYPES } from "@eddi/app-kit/lib/api/resources";
 
 describe("RESOURCE_TYPE_ICONS", () => {
   it("gives every kind its own icon", () => {
