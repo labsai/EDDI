@@ -751,15 +751,23 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
   default 0.99, which also sets the failure bands at the error budget and five
   times it; apdexTMs; minTurnsForBurnAlert, default 50) and \`overrides\`
   (a measure or section IGNORED until a day, with a reason; expired ones are
-  ignored) — with \`stored: false\` when these are only the preset's defaults.
+  ignored) — with \`stored: false\` when these are only the preset's defaults,
+  and \`defaulted\` listing the fields that come from the preset rather than
+  from what is stored.
   \`GET /health/presets\` lists the presets. Profiles are not versioned and do
   not travel with agent export or sync.
-- Owner report links are read-only, branded health pages for people without a
-  Manager account (\`/manage/health-report/<token>\`, served unauthenticated by
-  \`GET /health/reports/{token}\`). \`GET /agents/{agentId}/health/reports\`
-  (EDIT) lists the live ones — id, expiry, sections, period, creator — never
-  their tokens. You cannot create or revoke one: an admin does that in the
-  Manager, which shows the token once.
+- Owner report links are read-only, branded health reports for people without
+  a Manager account, served unauthenticated by \`GET /health/reports/{token}\`
+  (JSON). The Manager does not have the owner report page or a screen to create
+  or revoke links yet — that is REST only for now:
+  \`POST /agents/{agentId}/health/reports\` (shows the token once),
+  \`DELETE /agents/{agentId}/health/reports/{id}\` and
+  \`DELETE /agents/{agentId}/health/reports\` (all of an agent's links), each
+  needing EDIT. \`GET /agents/{agentId}/health/reports\` (EDIT) lists the live
+  ones — id, expiry, sections, period, creator — never their tokens. A link
+  shows only while its creator still holds EDIT on the agent; the status it
+  shows is judged over its own sections. You cannot create or revoke one: say
+  which call the admin makes.
 - Effectiveness is judged per session: a conversation splits after its origin's
   inactivity window (24 h; e-mail 72 h; per origin in the agent's
   \`healthConfig.inactivityWindowHours\`). Inside its window a session is OPEN
@@ -827,15 +835,21 @@ const BODY_HEALTH = `Agent Health (how an agent is used and how well it works, o
 const BODY_HEALTH_WRITES = `Agent Health changes (each one asks for approval):
 - \`PUT /agents/{agentId}/health/profile\` stores a profile (EDIT on the
   agent); every field is optional and falls back to the preset, and a save
-  replaces the stored profile, so read it first and send back the whole of it
-  with your change — keep what you read, it is how the change is undone.
+  replaces the stored profile. To change a stored profile, read it and send
+  back what is stored with your change, leaving out the fields its
+  \`defaulted\` list names — sending those would pin today's preset values.
+  Keep what you read: re-saving it is how a change to a stored profile is
+  undone. A profile that was not stored (\`stored: false\`) is undone only by
+  deleting it, which you cannot do — say so before you save one, and that the
+  admin would call \`DELETE /agents/{agentId}/health/profile\`.
   Invalid fields come back as 400 \`violations\` with a dotted \`path\`
   (thresholds.resolutionRate.red, overrides[0].reason): fix those and retry
   once. A save re-bands every measure at once and leaves a PROFILE_CHANGE
   marker; changing \`slo.apdexTMs\` recounts the retained days. Never change a
   profile to make an agent look healthy: say what the numbers are, and change
   thresholds only when the admin asks for them. Deleting a profile and
-  revoking a report link are the admin's, in the Manager.`;
+  creating or revoking a report link are the admin's, over REST (the Manager
+  has no screen for them yet).`;
 
 /**
  * Alerts — gated on {@link grantsAlertReads}: every line names one of the alert

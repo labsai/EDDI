@@ -14,7 +14,7 @@ them — and marks what is still coming.
 | H2b — Series & compare | Daily rollups, trends, version-to-version compare, change markers, REST/MCP | **Available** |
 | H3 — Outcomes | Sessions, engagement, resolved / escalated / abandoned, coverage, drill-down | **Available** |
 | H4 — Status | Health profiles, presets, status with reasons, `HEALTH` alerts | **Available** |
-| H4b — Owner report | Read-only, branded report links for people without Manager access | **Available** (backend; the Manager page renders it) |
+| H4b — Owner report | Read-only, branded report links for people without Manager access | **Available over REST** — the Manager's owner report page and link screens are not built yet |
 | H5 — Business join | Outcome events from other systems matched by the agent's own references | Coming |
 
 The design and the decisions behind it are in
@@ -425,13 +425,14 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/health/agents` | The portfolio: every agent the caller may view, `sort=attention\|name\|traffic`, `limit` (≤ 500), `cursor`, plus `platformIncidents` |
 | `GET` | `/agents/{agentId}/health/sessions` | The drill-down: one row per session — conversation id, `sessionNo`, start and end, version, origin, engaged, outcome, evidence, `provisional`, turns, cost, failed turns — newest first. Filters `outcome=` and `evidence=` (repeatable), `origin`, `version`, `period`/`from`/`to`; `limit` 1–100 (default 50), `cursor` |
 | `GET` | `/agents/{agentId}/health/outcome-suggestions` | The actions that most often end engaged, closed sessions and are not mapped in the current version's `healthConfig.outcomes`, with `sessionsEndingWith`, a `suggested` outcome from the action's name (`*confirm*`, `*done*`, `*complete*`, `*booked*` → `RESOLVED`; `*handoff*`, `*human*`, `*escalat*` → `ESCALATED`; `*out_of_scope*`, `*not_supported*` → `DEFLECTED`; else none) and a `reason`. At most 20; reserved actions are left out. Never applies anything |
-| `GET` | `/agents/{agentId}/health/profile` | The effective [health profile](#health-profiles-and-presets), `stored: false` when it is only the preset's defaults |
+| `GET` | `/agents/{agentId}/health/profile` | The effective [health profile](#health-profiles-and-presets), `stored: false` when it is only the preset's defaults; `defaulted` names the fields that come from the preset, not the stored profile |
 | `PUT` | `/agents/{agentId}/health/profile` | Stores a profile (EDIT); `200` with the effective profile, `400 {"violations": [{"path", "message"}]}` |
 | `DELETE` | `/agents/{agentId}/health/profile` | Back to the preset (EDIT); `204` |
 | `GET` | `/health/presets` | The four presets with their critical measures and thresholds |
 | `POST` | `/agents/{agentId}/health/reports` | Creates an [owner report link](#owner-report-links) (EDIT); `201` with its token, shown once |
 | `GET` | `/agents/{agentId}/health/reports` | The live links (EDIT) — never their tokens |
 | `DELETE` | `/agents/{agentId}/health/reports/{id}` | Revokes a link (EDIT); `204`, `404` for an unknown one |
+| `DELETE` | `/agents/{agentId}/health/reports` | Revokes every link of the agent (EDIT); `200 {"revoked": n}` |
 | `GET` | `/health/reports/{token}` | **Unauthenticated**: the report a link shows |
 
 **Query parameters.** `period=7d|30d|90d` (default `30d`; the portfolio `7d`)
@@ -700,7 +701,13 @@ alerts** — it never rolls back, pauses or changes an agent (plan decision 7).
 ## Owner report links
 
 A business owner without a Manager account gets a read-only, branded link to an
-agent's health:
+agent's health.
+
+> **Not yet available in the Manager — REST only for now.** The owner report
+> page at `/manage/health-report/<token>` and the screens to create, list and
+> revoke links follow in a later release. Until then a link's URL leads to a
+> Manager route that does not render it, and the report itself is the JSON of
+> `GET /health/reports/{token}`.
 
 ```http
 POST /agents/{agentId}/health/reports
@@ -715,17 +722,32 @@ POST /agents/{agentId}/health/reports
   read. `quality` only when the creator may read the agent's ratings. At most 20
   live links per agent.
 - The URL is `eddi.self.base-url` when set, else the request's base, plus
-  `/manage/health-report/<token>` — the route the Manager renders without
-  sign-in; it reads the report from `GET /health/reports/{token}`.
+  `/manage/health-report/<token>` — the route the Manager will render without
+  sign-in (not built yet, see above); it reads the report from
+  `GET /health/reports/{token}`.
 - `GET …/health/reports` lists the live links — id, expiry, sections, period,
-  creator — **never** a token; `DELETE …/health/reports/{id}` revokes one.
-  Expired links are deleted by the rollup pass a day after they expire.
+  creator — **never** a token; `DELETE …/health/reports/{id}` revokes one and
+  `DELETE …/health/reports` all of them. Expired links are deleted by the rollup
+  pass a day after they expire; an agent's links are revoked when the agent is
+  deleted (soft or permanent).
+- **A link shows only while its creator still holds `EDIT` on the agent.** Every
+  read re-checks the creator's access as it is now — ownership, grants, shares,
+  a move to another space — with the team list taken when the link was created.
+  A link whose creator lost `EDIT` answers 404 like a revoked one (and shows
+  again if the access comes back); one whose creator was erased (GDPR) answers
+  404 for good. What cannot be re-checked without the creator's own sign-in —
+  their roles (administrator, the rating roles behind `quality`) and leaving a
+  team — is as it was at creation: **revoke a departing person's links** (`DELETE
+  …/health/reports` per agent).
 - The report is the [`GET /agents/{agentId}/health`](#rest-api) shape for the
-  link's period, limited to its sections — status, the reasons of those
-  sections, the golden-suite check only with `reliability` — plus `expiresAt` and
-  a `brand` (`productName`, `tagline`, `poweredBy`, `logoUrl` `/branding/logo`,
-  `primaryColor`) from the [white-label settings](white-labeling.md). No
-  drill-down, no conversation ids, no user ids, no series.
+  link's period, limited to its sections — with the **status and reasons judged
+  over those sections alone** (a link without `reliability` does not reveal that
+  reliability is red), the golden-suite check only with `reliability` — plus
+  `expiresAt` and a `brand` (`productName`, `tagline`, `poweredBy`, `logoUrl`
+  `/branding/logo`, `primaryColor`) from the
+  [white-label settings](white-labeling.md). No free text: no measure carries a
+  `hint` (an override's reason is an admin's note), and no reason a `markerId`.
+  No drill-down, no conversation ids, no user ids, no series.
 
 **Security.** `GET /health/reports/{token}` is the only unauthenticated health
 endpoint: the `health-report` permit rule covers `GET`/`HEAD` of
@@ -737,16 +759,35 @@ everything under `/agents` stay authenticated).
   index, so no token is compared character by character and a database dump
   holds no usable link. The token is in the creation response only.
 - A malformed, unknown, expired or revoked token answers the same `404 {"error":
-  "not_found"}`; a malformed one never reaches the database.
-- Rate limits per node: 30 reads a minute per link, 300 a minute for all reports,
-  60 unknown tokens a minute; past them `429` with `Retry-After: 60`. Keyed by the
-  link, never by client address (behind a proxy that is the proxy's, and a
-  forwarded header is the client's to forge).
+  "not_found"}`; a malformed one is answered before any rate limit or database
+  lookup.
+- Rate limits per node, arranged so that tokens leading nowhere never use up a
+  real link's capacity: a token not found in the last 10 minutes is charged,
+  **before** its database lookup, to 10 lookups a minute per client address and
+  60 a minute in all — and gets the charge back when it turns out to be a live
+  link. Only a found link is charged to its own 30 reads a minute and to 300 a
+  minute for all found reports. Past any of them `429` with `Retry-After: 60`.
+  The client address is the one Quarkus resolves: the peer, or the forwarded
+  client only with `quarkus.http.proxy.proxy-address-forwarding` and the proxy in
+  `quarkus.http.proxy.trusted-proxies` — a raw `X-Forwarded-For` is never read.
+  Behind an unconfigured proxy every client shares one address, which only
+  tightens the unknown-token limit. A scan can therefore delay the *first* read
+  of a link on a node for a minute, never a link already being read.
 - Every answer is `Cache-Control: no-store`, `Referrer-Policy: no-referrer` (the
-  token is in the page's URL) and `X-Robots-Tag: noindex`. No CORS of its own —
-  `quarkus.http.cors.*` applies as to any endpoint.
-- Creating, listing and revoking are logged (`[HEALTH]`, with the link id, never
-  the token). The Platform Operator may list links but neither create nor
+  token is in the page's URL; it replaces the deployment-wide
+  `strict-origin-when-cross-origin` rather than adding a second header) and
+  `X-Robots-Tag: noindex`. No cookie, no CORS of its own — `quarkus.http.cors.*`
+  applies as to any endpoint.
+- **The token is in the URL path**, so whatever logs paths sees it. EDDI's own
+  traces do not: `HealthReportSpanScrubber` rewrites `url.path`, `http.target`,
+  `http.route`, `url.full` and `http.url` of a span to `/health/reports/{token}`
+  as it starts. A reverse proxy's or load balancer's access log is outside EDDI —
+  exclude `/health/reports/` from it or mask the segment there.
+- Creating and revoking links, and saving or deleting a profile, are logged
+  (`[HEALTH]`) and recorded in the [audit ledger](audit-ledger.md)
+  (`HEALTH_REPORT_LINK_CREATED`, `HEALTH_REPORT_LINK_REVOKED`,
+  `HEALTH_PROFILE_SAVED`, `HEALTH_PROFILE_DELETED`; actor, agent and link id —
+  never a token or its hash). The Platform Operator may list links but neither create nor
   revoke them: a tool result is kept in its conversation and the audit ledger,
   where a token would outlive being shown once, and its write scope holds no
   `DELETE`.
@@ -760,7 +801,9 @@ caller exactly as over REST), `suggest_outcome_mappings`,
 `read_agent_health_profile` and `list_health_presets` (tier `eddi-admin`,
 `eddi-editor`, `eddi-viewer`), and `update_agent_health_profile` (tier
 `eddi-admin`, `eddi-editor`, plus `EDIT` on the agent). Report links have no
-tool. See [MCP Server](mcp-server.md#health-tools-8).
+tool. `update_agent_health_profile` replaces the stored profile: send what is
+stored with your change, without the fields the read profile's `defaulted`
+names. See [MCP Server](mcp-server.md#health-tools-8).
 
 ## Configuration
 
@@ -836,8 +879,13 @@ Turn rows are personal data about a user's use of an agent:
   them. A conversation delete removes its sessions too.
 - **Health profiles and report links** (`agentHealthAdministration`) hold only the
   account name of whoever last saved a profile (`updatedBy`) or created a link
-  (`createdBy`); erasure blanks it and keeps the profile and the link (they
-  belong to the agent). Nothing of it is exported.
+  (`createdBy`); erasure blanks it and keeps the profile (it belongs to the
+  agent) and the link row — which, with nobody's authority behind it, answers
+  404 from then on. The export lists the profiles the person saved last (agent,
+  time) and the links they created (id, agent, sections, period, created,
+  expiry) — never a token.
+- **Deleting an agent** revokes its report links; a permanent delete also
+  removes its health profile and its `HEALTH` alert states.
 - **Deleting a conversation** deletes its rows (best effort — a failure is
   logged and the rows expire with the retention).
 - **A row still queued is withheld or removed — best effort, not a guarantee.** Rows are written on the health

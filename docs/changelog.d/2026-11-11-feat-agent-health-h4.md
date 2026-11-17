@@ -42,7 +42,7 @@ business owner without Manager access can read a **branded, read-only report** t
   malformed, unknown, expired and revoked tokens all answer the same 404; rate limits per link, overall and for
   unknown tokens; `no-store`, `no-referrer`, `noindex`; branded from the white-label settings; only the link's
   sections, no drill-down or ids. The permit rule `quarkus.http.auth.permission.health-report` opens `GET`/`HEAD` of
-  `/health/reports/*` and nothing else. The UI renders `/manage/health-report/<token>`.
+  `/health/reports/*` and nothing else. The Manager page at `/manage/health-report/<token>` is not built yet.
 - **`Measure.tested`**: every measure now says whether its kind has a significance test at all (rates, Apdex, counts)
   — derived from how `HealthMeasures` builds it, not a hand list — so `significant: false` can be told apart from
   "never tested".
@@ -57,16 +57,42 @@ business owner without Manager access can read a **branded, read-only report** t
   reasons, profiles, presets, `HEALTH` alerts and links. Operator revision 64; the OpenAPI operations snapshot gains
   the eight new operations.
 
+### Review fixes (before merge)
+
+- **Public report endpoint**: a malformed token is a 404 before any limit; unknown tokens are charged before their
+  database lookup to a per-client (Quarkus-resolved remote address, trusted proxies only) and a shared lookup bucket,
+  refunded when the link is live; per-link and all-reports buckets are charged only after a link is found — so junk
+  requests can no longer starve real links. `Referrer-Policy: no-referrer` replaces the global header instead of
+  adding a second; tokens are scrubbed from trace spans (`HealthReportSpanScrubber`).
+- **Status per link**: the shared report judges status and reasons over the link's sections only, and carries no hints
+  (override reasons) and no marker ids.
+- **Strict creator rights**: every read re-checks that the link's creator still holds `EDIT` on the agent
+  (`ResourceAccessGuard.checkPrincipalLevel`, team snapshot from creation); otherwise 404. `DELETE
+  /agents/{agentId}/health/reports` revokes all of an agent's links; deleting an agent revokes them.
+- **Rollup** reads the Apdex T past the profile cache. **Alerts** only remember conditions whose fire was recorded, and
+  skip agents whose window still has days waiting for the rollup.
+- **Profile** responses list `defaulted` fields; the MCP tool and operator guidance say not to send those back.
+- Audit-ledger records for profile saves/deletes and link creation/revocation; GDPR export of profiles saved and links
+  created (never tokens); the 20-link cap enforced after the insert; compare-and-set author erasure.
+- Docs and the Platform Operator now say the owner report page and link screens are **not yet in the Manager — REST
+  only for now** (operator revision 65). Auth E2E spec `health-report.spec.ts` checks the permit rule over HTTP.
+
 ### Design decisions
 
 - Quality is left out of the status everywhere, so the report, the portfolio and the alerts agree and no rating leaks
   through a status; profiles cannot make a quality measure critical.
 - Burn-rate windows are whole UTC days because the rollup keeps daily rows; documented as a limitation.
 - Alert conditions are edge-triggered (stored state per rule and agent); a new rule reports a current status once.
-- Report links are keyed and rate-limited by token hash, never by client address.
+- Report links are keyed and rate-limited by token hash; only requests for unknown tokens are also charged to the client address, so junk traffic cannot starve real links.
 
 ### Next
 
 - Manager: the profile editor, the owner report page at `/manage/health-report/<token>` (no sign-in), and the `HEALTH`
   source in the alert-rule editor.
 - H5: business join (outcome events, `externalRefs`).
+
+### Still open
+
+- Manager UI for profiles, links and the report page (REST/MCP only for now); the HEALTH source in the alert-rule editor.
+- Review items M3 is implemented as a read-time creator-rights re-check plus revoke-on-delete; a revoke on space move is not separate.
+- No dedicated MCP tool for revoking all links of an agent (REST only).

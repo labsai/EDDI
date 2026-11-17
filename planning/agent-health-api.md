@@ -375,7 +375,11 @@ shape above; the UI should know about them.
   `costPerResolvedUsd`, `costPerSessionUsd`, `tokensPerTurn`; each makes its measure `SCORED` (green ≤ budget, red ≥ 1.5 ×
   budget). `slo.agentTurnSuccess` also sets `agentFailureRate`'s bands (green = 1 − SLO, red = 5 × that) unless
   `thresholds.agentFailureRate` is given. `overrides[].until` is a day `YYYY-MM-DD`, inclusive, at most 366 days ahead;
-  `state` is `IGNORED` only.
+  `state` is `IGNORED` only. **Deviation — `defaulted`** (response only, ignored on a request): the fields that come from
+  the preset or the deployment default rather than the stored profile, among `preset`, `critical`, `thresholds`,
+  `budgets`, `slo.agentTurnSuccess`, `slo.apdexTMs`, `slo.minTurnsForBurnAlert`, `overrides` — all of them when
+  `stored: false`. Writing a response back would pin those defaults, so a client sends only what is stored plus its
+  change; returning to the preset is `DELETE`.
 - **Presets (§5).** `GET /health/presets` returns `[{id, label, description, critical, thresholds}]` with `thresholds` as
   `{measureId: {green, red, higherIsBetter}}` — the §1 `Thresholds` shape. **Deviation:** `description` is an addition.
 - **Report links (§9).** `POST` body `{expiresInDays (1–90, default 30), sections (default all but quality), period
@@ -383,22 +387,49 @@ shape above; the UI should know about them.
   sections, period}` — **`path` is an addition** (`/manage/health-report/<token>`; `url` is it on `eddi.self.base-url` when
   set, else on the request's base). `quality` without the ratings right is `403` (not 400). At most 20 live links per
   agent (`400` beyond). §11.2 confirmed: `GET …/reports` returns a **bare array** of `{id, expiresAt, sections, period,
-  createdAt, createdBy}`, live links only. `DELETE …/reports/{id}` is `204`, `404` for an unknown id.
+  createdAt, createdBy}`, live links only. `DELETE …/reports/{id}` is `204`, `404` for an unknown id. **Addition:**
+  `DELETE …/reports` revokes every link of the agent (EDIT), `200 {"revoked": n}`. The 20-link cap is enforced after
+  the insert (a link that is not among the agent's first 20 live ones in creation order is deleted again and refused),
+  so concurrent creations cannot exceed it. Create and revoke are recorded in the audit ledger
+  (`HEALTH_REPORT_LINK_CREATED|REVOKED`, with the link id, never the token); so are profile saves and deletes
+  (`HEALTH_PROFILE_SAVED|DELETED`) — the generic admin-action filter leaves `/agents/*` out. Deleting an agent revokes
+  its links; a permanent delete also removes its profile and alert states.
+- **Decision — creator rights are re-checked on every read (strict).** A link stores its creator's principal, team
+  subjects and administrator flag at creation. Every public read asks
+  `ResourceAccessGuard.checkPrincipalLevel(agentId, creator, teams, admin, EDIT)` — the request-less access check the
+  schedules use — against the agent's ownership, grants, shares and space **as they are now**. `DENIED` answers `404`
+  (like a revoked link; the link shows again if the access returns), `UNKNOWN` (descriptor store unavailable) `503`.
+  A creator blanked by GDPR erasure is `DENIED` wherever access is enforced. Not re-checkable without the creator's
+  token, and therefore a snapshot: their roles (administrator; the rating roles that allowed `quality`) and leaving a
+  team. `docs/security.md` says plainly that removing a person's role does not end their links, and to revoke them.
 - **Public report.** `GET /health/reports/{token}` answers `{agentName, period, baseline, status, reasons, preset,
   generatedAt, dataThrough, sections, checks, expiresAt, brand}` — **deviation from "§1 shape"**: no `agentId`,
   `version` or `origins`; `sections` holds only the link's sections (others are absent, not `restricted`); `reasons` only
   of those sections; `checks` only with `reliability`; `brand` is `{productName, tagline, poweredBy, logoUrl, primaryColor}`
-  from the white-label settings. `404 {"error": "not_found"}` for a malformed, unknown, expired or revoked token alike;
-  `429` with `Retry-After: 60` past the rate limits (30/min per link, 300/min all reports, 60/min unknown tokens, per node).
-  Headers: `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`.
+  from the white-label settings. **`status` and `reasons` are judged over the link's sections only** (with the agent's
+  effective profile and markers), so a link never reveals the state of a section it leaves out; no measure carries a
+  `hint` (override reasons are admin notes) and every `Reason.markerId` is `null`. `404 {"error": "not_found"}` for a
+  malformed, unknown, expired or revoked token alike — a malformed one before any rate limit or lookup. Rate limits per
+  node: a token not found within 10 minutes is charged **before** its database lookup to 10/min per client address and
+  60/min overall (refunded when found live); only a found link is charged to 30/min per link and 300/min for all found
+  reports; `429` with `Retry-After: 60`. The client address is Quarkus's resolved remote address (forwarded only from
+  `quarkus.http.proxy.trusted-proxies`). Headers: `Cache-Control: no-store`, `Referrer-Policy: no-referrer` (set on the
+  Vert.x response, replacing the deployment-wide header rather than adding a second), `X-Robots-Tag: noindex`. The token
+  is scrubbed from trace spans (`url.path` and friends become `/health/reports/{token}`); proxy access logs are the
+  deployment's to mask.
 - **UI route for the owner report: `/manage/health-report/<token>`.** The Manager is already served without sign-in under
   `/manage/*` (static-assets permit); its router must render this route without starting the Keycloak login, and read
-  the report from `GET /health/reports/{token}` without an `Authorization` header.
+  the report from `GET /health/reports/{token}` without an `Authorization` header. **Not built yet**: the page and the
+  link screens follow in a later PR; until then the docs and the operator say "REST only for now".
 - **HEALTH alerts (plan §6.4).** `source: "HEALTH"`, `condition: {healthTriggers: ["STATUS_CHANGE" | "BURN_RATE" |
   "CRITICAL_TREND"], healthStatuses?: ["WATCH" | "NEEDS_ATTENTION"]}`. Evaluated after each rollup pass over a 7-day window;
   burn-rate windows are **whole UTC days** (long = last 3 days, short = today; 2× the error budget in both, each with
   `slo.minTurnsForBurnAlert` turns). Edge-triggered per rule and agent. The alert `match` adds `healthStatus`,
-  `previousHealthStatus` and `measureId`; `conversationId` and `agentVersion` are `null`.
+  `previousHealthStatus` and `measureId`; `conversationId` and `agentVersion` are `null`. The per-rule state moves on
+  only for conditions whose fire was recorded — a failed fire, or no alert engine, leaves the condition unseen so the
+  next pass fires it again. An agent with a day of the status window or its baseline still waiting for the rollup since
+  before the pass is not judged that pass. The rollup reads an agent's Apdex T from the store, not the 60 s profile
+  cache, so a recount on another node never uses the old T.
 - **Not done:** the Manager's alert-rule editor does not offer `HEALTH` yet; report links have no MCP tool, and the
   Platform Operator may list links but neither create nor revoke them (a token in a tool result would be stored in its
   conversation and the audit ledger; its write scope holds no `DELETE`). It may save a profile (gated), not delete one.

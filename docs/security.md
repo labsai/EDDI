@@ -288,16 +288,38 @@ stay behind the catch-all. What protects it:
   is compared character by character.
 - **No enumeration**: a malformed (never looked up), unknown, expired or revoked
   token gets the same `404`. Links expire after 1–90 days and can be revoked.
-- **Rate limits** per node: 30 reads a minute per link, 300 for all reports, 60
-  unknown tokens; `429` with `Retry-After` beyond. Keyed by link, not client IP.
-- **What it shows**: the link's sections of the §1 report shape and the brand —
-  no drill-down, conversation ids, user ids or series; `quality` only when the
-  creator could read the agent's ratings.
+- **Rate limits** per node, ordered so that junk never costs a real link: a
+  malformed token is a 404 before any limit; a token not recently found is
+  charged, before its database lookup, to 10 lookups a minute per client
+  address and 60 in all (refunded when it turns out to be live); only a found
+  link is charged to its 30 reads a minute and the 300 a minute for all found
+  reports. `429` with `Retry-After` beyond. The client address is the remote
+  address as Quarkus resolves it — a forwarded one only from a proxy in
+  `quarkus.http.proxy.trusted-proxies`, never a raw `X-Forwarded-For`.
+- **The creator's authority is re-checked on every read**: the link shows only
+  while its creator still holds `EDIT` on the agent (ownership, grants, shares
+  and the agent's space as they are now; the creator's teams as they were at
+  creation). Losing `EDIT` makes the link a 404. **What revoking a person does
+  not do**: their roles and team memberships live in their identity provider
+  and cannot be re-checked without their sign-in, so removing someone's
+  `eddi-editor` role, or removing them from a team, does not end their links.
+  Revoke them (`DELETE /agents/{agentId}/health/reports`, per agent) when a
+  person leaves. Erasing the person (GDPR) does end them.
+- **What it shows**: the link's sections of the §1 report shape and the brand,
+  with the status judged over those sections only — no drill-down,
+  conversation ids, user ids, series, hints or marker ids; `quality` only when
+  the creator could read the agent's ratings.
 - **Headers**: `Cache-Control: no-store`, `Referrer-Policy: no-referrer` (the
-  token is in the page URL), `X-Robots-Tag: noindex`; no CORS of its own.
-- Creation, listing and revocation need `EDIT` on the agent and are logged
-  without the token. The Platform Operator cannot create links (its tool results
-  are kept in conversation memory and the audit ledger).
+  token is in the page URL; it replaces the deployment-wide value instead of
+  adding a second header), `X-Robots-Tag: noindex`; no cookie, no CORS of its
+  own.
+- **The token is in the URL path.** EDDI scrubs it from its trace spans
+  (`HealthReportSpanScrubber`); a reverse proxy's access log is the proxy's to
+  mask — exclude `/health/reports/` or redact the segment.
+- Creation and revocation need `EDIT` on the agent and are logged and recorded
+  in the audit ledger without the token. The Platform Operator cannot create
+  or revoke links (its tool results are kept in conversation memory and the
+  audit ledger).
 
 > **`@PermitAll` does not make a path public.** Quarkus evaluates these path policies *before* declarative RBAC, so an endpoint annotated `@PermitAll` but not named in a `permit` rule still answers `401`. That ordering is also why the discovery document above needs its own rule: quarkus-oidc serves it from a Vert.x filter at priority 50, and authorization runs at 100 — higher first.
 

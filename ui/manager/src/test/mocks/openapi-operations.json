@@ -11,6 +11,7 @@
     "DELETE /administration/coordinator/dead-letters/{entryId}",
     "DELETE /administration/orphans",
     "DELETE /agents/{agentId}/health/profile",
+    "DELETE /agents/{agentId}/health/reports",
     "DELETE /agents/{agentId}/health/reports/{id}",
     "DELETE /agents/{conversationId}/rating",
     "DELETE /agents/{conversationId}/steps/{stepIndex}/rating",
