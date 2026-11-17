@@ -191,6 +191,9 @@ public class RestWebhookChannel {
         if (dispatch.reason() != null) {
             entity.put("reason", dispatch.reason());
         }
+        if (dispatch.details() != null) {
+            dispatch.details().forEach(entity::putIfAbsent);
+        }
         var builder = Response.status(dispatch.status()).type(MediaType.APPLICATION_JSON).entity(json(entity));
         if (dispatch.status() == 409 && WebhookEventHandler.REASON_IN_PROGRESS.equals(dispatch.reason())) {
             // A repeat of a delivery still being processed: retry soon, and it is
