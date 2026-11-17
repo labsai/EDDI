@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { SecretKeyPicker } from "../secret-key-picker";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 
 /** A picker that owns its value, so typing into it behaves as it does in an editor. */
 function ControlledPicker({ initial = "" }: { initial?: string }) {

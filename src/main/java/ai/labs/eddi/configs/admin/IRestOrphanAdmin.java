@@ -18,8 +18,8 @@ import org.jboss.resteasy.reactive.NoCache;
  * REST API for detecting and cleaning up orphaned resources.
  *
  * <p>
- * An orphan is a resource (package, behavior set, HTTP calls config, etc.) that
- * exists in the database but is not referenced by any Agent or package.
+ * An orphan is a resource (workflow, behavior set, HTTP calls config, etc.)
+ * that exists in the database but is not referenced by any Agent or workflow.
  * </p>
  *
  * @author ginccc

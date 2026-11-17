@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import type { RequestHandler } from "msw";
-import * as handlerModule from "../handlers";
+import * as handlerModule from "@eddi/app-kit/test/mocks/handlers";
 
 /**
  * Does every mocked endpoint actually exist on the backend?

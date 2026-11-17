@@ -1,13 +1,13 @@
-import { formatUsd } from "@/lib/utils";
-import { displayUserInput } from "@/lib/api/conversations";
+import { formatUsd } from "@eddi/app-kit/lib/utils";
+import { displayUserInput } from "@eddi/app-kit/lib/api/conversations";
 import { createContext, useContext, useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useHasRole } from "@/hooks/use-auth";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import { AdminActionsView } from "@/components/audit/admin-actions-view";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { formatDateTimeWithZone, toIsoWithOffset } from "@/lib/date-format";
-import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@eddi/app-kit/hooks/use-agents";
 import {
   ShieldCheck,
   Search,
@@ -28,8 +28,8 @@ import {
   ShieldX,
   Hand,
 } from "lucide-react";
-import { extensionTypeForTask, getExtensionIcon } from "@/lib/api/extensions";
-import { UNKNOWN_RESOURCE_TYPE_ICON } from "@/lib/resource-type-icons";
+import { extensionTypeForTask, getExtensionIcon } from "@eddi/app-kit/lib/api/extensions";
+import { UNKNOWN_RESOURCE_TYPE_ICON } from "@eddi/app-kit/lib/resource-type-icons";
 import { useAuditTrail, useAuditTrailByAgent } from "@/hooks/use-audit";
 import { useAuditVerification } from "@/hooks/use-audit-verification";
 import {
@@ -41,9 +41,9 @@ import {
 } from "@/lib/api/audit-verify";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
-import type { AuditEntry } from "@/lib/api/audit";
-import { mergeById } from "@/lib/audit-pages";
-import { useDeployedAgents } from "@/hooks/use-chat";
+import type { AuditEntry } from "@eddi/app-kit/lib/api/audit";
+import { mergeById } from "@eddi/app-kit/lib/audit-pages";
+import { useDeployedAgents } from "@eddi/app-kit/hooks/use-chat";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

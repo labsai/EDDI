@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { NumberInput } from "@/components/editors/number-input";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 
 /** A parent that stores what the field reports, like every editor does. */
 function Harness({

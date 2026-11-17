@@ -305,7 +305,15 @@ public class RemoteApiResourceSource implements IResourceSource {
             failuresByPath.put(path, e);
             throw e;
         }
-        String scrubbed = json == null ? null : secretScrubber.apply(json);
+        String scrubbed;
+        try {
+            scrubbed = json == null ? null : secretScrubber.apply(json);
+        } catch (RuntimeException e) {
+            // A document the scrubber refuses (one it cannot parse) is a failed read
+            // too, and remembered as one for the same reason.
+            failuresByPath.put(path, e);
+            throw e;
+        }
         if (scrubbed != null) {
             documentsByPath.put(path, scrubbed);
         }
@@ -363,7 +371,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             // Resolve version if not specified
             int version = agentVersion != null ? agentVersion : resolveLatestAgentVersion();
 
-            String agentJson = readDocument("/agentstore/agents/" + agentId + "?version=" + version);
+            // One path segment, encoded as exportAgentArchive encodes it: concatenated
+            // raw, an id with "../" in it resolved to another path on the source.
+            String agentJson = readDocument("/agentstore/agents/" + encodePathSegment(agentId) + "?version=" + version);
             AgentConfiguration config = jsonSerialization.deserialize(agentJson, AgentConfiguration.class);
 
             String agentName = readRemoteDescriptorName("/agentstore/agents/descriptors", agentId);
@@ -887,7 +897,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
         }
 
-        throw new RuntimeException("Agent " + agentId + " is not listed on " + baseUrl
+        throw new RemoteReadException("Agent " + agentId + " is not listed on " + baseUrl
                 + " — cannot determine its latest version. Pass an explicit sourceAgentVersion.");
     }
 
@@ -999,10 +1009,12 @@ public class RemoteApiResourceSource implements IResourceSource {
     /**
      * A failure to read the <em>other</em> instance.
      * <p>
-     * Every failure this class raises is one: unreachable, refusing the token,
-     * answering a status or a body that cannot be used. Naming the category lets
-     * the endpoints answer {@code 502 Bad Gateway} for it and keep {@code 500} for
-     * what this deployment itself got wrong — a distinction an operator needs and a
+     * Almost every failure to read the source that this class raises is one:
+     * unreachable, refusing the token, answering a status or a body that cannot be
+     * used, or no resolvable latest agent version. (Not a malformed base URL, which
+     * is an {@code IllegalArgumentException}.) Naming the category lets the
+     * endpoints answer {@code 502 Bad Gateway} for it and keep {@code 500} for what
+     * this deployment itself got wrong — a distinction an operator needs and a
      * single {@code RuntimeException} could not carry.
      */
     public static class RemoteReadException extends RuntimeException {

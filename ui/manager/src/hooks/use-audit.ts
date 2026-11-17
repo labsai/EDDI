@@ -1,10 +1,10 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { isApiError } from "@/lib/api-client";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
 import {
   getAdminActions,
   getAuditTrail,
   getAuditTrailByAgent,
-} from "@/lib/api/audit";
+} from "@eddi/app-kit/lib/api/audit";
 
 /* ─── Query Keys ─── */
 

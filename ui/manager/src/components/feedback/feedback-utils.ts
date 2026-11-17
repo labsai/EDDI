@@ -1,4 +1,4 @@
-import type { RatingKind, RatingQuery, ReviewStatus } from "@/lib/api/ratings";
+import type { RatingKind, RatingQuery, ReviewStatus } from "@eddi/app-kit/lib/api/ratings";
 
 /** The periods the Feedback page offers. "all" has no previous period to compare with. */
 export const PERIODS = ["7d", "30d", "90d", "all"] as const;

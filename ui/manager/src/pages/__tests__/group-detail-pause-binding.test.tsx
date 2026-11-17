@@ -5,10 +5,10 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { createTestQueryClient } from "@/test/test-utils";
+import { createTestQueryClient } from "@eddi/app-kit/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
-import { server } from "@/test/mocks/server";
-import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useGroupStreamStore } from "@eddi/app-kit/hooks/use-group-discussion-stream";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },

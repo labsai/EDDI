@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle2, ExternalLink, NotebookPen, RotateCcw } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { Badge } from "@eddi/ui";
+import { Button } from "@eddi/ui";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { RatingScore } from "./rating-score";
 import { isRatingChanged, useReviewRating } from "@/hooks/use-ratings";
-import { RATING_LIMITS, type RatingRow } from "@/lib/api/ratings";
+import { RATING_LIMITS, type RatingRow } from "@eddi/app-kit/lib/api/ratings";
 
 interface RatingsTableProps {
   rows: RatingRow[];
@@ -209,7 +209,7 @@ function NoteDialog({
   const tooLong = note.length > RATING_LIMITS.maxReviewNoteLength;
   return (
     <AccessibleDialog open onClose={onClose} title={t("feedback.noteTitle", "Internal note")} testId="rating-note-dialog">
-      <div className="space-y-3">
+      <div className="space-y-3 p-5">
         <p className="text-sm text-muted-foreground">
           {t("feedback.noteHelp", "Seen only by the people running this agent — never by the person who rated.")}
         </p>

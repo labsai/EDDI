@@ -265,6 +265,24 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("a delete that read v1 before a permanent removal erased it leaves nothing behind")
+        void deleteRacingAPermanentRemovalDoesNotResurrectTheResource() throws Exception {
+            var id = UUID.randomUUID().toString();
+            var v1 = storage.newResource(id, 1, Map.of("v", 1));
+            storage.store(v1);
+            // the delete read v1, then the erasure ran to completion, then the delete
+            // arrives
+            var tombstone = storage.newHistoryResourceFor(v1, true);
+            storage.removeAllPermanently(id);
+
+            storage.storeHistoryAndRemove(tombstone, id, 1);
+
+            assertNull(storage.readHistory(id, 1), "the erased resource's data must not come back as a tombstone");
+            assertNull(storage.readHistoryLatest(id));
+            assertEquals(-1, storage.getCurrentVersion(id));
+        }
+
+        @Test
         @DisplayName("replaceHistory rewrites an existing history row and reports a missing one")
         void replaceHistory() throws Exception {
             var id = UUID.randomUUID().toString();
@@ -396,6 +414,18 @@ class PostgresResourceStorageContainerTest extends PostgresTestBase {
             store(Map.of("name", "50X off 'today' \\o/ axb")); // % and _ are not wildcards
 
             assertEquals(Set.of(hit), find("name", new IResourceFilter.Contains("% off 'today' \\o/ a_b")));
+        }
+
+        @Test
+        @DisplayName("ContainsIgnoreCase: literal, anywhere, any case; wildcards and regex characters are text")
+        void containsIgnoreCaseIsALiteralSubstringOfAnyCase() throws Exception {
+            String lower = store(Map.of("title", "trip to rome (a+b) 50% a_b"));
+            String upper = store(Map.of("title", "TRIP TO ROME (A+B) 50% A_B!"));
+            store(Map.of("title", "trip to rome (aab) 50X axb")); // "+", "%" and "_" are not special
+            store(Map.of("title", "trip to rome (a+b) 50XYZ aXb")); // "%" and "_" as LIKE wildcards would match this
+            store(Map.of("name", "trip to rome (a+b) 50% a_b")); // the field is absent
+
+            assertEquals(Set.of(lower, upper), find("title", new IResourceFilter.ContainsIgnoreCase("Rome (A+b) 50% a_B")));
         }
 
         private Set<String> find(String field, Object value) {

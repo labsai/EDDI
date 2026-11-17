@@ -23,6 +23,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Calendar;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,7 +32,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
@@ -138,6 +142,8 @@ class PostgresOAuthStateStoreUnitTest {
         assertTrue(executed.get(0).contains("consumed_at TIMESTAMP"), "the redemption stamp is the single-use marker: " + executed.get(0));
         assertTrue(executed.get(0).contains("expires_at TIMESTAMP NOT NULL"),
                 "a nullable expiry would be a state that never times out: " + executed.get(0));
+        assertFalse(executed.get(0).matches("(?s).*CURRENT_TIMESTAMP(?! AT TIME ZONE 'UTC').*"),
+                "a column default stamps a UTC wall clock too, not the session zone's: " + executed.get(0));
     }
 
     @Test
@@ -205,8 +211,11 @@ class PostgresOAuthStateStoreUnitTest {
         verify(preparedStatement).setString(6, REDIRECT_URI);
         verify(preparedStatement).setString(7, RETURN_TO);
         verify(preparedStatement).setString(8, NONCE_HASH);
-        verify(preparedStatement).setTimestamp(9, Timestamp.from(CREATED_AT));
-        verify(preparedStatement).setTimestamp(10, Timestamp.from(EXPIRES_AT));
+        // As UTC wall clocks: in a daylight-saving zone the repeated autumn hour would
+        // otherwise put a state's expiry before its creation.
+        verify(preparedStatement).setTimestamp(eq(9), eq(Timestamp.from(CREATED_AT)), utc());
+        verify(preparedStatement).setTimestamp(eq(10), eq(Timestamp.from(EXPIRES_AT)), utc());
+        verify(preparedStatement, never()).setTimestamp(anyInt(), any());
         assertTrue(sql.getValue().contains("connection_id"), sql.getValue());
         verify(preparedStatement).setString(11, CONNECTION_ID);
         verify(preparedStatement).executeUpdate();
@@ -257,9 +266,9 @@ class PostgresOAuthStateStoreUnitTest {
 
         ArgumentCaptor<Timestamp> consumedStamp = ArgumentCaptor.forClass(Timestamp.class);
         ArgumentCaptor<Timestamp> expiryCutoff = ArgumentCaptor.forClass(Timestamp.class);
-        verify(preparedStatement).setTimestamp(eq(1), consumedStamp.capture());
+        verify(preparedStatement).setTimestamp(eq(1), consumedStamp.capture(), utc());
         verify(preparedStatement).setString(2, STATE_TOKEN);
-        verify(preparedStatement).setTimestamp(eq(3), expiryCutoff.capture());
+        verify(preparedStatement).setTimestamp(eq(3), expiryCutoff.capture(), utc());
 
         // One reading drives both halves. Two would let a row be stamped consumed at
         // an instant it was not yet eligible to be claimed at.
@@ -338,7 +347,7 @@ class PostgresOAuthStateStoreUnitTest {
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getString("state")).thenReturn(STATE_TOKEN);
-        when(resultSet.getTimestamp(anyString())).thenReturn(null);
+        when(resultSet.getTimestamp(anyString(), any(Calendar.class))).thenReturn(null);
 
         OAuthState claimed = store.claim(STATE_TOKEN).orElseThrow();
 
@@ -380,7 +389,7 @@ class PostgresOAuthStateStoreUnitTest {
         assertEquals("DELETE FROM connection_oauth_states WHERE expires_at < ?", sql.getValue());
 
         ArgumentCaptor<Timestamp> cutoff = ArgumentCaptor.forClass(Timestamp.class);
-        verify(preparedStatement).setTimestamp(eq(1), cutoff.capture());
+        verify(preparedStatement).setTimestamp(eq(1), cutoff.capture(), utc());
         assertTrue(Math.abs(cutoff.getValue().getTime() - System.currentTimeMillis()) < CLOCK_TOLERANCE_MILLIS,
                 "the sweep uses the same JVM clock claim() does, so the two agree on what is still live");
     }
@@ -416,9 +425,18 @@ class PostgresOAuthStateStoreUnitTest {
         when(resultSet.getString("redirect_uri")).thenReturn(REDIRECT_URI);
         when(resultSet.getString("return_to")).thenReturn(RETURN_TO);
         when(resultSet.getString("nonce_hash")).thenReturn(NONCE_HASH);
-        when(resultSet.getTimestamp("created_at")).thenReturn(Timestamp.from(CREATED_AT));
-        when(resultSet.getTimestamp("expires_at")).thenReturn(Timestamp.from(EXPIRES_AT));
-        when(resultSet.getTimestamp("consumed_at")).thenReturn(Timestamp.from(CONSUMED_AT));
+        // Answered only when read as UTC wall clocks, as they were written.
+        when(resultSet.getTimestamp(eq("created_at"), utc())).thenReturn(Timestamp.from(CREATED_AT));
+        when(resultSet.getTimestamp(eq("expires_at"), utc())).thenReturn(Timestamp.from(EXPIRES_AT));
+        when(resultSet.getTimestamp(eq("consumed_at"), utc())).thenReturn(Timestamp.from(CONSUMED_AT));
+    }
+
+    /**
+     * A {@link Calendar} argument in UTC — the zone every timestamp column is
+     * written and read in.
+     */
+    private static Calendar utc() {
+        return argThat(calendar -> calendar != null && "UTC".equals(calendar.getTimeZone().getID()));
     }
 
     private static OAuthState newState() {

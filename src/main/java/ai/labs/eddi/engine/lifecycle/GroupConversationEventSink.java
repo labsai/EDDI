@@ -50,8 +50,9 @@ public final class GroupConversationEventSink {
     public static final String EVENT_MEMBER_PAUSE_SKIPPED = "member_pause_skipped";
     /**
      * A {@link GroupConversation.DecisionRecord} was set on the discussion (Wave 0,
-     * F3). No feature fires this yet — I3 (verdicts), I11 (agreements), I14 (votes)
-     * and I18 (awards) are the eventual producers.
+     * F3): a verdict (I3), an agreement (I11) or a vote (I14); I18 (awards) is
+     * declared but no producer writes it yet. A record of type {@code NONE} is
+     * forwarded too; the Slack listener skips it.
      */
     public static final String EVENT_DECISION_REACHED = "decision_reached";
     /**
@@ -218,14 +219,20 @@ public final class GroupConversationEventSink {
      *            not the approver-facing text.
      */
     public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
-            @JsonIgnore RenderedApprovalContext approvalContext) {
+            @JsonIgnore RenderedApprovalContext approvalContext, @JsonIgnore String planHash) {
+
+        /** Without a plan hash (the pre-6.8 shape). */
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
+                RenderedApprovalContext approvalContext) {
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, approvalContext, null);
+        }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
-            this(phaseIndex, phaseName, reason, granularity, pausedAt, null);
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, null, null);
         }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
-            this(phaseIndex, phaseName, reason, granularity, null, null);
+            this(phaseIndex, phaseName, reason, granularity, null, null, null);
         }
     }
 

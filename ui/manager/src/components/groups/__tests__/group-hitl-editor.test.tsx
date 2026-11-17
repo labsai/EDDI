@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 
 const mockMutate = vi.fn();
-vi.mock("@/hooks/use-groups", () => ({
+vi.mock("@eddi/app-kit/hooks/use-groups", () => ({
   useUpdateGroup: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
-import { GroupHitlEditor } from "@/components/groups/group-hitl-editor";
-import type { AgentGroupConfiguration, DiscussionPhase } from "@/lib/api/groups";
+import { GroupHitlEditor } from "@eddi/app-kit/components/groups/group-hitl-editor";
+import type { AgentGroupConfiguration, DiscussionPhase } from "@eddi/app-kit/lib/api/groups";
 
 function phase(name: string, requiresApproval = false): DiscussionPhase {
   return {
@@ -121,5 +121,25 @@ describe("GroupHitlEditor", () => {
     // Selecting a phase unblocks save.
     fireEvent.click(screen.getByTestId("group-hitl-phase-Synthesis"));
     expect(screen.getByTestId("group-hitl-save")).not.toBeDisabled();
+  });
+  it("TASK granularity offers 'approval counts as done' and saves it; PHASE drops it", () => {
+    const config = makeConfig({
+      style: "TASK_FORCE",
+      phases: [{ ...phase("Execute", true), type: "EXECUTE" } as DiscussionPhase],
+      hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", granularity: "TASK", onTaskRejection: "FAIL", approvalTimeout: null },
+    } as Partial<AgentGroupConfiguration>);
+    renderWithProviders(
+      <GroupHitlEditor config={config} groupId="g1" groupVersion={4} onDone={vi.fn()} />,
+    );
+    const box = screen.getByTestId("group-hitl-approval-completes-backlog");
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    fireEvent.click(screen.getByTestId("group-hitl-save"));
+    expect(mockMutate.mock.calls[0]![0].config.hitlConfig.approvalCompletesBacklogTask).toBe(true);
+
+    fireEvent.change(screen.getByTestId("group-hitl-granularity"), { target: { value: "PHASE" } });
+    expect(screen.queryByTestId("group-hitl-approval-completes-backlog")).toBeNull();
+    fireEvent.click(screen.getByTestId("group-hitl-save"));
+    expect(mockMutate.mock.calls[1]![0].config.hitlConfig.approvalCompletesBacklogTask).toBeUndefined();
   });
 });

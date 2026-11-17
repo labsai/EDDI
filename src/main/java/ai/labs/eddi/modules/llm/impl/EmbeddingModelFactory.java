@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.utils.EndpointParameters;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
@@ -33,7 +34,6 @@ import software.amazon.awssdk.regions.Region;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -92,14 +92,6 @@ public class EmbeddingModelFactory {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
-
-    /**
-     * The parameter keys the providers below read an editor-chosen endpoint from. A
-     * configuration with neither uses the provider's own endpoint, which an editor
-     * cannot choose, so there is nothing to check — as in
-     * {@link ChatModelRegistry}.
-     */
-    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint");
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -231,7 +223,10 @@ public class EmbeddingModelFactory {
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
-     * name the configured endpoint, before any reference is resolved.
+     * name the configured endpoint, before any reference is resolved. A
+     * configuration with no endpoint parameter ({@link EndpointParameters}) uses
+     * the provider's own endpoint, which an editor cannot choose, so there is
+     * nothing to check — as in {@link ChatModelRegistry}.
      *
      * @param params
      *            the embedding parameters with global variables resolved and vault
@@ -244,9 +239,9 @@ public class EmbeddingModelFactory {
         // Every key present, not the first: which one a provider reads is the
         // builder's business (Azure reads endpoint, OpenAI baseUrl), and a config
         // carrying both must not pass on the one that is ignored.
-        for (String key : ENDPOINT_KEYS) {
-            String endpoint = params.get(key);
-            if (!isBlank(endpoint)) {
+        for (Map.Entry<String, String> parameter : params.entrySet()) {
+            String endpoint = parameter.getValue();
+            if (EndpointParameters.isEndpointKey(parameter.getKey()) && !isBlank(endpoint)) {
                 vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
             }
         }
@@ -318,7 +313,7 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code apiKey} — OpenAI API key, supports {@code ${eddivault:...}}
+     * <li>{@code apiKey} — OpenAI API key, supports {@code ${vault:...}}
      * (required)</li>
      * <li>{@code model} / {@code modelName} — model name (default:
      * "text-embedding-3-small")</li>
@@ -358,7 +353,7 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code apiKey} — Azure API key, supports {@code ${eddivault:...}}
+     * <li>{@code apiKey} — Azure API key, supports {@code ${vault:...}}
      * (required)</li>
      * <li>{@code deploymentName} — deployment name (default:
      * "text-embedding-3-small")</li>
@@ -390,7 +385,8 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code model} — model name (default: "nomic-embed-text")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "nomic-embed-text")</li>
      * <li>{@code baseUrl} — Ollama server URL (default:
      * "http://localhost:11434")</li>
      * <li>{@code timeout} (ms), {@code maxRetries}</li>
@@ -418,11 +414,13 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code apiKey} — Google AI API key, supports {@code ${eddivault:...}}
+     * <li>{@code apiKey} — Google AI API key, supports {@code ${vault:...}}
      * (required)</li>
-     * <li>{@code model} — model name (default: "gemini-embedding-2")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "gemini-embedding-2")</li>
      * <li>{@code taskType} — task type (default: "RETRIEVAL_DOCUMENT")</li>
      * <li>{@code outputDimensionality} — output dimension (default: 3072)</li>
+     * <li>{@code baseUrl}, {@code timeout} (ms), {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildGemini(Map<String, String> params) {
@@ -452,9 +450,11 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code apiKey} — Mistral API key, supports {@code ${eddivault:...}}
+     * <li>{@code apiKey} — Mistral API key, supports {@code ${vault:...}}
      * (required)</li>
-     * <li>{@code model} — model name (default: "mistral-embed")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "mistral-embed")</li>
+     * <li>{@code baseUrl}, {@code timeout} (ms), {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildMistral(Map<String, String> params) {
@@ -478,8 +478,10 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code model} — model name (default: "amazon.titan-embed-text-v2:0")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "amazon.titan-embed-text-v2:0")</li>
      * <li>{@code region} — AWS region (default: "us-east-1")</li>
+     * <li>{@code dimensions}</li>
      * </ul>
      */
     private EmbeddingModel buildBedrock(Map<String, String> params) {
@@ -499,9 +501,11 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code apiKey} — Cohere API key, supports {@code ${eddivault:...}}
+     * <li>{@code apiKey} — Cohere API key, supports {@code ${vault:...}}
      * (required)</li>
-     * <li>{@code model} — model name (default: "embed-english-v3.0")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "embed-english-v3.0")</li>
+     * <li>{@code baseUrl}, {@code timeout} (ms)</li>
      * </ul>
      */
     private EmbeddingModel buildCohere(Map<String, String> params) {
@@ -524,7 +528,9 @@ public class EmbeddingModelFactory {
      * <ul>
      * <li>{@code project} — GCP project ID (required)</li>
      * <li>{@code location} — GCP location (default: "us-central1")</li>
-     * <li>{@code model} — model name (default: "text-embedding-005")</li>
+     * <li>{@code model} / {@code modelName} — model name (default:
+     * "text-embedding-005")</li>
+     * <li>{@code endpoint} — a host[:port] or URL; {@code maxRetries}</li>
      * </ul>
      */
     private EmbeddingModel buildVertex(Map<String, String> params) {

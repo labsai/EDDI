@@ -55,10 +55,11 @@ import java.util.function.Supplier;
  * <p>
  * Caps: calls per turn, an amount ceiling, and proposals applied per agent per
  * rolling day (counted from the budget's own adjustment history, so a restart
- * does not reset it). Idempotent: a raise names the cap it wants (setting a cap
- * it already has is a no-op), and a transfer's idempotency key is derived from
- * the agent, conversation, teams, amount, reason and month, so a replay moves
- * nothing twice.
+ * does not reset it). Idempotent: a raise names the cap it wants, so a replay
+ * finds the cap already in place and is refused ("must be above the current
+ * cap") instead of raising it twice, and a transfer's idempotency key is
+ * derived from the agent, conversation, teams, amount, reason and month, so a
+ * replay moves nothing twice.
  *
  * @since 6.7.0
  */

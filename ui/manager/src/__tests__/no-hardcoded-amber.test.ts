@@ -8,7 +8,7 @@ import { join, relative, resolve } from "node:path";
  * Amber was both the EDDI brand and the app's caution colour, hard-coded as
  * `amber-N` utilities in over a hundred files, so a white-labelled deployment's
  * colour could not reach them. They now read one of three scales from
- * `src/index.css`:
+ * `ui/packages/ui/src/styles/theme.css`:
  *
  * - `brand-N` — accents, selection, primary emphasis; a branded
  *   `/branding/brand.css` redefines it from the brand's primary colour.
@@ -18,9 +18,10 @@ import { join, relative, resolve } from "node:path";
  *   warning: per-type badges, section accents, avatar and syntax colours.
  *
  * This test keeps new code from going back to `amber-N` (which would silently
- * ignore the brand) or to a gold hex literal. `src/index.css` is where the two
- * scales are mapped onto amber, so its custom-property declarations are the one
- * place amber may be named. `warn-N` and `ochre-N` contain no `amber-`, so
+ * ignore the brand) or to a gold hex literal. The token file is where the
+ * scales are mapped onto amber, so its custom-property declarations (and the
+ * Branding preview panels' copy of them in `src/index.css`) are the one place
+ * amber may be named. `warn-N` and `ochre-N` contain no `amber-`, so
  * they pass by construction; the last test pins that.
  *
  * The allow-list is for a use that genuinely cannot take a token. It should stay
@@ -28,11 +29,27 @@ import { join, relative, resolve } from "node:path";
  */
 
 const repoRoot = resolve(__dirname, "../..");
-const ROOTS = ["src"];
-const SHELLS = ["manage.html", "welcome.html", "workforce.html"];
+/**
+ * The Manager, the shared packages it compiles as source, and Workforce — read
+ * as text, so one guard covers every surface a brand must reach (Workforce
+ * shares the tokens, the brand and this rule; the apps still never import each
+ * other).
+ */
+const ROOTS = ["src", "../packages/ui/src", "../packages/app-kit/src", "../workforce/src"];
+const SHELLS = ["manage.html", "welcome.html", "../workforce/workforce.html", "../workforce/index.html"];
 const SOURCE = /\.(?:[cm]?[jt]sx?|css|html)$/;
-/** The theme file that maps brand-N / warn-N / ochre-N onto amber. */
-const THEME_FILE = "src/index.css";
+/**
+ * The files whose custom-property declarations may name amber: the shared token
+ * file that maps brand-N / warn-N / ochre-N onto amber, and the Manager's
+ * stylesheet, whose Branding preview panels restate the unbranded scale.
+ */
+const THEME_FILES = new Set([
+  "../packages/ui/src/styles/theme.css",
+  "src/index.css",
+  // The base stylesheet both apps share (it was this app's index.css): the
+  // prompt editor's template-variable colours are declared there.
+  "../packages/app-kit/src/styles/app.css",
+]);
 
 const AMBER_UTILITY = /amber-\d/;
 /**
@@ -76,7 +93,7 @@ function offenders(): string[] {
         const key = `${rel}:${i + 1}`;
         if (key in ALLOW_LIST) return;
         // Token definitions in the theme file are where amber is mapped.
-        if (rel === THEME_FILE && /^\s*--[\w-]+\s*:/.test(line)) return;
+        if (THEME_FILES.has(rel) && /^\s*--[\w-]+\s*:/.test(line)) return;
         const text = line.replace(LOADER_FALLBACK, "");
         if (AMBER_UTILITY.test(text) || AMBER_HEX.test(text)) found.push(`${key}: ${line.trim()}`);
       });
@@ -88,7 +105,7 @@ describe("no hard-coded amber", () => {
   it("uses brand-N, warn-N or ochre-N, never an amber-N utility or a gold hex", () => {
     expect(
       offenders(),
-      "Use brand-N for accents that should follow a white-label brand, warn-N for caution, ochre-N for a fixed categorical amber hue (see src/index.css)",
+      "Use brand-N for accents that should follow a white-label brand, warn-N for caution, ochre-N for a fixed categorical amber hue (see ui/packages/ui/src/styles/theme.css)",
     ).toEqual([]);
   });
 

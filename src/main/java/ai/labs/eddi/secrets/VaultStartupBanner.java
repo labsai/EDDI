@@ -58,23 +58,31 @@ public final class VaultStartupBanner {
      * the implications and how to fix it.
      */
     public static void printDisabled() {
-        LogBanner.warn(LOGGER, """
-
-                +------------------------------------------------------------------+
-                |  WARNING: SECRETS VAULT DISABLED -- Master key not configured    |
-                +------------------------------------------------------------------+
-                |                                                                  |
-                |  What this means:                                                |
-                |    * ${vault:...} secret references will NOT be resolved        |
-                |    * API keys in configs are stored/transmitted as PLAINTEXT     |
-                |    * Audit log entries will NOT have HMAC integrity signatures   |
-                |                                                                  |
-                |  To enable, set the EDDI_VAULT_MASTER_KEY env variable.          |
-                |  See docs for all configuration options:                         |
-                |                                                                  |
-                |  > https://docs.labs.ai/secrets-vault                            |
-                +------------------------------------------------------------------+
-
-                """);
+        LogBanner.warn(LOGGER, DISABLED_BANNER);
     }
+
+    /**
+     * The vault-disabled banner. The audit ledger has its own signing secret
+     * ({@code eddi.audit.hmac-key}), so a missing master key leaves it unsigned
+     * only when that is missing too.
+     */
+    static final String DISABLED_BANNER = """
+
+            +------------------------------------------------------------------+
+            |  WARNING: SECRETS VAULT DISABLED -- Master key not configured    |
+            +------------------------------------------------------------------+
+            |                                                                  |
+            |  What this means:                                                |
+            |    * ${vault:...} secret references will NOT be resolved        |
+            |    * API keys in configs are stored/transmitted as PLAINTEXT     |
+            |    * Audit entries are HMAC-signed only if eddi.audit.hmac-key   |
+            |      is set (e.g. env EDDI_AUDIT_HMAC_KEY)                       |
+            |                                                                  |
+            |  To enable, set the EDDI_VAULT_MASTER_KEY env variable.          |
+            |  See docs for all configuration options:                         |
+            |                                                                  |
+            |  > https://docs.labs.ai/secrets-vault                            |
+            +------------------------------------------------------------------+
+
+            """;
 }

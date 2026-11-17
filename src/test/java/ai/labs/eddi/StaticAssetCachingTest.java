@@ -29,20 +29,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Two review findings met here. The committed assets tree had accumulated a
  * complete second Vite build — 19 files, 9.3 MB — that no page referenced: a
  * closed island with no entry point. That failure mode is gone by construction
- * now that the Manager and Chat UIs live under {@code ui/} and are built into
- * the jar by Maven: Vite empties {@code dist/} on every build and CI packages
- * with {@code clean}, so nothing is carried over from a previous bundle.
- * Separately the immutable cache filter matched {@code /(scripts|assets)/.*},
- * which caught {@code landing-redirect.js} — un-hashed, and loaded by the
- * landing page every visitor hits first. A fix to it would have gone unseen for
- * up to a year with no revalidation request even sent, because
- * {@code immutable} suppresses one.
+ * now that the Manager, Workforce and Chat UIs live under {@code ui/} and are
+ * built into the jar by Maven: Vite empties {@code dist/} on every build and CI
+ * packages with {@code clean}, so nothing is carried over from a previous
+ * bundle. Separately the immutable cache filter matched
+ * {@code /(scripts|assets)/.*}, which caught {@code landing-redirect.js} —
+ * un-hashed, and loaded by the landing page every visitor hits first. A fix to
+ * it would have gone unseen for up to a year with no revalidation request even
+ * sent, because {@code immutable} suppresses one.
  * <p>
  * The filter is allowed to treat all of {@code /assets/} as immutable precisely
  * because every file there is machine-generated and content-hashed. That half
  * is asserted where the assets are built: CI's Build Image job fails on any
- * un-hashed file in {@code ui/manager/dist/assets} before an image exists. This
- * class keeps the filter half.
+ * un-hashed file in {@code ui/manager/dist/assets} or
+ * {@code ui/workforce/dist/assets} before an image exists. This class keeps the
+ * filter half.
  */
 @DisplayName("static assets and cache headers")
 class StaticAssetCachingTest {

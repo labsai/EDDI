@@ -15,11 +15,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
-import ai.labs.eddi.configs.agents.AgentCascadeService;
-import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -79,7 +75,7 @@ class McpDeployGrantFailureTest {
         var identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
         var tools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, json, mock(StrictConfigurationParser.class),
-                mock(IScheduleStore.class), mock(ScheduleFireExecutor.class), mock(SchedulePollerService.class), identity, false,
+                mock(IRestScheduleStore.class), identity, false,
                 mock(AgentCascadeService.class));
 
         var failure = new VaultGrantGate.GrantCheck(VaultGrantGate.Mode.ENFORCE, List.of("${vault:gemini-api-key}"), true).toFailure(AGENT_ID, 1);

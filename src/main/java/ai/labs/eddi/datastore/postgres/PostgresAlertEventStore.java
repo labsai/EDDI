@@ -43,8 +43,11 @@ import java.util.Optional;
  * The dedupe is {@code INSERT … ON CONFLICT (dedupe_key) DO NOTHING}: a second
  * insert with the same key affects no row on whichever replica runs it, and is
  * turned into an increment of {@code duplicates}. The throttle counter is one
- * {@code INSERT … ON CONFLICT DO UPDATE … RETURNING}. Delivery updates and
- * claims are conditional on {@code version}.
+ * {@code INSERT … ON CONFLICT DO UPDATE … RETURNING}. Delivery updates are
+ * conditional on {@code version}; due events are claimed with
+ * {@code FOR UPDATE SKIP LOCKED} and a pushed-out {@code next_attempt_at}, and
+ * a send with a token and an expiring lease ({@code send_claim_token},
+ * {@code send_claim_until}).
  *
  * @since 6.6.0
  */

@@ -197,6 +197,13 @@ public class OutputTemplateTask implements ILifecycleTask {
             quickReplyData.setVerbatim(true); // rendered once — see templateOutputTexts
             templateData(currentStep, quickReplyData, quickReplyData.getKey(), preTemplating, postTemplating);
             quickReplyData.setResult(postTemplating);
+            // The same quick replies are also in the conversation output, which is what
+            // the client is shown. Leaving them raw showed "{properties.x}" while the
+            // next turn's dictionary, built from the data entry, held the rendered value.
+            // copyQuickReplies keeps the order, so the indexes pair up.
+            for (int i = 0; i < preTemplating.size(); i++) {
+                currentStep.replaceConversationOutputObject(KEY_QUICK_REPLIES, preTemplating.get(i), postTemplating.get(i));
+            }
         });
     }
 

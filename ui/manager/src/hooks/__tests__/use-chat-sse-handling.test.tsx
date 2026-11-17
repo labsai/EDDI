@@ -2,15 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { type SSEEvent } from "@/lib/api/chat";
+import { type SSEEvent } from "@eddi/app-kit/lib/api/chat";
 
 // Drive the streaming path with an arbitrary set of SSE frames per test. The
 // mock reads from a hoisted array so each test can queue up the frames it wants
 // pushed through handleSSEEvent (task_failed / error / …).
 const h = vi.hoisted(() => ({ frames: [] as Array<{ type: string; data: string }> }));
 
-vi.mock("@/lib/api/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/chat")>();
+vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/chat")>();
   return {
     ...actual,
     sendMessageStreaming: async function* () {
@@ -21,8 +21,8 @@ vi.mock("@/lib/api/chat", async (importOriginal) => {
   };
 });
 
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
-import { useDebugStore } from "@/hooks/use-debug-events";
+import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
+import { useDebugStore } from "@eddi/app-kit/hooks/use-debug-events";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -103,6 +103,42 @@ describe("use-chat handleSSEEvent — task_failed / error-JSON handling", () => 
     expect(lastAgent?.isError).toBe(true);
     // The raw JSON object must not leak into the bubble.
     expect(lastAgent?.content).not.toContain('{"message"');
+  });
+});
+
+describe("use-chat handleSSEEvent — 6.7 tool_call display and tool_result", () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useDebugStore.getState().reset();
+    h.frames = [];
+    useChatStore.setState({
+      selectedAgentId: "agent1",
+      conversationId: "conv1",
+      streamingEnabled: true,
+    });
+  });
+
+  it("feeds the status line the toolDisplay label, else the name, and settles on tool_result", async () => {
+    const add = vi.spyOn(useDebugStore.getState(), "addToolCall");
+    const settle = vi.spyOn(useDebugStore.getState(), "markToolsSettled");
+    // RestAgentEngineStreaming.ToolCallEvent / ToolResultEvent, as serialised.
+    h.frames = [
+      {
+        type: "tool_call",
+        data: JSON.stringify({ tool: "createAction", callId: "call_1", displayName: "Creating an action", display: { title: "Renew the contract" } }),
+      },
+      { type: "tool_result", data: JSON.stringify({ tool: "createAction", callId: "call_1", status: "ok", durationMs: 12 }) },
+      { type: "tool_call", data: JSON.stringify({ tool: "getAgentDescriptors", callId: "call_2", displayName: null, display: null }) },
+    ];
+    const { result } = renderHook(() => useSendMessage(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ message: "hi" });
+    });
+    expect(add.mock.calls.map((c) => c[0])).toEqual([
+      { text: "Creating an action: Renew the contract", phrase: true },
+      { text: "getAgentDescriptors", phrase: false },
+    ]);
+    expect(settle).toHaveBeenCalledTimes(1);
   });
 });
 

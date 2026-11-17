@@ -8,13 +8,13 @@ import {
   duplicateResource,
   getResourceType,
   type ResourceTypeConfig,
-} from "@/lib/api/resources";
-import { updateDescriptor } from "@/lib/api/descriptors";
+} from "@eddi/app-kit/lib/api/resources";
+import { updateDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 import {
   cascadePartialResult,
   cascadeSaveResource,
   type CascadeContext,
-} from "@/lib/api/cascade-save";
+} from "@eddi/app-kit/lib/api/cascade-save";
 
 
 function resourceKeys(slug: string) {
