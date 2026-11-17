@@ -142,6 +142,7 @@ public class RestAuditStore implements IRestAuditStore {
         int recovered = 0;
         int invalid = 0;
         int unsigned = 0;
+        int agentSignatureUnproven = 0;
         var problems = new ArrayList<EntryProblem>();
         // One budget for the whole sweep — see AuditRecoveryBudget. Spent only on
         // rows whose direct check already failed.
@@ -159,8 +160,12 @@ public class RestAuditStore implements IRestAuditStore {
                 }
                 // Not proven intact, so not valid — but reported by its own status in
                 // the problem list, where an operator can tell a missing key from a
-                // forged row.
-                case INVALID, UNKNOWN_KEY -> invalid++;
+                // forged row, and a forged agent signature from edited content.
+                case INVALID, UNKNOWN_KEY, AGENT_SIGNATURE_INVALID -> invalid++;
+                // The HMAC proved the content; only the agent's vouching for it is
+                // missing. Not tampering (an owner deleting their agent is routine),
+                // but not proven either.
+                case AGENT_SIGNATURE_MISSING, AGENT_KEY_REVOKED, AGENT_KEY_UNAVAILABLE -> agentSignatureUnproven++;
                 case UNSIGNED -> unsigned++;
                 case SIGNING_DISABLED -> {
                     // counted only as a problem — nothing was actually checked
@@ -180,7 +185,8 @@ public class RestAuditStore implements IRestAuditStore {
                 : ChainStatus.NOT_APPLICABLE;
 
         return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered,
-                recoveryBudget.searchesSkipped(), invalid, unsigned, chainStatus, missing, undelivered, duplicates, problems, Instant.now());
+                recoveryBudget.searchesSkipped(), invalid, unsigned, agentSignatureUnproven, chainStatus, missing, undelivered, duplicates, problems,
+                Instant.now());
     }
 
     /**

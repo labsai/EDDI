@@ -190,10 +190,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
                description = "Creates an Ed25519 key pair for the agent. The private key is stored in the secrets vault under "
                        + "agent-signing-key:{id}:v{n} and never leaves it; the public key is appended to identity.keys as "
                        + "version n, one above the highest version the agent declares, and saved as a new, compatible agent "
-                       + "version. From then on the agent signs with key n — no redeploy needed — once "
-                       + "security.signInterAgentMessages is on, which a save accepts only while the newest key's private half "
-                       + "is in the vault. Older keys stay in identity.keys so the entries they signed still verify. Admin only: "
-                       + "whoever can mint a key can sign as this agent. identity is engine-owned: a PUT of the agent keeps the "
+                       + "version. From then on the agent signs its group-conversation messages with key n — no redeploy needed — "
+                       + "once security.signInterAgentMessages is on, which a save accepts only while the newest key's private "
+                       + "half is in the vault. Its audit entries are signed by the agent version a conversation runs, so they "
+                       + "need a deployed version that declares key n and has the flag on. Older keys stay in identity.keys so "
+                       + "the entries they signed still verify. Admin only: whoever can mint a key can sign as this agent. "
+                       + "identity is engine-owned: a PUT of the agent keeps the "
                        + "stored identity whatever its body says, so keys change only here and through the revoke operation.")
     @APIResponse(responseCode = "200", description = "Key generated. The body is the new identity.keys entry (version, publicKeyB64, "
             + "validFromMs, validUntilMs, revoked); Location is the new agent version. 200, not 201: the agent already existed.")
