@@ -717,6 +717,13 @@ class ConversationStepRunner {
      * still current, no holder after it can exist, and the stored fence is lifted
      * one above itself by compare-and-set — fencing out the holder of the lost
      * range, should it still run — and this lease writes with that.
+     * <p>
+     * A stored fence <i>equal</i> to this lease's is the same case unless this very
+     * handle put it there (a turn the lease was handed to raises its fence again).
+     * Fences are numbers, not identities: the bucket reissues a lost revision, and
+     * the sequence later reaches a lifted value, so another holder can carry the
+     * same token — and the stores admit every write at or above the stored fence.
+     * Lifting gives this lease a value no other holder has.
      *
      * @return {@code true} when the fence is raised and the lease still held
      */
@@ -729,7 +736,10 @@ class ConversationStepRunner {
         }
         try {
             long stored = conversationMemoryStore.raiseFence(conversationId, fence);
-            if (stored > fence && !liftedAboveLostRange(conversationId, lease, fence, stored)) {
+            if (stored < fence) {
+                lease.establishFence(); // moved by this raise: the token is this lease's alone
+            } else if ((stored > fence || !lease.fenceEstablished())
+                    && !liftedAboveLostRange(conversationId, lease, fence, stored)) {
                 return false;
             }
         } catch (Exception e) {
@@ -746,16 +756,17 @@ class ConversationStepRunner {
     }
 
     /**
-     * The conversation carries {@code stored}, above this lease's {@code fence}.
-     * Lifts it to {@code stored + 1} for this lease when the lease bucket confirms
-     * the lease is still current (see {@link #fenceRaised}).
+     * The conversation carries {@code stored}, at or above this lease's
+     * {@code fence}, and not as a fence this handle established. Lifts it to
+     * {@code stored + 1} for this lease when the lease bucket confirms the lease is
+     * still current (see {@link #fenceRaised}).
      *
      * @return {@code true} when this lease now writes with the lifted fence
      */
     private boolean liftedAboveLostRange(String conversationId, LeaseHandle lease, long fence, long stored)
             throws ResourceStoreException {
         if (!lease.confirmHeld()) {
-            LOGGER.warnf("Turn of conversation %s not run: it carries fence %d, above this lease's %d, and the lease is no "
+            LOGGER.warnf("Turn of conversation %s not run: it carries fence %d, not below this lease's %d, and the lease is no "
                     + "longer confirmed — another node holds the conversation; reporting it as busy, the input was not "
                     + "consumed", sanitize(conversationId), stored, fence);
             return false;
@@ -767,9 +778,11 @@ class ConversationStepRunner {
             return false;
         }
         lease.liftFence(lifted);
-        LOGGER.warnf("Conversation %s carried fence %d, above the fence %d of its current lease: a revision range the lease "
-                + "bucket no longer has (a JetStream stream-leader change). Lifted to %d for this lease, so a holder of the "
-                + "lost range is fenced out", sanitize(conversationId), stored, fence, lifted);
+        lease.establishFence();
+        LOGGER.warnf("Conversation %s carried fence %d, not below the fence %d of its current lease, from another holder: a "
+                + "revision the lease bucket reissued (a JetStream stream-leader change) or a lifted fence the sequence "
+                + "reached. Lifted to %d for this lease, so the other holder is fenced out", sanitize(conversationId), stored,
+                fence, lifted);
         return true;
     }
 

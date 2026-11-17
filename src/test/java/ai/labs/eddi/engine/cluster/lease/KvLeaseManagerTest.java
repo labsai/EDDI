@@ -215,6 +215,11 @@ class KvLeaseManagerTest {
         lease.liftFence(acquired);
         assertEquals(acquired + 413, lease.fence(), "never lowered");
         assertTrue(lease.confirmHeld(), "the KV value is untouched by the lift");
+        assertFalse(lease.fenceEstablished(), "a lifted fence is not established until it is put on the conversation");
+        lease.establishFence();
+        assertTrue(lease.fenceEstablished());
+        lease.liftFence(acquired + 500);
+        assertFalse(lease.fenceEstablished(), "a later lift needs establishing again");
         a.release(lease);
         assertTrue(a.peek("conv1").isEmpty(), "the release deletes at the KV revision, not at the lifted fence");
     }

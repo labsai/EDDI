@@ -1012,14 +1012,14 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
-        @DisplayName("raiseFence answers the stored fence, so a raise that did not take is visible to the caller")
-        void raiseAnswersTheStoredFence() throws IResourceStore.ResourceStoreException {
+        @DisplayName("raiseFence answers below the fence when it moved it, and the stored fence when it did not")
+        void raiseAnswersWhetherItMovedTheFence() throws IResourceStore.ResourceStoreException {
             String id = newConversation();
-            assertEquals(278352L, store.raiseFence(id, 278352L), "the first raise takes");
-            assertEquals(278352L, store.raiseFence(id, 278352L), "the same lease's next turn raises the same fence");
+            assertTrue(store.raiseFence(id, 278352L) < 278352L, "the first raise moves it");
+            assertEquals(278352L, store.raiseFence(id, 278352L), "the same fence again does not move it, and says so");
             // a lease from a revision range the bucket lost raised it higher
-            assertEquals(278765L, store.raiseFence(id, 278765L));
-            assertEquals(278765L, store.raiseFence(id, 278359L), "a lower fence does not take, and says so");
+            assertTrue(store.raiseFence(id, 278765L) < 278765L);
+            assertEquals(278765L, store.raiseFence(id, 278359L), "a lower fence does not move it, and says so");
             assertEquals(278765L, store.loadConversationMemorySnapshot(id).getFence());
         }
 

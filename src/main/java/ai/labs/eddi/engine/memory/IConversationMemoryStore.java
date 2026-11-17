@@ -446,26 +446,32 @@ public interface IConversationMemoryStore {
      * write is refused. No-op for stores without fencing and for a missing
      * document.
      * <p>
-     * The answer is the document's fence after the raise. Above {@code fence} it
-     * means the raise did not take: either a newer holder started (this lease is
-     * gone), or the lease's revision is below a fence handed out from a revision
-     * range the KV bucket no longer has — a JetStream stream-leader change can
-     * acknowledge writes at sequences its successor never had, and reissue them.
-     * The caller must not run its turn on such a fence: every write would be
-     * refused after the reply had gone out. See {@link #liftFence}.
+     * The answer tells the caller whether the raise moved the fence. Below
+     * {@code fence}: it did, and no other holder carries this token. Otherwise it
+     * is the fence the document carries, at least {@code fence}, and the raise did
+     * not move it. Above {@code fence} means either a newer holder started (this
+     * lease is gone) or the lease's revision is below a fence handed out from a
+     * revision range the KV bucket no longer has — a JetStream stream-leader change
+     * can acknowledge writes at sequences its successor never had, and reissue
+     * them. Equal to {@code fence} is this very lease raising again (a turn it was
+     * handed), or another holder carrying the same number: a reissued revision, or
+     * a {@link #liftFence lifted} fence the sequence later reached. The caller
+     * tells those apart; it must not run a turn on a fence it cannot claim as its
+     * own.
      *
      * @param conversationId
      *            the conversation
      * @param fence
      *            the lease's fencing token
-     * @return the stored fence after the raise; {@code fence} itself for stores
-     *         without fencing and for a missing document
+     * @return a value below {@code fence} when the raise moved the stored fence
+     *         (and for stores without fencing, and a missing document); otherwise
+     *         the stored fence, at least {@code fence}
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
     default long raiseFence(String conversationId, long fence) throws IResourceStore.ResourceStoreException {
         // single-node stores have nothing to fence
-        return fence;
+        return 0;
     }
 
     /**

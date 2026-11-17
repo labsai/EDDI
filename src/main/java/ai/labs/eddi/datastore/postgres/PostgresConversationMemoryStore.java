@@ -1319,7 +1319,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // GREATEST: never lowers; `_rev` is deliberately not touched — see
         // IConversationMemoryStore#raiseFence. Written only when it moves (a lease
         // handed to its next turn raises the same fence again); otherwise the stored
-        // fence is read, since the caller must know whether the raise took.
+        // fence is read, since the caller must know whether the raise moved it.
         String raise = "UPDATE conversation_memories SET data = jsonb_set(data, '{_fence}', to_jsonb(?::bigint)) "
                 + "WHERE id = ?::uuid AND COALESCE((data->>'_fence')::bigint, 0) < ?";
         String read = "SELECT (data->>'_fence')::bigint FROM conversation_memories WHERE id = ?::uuid";
@@ -1329,7 +1329,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 ps.setString(2, conversationId);
                 ps.setLong(3, fence);
                 if (ps.executeUpdate() > 0) {
-                    return fence;
+                    return 0; // moved it
                 }
             }
             try (PreparedStatement ps = conn.prepareStatement(read)) {
@@ -1337,9 +1337,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
                         long stored = rs.getLong(1);
-                        return rs.wasNull() ? fence : stored;
+                        return rs.wasNull() ? 0 : stored;
                     }
-                    return fence; // no document: nothing to fence
+                    return 0; // no document: nothing to fence
                 }
             }
         } catch (SQLException e) {

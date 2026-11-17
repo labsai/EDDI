@@ -1530,6 +1530,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
          * conversation's stored fence came from a revision range the bucket lost.
          */
         volatile long fence;
+        /** The fence this handle put on the conversation itself; 0 none yet. */
+        volatile long establishedFence;
         final String lid;
         final long since = System.currentTimeMillis();
         private final long validityNanos;
@@ -1591,6 +1593,16 @@ public class KvLeaseManager implements IConversationLeaseManager {
             if (lifted > fence) {
                 fence = lifted;
             }
+        }
+
+        @Override
+        public boolean fenceEstablished() {
+            return establishedFence == fence;
+        }
+
+        @Override
+        public synchronized void establishFence() {
+            establishedFence = fence;
         }
 
         /**
