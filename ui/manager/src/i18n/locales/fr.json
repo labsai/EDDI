@@ -4326,6 +4326,8 @@
     "addTask": "Ajouter une tâche",
     "backToGroup": "Retour au groupe",
     "backlogEmpty": "Aucune tâche en attente pour le moment.",
+    "feedbackRun": "Retour pour nouvel essai, exécution {{run}}",
+    "feedbackVerified": "Vérifié",
     "backlogTitle": "Tâches en attente ({{count}})",
     "cadenceAdded": "Cadence ajoutée",
     "cadenceDeleted": "Cadence supprimée",

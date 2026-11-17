@@ -4285,6 +4285,8 @@
     "addTask": "कार्य जोड़ें",
     "backToGroup": "समूह पर वापस जाएँ",
     "backlogEmpty": "अभी तक कोई बैकलॉग कार्य नहीं है।",
+    "feedbackRun": "पुनः प्रयास फ़ीडबैक, रन {{run}}",
+    "feedbackVerified": "सत्यापित",
     "backlogTitle": "बैकलॉग ({{count}})",
     "cadenceAdded": "कैडेंस जोड़ा गया",
     "cadenceDeleted": "कैडेंस हटाया गया",

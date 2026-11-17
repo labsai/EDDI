@@ -4285,6 +4285,8 @@
     "addTask": "เพิ่มงาน",
     "backToGroup": "กลับไปที่กลุ่ม",
     "backlogEmpty": "ยังไม่มีงานในแบ็กล็อก",
+    "feedbackRun": "ข้อเสนอแนะสำหรับการลองใหม่ การรัน {{run}}",
+    "feedbackVerified": "ตรวจสอบแล้ว",
     "backlogTitle": "แบ็กล็อก ({{count}})",
     "cadenceAdded": "เพิ่มรอบดำเนินการแล้ว",
     "cadenceDeleted": "ลบรอบดำเนินการแล้ว",

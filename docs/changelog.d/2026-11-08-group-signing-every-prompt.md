@@ -248,3 +248,4 @@ makes, which cannot sign.
 - Lessons another team shares, and those the scorecard tool returns, were checked only against
   the storing team's records rule. Documented, not filtered.
 - The negotiation table's concession ledger is checked against the current records view as well: once a verifying reader joins, concessions by an author that does not sign verifiably (or that has an unverified entry) are withheld, with a count.
+- The Manager's workspace page shows each backlog task's cadence retry feedback (`GroupWorkspace.backlogFeedback`) under the task as plain text, with a badge for feedback that was verified when kept; before, it showed only the description, which no longer carries new feedback. Workforce renders no workspace backlog.

@@ -4285,6 +4285,8 @@
     "addTask": "Aufgabe hinzufügen",
     "backToGroup": "Zurück zur Gruppe",
     "backlogEmpty": "Noch keine Backlog-Aufgaben.",
+    "feedbackRun": "Wiederholungs-Feedback, Lauf {{run}}",
+    "feedbackVerified": "Verifiziert",
     "backlogTitle": "Backlog ({{count}} Aufgaben)",
     "cadenceAdded": "Rhythmus hinzugefügt",
     "cadenceDeleted": "Rhythmus gelöscht",
