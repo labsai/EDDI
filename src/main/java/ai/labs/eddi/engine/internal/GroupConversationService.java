@@ -15,7 +15,6 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
-import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
@@ -40,6 +39,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -54,6 +54,7 @@ import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
 import ai.labs.eddi.engine.internal.groups.FacilitatorEngine;
+import ai.labs.eddi.engine.internal.groups.GroupApprovedResultActions;
 import ai.labs.eddi.engine.internal.groups.GroupAttachmentBinder;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
@@ -207,7 +208,6 @@ public class GroupConversationService implements IGroupConversationService, User
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
     private final IScheduleStore scheduleStore;
-    private final NonceCacheService nonceCacheService;
     private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
     private final GroupContextBuilder contextBuilder;
@@ -292,6 +292,18 @@ public class GroupConversationService implements IGroupConversationService, User
     Instance<GroupApprovalContextRenderer> approvalContextRenderer;
 
     /**
+     * Strict plan binding for the whole deployment (see {@code HitlPlanBinding}).
+     * Field-injected with its default, like the other optional knobs here.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /** Whether every human group decision must carry the pause's plan hash. */
+    public boolean planHashStrict() {
+        return planHashStrict;
+    }
+
+    /**
      * The group approval-context renderer, or {@code null} when none is available.
      */
     public GroupApprovalContextRenderer approvalContextRenderer() {
@@ -360,7 +372,7 @@ public class GroupConversationService implements IGroupConversationService, User
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
+            AuditLedgerService auditLedgerService, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -374,11 +386,11 @@ public class GroupConversationService implements IGroupConversationService, User
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
         this.scheduleStore = scheduleStore;
-        this.nonceCacheService = nonceCacheService;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
+        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
-        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, nonceCacheService, defaultTenantId);
+        this.contextBuilder.setSigningGuard(signingGuard);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -1256,7 +1268,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 phase = new DiscussionPhase(phase.name(), phase.type(), phase.participants(),
                                         phase.turnOrder(), phase.contextScope(), phase.targetEachPeer(),
                                         phase.inputTemplate(), Math.max(phase.repeats(), 1) + 1, phase.requiresApproval(),
-                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf());
+                                        phase.convergence(), phase.allowAbstention(), phase.voteConfig(), phase.skipIf(), phase.onApproved());
                                 phaseList.set(phaseIdx, phase);
                                 persistRuntimePhases(gc, phaseList);
                             }
@@ -1745,9 +1757,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // the no-op signal branch. Resume re-registers a fresh token. Re-check the
             // removed token so a cancel that raced this remove is not silently dropped.
             removeTokenAndConvertIfSignalled(gc, listener);
-            // Drop the incremental verification cursor once this leg ends, but keep
-            // it across ANY pause (approval or a human turn, I6) so a resume
-            // continues from where it left off.
+            // Drop the signing guard's record of the withheld entries already logged
+            // once this leg ends, but keep it across ANY pause (approval or a human
+            // turn, I6) so a resume does not log the same entries at ERROR again.
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL
                     && gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT) {
                 signingGuard.forgetConversation(gc.getId());
@@ -2258,10 +2270,6 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
-     * Determines which members participate in a phase based on the
-     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
-     */
-    /**
      * The configured roster plus anyone recruited into the discussion at runtime
      * (I7).
      * <p>
@@ -2295,6 +2303,10 @@ public class GroupConversationService implements IGroupConversationService, User
         return combined;
     }
 
+    /**
+     * Determines which members participate in a phase based on the
+     * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
+     */
     public List<GroupMember> resolveParticipants(DiscussionPhase phase, List<GroupMember> allMembers, String moderatorAgentId) {
         String participants = phase.participants() != null ? phase.participants() : "ALL";
 
@@ -2332,7 +2344,7 @@ public class GroupConversationService implements IGroupConversationService, User
                 return List.of(new GroupMember(rosterModerator.agentId(), rosterModerator.displayName(), 0, "MODERATOR",
                         rosterModerator.memberType()));
             }
-            return List.of(new GroupMember(moderatorAgentId, "Moderator", 0, "MODERATOR"));
+            return List.of(new GroupMember(moderatorAgentId, AgentGroupStore.MODERATOR_SPEAKER_NAME, 0, "MODERATOR"));
         }
 
         if (participants.toUpperCase().startsWith("ROLE:")) {
@@ -2752,12 +2764,6 @@ public class GroupConversationService implements IGroupConversationService, User
         return contextBuilder.buildPlainTextFallback(phase, speaker, question, transcript);
     }
 
-    // Kept as a declared delegator (not inlined at its call site) since a
-    // characterization test reaches it via reflection.
-    private void verifyPriorEntriesIfRequired(String receivingAgentId, GroupConversation gc) {
-        signingGuard.verifyPriorEntriesIfRequired(receivingAgentId, gc);
-    }
-
     // =================================================================
     // HITL lifecycle — cancel & resume. Kept as declared delegators (not
     // inlined) since deleteGroupConversation and characterization tests reach
@@ -2844,6 +2850,16 @@ public class GroupConversationService implements IGroupConversationService, User
         // What the RETRO phase quotes: the team's own reported outcomes, then the
         // lessons other teams chose to share with it. Each is empty when off.
         contextBuilder.setOutcomeDigestProvider(groupId -> outcomeEventService.retroDigest(groupId) + lessonService.sharedDigest(groupId));
+    }
+
+    /**
+     * Wires approved-result actions ({@code phase.onApproved}) into the approval
+     * resume. Initializer injection, same reason as {@link #wireOutcomeDigest}:
+     * builds made with {@code new} in tests run no actions.
+     */
+    @Inject
+    void wireApprovedResultActions(GroupApprovedResultActions approvedResultActions) {
+        hitlCoordinator.setApprovedResultActions(approvedResultActions);
     }
 
     @Inject

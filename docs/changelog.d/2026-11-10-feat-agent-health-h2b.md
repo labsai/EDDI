@@ -101,3 +101,118 @@ presets, status and reasons.
 - A version's first turn (markers, compare windows) ignores `agent-test` rows unless they are asked for.
 - Portfolio: sessions are `null` with a hint when the period reaches past the turn-row retention, and `sessionsDelta`
   when the baseline does; `sort=traffic` falls back to daily-row turns.
+
+## 🐛 fix(health): deleted rows' days come with the delete; unknown days re-roll the agent (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteConversationReturningDays` deletes a conversation's rows and answers their (agent, day)s:
+  PostgreSQL `DELETE ... RETURNING agent_id, day`; MongoDB reads the pairs just before the delete and deletes even when
+  that read fails (`HealthDeletedRows.agentDays` is then `null`).
+- Unknown days (`HealthDirtyDays.markDeletedRows`): every retained day of the conversation's agent is marked dirty, with
+  a WARN. The purge reads the agent from the conversation before deleting its snapshot; the recorder uses the row's agent.
+- Orphan sweep: the candidate read returns each conversation's agent ids; an orphan whose rows name no agent is kept for
+  the next sweep (WARN with the count) rather than deleted blind.
+- Deletion marks retry the write once before falling back to the in-memory queue, and WARN when they do. The residual
+  (both attempts fail, then the node stops before the next successful flush) is documented: those days keep the deleted
+  counts until re-rolled for another reason or `eddi.health.daily-retention`.
+
+## 🐛 fix(health): a GDPR erasure re-rolls the user's days even when they cannot be read (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteByUserIdReturningDays` deletes a user's rows and returns their (agent, day)s
+  (PostgreSQL `DELETE ... WHERE user_id = ? RETURNING agent_id, day`; MongoDB reads the pairs, then `deleteMany`, and
+  returns `null` days if that read fails). `HealthTurnGdprParticipant.erase` uses it instead of a separate lookup.
+- Unknown days: every retained day of the user's agents is re-rolled (`HealthDirtyDays.markErasedRows`). The agents
+  come from the conversation store. `HealthErasureFence` notes them at step 0, before the cascade deletes the
+  conversations; this is best effort and never fails the step, and the noted agents expire with the fence. If nothing
+  was noted, the participant reads the conversation store again.
+- Nothing known: a WARN, and the daily rows keep the counts until `eddi.health.daily-retention`. This is not a failed
+  step, which would hold back the participants that run last although the personal data is gone.
+
+## 🐛 fix(health): self-heal finds discards of old rows; the re-roll limit of old daily rows is stated (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- An undo that discards an existing row from an earlier day now sets that row's discard time once, when it flips
+  (`discardedAt` / `discarded_at_ms`, the field markers already use). `updatedAt`, the write-ordering guard, is
+  untouched. The self-heal read (`forEachAgentDayUpdatedSince`) matches rows written **or** discarded in its window,
+  so a lost in-memory dirty mark for that day is recovered. PostgreSQL has a new partial index
+  `idx_health_turns_discarded_rows` (`discarded_at_ms` where `day IS NOT NULL`); the column already existed. MongoDB
+  sets the field with a pipeline update and uses its existing sparse index.
+- Docs (`agent-health.md`, `gdpr-compliance.md`): daily rows older than `eddi.health.facts-retention` can no longer
+  be recomputed, so an erased user's or deleted conversation's contribution stays in those aggregates until
+  `eddi.health.daily-retention`. Those rows hold no user id or content.
+
+## 🐛 fix(health): a purge that knows neither agent nor days keeps the rows for the orphan sweep (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `IHealthTurnStore.deleteConversationIfDaysKnown` deletes nothing, and returns `null`, when the days cannot be read.
+  That happens only on MongoDB; PostgreSQL's `DELETE ... RETURNING` always has them.
+  `ConversationPurgeService.deleteHealthTurns` uses it when the conversation's agent lookup failed. Without either,
+  the rows are kept with a WARN. The next orphan sweep, whose candidate read names the agent, deletes them and
+  re-rolls that agent's retained days. Kept rows outside `eddi.health.orphan-sweep-window` expire with
+  `eddi.health.facts-retention`.
+- Docs and the `HealthDirtyDays` comment now name the in-memory retry window as the one remaining limit: both writes
+  of a deletion mark fail, then the node stops before the next successful flush.
+
+## 🐛 fix(health): no rollup day is dropped or skipped by the self-heal (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- A day whose rollup keeps failing stays in the dirty queue, retried every pass (a WARN past five failures), instead
+  of being dropped after five. A historical day may have no later write to mark it again, and the self-heal is
+  already past its rows, so a dropped day kept stale counts until `eddi.health.daily-retention`.
+- The self-heal no longer moves its watermark past pairs it did not mark. A window with more than 10,000 (agent, day)
+  pairs is halved until one fits (down to one second), and the watermark moves only to the end of that part; the
+  rest is the next pass's. A one-second window still holding more than 10,000 pairs (many rows sharing a timestamp)
+  is not cut either: all of its pairs are streamed and marked in chunks of 10,000, with a WARN, and only then does the
+  watermark pass it. Re-marking a pair is idempotent (it only gives the dirty entry a new token). Test:
+  `selfHealNeverSkipsPastATruncatedScan` (10,500 pairs at one instant: all marked once, a second pass marks none).
+- A turn row that reaches the store more than 30 seconds (half the self-heal grace) after its capture time marks its
+  day in the dirty store at once (`HealthDirtyDays.markLateWrite`, with the deletion marks' retry and fallback),
+  not on the five-second flush. The self-heal finds rows by capture time and may already be past such a row, so a
+  mark lost with the node could not be found again.
+
+## 🐛 fix(health): a late row's day is marked before the row is written (2026-11-11)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthTurnRecorder.write` marks a late row's days (its capture day, and the stored days of the execution it
+  replaces and the ones it discards, read before the write) in the dirty store before the row is written, not after.
+  A node stopping between the two can no longer lose the mark; a mark whose row then fails to write only costs a
+  recompute. After the write, every day of the row is marked at once again, pre-marked ones included: a rollup that
+  ran between the pre-mark and the write recomputed the day without the row and cleared its mark, and the second mark
+  gives it a new token. It is also a second durable attempt when the pre-mark could not reach the store. Two windows remain
+  in which the mark can be lost, both ending in the node stopping. The first: a rollup clears the pre-mark between
+  the pre-mark and the write, and the node stops between the write and the re-mark. That is a rollup pass and a stop
+  inside the same few milliseconds of one late row. The second is the limit deletion marks have, now after four failed
+  writes: the dirty store refuses both marks, twice each, and the node stops before the next flush. Closing the first
+  would need the rollup to leave a mark alone while its row is still being written: a lease on the entry, a cost on
+  every pass, for a window this small. The row is still written then rather than dropped. A row whose day is
+  never rolled up stays in the turn store, so the agent-day's next write repairs it; a dropped row could not be
+  recovered. Tests: `lateWriteMarksBeforeTheWrite` (pre-mark, write, re-mark in that order) and
+  `lateWriteMarkSurvivesARollupAndAFailedPreMark` (a real `HealthDirtyDays` whose store refuses the pre-mark: the
+  day still reaches the store after the row).
+
+## 🐛 fix(health): single-flight health cache and a bounded portfolio (2026-11-12)
+
+**Repo:** EDDI (`feat/agent-health-h2b`)
+
+- `HealthQueryCache` loads are single-flight per key. It is now a Caffeine `AsyncCache`: the first caller of a missing
+  or expired key inserts a future and runs the query on its own thread, and concurrent callers of the same key wait for
+  that future instead of running the query again. The map is only touched to insert the future, so a slow query never
+  holds a lock other keys need. A failed or `null` load removes its entry: the callers already waiting see that one
+  outcome, and the next caller retries. The portfolio's batch reads (`dailyRows`, `portfolioSessions`) go through a new
+  `HealthQueryCache.shared`, single-flight without keeping the result, since their per-agent parts are cached
+  separately. Tests: `HealthQueryCacheTest` (8 concurrent callers on a cold key run the loader once; a failure is shared
+  by its waiters only and not cached; a `null` is not cached).
+- `GET /health/agents` was already paged (`limit` default 100, at most 500, `nextCursor` `null` on the last page) and
+  bounded in time (`7d`/`30d`/`90d`); the agents it aggregates were capped at 5,000, but silently and loosely — a page
+  of 200 descriptors could take it past the cap, and nothing told the caller agents were left out.
+  `HealthAccess.viewableAgents` now stops at exactly 5,000 and reports `truncated` only when a further viewable agent
+  exists (it reads one past the cap), and the portfolio carries it as the new field `agentsTruncated` (existing fields
+  unchanged). Tests: `HealthAccessTest.viewableAgentsCap` (exactly 5,000 is not truncated, 5,001 is),
+  `RestAgentHealthTest.portfolioTruncated`.

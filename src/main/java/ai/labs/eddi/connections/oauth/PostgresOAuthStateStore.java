@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.connections.oauth;
 
+import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.getUtc;
+import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
+
+import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,7 +20,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -26,6 +29,12 @@ import java.util.Optional;
  * {@code UPDATE … RETURNING} does the claim and the read in one statement,
  * which is what makes it atomic: the predicate is evaluated and the row updated
  * under one lock, so a second concurrent callback sees zero rows.
+ * <p>
+ * The timestamp columns are {@code TIMESTAMP} (without time zone) holding a UTC
+ * wall clock, bound and read through {@link PostgresTimestamps}: in the JVM's
+ * zone, the repeated autumn hour of a daylight-saving zone could put a state's
+ * expiry before its creation, and replicas in different zones would disagree on
+ * when a state expires.
  */
 @ApplicationScoped
 @DefaultBean
@@ -44,7 +53,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                 redirect_uri TEXT NOT NULL,
                 return_to TEXT,
                 nonce_hash VARCHAR(128),
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
                 expires_at TIMESTAMP NOT NULL,
                 consumed_at TIMESTAMP
             )
@@ -115,8 +124,8 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
             statement.setString(6, state.getRedirectUri());
             statement.setString(7, state.getReturnTo());
             statement.setString(8, state.getNonceHash());
-            statement.setTimestamp(9, Timestamp.from(state.getCreatedAt()));
-            statement.setTimestamp(10, Timestamp.from(state.getExpiresAt()));
+            setUtc(statement, 9, state.getCreatedAt());
+            setUtc(statement, 10, state.getExpiresAt());
             statement.setString(11, state.getConnectionId());
             statement.executeUpdate();
         } catch (SQLException e) {
@@ -145,9 +154,9 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
                 """;
         Instant now = Instant.now();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setTimestamp(1, Timestamp.from(now));
+            setUtc(statement, 1, now);
             statement.setString(2, state);
-            statement.setTimestamp(3, Timestamp.from(now));
+            setUtc(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? Optional.of(toState(rows)) : Optional.empty();
             }
@@ -195,7 +204,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         // accepting.
         try (Connection connection = dataSourceInstance.get().getConnection();
                 PreparedStatement statement = connection.prepareStatement("DELETE FROM connection_oauth_states WHERE expires_at < ?")) {
-            statement.setTimestamp(1, Timestamp.from(Instant.now()));
+            setUtc(statement, 1, Instant.now());
             return statement.executeUpdate();
         } catch (SQLException e) {
             LOGGER.warnf(e, "Failed to delete expired OAuth states");
@@ -215,13 +224,9 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         state.setRedirectUri(rows.getString("redirect_uri"));
         state.setReturnTo(rows.getString("return_to"));
         state.setNonceHash(rows.getString("nonce_hash"));
-        state.setCreatedAt(toInstant(rows.getTimestamp("created_at")));
-        state.setExpiresAt(toInstant(rows.getTimestamp("expires_at")));
-        state.setConsumedAt(toInstant(rows.getTimestamp("consumed_at")));
+        state.setCreatedAt(getUtc(rows, "created_at"));
+        state.setExpiresAt(getUtc(rows, "expires_at"));
+        state.setConsumedAt(getUtc(rows, "consumed_at"));
         return state;
-    }
-
-    private static Instant toInstant(Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toInstant();
     }
 }

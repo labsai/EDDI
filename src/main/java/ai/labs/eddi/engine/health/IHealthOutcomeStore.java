@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.health;
 
+import ai.labs.eddi.engine.health.model.HealthFeedCursor;
 import ai.labs.eddi.engine.health.model.HealthOutcome;
 import ai.labs.eddi.engine.health.model.HealthOutcomeCount;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
@@ -63,9 +64,14 @@ public interface IHealthOutcomeStore {
     List<HealthOutcome> findDue(Instant now, int limit);
 
     /**
-     * Makes sessions of a conversation due at {@code at} (a rating arrived, or was
-     * withdrawn, that may change them) — the given sessions, or every one when
-     * {@code sessionNos} is {@code null}. Sessions due earlier stay as they are.
+     * Makes sessions of a conversation due at {@code at}, the time of the mark (a
+     * rating arrived, or was withdrawn, that may change them) — the given sessions,
+     * or every one when {@code sessionNos} is {@code null}. A session already due
+     * before {@code at} is due at {@code at} afterwards: still due, and the mark
+     * now postdates an evaluation that started before it, so that evaluation's
+     * {@link #upsert} keeps it rather than clearing an overdue time older than the
+     * evaluation. The evaluation also passes a later {@code at} to put a session
+     * whose evaluation failed back in the due order.
      *
      * @return the sessions marked
      */
@@ -123,9 +129,20 @@ public interface IHealthOutcomeStore {
     /** Deletes the sessions that ended before {@code day} (retention). */
     long deleteOlderThan(LocalDate day);
 
-    /** Where the evaluation's incremental feed stopped, if it ever ran. */
-    Optional<Instant> watermark();
+    /**
+     * Where the evaluation's incremental feed stands — its forward position and the
+     * overlap replay's — if it ever ran.
+     */
+    Optional<HealthFeedCursor> feedCursor();
 
-    /** Records where the incremental feed stopped. */
-    void setWatermark(Instant at);
+    /** Records where the incremental feed stands, both positions at once. */
+    void setFeedCursor(HealthFeedCursor cursor);
+
+    /**
+     * How far the incremental feed has read once — the cursor's watermark — if it
+     * ever ran.
+     */
+    default Optional<Instant> watermark() {
+        return feedCursor().map(HealthFeedCursor::watermark);
+    }
 }

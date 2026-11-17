@@ -206,19 +206,93 @@ class ClusterPresenceTest {
     void membersFromTheWatch() throws Exception {
         ISharedKv nodes = spy(bucket);
         ClusterPresence presence = new ClusterPresence(connections("self", "b"), nodes, new SimpleMeterRegistry(), null,
-                Duration.ofSeconds(30));
-        long now = System.currentTimeMillis();
-        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a", "version", "6.5.0", "protocol", 1)), true, now);
-        presence.onWatched("n.b", JSON.writeValueAsBytes(Map.of("node", "b", "version", "6.5.0", "protocol", 1)), true, now);
-        presence.onWatched("n.dead", JSON.writeValueAsBytes(Map.of("node", "dead")), true, now - 31_000);
+                Duration.ofSeconds(30)).withClock(clock::get);
+        presence.onWatched("n.dead", JSON.writeValueAsBytes(Map.of("node", "dead")), true, 1);
+        clock.addAndGet(1_000);
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a", "version", "6.5.0", "protocol", 1)), true, 2);
+        presence.onWatched("n.b", JSON.writeValueAsBytes(Map.of("node", "b", "version", "6.5.0", "protocol", 1)), true, 3);
         presence.watchReady(true);
+        clock.addAndGet(29_000); // "dead" was last seen 30 s ago, a and b 29 s ago
 
         List<Map<String, Object>> members = presence.currentMembers();
-        assertEquals(List.of("a", "b"), members.stream().map(m -> m.get("node")).toList(), "a record older than the TTL is gone");
+        assertEquals(List.of("a", "b"), members.stream().map(m -> m.get("node")).toList(), "a record not rewritten for the TTL is gone");
         assertEquals(2, presence.watchedRecords(), "an expired record is dropped, not only skipped");
-        presence.onWatched("n.b", null, false, now);
+        presence.onWatched("n.b", null, false, 4);
         assertEquals(1, presence.members().size(), "a deleted record leaves at once");
         verify(nodes, never()).keys();
+    }
+
+    @Test
+    @DisplayName("OPS-1: a watched record expires on this node's clock alone, whatever the writer's clock says")
+    void watchedRecordExpiresOnThisNodesClock() throws Exception {
+        ClusterPresence presence = new ClusterPresence(connections("self", "b"), bucket, new SimpleMeterRegistry(), null,
+                Duration.ofSeconds(30)).withClock(clock::get);
+        presence.watchReady(true);
+        // The writer's clock runs a minute behind this node's: its own timestamp
+        // claims the record is already older than the TTL.
+        long writerClock = System.currentTimeMillis() - 60_000;
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a", "updatedAt", writerClock)), true, 7);
+
+        clock.addAndGet(29_000);
+        assertEquals(List.of("a"), presence.members().stream().map(m -> m.get("node")).toList(), "seen 29 s ago: still a member");
+        clock.addAndGet(2_000);
+        assertTrue(presence.members().isEmpty(), "not rewritten for 31 s: gone");
+    }
+
+    @Test
+    @DisplayName("OPS-1: the heartbeat age is the time since this node saw the record change, and resets with a new revision")
+    void heartbeatAgeFromTheWatch() throws Exception {
+        ClusterPresence presence = new ClusterPresence(connections("self", "b"), bucket, new SimpleMeterRegistry(), null,
+                Duration.ofSeconds(30)).withClock(clock::get);
+        presence.watchReady(true);
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a", "updatedAt", 1L)), true, 7);
+        clock.addAndGet(12_000);
+        assertEquals(OptionalLong.of(12_000), presence.heartbeatAgeMillis("a"));
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a", "updatedAt", 2L)), true, 8);
+        clock.addAndGet(500);
+        assertEquals(OptionalLong.of(500), presence.heartbeatAgeMillis("a"));
+        assertEquals(OptionalLong.of(0), presence.heartbeatAgeMillis("self"), "this node's own record is always current");
+        assertTrue(presence.heartbeatAgeMillis("nobody").isEmpty());
+    }
+
+    @Test
+    @DisplayName("OPS-1: a record delivered with the watch's initial values has no known age until it is rewritten")
+    void initialValuesHaveNoKnownAge() throws Exception {
+        ClusterPresence presence = new ClusterPresence(connections("self", "b"), bucket, new SimpleMeterRegistry(), null,
+                Duration.ofSeconds(30)).withClock(clock::get);
+        // Delivered before the end of the initial data: written at some unknown time
+        // within the bucket TTL.
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a")), true, 7);
+        presence.watchReady(true);
+        assertEquals(1, presence.members().size(), "listed as a member");
+        assertTrue(presence.heartbeatAgeMillis("a").isEmpty(), "but how old it is cannot be told");
+        clock.addAndGet(3_000);
+        presence.onWatched("n.a", JSON.writeValueAsBytes(Map.of("node", "a")), true, 8);
+        assertEquals(OptionalLong.of(0), presence.heartbeatAgeMillis("a"), "a rewrite seen live is dated");
+    }
+
+    @Test
+    @DisplayName("OPS-1: without a watch, the age is known once a bucket read sees the revision change, and only then")
+    void heartbeatAgeFromBucketReads() {
+        ClusterPresence presence = presence("self", "b");
+        bucket.put("n.a", "{\"node\":\"a\"}".getBytes());
+        presence.currentMembers();
+        assertTrue(presence.heartbeatAgeMillis("a").isEmpty(), "the first read cannot tell when the record was written");
+        clock.addAndGet(4_000);
+        presence.currentMembers();
+        assertTrue(presence.heartbeatAgeMillis("a").isEmpty(), "an unchanged revision still says nothing");
+        bucket.put("n.a", "{\"node\":\"a\"}".getBytes());
+        presence.currentMembers();
+        clock.addAndGet(2_500);
+        assertEquals(OptionalLong.of(2_500), presence.heartbeatAgeMillis("a"));
+        bucket.put("n.c", "{\"node\":\"c\"}".getBytes());
+        presence.currentMembers();
+        assertEquals(OptionalLong.of(0), presence.heartbeatAgeMillis("c"), "a key that appeared between two reads was just written");
+
+        clock.addAndGet(31_000); // a read longer than the TTL ago brackets nothing
+        bucket.put("n.c", "{\"node\":\"c\"}".getBytes());
+        presence.currentMembers();
+        assertTrue(presence.heartbeatAgeMillis("c").isEmpty());
     }
 
     @Test

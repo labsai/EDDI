@@ -654,6 +654,23 @@ public class TaskForceEngine {
         }
     }
 
+    /** What the planner is told about a HUMAN member, ahead of their role. */
+    static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
+
+    /**
+     * The pause for the next executable HUMAN-assigned task, or {@code null} when
+     * there is none or the turn budget is spent (a human task is a turn).
+     */
+    private PhaseExecutionEngine.HumanTurnRequired nextHumanTurn(GroupConversation gc, AgentGroupConfiguration config, String question,
+                                                                 DiscussionPhase phase, AtomicInteger turnCounter, int maxTurns) {
+        if (maxTurns > 0 && turnCounter.get() >= maxTurns) {
+            return null;
+        }
+        var task = GroupHumanTasks.nextHumanTask(config, gc.getTaskList()).orElse(null);
+        GroupMember member = task != null ? findMember(config.getMembers(), task.assignedAgentId()) : null;
+        return member != null ? GroupHumanTasks.humanTurnFor(member, task, buildTaskExecutionInput(task, question, phase, gc)) : null;
+    }
+
     /**
      * Wall-clock budget one EXECUTE wave gets before the orchestrator gives up on
      * the agents still running.
@@ -672,23 +689,6 @@ public class TaskForceEngine {
      *            the largest number of tasks assigned to one agent in this wave;
      *            values below 1 are treated as 1
      */
-    /** What the planner is told about a HUMAN member, ahead of their role. */
-    static final String HUMAN_PLANNER_NOTE = "(human — assign only work that needs a person; slow) ";
-
-    /**
-     * The pause for the next executable HUMAN-assigned task, or {@code null} when
-     * there is none or the turn budget is spent (a human task is a turn).
-     */
-    private PhaseExecutionEngine.HumanTurnRequired nextHumanTurn(GroupConversation gc, AgentGroupConfiguration config, String question,
-                                                                 DiscussionPhase phase, AtomicInteger turnCounter, int maxTurns) {
-        if (maxTurns > 0 && turnCounter.get() >= maxTurns) {
-            return null;
-        }
-        var task = GroupHumanTasks.nextHumanTask(config, gc.getTaskList()).orElse(null);
-        GroupMember member = task != null ? findMember(config.getMembers(), task.assignedAgentId()) : null;
-        return member != null ? GroupHumanTasks.humanTurnFor(member, task, buildTaskExecutionInput(task, question, phase, gc)) : null;
-    }
-
     static long waveBudgetSeconds(ProtocolConfig protocol, int maxTasksPerAgent) {
         long perTurn = GroupConversationService.parallelBatchBudgetSeconds(protocol);
         return perTurn * Math.max(1, maxTasksPerAgent);
@@ -1318,10 +1318,11 @@ public class TaskForceEngine {
                                 phaseIdx, phase, null, listener, cancellation);
                         if (reply != null && reply.content() != null && !reply.content().isBlank()) {
                             // Recorded as a BID entry — peer-hidden while the phase
-                            // runs (F4's blind-bid rule), auditable afterwards.
-                            gc.getTranscript().add(new TranscriptEntry(member.agentId(), member.displayName(),
-                                    reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
-                                    Instant.now(), null, null));
+                            // runs (F4's blind-bid rule), auditable afterwards. Signed as
+                            // a BID, as a DISSENT is: the signature covers the entry type.
+                            gc.getTranscript().add(memberTurnExecutor.sign(gc, new TranscriptEntry(member.agentId(),
+                                    member.displayName(), reply.content(), phaseIdx, phase.name(), TranscriptEntryType.BID,
+                                    Instant.now(), null, null)));
                         }
                         return TaskBidEngine.parseBids(reply != null ? reply.content() : null, member, announcedSubjects);
                     } catch (Exception e) {

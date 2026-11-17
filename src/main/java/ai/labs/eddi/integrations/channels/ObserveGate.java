@@ -202,7 +202,7 @@ public class ObserveGate {
      * cannot both be told there is room for one more.
      * <p>
      * Reading and booking as separate steps would tell two racing callers yes: the
-     * CAS in {@link #mutate} stops one increment overwriting the other, not both
+     * CAS in {@link #addCost} stops one increment overwriting the other, not both
      * being permitted. Here the limits are re-checked inside the loop against the
      * window the write will actually replace, so exactly one caller wins the last
      * slot.

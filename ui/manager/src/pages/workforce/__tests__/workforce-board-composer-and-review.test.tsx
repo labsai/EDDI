@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { render } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { createTestQueryClient, renderPage, userEvent } from "@/test/test-utils";
 import { act } from "@testing-library/react";
 import { server } from "@/test/mocks/server";

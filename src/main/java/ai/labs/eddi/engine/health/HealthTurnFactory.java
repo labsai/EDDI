@@ -19,7 +19,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -335,20 +337,25 @@ public final class HealthTurnFactory {
         return value instanceof String outcome && HealthOutcomes.SELF_REPORTABLE.contains(outcome) ? outcome : null;
     }
 
-    private static List<String> actions(Object value) {
+    /**
+     * The step's actions, each capped in length; of more than {@link #MAX_ACTIONS},
+     * the last ones — what the outcome evaluation reads from them is the last
+     * mapped action and whether the turn ended the conversation, both found at the
+     * end of the list.
+     */
+    static List<String> actions(Object value) {
         if (!(value instanceof List<?> list)) {
             return List.of();
         }
         List<String> out = new ArrayList<>(Math.min(list.size(), MAX_ACTIONS));
-        for (Object action : list) {
-            if (out.size() >= MAX_ACTIONS) {
-                break;
-            }
+        for (ListIterator<?> it = list.listIterator(list.size()); it.hasPrevious() && out.size() < MAX_ACTIONS;) {
+            Object action = it.previous();
             if (action != null) {
                 String name = String.valueOf(action);
                 out.add(name.length() > MAX_ACTION_LENGTH ? name.substring(0, MAX_ACTION_LENGTH) : name);
             }
         }
+        Collections.reverse(out);
         return out;
     }
 }

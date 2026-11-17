@@ -791,6 +791,8 @@ class VaultKeySafetyTest {
 
         assertTrue(failure.getMessage().contains("did not finish") && failure.getMessage().contains("rotate-kek"), failure.getMessage());
         assertTrue(failure.getMessage().contains("Only if the previous master key is lost"), failure.getMessage());
+        // The endpoint answers 400 without confirm=true, so the hint has to carry it.
+        assertTrue(failure.getMessage().contains("/reset?confirm=true"), failure.getMessage());
     }
 
     @Test

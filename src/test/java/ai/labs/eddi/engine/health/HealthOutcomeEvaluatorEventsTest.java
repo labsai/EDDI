@@ -52,7 +52,7 @@ class HealthOutcomeEvaluatorEventsTest {
         outcomes = mock(IHealthOutcomeStore.class);
         events = mock(IHealthEventStore.class);
         HealthConfigPolicy policy = mock(HealthConfigPolicy.class);
-        when(policy.of(anyString(), any())).thenReturn(new Resolved(Map.of(), true, Map.of(), false, List.of("orderId"),
+        when(policy.require(anyString(), any())).thenReturn(new Resolved(Map.of(), true, Map.of(), false, List.of("orderId"),
                 Map.of("ticket.reopened", "FAILED"), false));
         when(policy.windowOf(anyString(), any())).thenReturn(Duration.ofHours(24));
         when(outcomes.watermark()).thenReturn(Optional.empty());

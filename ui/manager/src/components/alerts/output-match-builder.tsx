@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { joinPath, opsFor, outputMatchProblems, pathProblem, splitPath, valueTypeOf, type PathSource, type ValueType } from "@/lib/alert-rules";
@@ -41,7 +42,17 @@ function asText(value: AlertCondition["value"]): string {
 export function OutputMatchBuilder({ condition, onChange }: OutputMatchBuilderProps) {
   const { t } = useTranslation();
   const { source, rest } = splitPath(condition.path);
-  const type = valueTypeOf(condition.value);
+  // The type is the author's choice, held here: an unset number is null, and
+  // reading the type back from null would answer Text — Number could not be
+  // chosen before a value is entered, and clearing the field would flip it.
+  // A non-null value of another type still decides it, so the choice follows
+  // a value set elsewhere (switching the source to actions makes it text).
+  const valueType = condition.value === null || condition.value === undefined ? null : valueTypeOf(condition.value);
+  const [chosenType, setChosenType] = useState<ValueType>(valueType ?? "text");
+  if (valueType !== null && valueType !== chosenType) {
+    setChosenType(valueType);
+  }
+  const type = valueType ?? chosenType;
   const ops = opsFor(source, type);
   const pathError = pathProblem(condition.path);
   const problems = outputMatchProblems(condition);
@@ -58,6 +69,7 @@ export function OutputMatchBuilder({ condition, onChange }: OutputMatchBuilderPr
   };
 
   const setType = (next: ValueType) => {
+    setChosenType(next);
     const nextOps = opsFor(source, next);
     onChange({
       value: convert(asText(condition.value), next),

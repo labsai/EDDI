@@ -62,6 +62,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_PRICING;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
+import static ai.labs.eddi.engine.memory.MemoryKeys.HITL_PLAN_HASH;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_TYPE_LANGCHAIN;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -129,7 +130,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @author ginccc
  * @see ILifecycleTask
  * @see IConversationMemory
- * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
+ * @see ai.labs.eddi.engine.runtime.IConversationCoordinator
  */
 public class LifecycleManager implements ILifecycleManager {
 
@@ -171,7 +172,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
-     * initialization based on package configuration.
+     * initialization based on workflow configuration.
      */
     private final List<ILifecycleTask> lifecycleTasks;
 
@@ -809,6 +810,14 @@ public class LifecycleManager implements ILifecycleManager {
         if (inputData != null && inputData.getResult() != null) {
             input.put("userInput", inputData.getResult());
         }
+        // A task that runs because a human approved a plan records which plan: the
+        // hash the resume was admitted against (HitlPlanHash), written to the step by
+        // Conversation#resume. Every task the resume runs carries it, since all of
+        // them run under that approval.
+        IData<String> planHashData = currentStep.getLatestData(HITL_PLAN_HASH);
+        if (planHashData != null && planHashData.getResult() != null) {
+            input.put("hitlPlanHash", planHashData.getResult());
+        }
 
         // Collect output data (what the task wrote)
         Map<String, Object> output = new LinkedHashMap<>();
@@ -897,19 +906,6 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Filters lifecycle tasks to execute only those starting from specified types.
-     *
-     * <p>
-     * This enables partial workflow execution. For example, if you specify
-     * ["behavior_rules"], it will execute behavior_rules and all subsequent tasks,
-     * but skip earlier tasks like parsing.
-     * </p>
-     *
-     * @param lifecycleTaskTypes
-     *            list of task type prefixes to match
-     * @return filtered list of tasks to execute
-     */
-    /**
      * Returns the ABSOLUTE index of the first task whose type matches any of the
      * requested types (prefix match); selective execution runs that task and all
      * subsequent ones. Returns -1 when no task matches.
@@ -989,8 +985,8 @@ public class LifecycleManager implements ILifecycleManager {
      *
      * <p>
      * Tasks are executed in the order they are added. This method is typically
-     * called during Agent initialization, when the agent's package configuration is
-     * being loaded.
+     * called during Agent initialization, when the agent's workflow configuration
+     * is being loaded.
      * </p>
      *
      * <p>

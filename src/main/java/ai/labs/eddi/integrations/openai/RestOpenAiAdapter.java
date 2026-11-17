@@ -201,13 +201,16 @@ public class RestOpenAiAdapter {
      * The body takes its own permit, acquired and released inside one try/finally
      * so neither can be orphaned. A stream that cannot get one ends with an in-band
      * rate-limit error event rather than an HTTP error, because by the time the
-     * body runs the 200 status has already been committed.
+     * body runs the 200 status has already been committed. It also abandons the
+     * turn: a stateless turn's conversation was started by prepare, and only
+     * {@code bridge.stream} would otherwise have ended it.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
                                        String completionId, String model, long created, boolean includeUsage) {
         StreamingOutput body = out -> {
             var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created, includeUsage);
             if (!inFlight.tryAcquire()) {
+                bridge.abandon(turn);
                 writer.error(OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.")
                         .toErrorResponse());
                 return;

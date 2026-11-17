@@ -96,7 +96,7 @@ authoritative counters, and a dropped row is a gap in a chart, nothing more.
 | `userInput` | `input:initial` is not blank and the turn is not a [self-continuation](long-jobs.md) | Engagement |
 | `agentOutput` | the step rendered output text | Engagement |
 | `lastOutputWasQuestion` | the output text, trimmed, ends with `?` (or `？`) | A cheap hint for outcome inference (`ABANDONED`). It misses questions without a question mark and cannot tell a rhetorical one |
-| `actions` | the turn's actions, at most 32 | Outcomes mapped from actions |
+| `actions` | the turn's actions, at most 32 — of more, the last 32, where the ending and mapped actions are | Outcomes mapped from actions |
 | `selfReportedOutcome` | `health:self_reported_outcome`, written by [`report_conversation_outcome`](#the-self-report-tool) | The model's own claim — weak evidence |
 | `discarded` | an undo removed this execution | See above |
 
@@ -172,22 +172,70 @@ They are recomputed, never incremented:
    drained; a node that is killed loses at most a few seconds of notes, which
    the self-heal pass (step 2) recovers. An erasure, a conversation delete and
    the orphan sweep mark the days of the rows they delete, so the daily rows
-   lose those counts at the next pass.
+   lose those counts at the next pass. A conversation's rows are deleted
+   together with their days (PostgreSQL `DELETE … RETURNING`; on MongoDB the
+   days are read just before the delete). When those days cannot be read, the
+   delete still goes ahead and **every retained day** of the conversation's
+   agent is marked instead, with a WARN — the agent comes from the
+   conversation (purge), the row (the recorder's clean-up) or the sweep's
+   candidate read. A purge that can read neither the agent nor the days
+   (MongoDB only, since PostgreSQL returns the days with the delete) **keeps** the
+   rows, with a WARN. The next orphan sweep then deletes them and marks their
+   agent's days, because its candidate read names the agent. Kept rows
+   captured within `eddi.health.orphan-sweep-window` are removed by that sweep;
+   older ones expire with `eddi.health.facts-retention`. An erasure deletes the
+   user's rows the same way; its fallback is the agents of the user's
+   conversations, noted at the erasure's first step while those conversations
+   still exist (see [GDPR](#gdpr)). Daily rows older than
+   `eddi.health.facts-retention` cannot be recomputed at all (see below).
+   These marks are written to the store at once, not on the five-second flush,
+   because the self-heal cannot find a deleted row; a failed write is retried
+   once. **The one remaining limit:** when both attempts fail (a WARN names the
+   agent), the mark waits in memory for the next flush. If the node stops
+   before a flush succeeds, the mark is lost, and the daily rows of those days
+   keep the deleted rows' counts until the day is re-rolled for another reason
+   (such as a later write of the agent on that day) or reaches
+   `eddi.health.daily-retention`.
 2. The `health-rollup` system schedule (a heartbeat, every
    `eddi.health.rollup-interval`, default 5 minutes; created at startup, run by
    one node at a time under the schedule store's claim) first **self-heals** —
-   it re-marks dirty the (agent, day) pairs of turn rows written since its last
-   pass (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
-   minute behind the clock, at most 10,000 pairs a pass) — and then drains the
+   it re-marks dirty the (agent, day) pairs of turn rows written, or discarded
+   by an undo, since its last pass. A discard leaves the row's write time
+   alone, so the time a row was first discarded is stored with it for this
+   (a watermark kept in `healthrollupstate` / `health_rollup_state`, one
+   minute behind the clock, at most 10,000 pairs a pass; a window holding more
+   is halved until one fits, and the watermark moves only past what was
+   marked. A one-second window that still holds more than 10,000 pairs is not
+   cut: all of its pairs are streamed and marked in chunks of 10,000, with a
+   WARN, so the watermark never passes a pair it did not mark — even when many
+   rows share one timestamp). A row that reaches the store more than 30 seconds
+   after its capture time — which this scan may already be past, since it goes
+   by capture time — is **written late**: the same write stores the time of the
+   write with the row (`writtenAt` on MongoDB, `written_at_ms` on PostgreSQL),
+   and the self-heal matches that time too; an undo in such a write is timed by
+   the write as well. So a late row is found again like any other, by a time
+   the watermark cannot have passed, and needs no dirty mark to survive: its
+   days are noted for the five-second flush like an on-time row's, and a rollup
+   that ran during the write, a node stopping right after it, or a dirty queue
+   that refuses every mark only delay the recompute until the next pass after
+   the write's time is a minute old. Only late rows carry the stamp — a later
+   on-time write of the row removes it — so its index (sparse on MongoDB,
+   partial on PostgreSQL) holds the rare late rows only, and an on-time write
+   costs nothing extra. **What this rests on:** a row is found only if its
+   write commits within the one-minute grace of the time the self-heal goes by
+   — the capture for an on-time row, the start of the write for a late one —
+   less the clock skew between nodes. A write that takes longer than that, on
+   a node that then stops before its flush, can still be missed, for late and
+   on-time rows alike. Then it drains the
    queue: for
    each entry it streams that agent-day's turn rows, **replaces** the day's
    daily rows with the result, and clears the entry **only if it was not marked
    again meanwhile** (a token per mark). A turn written while its day was being
    recomputed therefore keeps the day dirty for the next pass. A pass stops after
    90 seconds and leaves the rest for the next. A day whose rollup fails moves
-   to the back of the queue, so it cannot block the days behind it, and after
-   five failures in a row it is dropped with a WARN (the next write to it marks
-   it again).
+   to the back of the queue, so it cannot block the days behind it. It is never
+   dropped, because the day may have no later write to mark it again: it is
+   retried every pass, with a WARN once it has failed five times.
 3. A dirty day older than the turn-row retention (`eddi.health.facts-retention`)
    is dropped from the queue without recomputing: its turns are gone, and the
    daily rows it already has are kept.
@@ -205,11 +253,21 @@ has waited for the rollup longer than one rollup interval, else today: a day
 marked a moment ago is waiting for the next pass, not behind. **Today's numbers
 may lag by up to one rollup interval.** Daily rows are kept
 `eddi.health.daily-retention` (730 days) and hold no personal data (no user or
-conversation id); an erasure removes a user's counts from them at the next pass.
+conversation id); an erasure removes a user's counts from them at the next pass,
+for days within `eddi.health.facts-retention` (90 days). **Older daily rows
+cannot be recomputed**, because their turn rows are already gone. An erased
+user's, or a deleted conversation's, contribution to those counts stays until
+`eddi.health.daily-retention` removes the rows.
 
 The views cache what they read from the stores for `eddi.health.cache-ttl`
 (60 s; 0 switches it off), keyed by the full query and per agent, never per
-caller — who may see what is decided before the cache is asked. The portfolio
+caller — who may see what is decided before the cache is asked. Loads are
+single-flight per key: when an entry is missing or expired, one caller runs the
+query and every concurrent caller of the same query waits for that result, so a
+Manager poll from several tabs or users cannot stampede the store. A failed or
+empty (`null`) load is not cached — the callers waiting on it see that one
+outcome, and the next caller retries. The portfolio's batch reads over many
+agents are shared the same way between identical requests. The portfolio
 counts every listed agent's traffic, now and in the baseline, in one pass over
 the turn rows (indexed by `(agentId, day)`).
 A change that alters how stored turns are counted (later phases) marks a whole
@@ -348,23 +406,67 @@ Per pass (at most 45 s of it, then the daily-row drain runs):
    them — open sessions whose window has closed, and sessions a rating made due:
    a saved reply rating marks the session of its step, a saved conversation
    rating the session it was given in (the last one started before it), a
-   withdrawn rating its session (a withdrawn conversation rating every session
-   of the conversation). The rating request never waits for this: the mark is
-   handed to a worker thread. A mark that arrives while its session is being
-   evaluated survives that evaluation's write. Each due session is judged over
-   its own steps only, up to the next stored session.
-2. **The feed** — conversations with turn rows captured since the watermark
-   (`healthrollupstate` / `health_rollup_state`, row `outcomes`) **minus
-   `eddi.health.outcome-feed-overlap`** (15 min), up to a minute ago, paged by
-   each conversation's newest capture, oldest first: a pass can stop anywhere and
-   the next resumes without a gap. Rows are ordered by *capture* time, set on the
-   turn's node before the row waits on that node's health queue, so a row can
-   reach the store after the watermark passed it; the overlap re-reads the last
-   minutes every pass and catches it — the price is re-judging those
-   conversations each pass (the evaluation is idempotent). A conversation whose
-   evaluation fails holds the watermark at its capture time, so the following
-   passes retry it, for at most an hour (then a WARN; its next change or due
-   time judges it). The first pass starts at the turn-row retention, so turns
+   withdrawn rating its session (a withdrawn or changed conversation rating
+   every session of the conversation — a changed one counts at its new time, and
+   the session it was in before is not known). The rating request never waits
+   for this: the mark is handed to a worker thread. A mark that arrives while its
+   session is being evaluated survives that evaluation's write, even when the
+   session was already overdue: a mark always sets the session due at its own
+   time. A session the evaluation creates did not exist to take a mark, so when
+   such a new row is written final from ratings it read, the ratings are read
+   once more after the write, and a change makes the row due. A mark that cannot
+   be stored when it arrives — the worker's queue (1,000) is full, or the store
+   fails — is deferred on that node (up to 10,000 conversations) and stored,
+   marking every session of the conversation, after the worker's next mark or
+   at the start of the node's next pass, before the due sessions are read; it
+   stays deferred until that write succeeds (see [Metrics](#metrics)). Each due session is
+   judged over its own steps only, up to the next stored session. A due session
+   whose evaluation fails is made due again later — 15 minutes at the least,
+   growing with the time since it was last judged, up to 6 hours — so sessions
+   that keep failing cannot fill every pass's page of 1,000 and starve the rest.
+2. **The feed** — conversations with turn rows captured up to a minute ago,
+   paged by each conversation's newest capture (then its id), oldest first.
+   Where it stands is a **cursor** of two such (capture, conversation) pairs
+   (`healthrollupstate` document `outcomes` / `health_rollup_state` rows
+   `outcomes` and `outcomes.replay`, written together), so a pass can stop
+   anywhere — even inside a run of more than a page, or more than a pass, of
+   conversations sharing one capture millisecond — and the next resumes right
+   after the last conversation read. Each pass has two parts:
+   - the **replay** re-reads what the feed already read, from
+     **`eddi.health.outcome-feed-overlap`** (15 min) behind its watermark. Rows
+     are ordered by *capture* time, set on the turn's node before the row waits
+     on that node's health queue, so a row can reach the store after the
+     watermark passed it; the replay catches it — the price is re-judging those
+     conversations (the evaluation is idempotent). It gets at most half of the
+     pass's time and conversations; what it does not reach it resumes next pass
+     from its own position, instead of skipping it;
+   - the **forward feed** then reads on from the watermark. While a replay is
+     pending, the stored watermark stays within one overlap of it, so the replay
+     never trails it by more than that; the replay's own position only moves
+     on, so the feed always does too. The limit of this: while a replay is
+     pending across passes (more conversations in the overlap than half a
+     pass takes), a row that lands *behind* the replay's position is not
+     re-read by that sweep, and the next sweep starts at its own watermark
+     minus the overlap. Covering it would mean restarting every sweep where
+     the last one began, which under the load that makes a sweep pending never
+     moves on. Such a row is still judged when its session's window closes
+     (the due evaluation reads the session's steps again) or with the
+     conversation's next turn; only a row landing in a session already judged
+     final, while a sweep is pending, waits for that.
+
+   A conversation whose evaluation fails, in either part — any store it needs
+   cannot be read: turn rows, outcomes, the agent version's `healthConfig`, the
+   ratings — sets the replay back to its capture time, so every following pass
+   retries it first, however far the forward feed has got, for at most an hour
+   from its first failure, however old the turn (then it is given up with a
+   WARN; its next change or due time judges it). The node that saw the failure
+   also retries it directly at the start of each replay, so with several
+   failures a later one is retried every pass too, not only once the replay —
+   restarted at the earliest — gets that far. A conversation given up starts a
+   new retry window when a later capture of it fails; a re-read of the same
+   capture does not. Nothing is written for it in
+   the meantime: a session is never judged under default settings, or as
+   silence, because its configuration or ratings were unavailable. The first pass starts at the turn-row retention, so turns
    recorded before outcomes existed are judged too, up to 5,000 conversations
    per pass; while it catches up, every outcome-based measure (effectiveness,
    sessions, engaged sessions, turns and cost per session, rating response, cost
@@ -530,7 +632,7 @@ Every timestamp is ISO-8601 UTC and every day `YYYY-MM-DD` (UTC).
 | `GET` | `/agents/{agentId}/health` | The report: every section with its measures, the baseline, the golden-suite check |
 | `GET` | `/agents/{agentId}/health/series` | One point per day per measure (`measure=` repeatable, 1–6), `groupBy=none\|version\|origin`, and the change markers of the period |
 | `GET` | `/agents/{agentId}/health/compare` | `from=<version>&to=<version>[&days=14]`: both sides' sections and per-measure `deltas` |
-| `GET` | `/health/agents` | The portfolio: every agent the caller may view, `sort=attention\|name\|traffic`, `limit` (≤ 500), `cursor`, plus `platformIncidents` |
+| `GET` | `/health/agents` | The portfolio: every agent the caller may view (at most 5,000; `agentsTruncated: true` when there are more), `sort=attention\|name\|traffic`, `limit` (default 100, ≤ 500), `cursor` (`nextCursor`, `null` on the last page), plus `platformIncidents` |
 | `GET` | `/agents/{agentId}/health/sessions` | The drill-down: one row per session — conversation id, `sessionNo`, start and end, version, origin, engaged, outcome, evidence, `provisional`, turns, cost, failed turns — newest first. Filters `outcome=` and `evidence=` (repeatable), `origin`, `version`, `period`/`from`/`to`; `limit` 1–100 (default 50), `cursor` |
 | `GET` | `/agents/{agentId}/health/export` | The [export](#business-measures-and-export): `kind=daily\|sessions`, `format=json\|csv`, `period`/`from`/`to`, `version`, `origin` |
 | `GET` | `/agents/{agentId}/health/outcome-suggestions` | The actions that most often end engaged, closed sessions and are not mapped in the current version's `healthConfig.outcomes`, with `sessionsEndingWith`, a `suggested` outcome from the action's name (`*confirm*`, `*done*`, `*complete*`, `*booked*` → `RESOLVED`; `*handoff*`, `*human*`, `*escalat*` → `ESCALATED`; `*out_of_scope*`, `*not_supported*` → `DEFLECTED`; else none) and a `reason`. At most 20; reserved actions are left out. Never applies anything |
@@ -716,7 +818,16 @@ which of them still exist — one projected read per 500 ids — and deletes the
 rows (turns and sessions) of those that do not, counted (in rows) as
 `eddi_health_dropped_total{reason="orphaned"}`. Only a definite "does not
 exist" deletes: a batch the conversation store cannot answer keeps its rows,
-with a WARN, and the next day asks again. At most
+with a WARN, and the next day asks again. The turn rows go first, and an
+orphan's sessions are deleted only once they are gone. When its recent rows
+name an agent, should its days be unreadable at delete time, that agent's
+retained days are re-rolled instead. Without an agent — its recent rows name
+none, or it was found by its sessions alone, with turn rows older than the
+window that a failed purge left — its rows are deleted only if their days can
+be read; otherwise rows and sessions are both kept for the next sweep (a WARN
+with their count) rather than deleted without a way to correct the daily rows,
+the sessions being the next sweep's way back to turn rows outside its window.
+At most
 `eddi.health.orphan-sweep-max` conversations are checked per run (a WARN when
 there were more); the sweep keeps no cursor, so conversations past the cap are
 not guaranteed a check before they leave the window, and their rows then stay
@@ -734,7 +845,21 @@ Turn rows are personal data about a user's use of an agent:
 
 - **Erasure** (`DELETE /admin/gdpr/{userId}`) deletes every row of the user — the
   participant `agentHealthTurns`. Group member conversations are owned by the
-  discussion's user and are covered by the same erasure.
+  discussion's user and are covered by the same erasure. The delete returns the
+  (agent, day)s of the deleted rows, and those days are re-rolled without the
+  user. If the days cannot be read, the rows are deleted all the same and every
+  retained day of the user's agents is re-rolled instead. Those agents come from
+  the conversation store: noted at the erasure's first step (the
+  `agentHealthErasureFence` step reads them before the cascade deletes the
+  conversations; a failed read never fails that step), else read again when the
+  participant runs. If no agent is known either, a WARN is logged and the daily
+  rows keep the user's counts until `eddi.health.daily-retention`. This is not
+  reported as a failed step: the rows (the only personal data) are gone, and a
+  failed step would hold back the participants that run last. Only days within
+  `eddi.health.facts-retention` (90 days) can be re-rolled. On older days the
+  user's contribution to the daily counts stays until
+  `eddi.health.daily-retention` (730 days) removes those rows, which hold no
+  user id or content.
 - **Export** includes the user's rows (newest first, at most 10,000) under
   `agentHealthTurns.turns`.
 - **Session outcomes** (`agentHealthOutcomes`) are erased and exported the same
@@ -813,7 +938,16 @@ eddi_health_outcomes_sessions_total  # Session outcome rows the outcome evaluati
 eddi_health_outcomes_failures_total  # Conversation evaluations that failed (the feed retries them for up to an hour)
 eddi_health_outcomes_lag_seconds     # Gauge: how far the outcome evaluation's watermark is behind the clock
 eddi_health_events_total             # Business events; tag: outcome (accepted|duplicate|refused|matched|expired|restricted|erased)
+eddi_health_outcomes_rating_overflow_total  # Rating changes the outcome hand-off queue had no room for; tag: result (deferred|dropped)
 ```
+
+A rating saved or withdrawn marks its session for another look on a hand-off
+thread (1,000 marks queued), so the rating request never waits. When that queue
+is full, or the store fails to take the mark, the conversation is deferred
+(`deferred`) and marked — every session of it — once the thread runs its next
+mark or the node runs its next outcome pass; it leaves the deferred set only
+once that mark is stored. Only past 10,000 deferred conversations is a mark
+lost (`dropped`, with a WARN at most once a minute). Both should stay at zero.
 
 `eddi_health_dropped_total` should stay at zero for `queue_full`, `store_error`
 and `shutdown`. `erased` and `orphaned` are rows withheld or removed because

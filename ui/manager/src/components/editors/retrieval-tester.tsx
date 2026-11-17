@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Loader2, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { ChunkList } from "@/components/editors/ingestion-source-contents";
 import { useKnowledgeSearch } from "@/hooks/use-ingestion-sources";

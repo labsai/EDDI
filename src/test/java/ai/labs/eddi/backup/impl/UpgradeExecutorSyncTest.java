@@ -7,6 +7,7 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.AgentSourceData;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
+import ai.labs.eddi.backup.IResourceSource.SnippetSourceData;
 import ai.labs.eddi.backup.IResourceSource.WorkflowSourceData;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
@@ -19,6 +20,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -30,14 +32,20 @@ import io.quarkus.security.ForbiddenException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -45,8 +53,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -79,6 +90,9 @@ class UpgradeExecutorSyncTest {
     private static final String SRC_WF2 = "b8b8b8b8b8b8b8b8b8b8b8b8";
     private static final String SRC_LLM = "c9c9c9c9c9c9c9c9c9c9c9c9";
     private static final String SRC_OUT = "d9d9d9d9d9d9d9d9d9d9d9d9";
+    private static final String SRC_SNIPPET = "a9a9a9a9a9a9a9a9a9a9a9a9";
+    private static final String CREATED_SNIPPET = "a1a1a1a1a1a1a1a1a1a1a1a1";
+    private static final String INVALID_HEALTH = "{\"healthConfig\":{\"outcomes\":{\"order_done\":\"NOT_AN_OUTCOME\"}}}";
     private static final String OUTPUT_JSON = "{\"outputSet\":[]}";
     private static final String LLM_JSON = "{\"tasks\":[{\"id\":\"t\",\"type\":\"openai\",\"parameters\":{\"systemMessage\":\"new\"}}]}";
 
@@ -93,6 +107,7 @@ class UpgradeExecutorSyncTest {
     private UpgradeExecutor executor;
     private AgentConfiguration targetAgent;
     private ResourceAccessGuard accessGuard;
+    private IRestPromptSnippetStore snippetStore;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -104,9 +119,10 @@ class UpgradeExecutorSyncTest {
         workflowDocuments = mock(IWorkflowStore.class);
         llmStore = mock(IRestLlmStore.class);
         accessGuard = mock(ResourceAccessGuard.class);
+        snippetStore = mock(IRestPromptSnippetStore.class);
         lenient().when(accessGuard.stampNewDescriptor(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new UpgradeExecutor(agentStore, workflowStore, mock(IRestPromptSnippetStore.class),
+        executor = new UpgradeExecutor(agentStore, workflowStore, snippetStore,
                 new JsonSerialization(mapper), matcher, descriptorStore, mock(BackupMetrics.class), accessGuard);
 
         targetAgent = new AgentConfiguration();
@@ -317,6 +333,53 @@ class UpgradeExecutorSyncTest {
         assertEquals("did:target", agent.getValue().getIdentity().getAgentDid());
     }
 
+    /**
+     * The identity stays the target's, so the source's "sign" could only be
+     * honoured with the target's own key. Carried onto a target that cannot sign,
+     * the agent save was refused with 400 — and with it every workflow change the
+     * run wrote.
+     */
+    @Test
+    @DisplayName("the source's signing flag is turned off, with a warning, when the target cannot sign")
+    void signingFlagIsTurnedOffWhereTheTargetCannotSign() throws Exception {
+        when(agentStore.signingKeyProblem(AGENT)).thenReturn("signInterAgentMessages needs a signing key, and this agent declares none.");
+        UpgradeResult result = syncAgentThatSigns();
+
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertFalse(agent.getValue().getSecurity().isSignInterAgentMessages());
+        assertEquals("promoted from staging", agent.getValue().getDescription(), "the rest of the settings still travel");
+        assertEquals(1, result.warnings().size(), result.warnings().toString());
+        assertTrue(result.warnings().get(0).contains("signInterAgentMessages was turned off: signInterAgentMessages needs a signing key"),
+                result.warnings().get(0));
+        assertFalse(result.hasFailures());
+    }
+
+    @Test
+    @DisplayName("the source's signing flag travels when the target can sign")
+    void signingFlagTravelsWhereTheTargetCanSign() throws Exception {
+        when(agentStore.signingKeyProblem(AGENT)).thenReturn(null);
+        UpgradeResult result = syncAgentThatSigns();
+
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertTrue(agent.getValue().getSecurity().isSignInterAgentMessages());
+        assertTrue(result.warnings().isEmpty(), result.warnings().toString());
+    }
+
+    private UpgradeResult syncAgentThatSigns() throws Exception {
+        var adopted = new AgentConfiguration();
+        adopted.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        adopted.setDescription("promoted from staging");
+        var security = new AgentConfiguration.SecurityConfig();
+        security.setSignInterAgentMessages(true);
+        adopted.setSecurity(security);
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
+        givenPreview(agentRow(DiffAction.UPDATE, mapper.writeValueAsString(adopted)),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0));
+        return inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+    }
+
     @Test
     @DisplayName("a resource edited here since the last sync is left alone unless named explicitly")
     void conflictIsLeftAloneUnlessSelected() {
@@ -401,6 +464,125 @@ class UpgradeExecutorSyncTest {
         var descriptor = ArgumentCaptor.forClass(DocumentDescriptor.class);
         verify(descriptorStore).updateDescriptor(eq(LLM), eq(3), descriptor.capture());
         assertEquals(4, descriptor.getValue().getSyncedVersion());
+    }
+
+    /**
+     * Agent settings the agent update would refuse. The store checks them only at
+     * the agent update, which is the last write of an upgrade, so a refusal used to
+     * arrive after the snippet, the extensions and the workflow had landed, wrapped
+     * into a generic "Upgrade failed" 500 with none of them rolled back.
+     */
+    static Stream<Arguments> refusedSettings() {
+        return Stream.of(
+                Arguments.of("healthConfig.outcomes", INVALID_HEALTH),
+                Arguments.of("ratingConfig.ratingWindowHours", "{\"ratingConfig\":{\"ratingWindowHours\":-1}}"),
+                Arguments.of("maxContinuations", "{\"maxContinuations\":1000000}"),
+                Arguments.of("userMemoryConfig.dream.summarizeTargetEntries",
+                        "{\"userMemoryConfig\":{\"dream\":{\"summarizeTargetEntries\":0}}}"),
+                Arguments.of("appearance.accentColor", "{\"appearance\":{\"accentColor\":\"red\"}}"),
+                Arguments.of("titleGeneration.maxLength", "{\"titleGeneration\":{\"maxLength\":5}}"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("refusedSettings")
+    @DisplayName("adopted agent settings the update would refuse are a 400 naming the field, before anything is written")
+    void refusedAdoptedSettingsWriteNothing(String field, String settings) throws Exception {
+        givenEverySourceResourceWouldBeWritten(DiffAction.UPDATE, settings);
+        var source = sourceWithSnippet();
+
+        var thrown = assertThrows(BadRequestException.class,
+                () -> inCdi(() -> executor.executeUpgrade(source, AGENT, null, null)));
+
+        assertEquals(400, thrown.getResponse().getStatus());
+        assertTrue(thrown.getMessage().contains(field), thrown.getMessage());
+        verify(snippetStore, never()).createSnippet(any());
+        verify(snippetStore, never()).updateSnippet(anyString(), any(), any());
+        verify(outputDocuments, never()).create(any());
+        verify(workflowDocuments, never()).create(any());
+        verify(llmStore, never()).updateLlm(anyString(), anyInt(), any());
+        verify(workflowStore, never()).updateWorkflow(any(), any(), any());
+        verify(agentStore, never()).updateAgent(any(), any(), any(), any());
+        verify(descriptorStore, never()).updateDescriptor(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("checkAdoptedSettings refuses what the upgrade would refuse, writes nothing, and passes settings it would not adopt")
+    void checkAdoptedSettingsBeforeAnyWrite() throws Exception {
+        givenEverySourceResourceWouldBeWritten(DiffAction.UPDATE, INVALID_HEALTH);
+        var source = sourceWithSnippet();
+        var thrown = assertThrows(BadRequestException.class, () -> inCdi(() -> {
+            check(source);
+            return null;
+        }));
+        assertTrue(thrown.getMessage().contains("healthConfig.outcomes"), thrown.getMessage());
+        verify(snippetStore, never()).createSnippet(any());
+        verify(agentStore, never()).updateAgent(any(), any(), any(), any());
+
+        givenEverySourceResourceWouldBeWritten(DiffAction.CONFLICT, INVALID_HEALTH);
+        inCdi(() -> {
+            check(source);
+            return null;
+        });
+    }
+
+    @Test
+    @DisplayName("a settings conflict that was not selected is not adopted, so its settings are not checked")
+    void unadoptedSettingsAreNotChecked() throws Exception {
+        givenEverySourceResourceWouldBeWritten(DiffAction.CONFLICT, INVALID_HEALTH);
+        var source = sourceWithSnippet();
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+
+        // The target keeps its own settings and gets the new workflow, as before.
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertNull(agent.getValue().getHealthConfig());
+        verify(snippetStore).createSnippet(any());
+        verify(outputDocuments).create(any());
+        verify(workflowStore).updateWorkflow(eq(WF), eq(2), any());
+        assertTrue(result.failures().stream().anyMatch(f -> "agent".equals(f.resourceType())), result.failures().toString());
+    }
+
+    @Test
+    @DisplayName("valid adopted settings pass the early check and are written with everything else")
+    void validAdoptedSettingsAreWritten() throws Exception {
+        givenEverySourceResourceWouldBeWritten(DiffAction.UPDATE,
+                "{\"healthConfig\":{\"outcomes\":{\"order_done\":\"RESOLVED\"}}}");
+        var source = sourceWithSnippet();
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+
+        assertTrue(result.agentUpdated(), result.failures().toString());
+        var agent = ArgumentCaptor.forClass(AgentConfiguration.class);
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), agent.capture(), eq(false));
+        assertEquals("RESOLVED", agent.getValue().getHealthConfig().getOutcomes().get("order_done"));
+        verify(snippetStore).createSnippet(any());
+        verify(workflowStore).updateWorkflow(eq(WF), eq(2), any());
+    }
+
+    /**
+     * A preview in which the run would create a snippet and an output, update the
+     * workflow and, when {@code agentAction} is UPDATE, adopt {@code settings}.
+     */
+    private void givenEverySourceResourceWouldBeWritten(DiffAction agentAction, String settings) throws Exception {
+        var adopted = mapper.readValue(settings, AgentConfiguration.class);
+        adopted.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2))));
+        lenient().when(snippetStore.createSnippet(any())).thenReturn(Response.created(
+                URI.create("eddi://ai.labs.snippet/snippetstore/snippets/" + CREATED_SNIPPET + "?version=1")).build());
+        givenPreview(agentRow(agentAction, mapper.writeValueAsString(adopted)),
+                row(SRC_SNIPPET, "snippet", DiffAction.CREATE, null, null, -1),
+                row(SRC_WF, "workflow", DiffAction.UPDATE, WF, 2, 0),
+                row(SRC_LLM, "langchain", DiffAction.SKIP, LLM, 3, -1),
+                row(SRC_OUT, "output", DiffAction.CREATE, null, null, -1));
+    }
+
+    private IResourceSource sourceWithSnippet() {
+        var source = source(workflowData(SRC_WF, 0, llmAndOutput(), llmAndOutputExtensions()));
+        var snippet = new PromptSnippet();
+        snippet.setName("tone");
+        snippet.setContent("Be brief.");
+        when(source.readSnippets()).thenReturn(List.of(new SnippetSourceData(SRC_SNIPPET, "tone", snippet)));
+        return source;
     }
 
     // ==================== helpers ====================
@@ -489,6 +671,14 @@ class UpgradeExecutorSyncTest {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
+    private void check(IResourceSource source) {
+        try {
+            executor.checkAdoptedSettings(source, AGENT, null);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private <T> T inCdi(Supplier<T> action) {
         MockedStatic<CDI> cdiMock = Mockito.mockStatic(CDI.class);
         try (cdiMock) {

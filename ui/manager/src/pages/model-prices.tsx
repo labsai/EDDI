@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PendingSpendChanges } from "@/components/spend-control/pending-spend-changes";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Coins, Download, Pencil, Plus, RefreshCw, Save, Trash2, Upload, BookOpen } from "lucide-react";
@@ -262,6 +263,8 @@ data-testid="model-prices-import"
           </button>
         </div>
       )}
+
+      <PendingSpendChanges kind="MODEL_PRICES" isAdmin={isAdmin} />
 
       {/* Policy */}
       <section className="rounded-xl border border-border bg-card p-4" data-testid="model-prices-policy">

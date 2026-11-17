@@ -17,7 +17,6 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
@@ -26,19 +25,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Executes streaming chat completion — tokens are emitted in real-time via the
  * {@link ConversationEventSink}.
  * <p>
- * This class blocks until the full response is received (via CountDownLatch) so
- * that the lifecycle workflow can proceed synchronously while tokens stream to
- * the client.
+ * This class blocks until the full response is received (via
+ * {@link AbandonableStreamCall}) so that the lifecycle workflow can proceed
+ * synchronously while tokens stream to the client.
  */
 class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
@@ -50,6 +44,12 @@ class StreamingLegacyChatExecutor {
      * F8). {@code null} in the direct-construction unit tests.
      */
     private final MeterRegistry meterRegistry;
+
+    /**
+     * Tasks this executor has already warned about a below-backstop
+     * {@code timeout}.
+     */
+    private final ShortTimeoutWarnings shortTimeoutWarnings = new ShortTimeoutWarnings();
 
     StreamingLegacyChatExecutor() {
         this(null);
@@ -218,72 +218,32 @@ class StreamingLegacyChatExecutor {
      * The {@code timeout} value is read from the task's raw parameters. A
      * Qute-templated value cannot be resolved here and simply leaves the default in
      * place — the pre-existing behaviour, never a shorter bound.
+     * <p>
+     * This resolution logs no warning, so a caller that only derives a bound from
+     * it (the cascade's step margin) adds nothing to the log. Requests go through
+     * {@link #backstopSeconds}, which also says, once per task, when a short
+     * {@code timeout} does not shorten the backstop.
      */
-    /**
-     * Tasks already warned about a below-backstop {@code timeout}, keyed by task id
-     * and configured value.
-     * <p>
-     * {@link #resolveTimeoutSeconds} runs on the PER-REQUEST path (once per
-     * streaming turn, and again per cascade step via
-     * {@code CascadingModelExecutor.resolveStreamingStepTimeoutMs}), so an
-     * unconditional warning fires on every single turn for the whole lifetime of a
-     * config that will never change. {@code ChatModelRegistry} makes the same
-     * distinction deliberately — it warns on the build path only, never on a cache
-     * hit.
-     * <p>
-     * Explicitly bounded. An earlier comment claimed it was "bounded because a
-     * config edit re-keys the entry", which is backwards: re-keying ADDS a key and
-     * leaves the old one behind, so config edits are exactly what made this grow.
-     * Keyed on (taskId, timeoutMs), the key space is unbounded over the life of a
-     * process.
-     * <p>
-     * Bounded with a size check and a clear, NOT with a Caffeine cache: this is
-     * read on the per-request path (once per streaming turn, again per cascade
-     * step), and putting cache machinery there measurably slowed it — two
-     * timing-sensitive tests failed on a 66ms budget when it was tried. A plain key
-     * set plus an O(1) size check costs nothing per call.
-     * <p>
-     * Clearing on overflow rather than refusing to add: a hard cap would silently
-     * stop warning about genuinely new misconfigurations, which is the failure mode
-     * this warning exists to prevent. Worst case here is that an already-warned
-     * task warns once more — noise, not silence.
-     */
-    private static final Set<String> shortTimeoutWarned = ConcurrentHashMap.newKeySet();
-
-    /** Upper bound on retained warn-suppression keys. */
-    private static final int MAX_WARNED_TIMEOUT_KEYS = 1_000;
-
-    /**
-     * Record that {@code key} has been warned about, returning true when this call
-     * is the one that should emit the warning.
-     */
-    private static boolean rememberWarned(String key) {
-        if (shortTimeoutWarned.size() >= MAX_WARNED_TIMEOUT_KEYS) {
-            shortTimeoutWarned.clear();
-        }
-        return shortTimeoutWarned.add(key);
-    }
-
-    /** How many below-backstop warnings have actually been emitted. */
-    private static final AtomicInteger shortTimeoutWarnings = new AtomicInteger();
-
-    private static String warnKey(LlmConfiguration.Task task, long millis) {
-        String id = task != null && task.getId() != null ? task.getId() : "<unnamed>";
-        return id + '@' + millis;
-    }
-
-    /** Test hook: emitted below-backstop warnings since the last reset. */
-    static int shortTimeoutWarningCount() {
-        return shortTimeoutWarnings.get();
-    }
-
-    /** Test hook: forget which tasks have been warned about. */
-    static void resetShortTimeoutWarnings() {
-        shortTimeoutWarned.clear();
-        shortTimeoutWarnings.set(0);
-    }
-
     static long resolveTimeoutSeconds(LlmConfiguration.Task task) {
+        return resolveTimeoutSeconds(task, null);
+    }
+
+    /**
+     * {@link #resolveTimeoutSeconds(LlmConfiguration.Task)} for a request this
+     * executor (or the tool loop's streaming bridge) is about to make: the same
+     * bound, plus a warning the first time a task's {@code timeout} turns out
+     * shorter than the backstop it cannot shorten (finding F11).
+     */
+    long backstopSeconds(LlmConfiguration.Task task) {
+        return resolveTimeoutSeconds(task, shortTimeoutWarnings);
+    }
+
+    /**
+     * @param warnings
+     *            where to record a below-backstop warning, or {@code null} to
+     *            resolve without warning
+     */
+    private static long resolveTimeoutSeconds(LlmConfiguration.Task task, ShortTimeoutWarnings warnings) {
         if (task == null) {
             return DEFAULT_TIMEOUT_SECONDS;
         }
@@ -305,8 +265,7 @@ class StreamingLegacyChatExecutor {
             // Finding F11: the raise-only floor is deliberate (see the javadoc above),
             // but it used to be silent — an operator configuring timeout=5000 still
             // waited the full 120s with nothing in the log explaining why. Say so.
-            if (seconds < DEFAULT_TIMEOUT_SECONDS && rememberWarned(warnKey(task, millis))) {
-                shortTimeoutWarnings.incrementAndGet();
+            if (warnings != null && seconds < DEFAULT_TIMEOUT_SECONDS && warnings.firstFor(task, millis)) {
                 LOGGER.warnf("The 'timeout' parameter (%dms ≈ %ds) is SHORTER than the %ds streaming backstop and does NOT shorten it — "
                         + "the provider's own client timeout still applies, but this executor will wait up to %ds. "
                         + "Set 'streamingTimeoutSeconds' to lower the backstop.", millis, seconds, DEFAULT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
@@ -359,7 +318,7 @@ class StreamingLegacyChatExecutor {
 
         LOGGER.debug("Executing with streaming (legacy mode)" + (responseFormat != null ? " with JSON response format" : ""));
 
-        long timeoutSeconds = resolveTimeoutSeconds(task);
+        long timeoutSeconds = backstopSeconds(task);
 
         RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
 
@@ -378,72 +337,27 @@ class StreamingLegacyChatExecutor {
             // replacing a perfectly good answer with the timeout fallback.
             metadata.clear();
 
-            var latch = new CountDownLatch(1);
-            var fullResponse = new StringBuilder();
-            var errorRef = new AtomicReference<Throwable>();
-            var responseRef = new AtomicReference<ChatResponse>();
-            // Abandoning an attempt (timeout, interrupt, or a retried error) does not
-            // stop the provider's callback thread — this executor cannot cancel it. Without
-            // this gate a late token from a timed-out attempt keeps writing to the shared
-            // event sink while the retry streams its own tokens into the same sink, so the
-            // client renders two answers interleaved and neither matches what is stored in
-            // memory. Once an attempt is abandoned its handler goes silent.
-            var abandoned = new AtomicBoolean(false);
-            // Appending, emitting and abandoning must be mutually exclusive.
-            // KEEP IN SYNC: ToolLoopStreamingChatModel mirrors this whole
-            // latch/abandoned/lock skeleton for the tool loop; a concurrency fix
-            // here almost certainly applies there too.
-            // fullResponse is written only by the provider's callback thread and read
-            // only here; on the normal path latch.countDown()/await() publishes those
-            // writes, but the timeout/interrupt path has no such edge — abandoned is a
-            // volatile write ordering executor -> callback, not callback -> executor.
-            // Reading the StringBuilder unsynchronized while it is being mutated can
-            // observe a torn buffer (count advanced before the char data is visible, or
-            // a stale value array after a grow). The same lock also closes the
-            // check-then-act on `abandoned`: a callback already past the check could
-            // otherwise still push a token into the shared event sink after this thread
-            // believed the attempt silenced.
-            final Object streamLock = new Object();
+            // One call per attempt: abandoning an attempt (timeout, interrupt, or a
+            // retried error) silences its still-running callback thread, so a late
+            // token never interleaves with the retry's tokens on the shared sink.
+            var call = AbandonableStreamCall.forwardingTo((token, firstOfCall) -> {
+                try {
+                    eventSink.onToken(token);
+                } catch (Exception e) {
+                    LOGGER.warnf("Error sending token event: %s", e.getMessage());
+                }
+            });
 
             var requestBuilder = ChatRequest.builder().messages(messages);
             if (responseFormat != null) {
                 requestBuilder.responseFormat(responseFormat);
             }
-            var chatRequest = requestBuilder.build();
-
-            streamingModel.chat(chatRequest, new StreamingChatResponseHandler() {
-                @Override
-                public void onPartialResponse(String partialResponse) {
-                    synchronized (streamLock) {
-                        if (abandoned.get()) {
-                            return;
-                        }
-                        fullResponse.append(partialResponse);
-                        try {
-                            eventSink.onToken(partialResponse);
-                        } catch (Exception e) {
-                            LOGGER.warnf("Error sending token event: %s", e.getMessage());
-                        }
-                    }
-                }
-
-                @Override
-                public void onCompleteResponse(ChatResponse completeResponse) {
-                    responseRef.set(completeResponse);
-                    latch.countDown();
-                }
-
-                @Override
-                public void onError(Throwable error) {
-                    errorRef.set(error);
-                    latch.countDown();
-                }
-            });
+            streamingModel.chat(requestBuilder.build(), call);
 
             boolean timedOut = false;
             boolean interrupted = false;
             try {
-                if (!latch.await(timeoutSeconds, TimeUnit.SECONDS)) {
+                if (!call.await(timeoutSeconds)) {
                     LOGGER.warn("Streaming chat timed out");
                     timedOut = true;
                 }
@@ -453,17 +367,12 @@ class StreamingLegacyChatExecutor {
                 interrupted = true;
             }
 
-            synchronized (streamLock) {
-                if (timedOut || interrupted) {
-                    // Silence the still-running handler before reading what it produced, so the
-                    // text returned to memory is exactly the text the client was sent. Under the
-                    // lock an in-flight emission completes first and is therefore included —
-                    // never half-included.
-                    abandoned.set(true);
-                }
-                responseText = fullResponse.toString();
-            }
-            metadata.putAll(buildMetadata(responseRef.get()));
+            // A timed-out or interrupted call is already abandoned, so this is exactly
+            // the text the client was sent — an in-flight emission is included whole.
+            responseText = call.forwardedText();
+            ChatResponse response = call.response();
+            Throwable error = call.error();
+            metadata.putAll(buildMetadata(response));
 
             // Finding F8: a provider that completes without ever calling
             // onPartialResponse leaves the accumulated buffer empty, and the buffer used
@@ -472,8 +381,8 @@ class StreamingLegacyChatExecutor {
             // silent empty answer with no error, warning or metric. Fall back to the
             // complete response, and emit the token to the sink so the SSE client is not
             // left with nothing.
-            if (!timedOut && !interrupted && errorRef.get() == null && responseText.isEmpty()) {
-                String completeText = completeResponseText(responseRef.get());
+            if (!timedOut && !interrupted && error == null && responseText.isEmpty()) {
+                String completeText = completeResponseText(response);
                 if (completeText != null && !completeText.isEmpty()) {
                     LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
                             + "This provider does not support incremental streaming.", completeText.length());
@@ -487,15 +396,13 @@ class StreamingLegacyChatExecutor {
                     metadata.putIfAbsent("warning", "streaming_no_partials");
                     incrementNoPartials();
                     responseText = completeText;
-                    synchronized (streamLock) {
-                        if (!abandoned.get()) {
-                            try {
-                                eventSink.onToken(completeText);
-                            } catch (Exception e) {
-                                LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
-                            }
+                    call.runUnlessAbandoned(() -> {
+                        try {
+                            eventSink.onToken(completeText);
+                        } catch (Exception e) {
+                            LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
                         }
-                    }
+                    });
                 }
             }
 
@@ -539,33 +446,31 @@ class StreamingLegacyChatExecutor {
                 return new StreamingResult("", metadata);
             }
 
-            if (errorRef.get() != null) {
+            if (error != null) {
                 if (salvagePartialOnError && !responseText.isEmpty()) {
                     // Error fired but we have partial content — return it with warning
                     metadata.put("warning", "streaming_error_partial");
-                    metadata.put("errorMessage", errorRef.get().getMessage());
-                    LOGGER.warnf("Streaming error with partial response (%d chars): %s", responseText.length(), errorRef.get().getMessage());
+                    metadata.put("errorMessage", error.getMessage());
+                    LOGGER.warnf("Streaming error with partial response (%d chars): %s", responseText.length(), error.getMessage());
                     return new StreamingResult(responseText, metadata);
                 }
                 // Nothing salvageable (no content, or the caller wants errors
                 // propagated) — retry if possible
                 if (attempt < maxAttempts) {
-                    synchronized (streamLock) {
-                        abandoned.set(true);
-                    }
+                    call.abandon();
                     long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
                     if (slept >= 0) {
                         totalBackoffMs += slept;
-                        RetryObserver.retrying(LlmFailureClassifier.classify(errorRef.get()).cls());
+                        RetryObserver.retrying(LlmFailureClassifier.classify(error).cls());
                         LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
-                                attempt, maxAttempts, errorRef.get().getMessage());
+                                attempt, maxAttempts, error.getMessage());
                         continue;
                     }
                     LOGGER.warnf("Streaming error with empty response and the retry backoff budget is spent after %d attempt(s): %s",
-                            attempt, errorRef.get().getMessage());
+                            attempt, error.getMessage());
                 }
-                LOGGER.errorf("Streaming chat error after %d attempt(s): %s", attempt, errorRef.get().getMessage());
-                throw new RuntimeException("Streaming chat failed", errorRef.get());
+                LOGGER.errorf("Streaming chat error after %d attempt(s): %s", attempt, error.getMessage());
+                throw new RuntimeException("Streaming chat failed", error);
             }
 
             // Success — break out of retry loop
@@ -630,5 +535,55 @@ class StreamingLegacyChatExecutor {
             }
         }
         return metadata;
+    }
+
+    /**
+     * Tasks already warned about a below-backstop {@code timeout}, keyed by task id
+     * and configured value.
+     * <p>
+     * {@link #backstopSeconds} runs on the PER-REQUEST path (once per streaming
+     * turn, once per live-streamed cascade step, and once per streamed tool-loop
+     * turn), so an unconditional warning fires on every single turn for the whole
+     * lifetime of a config that will never change. {@code ChatModelRegistry} makes
+     * the same distinction deliberately — it warns on the build path only, never on
+     * a cache hit.
+     * <p>
+     * Owned by the executor instance, not static: {@code LlmTask} builds one
+     * executor and hands the same one to the cascade, so per instance is per
+     * process in production, and each test gets a fresh one without a reset hook.
+     * <p>
+     * Explicitly bounded. An earlier comment claimed it was "bounded because a
+     * config edit re-keys the entry", which is backwards: re-keying ADDS a key and
+     * leaves the old one behind, so config edits are exactly what made this grow.
+     * Keyed on (taskId, timeoutMs), the key space is unbounded over the life of a
+     * process.
+     * <p>
+     * Bounded with a size check and a clear, NOT with a Caffeine cache: this is
+     * read on the per-request path, and putting cache machinery there measurably
+     * slowed it — two timing-sensitive tests failed on a 66ms budget when it was
+     * tried. A plain key set plus an O(1) size check costs nothing per call.
+     * <p>
+     * Clearing on overflow rather than refusing to add: a hard cap would silently
+     * stop warning about genuinely new misconfigurations, which is the failure mode
+     * this warning exists to prevent. Worst case here is that an already-warned
+     * task warns once more — noise, not silence.
+     */
+    private static final class ShortTimeoutWarnings {
+        /** Upper bound on retained warn-suppression keys. */
+        private static final int MAX_KEYS = 1_000;
+
+        private final Set<String> warned = ConcurrentHashMap.newKeySet();
+
+        /**
+         * Record that this task's {@code timeout} has been warned about, returning true
+         * when this call is the one that should emit the warning.
+         */
+        boolean firstFor(LlmConfiguration.Task task, long millis) {
+            if (warned.size() >= MAX_KEYS) {
+                warned.clear();
+            }
+            String id = task.getId() != null ? task.getId() : "<unnamed>";
+            return warned.add(id + '@' + millis);
+        }
     }
 }

@@ -59,8 +59,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>Verify the signature over those bytes (401). Nothing is parsed before
  * this — an unsigned body never reaches a JSON parser.</li>
  * <li>Parse CloudEvents structured / binary or plain JSON (400 / 415).</li>
- * <li>Deduplicate, route, start the turn (202 / 200 duplicate / 429 /
- * 503).</li>
+ * <li>Deduplicate, route, start the turn (202 / 200 duplicate / 409 still in
+ * progress or awaiting approval / 422 no matching target / 429 / 503).</li>
  * </ol>
  * The body and signature are never logged above DEBUG — and not at DEBUG
  * either.

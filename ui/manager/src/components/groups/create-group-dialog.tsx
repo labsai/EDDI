@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw, ChevronDown, ChevronUp, Info, Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -56,7 +56,6 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   // What the backend actually supports — see useAvailableStyles.
   const availableStyles = useAvailableStyles();
   const [step, setStep] = useState<Step>(initialTemplate ? "basics" : "template");
-  const [, setSelectedTemplate] = useState<GroupTemplate | null>(initialTemplate ?? null);
   const [name, setName] = useState(initialTemplate?.name ?? "");
   const [description, setDescription] = useState(initialTemplate?.description ?? "");
   const [style, setStyle] = useState<DiscussionStyle>(initialTemplate?.style ?? "ROUND_TABLE");
@@ -94,7 +93,6 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
 
   const resetAndClose = useCallback(() => {
     setStep("template");
-    setSelectedTemplate(null);
     setName("");
     setDescription("");
     setStyle("ROUND_TABLE");
@@ -112,7 +110,6 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   }, [onClose]);
 
   function selectTemplate(tmpl: GroupTemplate) {
-    setSelectedTemplate(tmpl);
     setName(tmpl.name);
     setDescription(tmpl.description);
     setStyle(tmpl.style);
@@ -130,7 +127,6 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   }
 
   function startBlank() {
-    setSelectedTemplate(null);
     setStep("basics");
   }
 

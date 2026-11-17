@@ -62,6 +62,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code eddi.health.event-match-window}, then deleted), {@code restricted}
  * (its user's processing is restricted, GDPR Art. 18 — dropped) and
  * {@code erased} (its user is being erased — dropped).</li>
+ * <li>{@code eddi.health.outcomes.rating.overflow} — rating changes the outcome
+ * hand-off queue had no room for, or whose mark the store refused, tagged
+ * {@code result}: {@code deferred} (the conversation is marked once the
+ * hand-off thread catches up, or by the node's next outcome pass) or
+ * {@code dropped} (the deferred set was full too: the mark is lost and a
+ * rate-limited WARN says so). Both should stay at zero.</li>
  * </ul>
  * No tag carries an agent id: one series per agent is what the health store is
  * for, not Prometheus.
@@ -105,6 +111,11 @@ public class HealthMetrics {
     static final String EVENT_EXPIRED = "expired";
     static final String EVENT_RESTRICTED = "restricted";
     static final String EVENT_ERASED = "erased";
+    static final String RATING_OVERFLOW = "eddi.health.outcomes.rating.overflow";
+    /** A rating mark the full hand-off queue refused, deferred to its thread. */
+    static final String RESULT_DEFERRED = "deferred";
+    /** A rating mark lost: the queue and the deferred set were both full. */
+    static final String RESULT_DROPPED = "dropped";
 
     private final MeterRegistry registry;
     private final Counter recorded;
@@ -145,6 +156,8 @@ public class HealthMetrics {
         for (String outcome : List.of(EVENT_ACCEPTED, EVENT_DUPLICATE, EVENT_REFUSED, EVENT_MATCHED, EVENT_EXPIRED, EVENT_RESTRICTED, EVENT_ERASED)) {
             event0(outcome);
         }
+        ratingOverflow0(RESULT_DEFERRED);
+        ratingOverflow0(RESULT_DROPPED);
     }
 
     /** Counts business events by what became of them. */
@@ -156,6 +169,16 @@ public class HealthMetrics {
 
     private Counter event0(String outcome) {
         return Counter.builder(EVENTS).description("Agent Health business events").tag("outcome", outcome).register(registry);
+    }
+
+    /** A rating change the outcome hand-off queue had no room for. */
+    void ratingMarkOverflow(String result) {
+        ratingOverflow0(result).increment();
+    }
+
+    private Counter ratingOverflow0(String result) {
+        return Counter.builder(RATING_OVERFLOW).description("Rating changes the Agent Health outcome hand-off queue had no room for")
+                .tag("result", result).register(registry);
     }
 
     /**

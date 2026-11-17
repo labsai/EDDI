@@ -1096,6 +1096,44 @@ class RestImportServiceArchiveContractTest {
     }
 
     @Nested
+    @DisplayName("the agent's healthConfig")
+    class HealthConfigOnImport {
+
+        @Test
+        @DisplayName("a healthConfig the REST save refuses is refused by a create import too, before anything is written")
+        void invalidHealthConfigIsRefused() throws Exception {
+            stubUnzip(dir -> Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                    "{\"workflows\":[],\"healthConfig\":{\"outcomes\":{\"order_confirmed\":\"SOLVED\"}}}"));
+
+            var agentStore = stubAgentCreation();
+            try (var cdi = stubCdi(IAgentStore.class, agentStore)) {
+                var ex = assertThrows(BadRequestException.class, () -> importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+                assertTrue(ex.getMessage().contains("healthConfig.outcomes.order_confirmed"), ex.getMessage());
+                verify(agentStore, never()).create(any());
+            }
+        }
+
+        @Test
+        @DisplayName("a valid healthConfig imports unchanged")
+        void validHealthConfigIsImported() throws Exception {
+            stubUnzip(dir -> Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(),
+                    "{\"workflows\":[],\"healthConfig\":{\"outcomes\":{\"order_confirmed\":\"RESOLVED\"},"
+                            + "\"inactivityWindowHours\":{\"email\":72}}}"));
+
+            var agentStore = stubAgentCreation();
+            var stored = ArgumentCaptor.forClass(AgentConfiguration.class);
+            try (var cdi = stubCdi(IAgentStore.class, agentStore)) {
+                Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                assertEquals(201, response.getStatus());
+            }
+            verify(agentStore).create(stored.capture());
+            assertEquals(Map.of("order_confirmed", "RESOLVED"), stored.getValue().getHealthConfig().getOutcomes());
+        }
+    }
+
+    @Nested
     @DisplayName("selective merge")
     class SelectiveMerge {
 

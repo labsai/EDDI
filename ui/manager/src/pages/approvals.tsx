@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {
@@ -50,6 +50,7 @@ import type {
   PendingToolCallView,
 } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
+import { humanizeToolName } from "@/lib/tool-labels";
 
 /**
  * The redacted-preview render prop shared by every `ApprovalBanner` consumer.
@@ -272,7 +273,7 @@ function ApprovalQueueRow({
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
-            ? item.toolNames.join(", ")
+            ? Array.from(new Set(item.toolNames.map((name) => humanizeToolName(name) || name))).join(", ")
             : isHumanTurn
               ? (
                   <span
@@ -754,7 +755,8 @@ export function ApprovalsPage() {
       nameFor(a)?.toLowerCase().includes(q) ||
       a.pendingMemberId?.toLowerCase().includes(q) ||
       a.pauseReason?.toLowerCase().includes(q) ||
-      a.toolNames?.some((n) => n.toLowerCase().includes(q)) ||
+      // The list shows tools in words, so a search for what is on screen must match too.
+      a.toolNames?.some((n) => n.toLowerCase().includes(q) || humanizeToolName(n).toLowerCase().includes(q)) ||
       a.userId?.toLowerCase().includes(q)
     );
   });

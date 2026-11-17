@@ -51,11 +51,54 @@ export interface AgentDescriptor {
   originId?: string;
 }
 
+/** `appearance` on the agent (backend: AgentAppearance). */
+export interface AgentAppearance {
+  /** At most 80 characters; absent shows the agent's name. */
+  displayName?: string;
+  /** An https URL or a data:image/(png|jpeg|gif|webp);base64 URI of at most 64 KB. */
+  avatar?: string;
+  /** `#rgb` or `#rrggbb`. */
+  accentColor?: string;
+  /** Up to 6 starters of at most 200 characters each. */
+  starters?: string[];
+}
+
+/** `conversationControls` on the agent (backend: ConversationControls). */
+export interface ConversationControls {
+  undo?: boolean;
+  redo?: boolean;
+  attachments?: boolean;
+  rating?: boolean;
+  quickReplies?: boolean;
+  streaming?: boolean;
+  /** Off unless `true`: HTML in replies is shown as text. */
+  rawHtml?: boolean;
+}
+
+/** `titleGeneration` on the agent (backend: TitleGeneration). */
+export interface TitleGeneration {
+  enabled?: boolean;
+  llmProvider?: string;
+  llmModel?: string;
+  parameters?: Record<string, string>;
+  inputPricePer1M?: number;
+  outputPricePer1M?: number;
+  /** 10..200, default 60. */
+  maxLength?: number;
+  instructions?: string;
+}
+
 export interface Agent {
   workflows?: string[];
   channels?: ChannelConnector[];
   a2aEnabled?: boolean;
   description?: string;
+  /**
+   * Offered in the end-user catalog (`GET /catalog/agents`, what Workforce
+   * lists for an `eddi-user`). Opt-in, default false; whether someone may
+   * actually use the agent is still decided by its sharing.
+   */
+  listed?: boolean;
   a2aSkills?: string[];
   // Phase 15.4 — Security, Identity, Capabilities, Memory
   identity?: AgentIdentity;
@@ -77,6 +120,15 @@ export interface Agent {
    * off. See `RatingConfigSection` and docs/conversation-ratings.md.
    */
   ratingConfig?: AgentRatingConfig;
+  /** How chat windows present the agent. All optional; validated on save. */
+  appearance?: AgentAppearance;
+  /**
+   * Which chat controls are offered. Absent switches keep the control, except
+   * `rawHtml`, which is off unless `true`.
+   */
+  conversationControls?: ConversationControls;
+  /** Model-written conversation titles; off unless `enabled: true`. */
+  titleGeneration?: TitleGeneration;
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**
@@ -126,6 +178,10 @@ export interface StrictWriteDiscipline {
   onFailure?: string; // "digest" | "exclude_all" | "keep_all"
 }
 
+/**
+ * Engine-owned: a save keeps the stored identity whatever the draft holds. Keys
+ * change only through `generateAgentSigningKey` and `revokeAgentSigningKey`.
+ */
 export interface AgentIdentity {
   agentDid?: string;
   publicKey?: string;
@@ -138,11 +194,17 @@ export interface AgentPublicKey {
   publicKeyB64?: string;
   validFromMs?: number;
   validUntilMs?: number;
+  /** Revoked by an admin: valid at no time, whatever its window says. */
+  revoked?: boolean;
 }
 
 export interface SecurityConfig {
+  /**
+   * Sign this agent's group-conversation messages. A save with this on is
+   * refused unless the newest key in `identity.keys` has its private half in
+   * the vault — see `generateAgentSigningKey`.
+   */
   signInterAgentMessages?: boolean;
-  signMcpInvocations?: boolean;
   requirePeerVerification?: boolean;
 }
 
@@ -180,8 +242,6 @@ export interface DreamConfig {
   llmProvider?: string;
   llmModel?: string;
   maxCostPerRun?: number;
-  batchSize?: number;
-  maxUsersPerRun?: number;
 }
 
 // Wave 6 — Session Management
@@ -346,6 +406,10 @@ export interface AgentProfile {
    * Absent or null when it asks for none.
    */
   rating?: import("./ratings").RatingProfile | null;
+  /** The deployed version's `appearance` (B4); null when it sets none, absent on an older backend. */
+  appearance?: import("./catalog").AgentAppearanceProfile | null;
+  /** The resolved `conversationControls` (B4); absent on an older backend. */
+  conversationControls?: Partial<import("./catalog").ConversationControlsProfile> | null;
 }
 
 export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {
@@ -428,6 +492,37 @@ export function updateAgent(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.compatible === true) params.set("compatible", "true");
   return api.put(`/agentstore/agents/${seg(id)}?${params.toString()}`, agent);
+}
+
+/**
+ * Generates a signing key for the agent (eddi-admin only). The backend stores
+ * the private key in the vault and saves the public key into `identity.keys`
+ * as a NEW agent version, named by `location`; `version` must be the current
+ * one or the call is refused with 409.
+ */
+export function generateAgentSigningKey(
+  id: string,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys?version=${version}`
+  );
+}
+
+/**
+ * Revokes one of the agent's signing keys (eddi-admin only): the backend marks
+ * it revoked in a NEW agent version, named by `location`, and deletes its
+ * private key. `keyVersion` 0 is the legacy `identity.publicKey`, which is
+ * removed. `version` must be the current one or the call is refused with 409.
+ */
+export function revokeAgentSigningKey(
+  id: string,
+  keyVersion: number,
+  version: number
+): Promise<AgentPublicKey & { location?: string }> {
+  return api.post<AgentPublicKey & { location?: string }>(
+    `/agentstore/agents/${seg(id)}/signing-keys/${keyVersion}/revoke?version=${version}`
+  );
 }
 
 export function deleteAgent(

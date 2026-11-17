@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.health.HealthStoreException;
 import ai.labs.eddi.engine.health.IHealthTurnStore;
 import ai.labs.eddi.engine.health.model.ConversationActivity;
 import ai.labs.eddi.engine.health.model.HealthFailure;
+import ai.labs.eddi.engine.health.model.HealthDeletedRows;
 import ai.labs.eddi.engine.health.model.HealthPortfolioSessions;
 import ai.labs.eddi.engine.health.model.HealthTurn;
 import ai.labs.eddi.engine.health.model.HealthUsage;
@@ -56,7 +57,9 @@ import java.util.stream.Collectors;
  * applies only
  * {@code WHERE health_turns.updated_at_ms <= EXCLUDED.updated_at_ms} (or the
  * stored row is a discard marker), so a stale write is ignored.
- * {@link #insertIfAbsent} is {@code ON CONFLICT DO NOTHING}.
+ * {@link #insertIfAbsent} is {@code ON CONFLICT DO NOTHING}. A late write's
+ * stamp is {@code written_at_ms}, replaced by every applied write (an on-time
+ * one sets it {@code NULL}); its index is partial, over the stamped rows only.
  * <p>
  * A discard marker has {@code discarded_at_ms} and no {@code recorded_at_ms};
  * reads skip it. Actions are a {@code TEXT[]}, the failure list a small
@@ -108,6 +111,7 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 discarded_at_ms BIGINT,
                 self_reported_outcome VARCHAR(32),
                 refs TEXT[],
+                written_at_ms BIGINT,
                 PRIMARY KEY (conversation_id, execution_id)
             )
             """;
@@ -115,26 +119,42 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     /**
      * Rollups and drill-down read an agent's days; erasure finds rows by user;
      * retention deletes by day and markers by their time; the orphan sweep finds
-     * recently written rows by {@code updated_at_ms} (and markers by their time).
+     * recently written rows by {@code updated_at_ms} (and markers by their time);
+     * the rollup's self-heal finds rows written or discarded since its last pass.
      * Rows by conversation use the primary key.
      */
     static final String[] CREATE_INDEXES = {"CREATE INDEX IF NOT EXISTS idx_health_turns_agent_day ON health_turns (agent_id, day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_user ON health_turns (user_id)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_day ON health_turns (day)",
             "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_at ON health_turns (discarded_at_ms) WHERE day IS NULL",
-            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)"};
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_discarded_rows ON health_turns (discarded_at_ms) WHERE day IS NOT NULL "
+                    + "AND discarded_at_ms IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_updated ON health_turns (updated_at_ms)",
+            // Late rows only: the self-heal finds them by when they were written.
+            "CREATE INDEX IF NOT EXISTS idx_health_turns_written_late ON health_turns (written_at_ms) WHERE written_at_ms IS NOT NULL"};
+
+    /**
+     * The late-write stamp, added after the table first shipped on development
+     * branches; checked in the catalog first, like
+     * {@link #HAS_SELF_REPORTED_COLUMN}.
+     */
+    static final String HAS_WRITTEN_AT_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'written_at_ms' AND NOT attisdropped";
+    static final String ADD_WRITTEN_AT_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS written_at_ms BIGINT";
 
     /**
      * Added in H3; a table created before lacks it. Checked in the catalog first:
      * even with {@code IF NOT EXISTS} an {@code ALTER TABLE} takes an ACCESS
-     * EXCLUSIVE lock, on every node start.
+     * EXCLUSIVE lock, on every node start. The table checked is the one the search
+     * path resolves {@code health_turns} to — the one the statements use — not a
+     * namesake in another schema.
      */
-    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM information_schema.columns WHERE table_name = 'health_turns' "
-            + "AND column_name = 'self_reported_outcome'";
+    static final String HAS_SELF_REPORTED_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') "
+            + "AND attname = 'self_reported_outcome' AND NOT attisdropped";
     static final String ADD_SELF_REPORTED_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS self_reported_outcome VARCHAR(32)";
 
     /** Added in H5 (business references), checked like the column above. */
-    static final String HAS_REFS_COLUMN = "SELECT 1 FROM information_schema.columns WHERE table_name = 'health_turns' AND column_name = 'refs'";
+    static final String HAS_REFS_COLUMN = "SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('health_turns') AND attname = 'refs' AND NOT attisdropped";
     static final String ADD_REFS_COLUMN = "ALTER TABLE health_turns ADD COLUMN IF NOT EXISTS refs TEXT[]";
 
     /** The columns a row write binds, in bind order. */
@@ -152,18 +172,23 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     private static final String VALUES = WRITTEN.stream().map(c -> "failures".equals(c) ? "CAST(? AS JSONB)" : "?")
             .collect(Collectors.joining(", "));
 
-    private static final String INSERT = "INSERT INTO health_turns (" + COLUMNS + ") VALUES (" + VALUES + ") ";
+    /** {@link #WRITTEN}, then the late-write stamp, bound last. */
+    private static final String INSERT = "INSERT INTO health_turns (" + COLUMNS + ", written_at_ms) VALUES (" + VALUES + ", ?) ";
 
     static final String UPSERT = INSERT + "ON CONFLICT (conversation_id, execution_id) DO UPDATE SET "
             + WRITTEN.stream().filter(c -> !NOT_REPLACED.contains(c)).map(c -> c + " = EXCLUDED." + c).collect(Collectors.joining(", "))
             + ", day = COALESCE(health_turns.day, EXCLUDED.day), recorded_at_ms = COALESCE(health_turns.recorded_at_ms, EXCLUDED.recorded_at_ms)"
-            + ", discarded = health_turns.discarded OR EXCLUDED.discarded"
+            + ", discarded = health_turns.discarded OR EXCLUDED.discarded, written_at_ms = EXCLUDED.written_at_ms"
             + " WHERE health_turns.updated_at_ms IS NULL OR health_turns.updated_at_ms <= EXCLUDED.updated_at_ms";
 
     static final String INSERT_IF_ABSENT = INSERT + "ON CONFLICT (conversation_id, execution_id) DO NOTHING";
 
     static final String MARK_DISCARDED = "INSERT INTO health_turns (conversation_id, execution_id, agent_id, user_id, discarded, discarded_at_ms) "
-            + "VALUES (?, ?, ?, ?, TRUE, ?) ON CONFLICT (conversation_id, execution_id) DO UPDATE SET discarded = TRUE";
+            + "VALUES (?, ?, ?, ?, TRUE, ?) ON CONFLICT (conversation_id, execution_id) DO UPDATE SET discarded = TRUE, "
+            // When the discard happened, set once — the self-heal finds an existing row's
+            // day by it; updated_at_ms stays the write-ordering guard.
+            + "discarded_at_ms = CASE WHEN health_turns.discarded THEN COALESCE(health_turns.discarded_at_ms, EXCLUDED.discarded_at_ms) "
+            + "ELSE EXCLUDED.discarded_at_ms END";
 
     private static final String SELECT = "SELECT " + WRITTEN.stream().map(c -> "failures".equals(c) ? "failures::text AS failures" : c)
             .collect(Collectors.joining(", ")) + " FROM health_turns ";
@@ -176,11 +201,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     static final String CONVERSATIONS_UPDATED_BETWEEN = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
             + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
             + "ORDER BY last, conversation_id LIMIT ?";
+    /** As above, after the pair (since, conversation id) in its order. */
+    static final String CONVERSATIONS_UPDATED_AFTER = "SELECT conversation_id, MAX(updated_at_ms) AS last FROM health_turns "
+            + "WHERE updated_at_ms >= ? AND updated_at_ms < ? AND recorded_at_ms IS NOT NULL GROUP BY conversation_id "
+            + "HAVING MAX(updated_at_ms) > ? OR (MAX(updated_at_ms) = ? AND conversation_id > ?) ORDER BY last, conversation_id LIMIT ?";
     static final String BY_AGENT_DAYS = SELECT + "WHERE agent_id = ? AND day >= ? AND day <= ? ORDER BY day, recorded_at_ms LIMIT ?";
     static final String BY_AGENT_DAY = SELECT + "WHERE agent_id = ? AND day = ?";
     static final String BY_USER = SELECT + "WHERE user_id = ? AND recorded_at_ms IS NOT NULL ORDER BY recorded_at_ms DESC LIMIT ?";
     static final String CONVERSATIONS_UPDATED_SINCE = "SELECT DISTINCT conversation_id FROM health_turns "
             + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
+    static final String CONVERSATION_AGENTS_UPDATED_SINCE = "SELECT DISTINCT conversation_id, agent_id FROM health_turns "
+            + "WHERE updated_at_ms >= ? OR (day IS NULL AND discarded_at_ms >= ?) LIMIT ?";
+    /** The delete and the days of what it deleted, in one statement. */
+    static final String DELETE_CONVERSATION_RETURNING = "DELETE FROM health_turns WHERE conversation_id = ? RETURNING agent_id, day";
+    static final String DELETE_USER_RETURNING = "DELETE FROM health_turns WHERE user_id = ? RETURNING agent_id, day";
     static final String DELETE_OLDER = "DELETE FROM health_turns WHERE day < ? OR (day IS NULL AND discarded_at_ms < ?)";
 
     /** Rows fetched per round trip while a rollup streams an agent-day. */
@@ -194,28 +228,34 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
         this.dataSourceInstance = dataSourceInstance;
     }
 
+    /**
+     * Adds a column only when the catalog lacks it: even with {@code IF NOT EXISTS}
+     * an {@code ALTER TABLE} waits for an ACCESS EXCLUSIVE lock, and a node
+     * starting during a long streaming read would queue every later reader behind
+     * it.
+     */
+    private static void addColumnIfMissing(Statement statement, String hasColumn, String addColumn) throws SQLException {
+        boolean present;
+        try (ResultSet column = statement.executeQuery(hasColumn)) {
+            present = column != null && column.next();
+        }
+        if (!present) {
+            statement.execute(addColumn);
+        }
+    }
+
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            // Before the indexes: one of them is on written_at_ms.
+            addColumnIfMissing(statement, HAS_WRITTEN_AT_COLUMN, ADD_WRITTEN_AT_COLUMN);
+            addColumnIfMissing(statement, HAS_SELF_REPORTED_COLUMN, ADD_SELF_REPORTED_COLUMN);
+            addColumnIfMissing(statement, HAS_REFS_COLUMN, ADD_REFS_COLUMN);
             for (String index : CREATE_INDEXES) {
                 statement.execute(index);
-            }
-            boolean hasColumn;
-            try (ResultSet column = statement.executeQuery(HAS_SELF_REPORTED_COLUMN)) {
-                hasColumn = column != null && column.next();
-            }
-            if (!hasColumn) {
-                statement.execute(ADD_SELF_REPORTED_COLUMN);
-            }
-            boolean hasRefs;
-            try (ResultSet column = statement.executeQuery(HAS_REFS_COLUMN)) {
-                hasRefs = column != null && column.next();
-            }
-            if (!hasRefs) {
-                statement.execute(ADD_REFS_COLUMN);
             }
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -226,19 +266,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public void upsert(HealthTurn turn) {
-        write(UPSERT, turn);
+    public void upsert(HealthTurn turn, Instant lateWrittenAt) {
+        write(UPSERT, turn, lateWrittenAt);
     }
 
     @Override
-    public void insertIfAbsent(HealthTurn turn) {
-        write(INSERT_IF_ABSENT, turn);
+    public void insertIfAbsent(HealthTurn turn, Instant lateWrittenAt) {
+        write(INSERT_IF_ABSENT, turn, lateWrittenAt);
     }
 
-    private void write(String sql, HealthTurn turn) {
+    private void write(String sql, HealthTurn turn, Instant lateWrittenAt) {
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             bind(connection, statement, turn);
+            setLong(statement, WRITTEN.size() + 1, millis(lateWrittenAt));
             statement.executeUpdate();
         } catch (SQLException | JsonProcessingException e) {
             throw new HealthStoreException("Could not store a health turn", e);
@@ -316,12 +357,12 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds) {
+    public long markDiscarded(HealthTurn replacing, Collection<String> executionIds, Instant lateWrittenAt) {
         if (replacing == null || replacing.conversationId() == null || executionIds == null || executionIds.isEmpty()) {
             return 0L;
         }
         ensureSchema();
-        long at = (replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now()).toEpochMilli();
+        long at = (lateWrittenAt != null ? lateWrittenAt : replacing.updatedAt() != null ? replacing.updatedAt() : Instant.now()).toEpochMilli();
         try (Connection connection = dataSourceInstance.get().getConnection();
                 PreparedStatement statement = connection.prepareStatement(MARK_DISCARDED)) {
             Set<String> ids = new LinkedHashSet<>(executionIds);
@@ -359,13 +400,20 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     }
 
     @Override
-    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, Instant until, int limit) {
+    public List<ConversationActivity> conversationsUpdatedBetween(Instant since, String afterConversationId, Instant until, int limit) {
         ensureSchema();
         try (Connection connection = dataSourceInstance.get().getConnection();
-                PreparedStatement statement = connection.prepareStatement(CONVERSATIONS_UPDATED_BETWEEN)) {
-            statement.setLong(1, since.toEpochMilli());
-            statement.setLong(2, until.toEpochMilli());
-            statement.setInt(3, Math.max(1, limit));
+                PreparedStatement statement = connection
+                        .prepareStatement(afterConversationId == null ? CONVERSATIONS_UPDATED_BETWEEN : CONVERSATIONS_UPDATED_AFTER)) {
+            int i = 1;
+            statement.setLong(i++, since.toEpochMilli());
+            statement.setLong(i++, until.toEpochMilli());
+            if (afterConversationId != null) {
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setLong(i++, since.toEpochMilli());
+                statement.setString(i++, afterConversationId);
+            }
+            statement.setInt(i, Math.max(1, limit));
             List<ConversationActivity> found = new ArrayList<>();
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
@@ -495,8 +543,13 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
             + "MAX(CASE WHEN day < ? THEN 1 ELSE 0 END) AS a_before FROM health_turns WHERE agent_id = ANY(?) AND day >= ? AND day <= ? "
             + "AND recorded_at_ms IS NOT NULL AND NOT discarded AND origin = ANY(?) GROUP BY agent_id, conversation_id) c GROUP BY agent_id";
 
-    static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE updated_at_ms >= ? AND updated_at_ms < ? "
-            + "AND day IS NOT NULL AND agent_id IS NOT NULL LIMIT ?";
+    /**
+     * Rows written, discarded, or written late in the window: a discard leaves
+     * updated_at_ms as it was, and a late row's updated_at_ms is its capture time.
+     */
+    static final String AGENT_DAYS_UPDATED_SINCE = "SELECT DISTINCT agent_id, day FROM health_turns WHERE ((updated_at_ms >= ? AND updated_at_ms < ?) "
+            + "OR (discarded_at_ms >= ? AND discarded_at_ms < ?) OR (written_at_ms >= ? AND written_at_ms < ?)) AND day IS NOT NULL "
+            + "AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_USER = "SELECT DISTINCT agent_id, day FROM health_turns WHERE user_id = ? AND day IS NOT NULL "
             + "AND agent_id IS NOT NULL LIMIT ?";
     static final String AGENT_DAYS_OF_CONVERSATION = "SELECT DISTINCT agent_id, day FROM health_turns WHERE conversation_id = ? "
@@ -617,7 +670,11 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
                 PreparedStatement statement = connection.prepareStatement(AGENT_DAYS_UPDATED_SINCE)) {
             statement.setLong(1, since.toEpochMilli());
             statement.setLong(2, until.toEpochMilli());
-            statement.setInt(3, Math.max(1, limit));
+            statement.setLong(3, since.toEpochMilli());
+            statement.setLong(4, until.toEpochMilli());
+            statement.setLong(5, since.toEpochMilli());
+            statement.setLong(6, until.toEpochMilli());
+            statement.setInt(7, Math.max(1, limit));
             try (ResultSet r = statement.executeQuery()) {
                 while (r.next()) {
                     consumer.accept(r.getString(1), r.getObject(2, LocalDate.class));
@@ -639,6 +696,64 @@ public class PostgresHealthTurnStore implements IHealthTurnStore {
     @Override
     public Map<String, Set<LocalDate>> agentDaysOfConversation(String conversationId) {
         return agentDays(AGENT_DAYS_OF_CONVERSATION, s -> s.setString(1, conversationId));
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationReturningDays(String conversationId) {
+        return deleteReturning(DELETE_CONVERSATION_RETURNING, conversationId, "Could not delete a conversation's health turns");
+    }
+
+    @Override
+    public HealthDeletedRows deleteConversationIfDaysKnown(String conversationId) {
+        // One statement: the days are known whenever the delete succeeds.
+        return deleteConversationReturningDays(conversationId);
+    }
+
+    @Override
+    public HealthDeletedRows deleteByUserIdReturningDays(String userId) {
+        return deleteReturning(DELETE_USER_RETURNING, userId, "Could not delete a user's health turns");
+    }
+
+    /** One {@code DELETE ... RETURNING agent_id, day}: the rows and their days. */
+    private HealthDeletedRows deleteReturning(String sql, String key, String failure) {
+        ensureSchema();
+        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, key);
+            long deleted = 0;
+            Map<String, Set<LocalDate>> days = new LinkedHashMap<>();
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    deleted++;
+                    String agentId = r.getString(1);
+                    LocalDate day = r.getObject(2, LocalDate.class);
+                    if (agentId != null && day != null) {
+                        days.computeIfAbsent(agentId, k -> new TreeSet<>()).add(day);
+                    }
+                }
+            }
+            return new HealthDeletedRows(deleted, days);
+        } catch (SQLException e) {
+            throw new HealthStoreException(failure, e);
+        }
+    }
+
+    @Override
+    public void forEachConversationAgentUpdatedSince(Instant since, int limit, BiConsumer<String, String> consumer) {
+        ensureSchema();
+        long at = since.toEpochMilli();
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement(CONVERSATION_AGENTS_UPDATED_SINCE)) {
+            statement.setLong(1, at);
+            statement.setLong(2, at);
+            statement.setInt(3, Math.max(1, limit));
+            try (ResultSet r = statement.executeQuery()) {
+                while (r.next()) {
+                    consumer.accept(r.getString(1), r.getString(2));
+                }
+            }
+        } catch (SQLException e) {
+            throw new HealthStoreException("Could not read the conversations of recent health turns", e);
+        }
     }
 
     private Map<String, Set<LocalDate>> agentDays(String sql, Binder binder) {

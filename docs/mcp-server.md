@@ -22,13 +22,13 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (113)
+## Available Tools (125)
 
 ### Argument contract
 
 Every tool publishes its arguments in `tools/list`, and the server enforces that schema **before** the tool runs: an argument listed under `required` that is omitted — or sent as `null` — is refused with `Missing required argument: <name>` and the call never reaches EDDI.
 
-- **Only what a tool cannot work without is required** — identifiers, the message, a configuration body, a verdict. Everything a description calls *optional*, *default: …* or *deprecated* may be left out; 129 of the 303 arguments are required, and `list_agents {}` is a complete call.
+- **Only what a tool cannot work without is required** — identifiers, the message, a configuration body, a verdict. Everything a description calls *optional*, *default: …* or *deprecated* may be left out; 145 of the 354 arguments are required, and `list_agents {}` is a complete call.
 - **Defaults are real.** Where a default is a literal it is published as the JSON-schema `default` (e.g. `environment` → `production`, `limit` → `20`) and applied when the argument is absent. A `version` that defaults to **latest** resolves the current version (`get_agent`, `read_workflow`, `read_resource`, `list_agent_resources`, `read_channel_integration`, `read_group`); `list_conversations` without `agentVersion` lists every version.
 - **Environment** is optional everywhere and means `production` when omitted; `talk_to_agent` and `read_conversation` ignore it (the conversation keeps its own).
 - **Failures are tool errors.** A refused or failed call returns `isError: true` with a JSON body `{"error": "...", "errorCode": "..."}` — "Access denied", "not found", validation failures, and a missing role (`errorCode: FORBIDDEN`) alike. A successful call never carries `isError`. Results that report an outcome rather than a refusal stay ordinary results with an `error` *field* among others: `deploy_agent` when the deployment ends in `ERROR` (`"action": "deploy_failed"`), and `fire_schedule_now` when the fire itself failed. An unknown value is refused, not substituted: `create_group` with an unknown `style` answers `BAD_REQUEST` and lists the valid styles. Server-side failures name what failed (`errorCode: INTERNAL`) and keep the exception text in the server log.
@@ -47,7 +47,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `read_conversation`     | Read conversation history, memory, and quick replies                                                                        |
 | `read_conversation_log` | Read conversation log as formatted text                                                                                     |
 | `list_conversations`    | List all conversations for a specific agent                                                                                 |
-| `get_agent`             | Get an agent's full configuration (packages, name, description)                                                              |
+| `get_agent`             | Get an agent's full configuration (workflows, name, description)                                                              |
 | `discover_agents`       | Discover deployed agents enriched with intent mappings from agent triggers. Best way to find agents by purpose              |
 | `chat_managed`          | Send a message using intent-based managed conversations (one conversation per intent+userId, auto-creates on first message) |
 
@@ -59,11 +59,11 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `undeploy_agent`        | Undeploy an agent from an environment                                            |
 | `upgrade_conversations` | Move an agent's running conversations on older compatibility generations onto the current one — dry run by default, see [Moving running conversations onto the current version](deployment-management-of-agents.md#moving-running-conversations-onto-the-current-version) |
 | `get_deployment_status` | Get deployment status of a specific agent version                               |
-| `list_workflows`        | List all packages (pipeline configurations)                                     |
+| `list_workflows`        | List all workflows (pipeline configurations)                                     |
 | `create_agent`          | Create a new agent                                                              |
 | `delete_agent`          | Delete an agent (with optional cascade)                                          |
 | `update_agent`          | Update an agent's name/description and optionally redeploy                       |
-| `read_workflow`         | Read a package's full pipeline configuration                                    |
+| `read_workflow`         | Read a workflow's full pipeline configuration                                    |
 | `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, rag, etc.) — read only; `rag` has no create/update/delete case |
 | `list_agent_triggers`   | List all agent triggers (intent→agent mappings) for managed conversations       |
 | `create_agent_trigger`  | Create an agent trigger mapping an intent to one or more agent deployments       |
@@ -77,8 +77,8 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `update_resource`      | Update any resource config by type and ID. Returns the new version URI              |
 | `create_resource`      | Create a new resource. Returns the new resource ID and URI                          |
 | `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete)        |
-| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change. An `oldUri` the agent does not hold, or a pair naming different kinds of resource, is refused and nothing is written. The same operation is available over REST as `POST /agentstore/agents/{id}/cascade` ([details](deployment-management-of-agents.md#landing-resource-changes-in-one-pass))  |
-| `list_agent_resources` | Walk agent → packages → extensions to get a complete resource inventory in one call |
+| `apply_agent_changes`  | Batch-cascade URI changes through workflow → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change. An `oldUri` the agent does not hold, or a pair naming different kinds of resource, is refused and nothing is written. The same operation is available over REST as `POST /agentstore/agents/{id}/cascade` ([details](deployment-management-of-agents.md#landing-resource-changes-in-one-pass))  |
+| `list_agent_resources` | Walk agent → workflows → extensions to get a complete resource inventory in one call |
 
 ### Diagnostic Tools (2)
 
@@ -91,20 +91,22 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 
 | Tool               | Description                                                                                                                                                                                                                                         |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, package, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
+| `setup_agent`      | Create a fully working agent in one call: creates behavior rules, LangChain config, optional output/greeting, workflow, agent, and deploys. Supports built-in tools, quick replies, and sentiment analysis. Default: `anthropic`/`claude-sonnet-4-6` |
 | `create_api_agent` | Create an agent from an OpenAPI 3.0/3.1 spec. Parses the spec, generates HttpCalls configs (grouped by API tag), creates the full pipeline, and deploys. Supports endpoint filtering, base URL override, auth header propagation, and `mcpServerUrls` to add an MCP server's tools alongside the generated ones. A generated write tool takes the whole request body as one `requestBody` parameter — see below |
 
 > **The approval gate is not settable over MCP.** `POST /administration/agents/setup-api` accepts a `hitlConfig` on the request body, so a caller can provision an agent whose write tools are gated from v1 onward. The MCP `create_api_agent` tool deliberately has **no** such parameter and always passes `null`: it already provisions an agent with a caller-chosen endpoint filter, so letting the caller also choose the gate would make it a complete escape from whatever allow-list governs the agent doing the calling. Provisioning a gated agent goes through REST (`eddi-admin`).
 
 ### Schedule Management Tools (6)
 
+The six tools call the in-process REST schedule resource (`/schedulestore/schedules`) under the MCP caller's identity, the way the alert and rating tools do. Validation, defaults, the creator stamp, the access checks and the claim/fire/release flow of a manual fire are therefore REST's, and a refusal carries REST's reason: `errorCode: invalid_schedule` for a schedule REST would not create, `CONFLICT`, `FORBIDDEN` or `BAD_REQUEST` for a fire REST refuses, `TIMEOUT` for a fire that ran past its bound, `SYSTEM_SCHEDULE` for the server's own schedules.
+
 | Tool                    | Description                                                                                                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Intervals below `eddi.schedule.min-interval-seconds` (default 60) are refused, as over REST. Heartbeats default to persistent conversations |
-| `list_schedules`        | List all scheduled agent triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by agentId                                                              |
+| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Validated, defaulted and stamped with the caller as its creator exactly as `POST /schedulestore/schedules` does: intervals below `eddi.schedule.min-interval-seconds` (default 60), an unknown time zone or conversation strategy, and a cron that never matches are refused. An unset `timeZone` takes `eddi.schedule.default-timezone`. Heartbeats default to persistent conversations |
+| `list_schedules`        | List scheduled agent triggers, newest first, with name, type, cron/interval, status, next fire time, and fire count. Paged: `limit` (default 100, max 500) and `offset` (default 0); `truncated: true` only when more exist beyond the page, with `nextOffset` for the next call. Optionally filter by agentId |
 | `read_schedule`         | Read a schedule's full configuration including recent fire history (last 10 executions)                                                                                                             |
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
-| `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
+| `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions. Refused as `POST /schedulestore/schedules/{id}/fire` refuses: a HITL approval timeout or a continuation never, a schedule that cannot be claimed right now, and an ingestion, email-poll, team-cadence or lesson schedule without `EDIT` on what it drives |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
 
 ### Group Conversation Tools (18)
@@ -182,7 +184,7 @@ Read and triage what the people chatting thought of an agent — see [Conversati
 
 ### Alert Tools (2)
 
-The alert inbox — see [Alerts](alerts.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST `/alerts/events` resource, which the tools call in-process: an administrator sees every agent's events; anyone else passes `agentId` and holds `EDIT` on it (`AGENT_ID_REQUIRED` / `FORBIDDEN`). Events carry no conversation user id (an acknowledged one names the caller who acknowledged it); conversation content appears only as a rating comment or, when the rule sets `includeValue` and the agent version has conversation review on, an `OUTPUT_MATCH` value — each cut to 280 characters. Rules are written over REST (the Manager has no Alerts page yet).
+The alert inbox — see [Alerts](alerts.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST `/alerts/events` resource, which the tools call in-process: an administrator sees every agent's events; anyone else passes `agentId` and holds `EDIT` on it (`AGENT_ID_REQUIRED` / `FORBIDDEN`). Events carry no conversation user id (an acknowledged one names the caller who acknowledged it); conversation content appears only as a rating comment or, when the rule sets `includeValue` and the agent version has conversation review on, an `OUTPUT_MATCH` value — each cut to 280 characters. There is no MCP tool for rules: write them over REST (`/alerts/rules`) or on the Manager's Alerts page (`/manage/alerts`).
 
 | Tool                      | Description                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -203,11 +205,44 @@ Agent Health over MCP — see [Agent Health](agent-health.md). Read-only. Tier `
 
 ### Model Price Tool (1)
 
-The deployment's price catalog — see [Model Pricing](model-pricing.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST reads of `/administration/model-prices`, which the tool calls in-process. **Read only, on purpose:** a price is a budget lever (a $0 price raises every budget that model counts against), so the catalog is changed by an administrator in the Manager or over REST, never by a tool.
+The deployment's price catalog — see [Model Pricing](model-pricing.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST reads of `/administration/model-prices`, which the tool calls in-process. Writing prices is `update_model_prices` under [Spend-Control Tools](#spend-control-tools-5), administrators only.
 
 | Tool                | Description |
 | ------------------- | ----------- |
 | `read_model_prices` | The catalog entries, the effective unpriced-call policy (the stricter of the catalog's and `eddi.llm.pricing.unpriced-policy-floor`), and the models called without a price on this node. With both `provider` and `model`: also the entry that prices that model (exact, then longest wildcard), or none |
+
+### Spend-Control Tools (5)
+
+The model price catalog and the tenant quota, written by an administrator's AI client — see [Spend-Control Changes](spend-control-changes.md). All five are tier `eddi-admin`, as the quota resource and the catalog write are over REST. **A write that only makes spending stricter is applied; a write with any loosening part is not applied at all** — it is filed as a pending change that an `eddi-admin` approves in the Manager (*Model Prices* or *Quotas*, *Pending changes*), and the approver is the actor of the write. There is no tool to approve: an MCP client is often a model, and a prompt injection that reaches one wants exactly a $0 price or a higher quota. Every write is compare-and-set (catalog `revision`, quota `fingerprint`), needs a `reason` (≤ 1000 characters) and writes an audit-ledger entry (`taskType: spendcontrol`).
+
+| Tool | Description |
+| --- | --- |
+| `read_tenant_quota` | A tenant's quota (`-1` = unlimited) with its `fingerprint`, the current usage (conversations today, API calls this minute, this month's cost and reserved USD), the remaining monthly budget and the ids of pending quota changes. Default tenant without `tenantId` |
+| `update_model_prices` | `expectedRevision`, `upsertEntries` / `removeEntries` (JSON arrays, ≤ 50 each; every upserted entry needs an http(s) `source`), `unpricedPolicy`, `reason`. `APPLIED` when stricter only, `PROPOSED` (with `changeId` and the loosening parts) otherwise, `UNCHANGED` when nothing differs; `CONFLICT` with `currentRevision` on a stale revision |
+| `update_tenant_quota` | `expectedFingerprint`, any of `maxConversationsPerDay`, `maxAgentsPerTenant`, `maxApiCallsPerMinute`, `maxMonthlyCostUsd`, `enabled`, and `reason`. Lowering a limit or enabling applies; raising, `-1` or disabling is proposed; a mixed change is proposed as a whole |
+| `list_spend_control_changes` | Pending (default) or decided changes: what each changes, which part loosens, who proposed it and why, status (`PENDING`, `APPLYING`, `APPLIED`, `REJECTED`, `WITHDRAWN`, `STALE`, `FAILED`, `EXPIRED`; one left `APPLYING` or `FAILED` has an unknown outcome — read the catalog or quota) |
+| `withdraw_spend_control_change` | Withdraw a pending change the caller proposed; nothing is applied |
+
+### Vault Tool (1)
+
+Read-only — see [Secrets Vault](secrets-vault.md). Tier `eddi-admin`, as `/secretstore/secrets`, which it calls in-process. Never returns a value or a checksum; storing, granting and deleting secrets stay in the Manager.
+
+| Tool | Description |
+| --- | --- |
+| `list_vault_keys` | The key names of a tenant (default `default`) with description, timestamps, `allowedAgents`, `allowedHosts`, `unrestrictedDestination` and the configurations that reference each — so a client can write `${vault:<keyName>}` references and check grants |
+
+### Team Cadence Tools (6)
+
+A standing team's recurring work — see [Team Learning Loop](team-learning-loop.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST workspace and lessons resources, which the tools call in-process: `VIEW` on the group to read, `EDIT` to write, and the caller is recorded as the cadence's owner. No approval step: a cadence run is skipped when the team's monthly budget is spent and every call it makes counts against the tenant's budget; consolidation is capped by `lessonConfig.consolidation.maxCostPerRun` (at most $5). Creating one raises no ceiling.
+
+| Tool | Description |
+| --- | --- |
+| `list_team_cadences` | Each cadence with its cron, time zone, next and last fire, whether it is enabled, tasks per run, per-run cost cap and creator |
+| `create_team_cadence` | `cronExpression` (5 fields), `timeZone` (IANA, default UTC), `inputTemplate`, `maxBacklogTasksPerRun` (1..20), and `maxCostPerRun` — **required over MCP** (more than 0, at most $100) |
+| `delete_team_cadence` | Delete a cadence and its schedule |
+| `read_lesson_consolidation` | Whether consolidation is configured and scheduled |
+| `schedule_lesson_consolidation` | Schedule (or reschedule) it: `cronExpression`, `timeZone` |
+| `unschedule_lesson_consolidation` | Remove its schedule |
 
 ### Team Handoff Tools (3)
 
@@ -243,18 +278,18 @@ Approval analytics and earned autonomy — see [HITL Oversight](hitl-oversight.m
 
 ### HITL Tools (10)
 
-Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly: the REST HITL role tier first (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver` — the `@RolesAllowed` of every REST HITL endpoint, so `eddi-viewer` is refused at the door here as there), then the shared `HitlAccessGuard` per conversation: owner / `eddi-admin` / `eddi-approver` for a decision (`resume_conversation`, `cancel_conversation`, `approve_group_phase`, `cancel_group_discussion`), while `get_group_approval_status` additionally admits the pending HUMAN member of an `AWAITING_HUMAN_INPUT` discussion (`requireGroupConversationReadAccess`) and `submit_group_human_input` admits only that pending member or an admin (`requireGroupHumanInputAccess` — the member speaking, not an approval); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | PAUSE_CHANGED | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`; `PAUSE_CHANGED` when a `pauseId` names a pause that is no longer current).
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly: the REST HITL role tier first (`eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver` — the `@RolesAllowed` of every REST HITL endpoint, so `eddi-viewer` is refused at the door here as there), then the shared `HitlAccessGuard` per conversation: owner / `eddi-admin` / `eddi-approver` for a decision (`resume_conversation`, `cancel_conversation`, `approve_group_phase`, `cancel_group_discussion`), while `get_group_approval_status` additionally admits the pending HUMAN member of an `AWAITING_HUMAN_INPUT` discussion (`requireGroupConversationReadAccess`) and `submit_group_human_input` admits only that pending member or an admin (`requireGroupHumanInputAccess` — the member speaking, not an approval); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | PAUSE_CHANGED | PLAN_CHANGED | PLAN_HASH_REQUIRED | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`; `PAUSE_CHANGED` when a `pauseId` names a pause that is no longer current, `PLAN_CHANGED` when a `planHash` names another plan, `PLAN_HASH_REQUIRED` when [strict plan binding](hitl.md#plan-binding-planhash) needs one).
 
 | Tool                              | Description                                                                                                                    |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `list_pending_approvals`          | List regular (1:1) conversations awaiting approval (owner-scoped; includes RULE and TOOL_CALL pauses)                          |
-| `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `detail=full` returns the snapshot incl. any tool-call batch |
-| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses. Optional `editedAnswer`, `reasonCode` and per-call `toolDecisionsJson` — see [HITL review & audit](hitl-review-and-audit.md) |
+| `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `pauseId` and `planHash`, `detail=full` returns the snapshot incl. any tool-call batch |
+| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses. Optional `pauseId` and `planHash` bind the decision to the pause and the exact plan reviewed ([Plan Binding](hitl.md#plan-binding-planhash)); optional `editedAnswer`, `reasonCode` and per-call `toolDecisionsJson` — see [HITL review & audit](hitl-review-and-audit.md) |
 | `cancel_conversation`             | Cancel a paused or running conversation                                                                                        |
 | `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
-| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; optional `taskDecisionsJson`, `editedAnswer` and `reasonCode` (see [HITL review & audit](hitl-review-and-audit.md)); returns the resumed discussion |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` and `planHash` binding the decision to the pause and plan reviewed; optional `taskDecisionsJson`, `editedAnswer` and `reasonCode` (see [HITL review & audit](hitl-review-and-audit.md)); returns the resumed discussion |
 | `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving. A `TIE_BREAK` pause (`pendingKind`) is answered instead by the vote's `humanTieBreak.decider` — a human principal who need not be a group member (or an admin) — and **requires** the `choice` argument — one of `pendingOptions`; without it the call is rejected — and `content` becomes an optional rationale |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 
@@ -559,6 +594,7 @@ The conversation is auto-created on first message and reused on subsequent calls
   "agentId": "692f7fe8...",
   "userId": "user-123",
   "intent": "bob-marley-2-692f7fe8...",
+  "agentResponse": "Hello there! ...",
   "actions": ["send_message", "unknown"],
   "conversationState": "READY",
   "response": {
@@ -574,7 +610,13 @@ The conversation is auto-created on first message and reused on subsequent calls
 
 - **First call** with a new intent+userId: creates a new conversation and sends the message
 - **Subsequent calls** with the same intent+userId: reuses the existing conversation (like continuing in the same chat window)
+- **Ended conversation**: the next call replaces it with a fresh one
+- **Several deployments** on the trigger: each new conversation goes to one picked at random, as with the REST managed endpoints
+- **Concurrent first calls** for the same intent+userId: both land in one conversation. The call that loses the race to store the mapping uses the winner's conversation and ends the one it started
+- **Agent not ready** (startup, rolling deploy): returns an error with `"errorCode": "UNAVAILABLE"`; retry shortly. No conversation was created
 - Returns an error if no agent trigger is configured for the given intent
+- With authorization on, `userId` must be the caller's own principal — naming another user's id is refused ("Access denied") unless the caller holds `eddi-admin`
+- A conversation waiting for a human approval answers `"status": "PAUSED_FOR_APPROVAL"` with `"suggestNextTool": "resume_conversation"`; the intent+userId mapping is kept, so calling again after the decision continues the same conversation
 
 ---
 
@@ -725,8 +767,11 @@ In `application.properties`:
 # MCP Server — Streamable HTTP at /mcp
 quarkus.mcp.server.http.root-path=/mcp
 
-# Documentation path for MCP resources (default: docs/)
-eddi.docs.path=docs
+# Documentation path for MCP resources — not set in application.properties;
+# the code default is docs, the container image passes /deployments/docs
+# eddi.docs.path=docs
+# Switches the docs tools, resources and REST endpoints off together
+eddi.docs.enabled=true
 
 # EDDI's langchain4j agent tools (calculator, web scraper, ...) are not MCP tools
 quarkus.mcp.server.support-langchain4j-annotations=false
@@ -740,7 +785,7 @@ quarkus.mcp.server.support-langchain4j-annotations=false
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 96 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`) and the **alert inbox** (`McpAlertTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 108 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **HITL oversight** (`McpOversightTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`), the **alert inbox** (`McpAlertTools`), the **price catalog** (`McpPricingTools`), **team handoffs** (`McpTeamHandoffTools`) and **team budgets** (`McpTeamBudgetTools`).
 
 To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
@@ -873,11 +918,11 @@ These are the **actual Keycloak role strings** the tools check (not aliases). Ev
 | **Docs** | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver`, `eddi-viewer` | `list_docs`, `read_docs`, and the `eddi://docs/*` resources | `/administration/docs` |
 | **Converse** — every tool ownership-guarded | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` | `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `discover_agents`; the group discussions (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `close_group_conversation`, `delete_group_conversation`); the memory reads (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) | `/agents/*` and `/groups/*/conversations` — admin, editor, user. `eddi-viewer` is the addition: the MCP read-and-converse role, which only ever reaches the caller's own conversations and memories. The memory reads also admit `eddi-editor`, which the REST memory store (`eddi-admin`, `eddi-user`) does not — for the caller's own `userId` only |
 | **Observe** — ownership-guarded | `eddi-admin`, `eddi-viewer` | `read_audit_trail`, and `read_agent_logs` *with* a `conversationId` | `/auditstore`, `/administration/logs` — admin only. An audit entry carries the LLM request (system prompt, tool calls and their arguments), which `eddi-user` cannot read over REST, so this tier is not the conversation tier: next to the admin it admits only `eddi-viewer`, the MCP observer role that has always held these two tools. An editor who needs them is granted `eddi-viewer`. Under enforced workspaces `read_audit_trail` also replaces each entry's `llmDetail.compiledPrompt` (the agent's system message and prompt template) with a redaction marker unless the caller holds `VIEW` on the agent: owning a conversation with an agent shared as `USE` does not reveal its configuration |
-| **Author** | `eddi-admin`, `eddi-editor` | `list_agents`, `list_agent_configs`, `get_agent`; deployment (`deploy_agent`, `undeploy_agent`, `upgrade_conversations`, `get_deployment_status`); agent, workflow and resource CRUD (`create_agent`, `update_agent`, `delete_agent`, `list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`); triggers (`*_agent_trigger`); channels (`*_channel_integration`); group configuration (`list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `list_group_templates`, `add_team_task`, `list_team_backlog`); team handoff intake (`list_team_handoffs`, `accept_team_handoff`, `decline_team_handoff`); the price catalog read (`read_model_prices`); agent tests (`run_agent_tests`, `get_agent_test_run`, `list_agent_test_runs`, `cancel_agent_test_run`); conversation ratings (`list_conversation_ratings`, `summarize_conversation_ratings`, `count_ratings_needing_attention`, `review_conversation_rating`); the alert inbox (`list_alert_events`, `acknowledge_alert_event`) | the configuration stores, `/administration/{env}/deploy…`, `/agenttriggerstore`, `/channelstore`, `/groupstore` (the workspace handoffs included), `/agenttests`, `/ratings`, `/alerts`, the `GET`s of `/administration/model-prices` |
+| **Author** | `eddi-admin`, `eddi-editor` | `list_agents`, `list_agent_configs`, `get_agent`; deployment (`deploy_agent`, `undeploy_agent`, `upgrade_conversations`, `get_deployment_status`); agent, workflow and resource CRUD (`create_agent`, `update_agent`, `delete_agent`, `list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`); triggers (`*_agent_trigger`); channels (`*_channel_integration`); group configuration (`list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `list_group_templates`, `add_team_task`, `list_team_backlog`); team handoff intake (`list_team_handoffs`, `accept_team_handoff`, `decline_team_handoff`); team cadences and lesson consolidation (`list_team_cadences`, `create_team_cadence`, `delete_team_cadence`, `read_lesson_consolidation`, `schedule_lesson_consolidation`, `unschedule_lesson_consolidation`); the price catalog read (`read_model_prices`); agent tests (`run_agent_tests`, `get_agent_test_run`, `list_agent_test_runs`, `cancel_agent_test_run`); conversation ratings (`list_conversation_ratings`, `summarize_conversation_ratings`, `count_ratings_needing_attention`, `review_conversation_rating`); the alert inbox (`list_alert_events`, `acknowledge_alert_event`) | the configuration stores, `/administration/{env}/deploy…`, `/AgentTriggerStore/agenttriggers`, `/channelstore`, `/groupstore` (the workspace handoffs included), `/agenttests`, `/ratings`, `/alerts`, the `GET`s of `/administration/model-prices` |
 | **Oversight** | `eddi-admin`, `eddi-editor`, `eddi-approver` | `summarize_approvals`, `list_autonomy_recommendations`, `get_autonomy_state`, `count_pending_audit_samples` | `/hitl/analytics`, `/hitl/autonomy`, `/hitl/samples` — the approver reviews how approvals turn out; per-agent scoping (`OversightAccess`) runs after the tier |
 | **Budget read** | `eddi-admin`, `eddi-editor`, `eddi-viewer` | `read_team_budget`, `list_team_budgets` | the `GET`s of `/groupstore/groups/{groupId}/budget` and `/administration/team-budgets` — `VIEW` on the group still applies |
 | **Health read** | `eddi-admin`, `eddi-editor`, `eddi-viewer` | `read_agent_health`, `list_agent_health`, `compare_agent_versions_health`, `list_agent_health_sessions`, `suggest_outcome_mappings` | `/agents/{agentId}/health` (and `/series`, `/compare`, `/sessions`, `/outcome-suggestions`), `/health/agents` — `VIEW` on the agent still applies, the quality section follows the ratings rule, and the session list the conversation-review rule |
-| **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`, `get_eddi_version`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); team budget writes (`adjust_team_budget`, `transfer_team_budget`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/administration/gdpr`, `/administration/logs`, `PUT …/budget/current-month`, `POST /administration/team-budgets/transfers`. **Deliberately narrower than REST** for schedules and memory writes: these tools act on any user's schedule or memory directly, without the per-owner scoping the REST endpoints apply to editors and users |
+| **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`, `get_eddi_version`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); team budget writes (`adjust_team_budget`, `transfer_team_budget`); spending controls (`read_tenant_quota`, `update_model_prices`, `update_tenant_quota`, `list_spend_control_changes`, `withdraw_spend_control_change` — a loosening write only files a change an `eddi-admin` approves in the Manager); vault key names (`list_vault_keys`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/admin/gdpr`, `/administration/logs`, `PUT …/budget/current-month`, `POST /administration/team-budgets/transfers`, `/administration/quotas`, `PUT /administration/model-prices`, `/administration/spend-control-changes`, `GET /secretstore/secrets/{tenantId}`. **Deliberately narrower than REST** for schedules and memory writes. The memory tools act on any user's memory directly, without the per-owner scoping the REST endpoint applies to users. The schedule tools go through the REST schedule resource under the caller's identity, so its owner rules already apply; they stay admin-only (REST also admits `eddi-editor`) until widening them is decided on its own |
 | **HITL** | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-approver` — then decided per conversation by `HitlAccessGuard`: the owner, `eddi-admin`, `eddi-approver` | `resume_conversation`, `cancel_conversation`, `get_approval_status`, `list_pending_approvals`, and the group counterparts | the REST HITL endpoints (`/{conversationId}/resume`, `/cancel`, `/approval-status`, `/pending-approvals` and the group `/approve`, `/cancel`, `/human-input`, pending listings) — see [HITL](hitl.md#who-may-decide). Until 6.6.0 these tools had no role tier at all, so an `eddi-viewer` could decide its own gated tool calls over MCP while REST refused it (security review 2026-10-15, L5) |
 
 > **Higher roles include the read tiers.** A role check is a literal `hasRole`, so each tier enumerates its roles rather than relying on a hierarchy — which gives `eddi-admin ⊇ eddi-editor ⊇ eddi-viewer` for the conversation tools and `eddi-admin ⊇ eddi-viewer` for the Observe tier. An admin no longer needs `eddi-viewer` as well, and an editor needs it only for `read_audit_trail` and conversation-scoped `read_agent_logs` (up to 6.5.0 an account without `eddi-viewer` was refused all 27 read tools, `list_agents` included). The tiers are defined once, in `McpRoles`.
@@ -1042,7 +1087,7 @@ A workflow may contain any number of `mcpcalls` steps — one per MCP server.
 
 ### Two Modes, One Configuration
 
-- **Agent mode** — `AgentOrchestrator.discoverMcpCallTools()` traverses the agent → workflow → every `mcpcalls` step at execution time, connects to each server, applies that config's whitelist/blacklist, and hands the surviving tools to the LLM. The LLM calls them reactively. Controlled by `enableMcpCallTools` on the LLM task (`langchain.json`), **default `true`** — no per-server opt-in is needed:
+- **Agent mode** — `McpToolsProvider` (one of the `ToolSourceProvider`s `AgentOrchestrator` assembles tools from) traverses the agent → workflow → every `mcpcalls` step at execution time, connects to each server, applies that config's whitelist/blacklist, and hands the surviving tools to the LLM. The LLM calls them reactively. Controlled by `enableMcpCallTools` on the LLM task (`langchain.json`), **default `true`** — no per-server opt-in is needed:
 
   ```json
   { "tasks": [ { "type": "anthropic", "enableMcpCallTools": false } ] }

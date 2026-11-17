@@ -75,6 +75,8 @@ public class RestHealthPortfolio implements IRestHealthPortfolio {
                 throw HealthPeriods.badRequest("cursor is not a cursor this endpoint returned");
             }
         }
-        return portfolio.portfolio(access.viewableAgents(), window, order, wanted, size, offset);
+        HealthAccess.ViewableAgents viewable = access.viewableAgents();
+        Portfolio page = portfolio.portfolio(viewable.agents(), window, order, wanted, size, offset);
+        return page == null ? null : page.withAgentsTruncated(viewable.truncated());
     }
 }

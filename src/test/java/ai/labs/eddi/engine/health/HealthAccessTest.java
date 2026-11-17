@@ -21,11 +21,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -120,6 +123,35 @@ class HealthAccessTest {
                 .thenReturn(List.of(visible, hidden));
         when(guard.canAccess(visible, AccessLevel.VIEW)).thenReturn(true);
         when(guard.canAccess(hidden, AccessLevel.VIEW)).thenReturn(false);
-        assertEquals(List.of(new AgentRef("6740aaaaaaaaaaaaaaaaaaa1", "Support")), access.viewableAgents());
+        HealthAccess.ViewableAgents viewable = access.viewableAgents();
+        assertEquals(List.of(new AgentRef("6740aaaaaaaaaaaaaaaaaaa1", "Support")), viewable.agents());
+        assertFalse(viewable.truncated());
+    }
+
+    @Test
+    @DisplayName("the portfolio looks at MAX_AGENTS agents exactly; truncated only when a viewable agent lies past the cap")
+    void viewableAgentsCap() throws Exception {
+        HealthAccess access = access(true, Set.of("eddi-viewer"));
+        DocumentDescriptor hidden = descriptor("6740aaaaaaaaaaaaaaaaaaa2", "Secret");
+        when(guard.canAccess(any(DocumentDescriptor.class), eq(AccessLevel.VIEW))).thenAnswer(inv -> inv.getArgument(0) != hidden);
+        List<DocumentDescriptor> fullPage = new ArrayList<>();
+        for (int i = 0; i < HealthAccess.PAGE; i++) {
+            fullPage.add(descriptor("6740aaaaaaaaaaaaaaaaaaa1", "Support"));
+        }
+        int pagesAtCap = HealthAccess.MAX_AGENTS / HealthAccess.PAGE;
+
+        // Exactly MAX_AGENTS viewable, then only an agent the caller may not view.
+        when(descriptors.readDescriptors(eq("ai.labs.agent"), eq(""), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(inv -> inv.getArgument(2, Integer.class) < pagesAtCap ? fullPage : List.of(hidden));
+        HealthAccess.ViewableAgents atCap = access.viewableAgents();
+        assertEquals(HealthAccess.MAX_AGENTS, atCap.agents().size());
+        assertFalse(atCap.truncated());
+
+        // One more viewable agent past the cap.
+        when(descriptors.readDescriptors(eq("ai.labs.agent"), eq(""), anyInt(), anyInt(), anyBoolean(), any()))
+                .thenAnswer(inv -> inv.getArgument(2, Integer.class) < pagesAtCap ? fullPage : List.of(hidden, fullPage.get(0)));
+        HealthAccess.ViewableAgents past = access.viewableAgents();
+        assertEquals(HealthAccess.MAX_AGENTS, past.agents().size());
+        assertTrue(past.truncated());
     }
 }

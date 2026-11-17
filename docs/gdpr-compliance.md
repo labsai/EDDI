@@ -52,7 +52,7 @@ the cascade actually finished:
 > steps that did not run. Some of the user's data is still there: re-run the
 > erasure and do not report it to the data subject as done. A cascade in which
 > every step succeeded answers **200** with an empty `failedSteps`.
-> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
+> Besides the step names above, `failedSteps` can also name `clusterStop`, `autoVaultedSecrets`, `deadLetters` and a participant by its name (`alerts`, `personalSpaceResources`, `conversationRatings`, `toolQuotas`, `groupOutcomes`, ...). The dead-letter purge runs in single-node mode too, not only in a cluster.
 >
 > The step names are `auditRewrite`, `inFlightConversations`, `runningGroupDiscussions`,
 > `userMemories`, `restrictionCache`, `conversationIdLookup`,
@@ -173,7 +173,9 @@ principal, not a user: erasing or exporting it is refused with 400.
     `email-anon:` identities of unauthenticated senders hold no memory and are not
     linked to an address. All of it is
     **permanently deleted**. Each reports under its own step name
-    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`)
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`).
+    The exception is the `groupOutcomes` participant: team outcome events describe a team's work, so
+    they are **kept** and the principal that posted one is replaced by the ledger's pseudonym
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
@@ -207,7 +209,12 @@ principal, not a user: erasing or exporting it is refused with 400.
     checks at most `eddi.health.orphan-sweep-max` conversations per run without resuming where it
     stopped, and keeps a row whenever the conversation store cannot answer. A failure that outlasts
     the window, a row delayed past it, or a conversation beyond the cap therefore leaves the row
-    until `eddi.health.facts-retention` removes it. The export
+    until `eddi.health.facts-retention` removes it. On the erasing node, step 0 also notes the
+    agents of the user's conversations (best effort, never a failed step). Should the days of the
+    deleted rows be unreadable, those agents' daily aggregates are recomputed in full (they hold no
+    personal data). Daily aggregates older than `eddi.health.facts-retention` (90 days) cannot be
+    recomputed. The user's contribution to their counts stays until `eddi.health.daily-retention`
+    (730 days) removes them; they hold no user id or content. The export
     carries them under `turns` in the `agentHealthTurns` section of `additionalData`, newest first,
     at most 10,000; past that the section says `"truncated": true`. See [Agent Health](agent-health.md#gdpr)
 19. **Agent Health session outcomes** (`agentHealthOutcomes`) — **permanently deleted** by the
@@ -244,8 +251,17 @@ curl https://your-eddi-instance/admin/gdpr/{userId}/export \
 The export is a structured, machine-readable JSON bundle of these categories — not
 yet every category EDDI erases; what it leaves out is named in `omittedCategories`
 (see the note below):
-- All persistent user memories
-- Conversation outputs (the chat history as recorded in the conversation outputs). Conversation properties, step data and checkpoints are **not** exported
+- All persistent user memories, each with its Dream `assessment` (`ACCEPTED`, `CONTESTED` or
+  `SUPERSEDED`) and, for a superseded one, the `supersededBy` id — Dream never deletes a
+  contradicted memory, so the export holds every conflicting value it ever kept — and its
+  `sourceEntryIds`: for a memory a `citeSources` Dream consolidation wrote, the ids of the
+  (since deleted) memories it was built from
+- Conversation outputs (the chat history as recorded in the conversation outputs), each with
+  the conversation's `title` and `pinned` flag — a title derived from the user's first
+  non-secret message, written by a model from it (`titleGeneration`), or set by the user.
+  Titles live on the conversation descriptor, so the erasure step "Conversation
+  descriptors" removes them, archived copies of soft-deleted conversations included.
+  Conversation properties, step data and checkpoints are **not** exported
 - All managed conversation mappings (intent→conversation bindings)
 - Audit processing records: conversation id, agent id, task type, duration, LLM detail and timestamp (capped at 10,000 entries; the prompt input, output and tool calls of the entry are not included)
 - Attachment metadata (conversation, storage reference, file name, MIME type, size) —
@@ -273,6 +289,7 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   Erasure blanks those values and forgets the user as acknowledger and rule author
 - A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
   message sent, the reply, state and timestamps)
+- Team outcome events the user posted (`groupOutcomes`; capped at 10,000)
 - Group discussions the user started (`groupConversations`: question, transcript,
   state and dates; capped at 1,000, `groupConversationsTruncated` when the cap bit),
   and the shared artifacts of those discussions (`sharedArtifacts`: content and

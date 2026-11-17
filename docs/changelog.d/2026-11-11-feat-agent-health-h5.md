@@ -51,8 +51,9 @@ after a conversation becomes the strongest outcome evidence there is. Documented
 - Only matched events count as business measures — attribution stays honest (plan §5.4).
 - MCP gains no export tool: `read_agent_health` already returns the business section; the export is a file download.
 
-### Not done
+### Still open
 
+- Not run locally: the Mongo and Postgres event-store integration tests (`MongoHealthEventStoreIT`, `PostgresHealthEventStoreIT`) need Docker; CI is the check.
 - The Manager's Channels page has no fields for `kind` / `agentIds` (it keeps them); business measures are not series
   ids and not in the version compare.
 
