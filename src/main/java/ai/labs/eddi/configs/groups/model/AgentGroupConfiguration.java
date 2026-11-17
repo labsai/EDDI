@@ -41,11 +41,12 @@ public class AgentGroupConfiguration {
 
     /**
      * Upper bound on {@link #maxRounds}. {@code DiscussionStylePresets.expand}
-     * multiplies this into concrete phases for ROUND_TABLE and DELPHI, and every
-     * phase fans out to every member — so this value alone multiplies the LLM cost
-     * of a single discussion. 50 rounds against even a small group is already
-     * hundreds of model calls; nothing legitimate goes near it, and without the
-     * bound a config could ask for millions of phases.
+     * multiplies this into concrete phases for ROUND_TABLE, DELPHI and NEGOTIATION
+     * (its bargaining repeats), and every phase fans out to every member — so this
+     * value alone multiplies the LLM cost of a single discussion. 50 rounds against
+     * even a small group is already hundreds of model calls; nothing legitimate
+     * goes near it, and without the bound a config could ask for millions of
+     * phases.
      * <p>
      * Deliberately only an upper bound: {@code expand()} already clamps the low
      * side with {@code Math.max(maxRounds, 1)}, so rejecting 0 would break configs

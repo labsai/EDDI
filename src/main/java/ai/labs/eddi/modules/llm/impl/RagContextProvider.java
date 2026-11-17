@@ -41,7 +41,7 @@ import java.util.Map;
  *
  * <p>
  * Follows the same WorkflowTraversal pattern as httpcall and mcpcalls discovery
- * in {@link AgentOrchestrator}.
+ * in {@link HttpCallToolsProvider} and {@link McpToolsProvider}.
  * </p>
  */
 @ApplicationScoped

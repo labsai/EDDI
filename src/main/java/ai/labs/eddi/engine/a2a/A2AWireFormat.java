@@ -61,7 +61,7 @@ import static ai.labs.eddi.engine.a2a.A2AModels.ERROR_CONTENT_TYPE_NOT_SUPPORTED
  * <td>send result</td>
  * <td>{@code {"task": {…}}}</td>
  * <td>the task, {@code "kind":"task"}</td>
- * <td>the task</td>
+ * <td>the task, {@code "kind":"task"}</td>
  * </tr>
  * </table>
  * A 1.0 client parses strictly (protobuf JSON without unknown fields), so a 1.0

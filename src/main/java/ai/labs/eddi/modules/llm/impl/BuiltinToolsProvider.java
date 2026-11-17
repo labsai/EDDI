@@ -46,9 +46,9 @@ import java.util.Set;
  * Order is load-bearing and preserved: the catalog is iterated in declaration
  * order, matching the old if-chain, so the resulting tool list (and therefore
  * the spec order the model sees) is byte-identical for every configuration.
- * Note that this is the *declaration* order, not the order keys appear in an
- * agent's whitelist — the old code had the same property, since the if-chain's
- * sequence governed, not the whitelist's.
+ * Note that this is the <em>declaration</em> order, not the order keys appear
+ * in an agent's whitelist — the old code had the same property, since the
+ * if-chain's sequence governed, not the whitelist's.
  * <p>
  * Constructed once in the {@code AgentOrchestrator} constructor rather than per
  * call: unlike {@code ContextualToolsProvider} and
@@ -126,9 +126,10 @@ class BuiltinToolsProvider implements ToolSourceProvider {
      * The tool beans this turn's configuration selects, in catalog order.
      * <p>
      * Deliberately does <em>not</em> apply the {@code enableBuiltInTools} switch —
-     * {@code AgentOrchestrator#collectAllBuiltInTools} checks that once, before
-     * calling any source, and calls this from inside both of its whitelist
-     * branches. Package-private so that call site can use it.
+     * {@code AgentOrchestrator#collectEnabledTools} checks that once, before
+     * calling {@code collectAllBuiltInTools}, which calls this ahead of its
+     * user-memory and recall whitelist branches. Package-private so that call site
+     * can use it.
      */
     List<Object> collect(ToolAssemblyContext ctx) {
         List<Object> tools = new ArrayList<>();

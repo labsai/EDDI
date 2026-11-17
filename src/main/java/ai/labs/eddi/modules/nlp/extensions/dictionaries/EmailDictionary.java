@@ -15,6 +15,9 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
+ * Recognises a whole token that is an email address (case-insensitive,
+ * top-level domain of 2 to 4 letters) and emits an {@code email} expression.
+ *
  * @author ginccc
  */
 public class EmailDictionary implements IDictionary {

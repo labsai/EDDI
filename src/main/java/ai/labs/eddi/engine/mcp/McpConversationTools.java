@@ -474,7 +474,8 @@ public class McpConversationTools {
                 try {
                     state = ConversationState.valueOf(conversationState.trim().toUpperCase());
                 } catch (IllegalArgumentException e) {
-                    return errorJson("Invalid conversationState: " + conversationState + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
+                    return errorJson("Invalid conversationState: " + conversationState
+                            + ". Valid values: READY, IN_PROGRESS, ENDED, ERROR");
                 }
             }
 
@@ -783,7 +784,7 @@ public class McpConversationTools {
             // The trigger check above looks at the trigger's CURRENT targets, but a
             // retained conversation runs on the agent it was started with. After a
             // retarget or a revoked share that agent may no longer be usable by this
-            // caller — re-check the conversation's own agent, as send_message and the
+            // caller — re-check the conversation's own agent, as talk_to_agent and the
             // REST say() do. The guard refuses a non-owner and an owner without USE
             // on the agent alike, so the answer is the neutral one, not the
             // "you do not own" message below.

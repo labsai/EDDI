@@ -243,7 +243,11 @@ public class LifecycleManager implements ILifecycleManager {
      * @throws LifecycleException
      *             if any task execution fails
      * @throws ConversationStopException
-     *             if STOP_CONVERSATION action is triggered
+     *             if STOP_CONVERSATION action is triggered, or the conversation was
+     *             cancelled
+     * @throws ConversationPauseException
+     *             if a task pauses the conversation (PAUSE_CONVERSATION action or a
+     *             gated tool call)
      */
     @SuppressWarnings("null") // Objects.requireNonNullElse guarantees non-null but Eclipse JDT doesn't track
                               // it
@@ -966,7 +970,7 @@ public class LifecycleManager implements ILifecycleManager {
      * <li>Semantic parsing (dictionaries)</li>
      * <li>Behavior rules</li>
      * <li>Property extraction</li>
-     * <li>HTTP calls / LangChain</li>
+     * <li>HTTP calls / LLM</li>
      * <li>Output generation</li>
      * </ol>
      *
@@ -1288,8 +1292,8 @@ public class LifecycleManager implements ILifecycleManager {
      * authoritative, so a wrapper's message can never outrank them. Message
      * heuristics are only consulted when no typed cause matches.
      *
-     * @return one of: "timeout", "transport", "rate_limit", "content_filter",
-     *         "unknown"
+     * @return one of: "timeout", "transport", "stack_overflow", "rate_limit",
+     *         "content_filter", "unknown"
      */
     static String classifyError(Throwable e) {
         for (Throwable current = e; current != null; current = current.getCause()) {
@@ -1325,7 +1329,7 @@ public class LifecycleManager implements ILifecycleManager {
 
     /**
      * Creates a redacted, truncated summary of an exception for audit and SSE
-     * events. Unlike {@link #summarizeException(Exception)} (which sanitizes for
+     * events. Unlike {@link #summarizeException(Throwable)} (which sanitizes for
      * LLM consumption at 200 chars), this preserves full detail at 500 chars for
      * admin visibility — URLs and class names are deliberately kept, since the
      * audience is privileged and needs them to diagnose. Credentials are not: they
