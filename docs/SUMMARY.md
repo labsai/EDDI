@@ -56,6 +56,7 @@
   - [HITL Oversight — Analytics, Sampled Audit, Earned Autonomy](hitl-oversight.md)
   - [HITL Approval Card Context](hitl-approval-context.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
+- [User Events — the Per-User Event Stream](user-events.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)
@@ -77,17 +78,20 @@
 - [Email Integration](email-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
+- [Workforce for End Users](workforce-guide.md)
 
 ## Security & Compliance
 
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
+- [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
 - [Tenant Quotas](tenant-quotas.md)
   - [Team Budgets](team-budgets.md)
+  - [Spend-Control Changes](spend-control-changes.md)
   - [Agent Operations Tools](agent-ops-tools.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)

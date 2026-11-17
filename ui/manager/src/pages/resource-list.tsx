@@ -10,20 +10,20 @@ import {
   Trash2,
   Share2,
 } from "lucide-react";
-import { getResourceType } from "@/lib/api/resources";
-import { parseResourceUri } from "@/lib/api/agents";
+import { getResourceType } from "@eddi/app-kit/lib/api/resources";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 import { useResourceDescriptors, useDeleteResource, useDuplicateResource } from "@/hooks/use-resources";
 import { ResourceCard } from "@/components/resources/resource-card";
 import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
-import type { AgentDescriptor } from "@/lib/api/agents";
+import type { AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
 import { accessFor } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
-import { getResourceTypeIcon } from "@/lib/resource-type-icons";
+import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
 import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { BackLink } from "@/components/shared/back-link";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";

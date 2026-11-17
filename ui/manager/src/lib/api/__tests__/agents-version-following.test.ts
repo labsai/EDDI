@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { updateAgent, getDeploymentImpact } from "@/lib/api/agents";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { updateAgent, getDeploymentImpact } from "@eddi/app-kit/lib/api/agents";
 import {
   extractAgentSwitch,
   extractAgentVersion,
   type SimpleConversationStep,
-} from "@/lib/api/conversations";
+} from "@eddi/app-kit/lib/api/conversations";
 
 /** Capture the URL of the next PUT to the agent store. */
 function capturePut(): { url: () => URL } {

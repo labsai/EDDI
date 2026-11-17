@@ -1,7 +1,7 @@
-import { api } from "../api-client";
-import type { SharedTaskList, TaskItem } from "./groups";
-import { seg } from "./path-segment";
-import type { WorkspaceHandoffs } from "./team-handoffs";
+import { api } from "@eddi/app-kit/lib/api-client";
+import type { SharedTaskList, TaskItem } from "@eddi/app-kit/lib/api/groups";
+import { seg } from "@eddi/app-kit/lib/api/path-segment";
+import type { WorkspaceHandoffs } from "@eddi/app-kit/lib/api/team-handoffs";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +

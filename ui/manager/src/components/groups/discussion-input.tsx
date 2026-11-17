@@ -3,16 +3,16 @@ import { useTranslation } from "react-i18next";
 import { Send, Loader2, Expand, RotateCw, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@eddi/ui";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { cn } from "@/lib/utils";
-import { isImeComposing } from "@/lib/ime";
-import { filesFromClipboard, useFileDrop } from "@/hooks/use-attachment-staging";
-import { FileDropOverlay } from "@/components/chat/attachment-chip";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
+import { filesFromClipboard, useFileDrop } from "@eddi/app-kit/hooks/use-attachment-staging";
+import { FileDropOverlay } from "@eddi/app-kit/components/chat/attachment-chip";
 import {
   formatAttachmentBytes,
   useGroupAttachmentStaging,
-} from "@/hooks/use-group-attachment-staging";
-import { MAX_GROUP_QUESTION_CHARS, type GroupAttachmentRef } from "@/lib/api/groups";
+} from "@eddi/app-kit/hooks/use-group-attachment-staging";
+import { MAX_GROUP_QUESTION_CHARS, type GroupAttachmentRef } from "@eddi/app-kit/lib/api/groups";
 
 interface DiscussionInputProps {
   /**

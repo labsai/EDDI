@@ -1,15 +1,15 @@
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { Input } from "@/components/ui/input";
+import { Input } from "@eddi/app-kit/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
 import { EmailPlatformFields } from "./email-settings";
 import { emailConfigProblems, initialEmailPlatformConfig, withEmailFixedKeys } from "@/lib/email-channel";
 import { toastChannelWarnings } from "@/lib/email-channel-messages";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { isEmptyOrReference } from "@/lib/channel-secrets";
 import { StepDots } from "@/components/shared/step-dots";
 import { useCreateChannel } from "@/hooks/use-channels";

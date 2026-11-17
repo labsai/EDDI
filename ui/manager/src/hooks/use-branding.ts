@@ -7,8 +7,8 @@ import {
   uploadBrandAsset,
   type BrandingView,
   type BrandUpdate,
-} from "@/lib/api/branding";
-import type { BrandAssetSlot } from "@/lib/brand";
+} from "@eddi/app-kit/lib/api/branding";
+import type { BrandAssetSlot } from "@eddi/app-kit/lib/brand";
 import { applyBrandRevision } from "@/lib/brand-live";
 
 /** Read and invalidated only here. */

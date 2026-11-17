@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderPage } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 import { VariablesPage } from "@/pages/variables";

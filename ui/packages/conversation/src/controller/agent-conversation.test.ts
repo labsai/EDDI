@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type ConversationSnapshot, type SSEEvent, type ToolActivity } from "@eddi/core";
+import { toolResultListener, type ToolResultEvent } from "@eddi/core/tool-events";
 import { AgentConversation, SECRET_BUBBLE } from "./agent-conversation";
 import { initialConversationState } from "./state";
 import type { AgentTransport } from "./transport";
@@ -442,6 +443,109 @@ describe("send — refusals and failures", () => {
   });
 });
 
+/**
+ * What GET /agents/{id}?returnCurrentStepOnly=true answers, as the backend
+ * builds it: the latest STORED step and its output. A say turn is kept in
+ * memory while it runs and stored only when it completes, so during the turn
+ * this is the PREVIOUS step, in state READY — never IN_PROGRESS.
+ */
+const storedStep = (
+  stamp: string,
+  reply: string,
+  conversationState: string = "READY",
+  extra: Record<string, unknown> = {},
+): Snap =>
+  ({
+    conversationState,
+    conversationSteps: [{ timestamp: stamp, conversationStep: [{ key: "output:text:0", value: reply, timestamp: stamp }] }],
+    conversationOutputs: [output(reply, extra)],
+  }) as unknown as Snap;
+
+/** The step stored before the turn under test. */
+const previousStep = (conversationState = "READY") => storedStep("t1", "Earlier answer", conversationState);
+/** The turn under test, once the backend stored it. */
+const ownStep = (reply: string, conversationState = "READY", extra: Record<string, unknown> = {}) =>
+  storedStep("t2", reply, conversationState, extra);
+
+describe("send — reconnecting after a dropped stream", () => {
+  const dropping = () =>
+    fakeTransport({
+      stream: vi.fn(async function* () {
+        yield ev("token", "Part of");
+        throw new TypeError("network");
+      }),
+    });
+
+  it("follows the turn until a read holds its own step, and shows that reply in place of the partial one", async () => {
+    const transport = dropping();
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0, 0, 0] });
+    transport.read
+      .mockReset()
+      .mockResolvedValueOnce(previousStep()) // the baseline, read as the turn is sent
+      .mockRejectedValueOnce(new TypeError("still offline"))
+      .mockResolvedValueOnce(previousStep()) // the turn is still running: the backend shows the step before it
+      .mockResolvedValueOnce(ownStep("Part of the answer", "READY", { quickReplies: [{ value: "More" }] }));
+    const seen: boolean[] = [];
+    c.subscribe(() => seen.push(c.getSnapshot().reconnecting));
+    const result = await c.send("question");
+    expect(result).toEqual({ outcome: "sent", recovered: true });
+    expect(seen).toContain(true);
+    expect(c.getSnapshot().reconnecting).toBe(false);
+    expect(transport.read).toHaveBeenCalledTimes(4);
+    expect(texts(c)).toEqual(["question", "Part of the answer"]);
+    expect(c.getSnapshot().quickReplies).toEqual([{ value: "More" }]);
+    expect(c.getSnapshot().isProcessing).toBe(false);
+  });
+
+  it("never takes the previous step for the turn's outcome: a turn that does not settle is a lost connection", async () => {
+    const transport = dropping();
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0] });
+    transport.read.mockReset().mockResolvedValue(previousStep());
+    const result = await c.send("question");
+    expect(result).toEqual({ outcome: "failed", failure: expect.objectContaining({ partial: true }) });
+    expect(texts(c).slice(-1)[0]).toContain("Part of\n\n⚠️ Connection lost");
+    expect(texts(c).some((t) => t.includes("Earlier answer"))).toBe(false);
+    expect(c.getSnapshot().reconnecting).toBe(false);
+  });
+
+  it("trusts no read when the step before the turn is unknown", async () => {
+    const transport = dropping();
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0] });
+    transport.read
+      .mockReset()
+      .mockRejectedValueOnce(new TypeError("offline")) // the baseline
+      .mockResolvedValue(ownStep("Looks finished"));
+    await c.send("question");
+    expect(texts(c).slice(-1)[0]).toContain("Part of\n\n⚠️ Connection lost");
+    expect(texts(c).some((t) => t === "Looks finished")).toBe(false);
+  });
+
+  it("follows a stream that closed without its done, instead of showing the part as the whole reply", async () => {
+    const transport = fakeTransport({ stream: vi.fn(() => events(ev("token", "Part of"))) });
+    const c = await opened(transport, { reconnectDelaysMs: [0, 0] });
+    transport.read.mockReset().mockResolvedValueOnce(previousStep()).mockResolvedValue(ownStep("Part of the answer"));
+    expect(await c.send("question")).toEqual({ outcome: "sent", recovered: true });
+    expect(texts(c)).toEqual(["question", "Part of the answer"]);
+
+    const cut = fakeTransport({ stream: vi.fn(() => events(ev("token", "Part of"))) });
+    const d = await opened(cut, { reconnectDelaysMs: [0] });
+    cut.read.mockReset().mockResolvedValue(previousStep());
+    expect(await d.send("question")).toEqual({ outcome: "failed", failure: expect.objectContaining({ partial: true }) });
+    expect(texts(d).slice(-1)[0]).toContain("Part of\n\n⚠️ Connection lost");
+    expect(d.getSnapshot().isProcessing).toBe(false);
+  });
+
+  it("does not reconnect without the option, or before any of the reply arrived", async () => {
+    const transport = dropping();
+    const c = await opened(transport);
+    transport.read.mockClear();
+    transport.read.mockResolvedValue({ conversationState: "IN_PROGRESS" });
+    await c.send("question");
+    expect(c.getSnapshot().reconnecting).toBe(false);
+    expect(transport.read).toHaveBeenCalledTimes(1); // the existing re-read for the state
+  });
+});
+
 describe("send — snapshot transports", () => {
   it("non-streaming: applies the reply snapshot", async () => {
     const say = vi.fn(async () => ({ conversationState: "READY" as const, conversationOutputs: [output("Plain", { quickReplies: [{ value: "Q" }] })] }));
@@ -542,6 +646,130 @@ describe("pause, cancel, stop", () => {
     expect(transport.cancel).toHaveBeenCalledWith("c1");
     expect(c.getSnapshot().messages.map((m) => m.content)).toEqual(["long"]);
     expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+  });
+
+  describe("whether Stop took (a cluster can run the turn on another pod)", () => {
+    /** A turn that streams one token and then waits until it is aborted. */
+    function stoppable(over: Partial<AgentTransport> = {}) {
+      const stream = vi.fn((_id: string | null, _t: string, o: { signal: AbortSignal }) =>
+        (async function* () {
+          yield ev("token", "Half a re");
+          await new Promise((_, reject) => o.signal.addEventListener("abort", () => reject(new DOMException("a", "AbortError"))));
+        })(),
+      );
+      return fakeTransport({ stream, ...over });
+    }
+
+    /**
+     * Stop a turn mid-reply. The first read is the baseline the turn takes as
+     * it is sent (the step before it); `later` answers every read after it —
+     * the turn's own re-read after its stream, then the checks.
+     */
+    async function stopMidTurn(transport: ReturnType<typeof stoppable>, later: (n: number) => Snap = () => previousStep()) {
+      const c = await opened(transport, { stopVerifyDelaysMs: [0, 0] });
+      let n = 0;
+      transport.read.mockReset().mockImplementation(async () => (n++ === 0 ? previousStep() : later(n - 1)));
+      const turn = c.send("long");
+      await vi.waitFor(() => expect(texts(c).slice(-1)[0]).toBe("Half a re"));
+      await c.stop();
+      await turn;
+      return c;
+    }
+
+    const notices = (c: AgentConversation) => c.getSnapshot().messages.filter((m) => m.kind === "notice").map((m) => m.content);
+
+    it("says nothing when the cancel settles as interrupted over the step before the turn", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, () => previousStep("EXECUTION_INTERRUPTED"));
+      // The baseline, the turn's own re-read after its stream, then one check settles it.
+      expect(transport.read).toHaveBeenCalledTimes(3);
+      expect(notices(c)).toEqual([]);
+      expect(texts(c)).toEqual(["long", "Half a re"]);
+      expect(c.getSnapshot().conversationState).toBe("EXECUTION_INTERRUPTED");
+    });
+
+    it("does not take the previous step, still READY while the turn runs, for a finished turn", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, () => previousStep());
+      expect(texts(c)).toContain("Half a re");
+      expect(texts(c).some((t) => t.includes("Earlier answer") || t.includes("Stop came too late"))).toBe(false);
+      // Both checks found it unsettled: it is still running somewhere.
+      expect(notices(c)).toEqual([expect.stringContaining("still running")]);
+    });
+
+    it("says the turn finished anyway and shows its whole reply in place of the part Stop left", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, () => ownStep("Half a reply, finished on pod B"));
+      expect(texts(c)).toEqual([
+        "long",
+        "Stop came too late: the reply had already finished on the server, and it counts. Here it is in full.",
+        "Half a reply, finished on pod B",
+      ]);
+      expect(c.getSnapshot().conversationState).toBe("READY");
+    });
+
+    it("applies a turn that finished by ending the conversation", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, () => ownStep("Goodbye", "ENDED"));
+      expect(c.getSnapshot().conversationState).toBe("ENDED");
+      expect(texts(c).slice(-1)[0]).toBe("Goodbye");
+      expect(texts(c)).not.toContain("Half a re");
+    });
+
+    it("keeps checking after a read that finds the turn in progress, and shows it once it lands", async () => {
+      const transport = stoppable();
+      const c = await stopMidTurn(transport, (n) => (n <= 2 ? previousStep("IN_PROGRESS") : ownStep("Landed later")));
+      expect(texts(c).slice(-1)[0]).toBe("Landed later");
+      expect(notices(c).some((t) => t.includes("still running"))).toBe(false);
+    });
+
+    it("a 409 means the turn had already finished: shown once a read holds it, not swallowed", async () => {
+      const transport = stoppable({ cancel: vi.fn(async () => Promise.reject(new ApiError(409, "nothing", "test"))) });
+      const c = await stopMidTurn(transport, () => ownStep("Complete"));
+      expect(transport.read).toHaveBeenCalledTimes(3); // the baseline, the turn's re-read, then one check
+      expect(texts(c).slice(-2)).toEqual([expect.stringContaining("Stop came too late"), "Complete"]);
+    });
+
+    it("says so when the cancel could not reach the server", async () => {
+      const transport = stoppable({ cancel: vi.fn(async () => Promise.reject(new TypeError("offline"))) });
+      const c = await stopMidTurn(transport);
+      expect(transport.read).toHaveBeenCalledTimes(2); // the baseline and the turn's own re-read
+      expect(texts(c).slice(-1)[0]).toContain("Stop could not reach the server");
+    });
+
+    it("does not mark a turn sent while the cancel was in flight as interrupted", async () => {
+      let releaseCancel!: () => void;
+      const transport = stoppable({
+        cancel: vi.fn(() => new Promise<void>((r) => (releaseCancel = () => r()))),
+      });
+      const c = await opened(transport, { stopVerifyDelaysMs: [0] });
+      transport.read.mockReset().mockResolvedValue(previousStep());
+      const turn = c.send("long");
+      await vi.waitFor(() => expect(texts(c).slice(-1)[0]).toBe("Half a re"));
+      const stopping = c.stop();
+      await turn;
+      transport.stream = vi.fn(() => events(done({ conversationState: "READY", conversationOutputs: [output("next")] })));
+      await c.send("again");
+      releaseCancel();
+      await stopping;
+      expect(c.getSnapshot().conversationState).toBe("READY");
+      expect(notices(c)).toEqual([]);
+    });
+
+    it("stops checking once the user sends the next turn", async () => {
+      const transport = stoppable();
+      const c = await opened(transport, { stopVerifyDelaysMs: [30] });
+      let n = 0;
+      transport.read.mockReset().mockImplementation(async () => (n++ === 0 ? previousStep() : ownStep("next")));
+      const turn = c.send("long");
+      await vi.waitFor(() => expect(texts(c).slice(-1)[0]).toBe("Half a re"));
+      const stopping = c.stop();
+      await turn;
+      transport.stream = vi.fn(() => events(done({ conversationState: "READY", conversationOutputs: [output("next")] })));
+      await c.send("again");
+      await stopping;
+      expect(texts(c).some((t) => t.includes("Stop came too late"))).toBe(false);
+    });
   });
 
   it("the refresh after a pause re-reads without duplicating the shown placeholder", async () => {
@@ -852,6 +1080,26 @@ describe("host hooks (a host with its own store and its own copy)", () => {
     });
     await c.send("hello");
     expect(seen).toEqual(["start", "done", "end"]);
+  });
+
+  it("hands tool_result to the host through onStreamEvent and keeps it out of the transcript", async () => {
+    // B6: a host that shows tool cards plugs @eddi/core/tool-events'
+    // toolResultListener into onStreamEvent; the controller itself ignores it.
+    const transport = fakeTransport({
+      stream: vi.fn(() =>
+        events(
+          ev("tool_call", '{"tool":"weather"}'),
+          ev("tool_result", '{"tool":"weather","ok":true,"summary":"18C"}'),
+          ev("token", "It is 18C."),
+          done({ conversationState: "READY", conversationOutputs: [output("It is 18C.")] }),
+        ),
+      ),
+    });
+    const results: ToolResultEvent[] = [];
+    const c = await opened(transport, { onStreamEvent: toolResultListener((r) => results.push(r)) });
+    await c.send("weather?");
+    expect(results).toEqual([{ tool: "weather", ok: true, summary: "18C" }]);
+    expect(texts(c)).toEqual(["weather?", "It is 18C."]);
   });
 
   it("shows why a finished turn failed in its reply, after the reconcile", async () => {

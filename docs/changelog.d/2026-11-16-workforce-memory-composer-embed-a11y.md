@@ -1,0 +1,6 @@
+## ♿ fix(workforce, chat): focus after Forget, and a non-modal auto-opened embed panel (2026-11-16)
+
+**Repo:** EDDI · **Branch:** `feat/workforce-memory-composer-embed` (PR #1331, review findings)
+
+- **"What I remember about you": focus survives Forget.** `useDeleteMemory` returns its invalidation from `onSuccess`, so the page's own `onSuccess` runs once the list was re-read without the entry and then focuses the row that took its place ([`workforce-memory.tsx`](../../ui/workforce/src/pages/workforce/workforce-memory.tsx), [`use-user-memory.ts`](../../ui/packages/app-kit/src/hooks/use-user-memory.ts)). While a delete runs, the other Forget buttons are `aria-disabled` (and ignore clicks) instead of `disabled`, which used to drop the focus the person had on one. Test: "moves focus to the row that took the forgotten one's place".
+- **`/chat/embed.js`: `aria-modal` only when the panel took focus.** Opened by default (`data-open`, no focus move), an `aria-modal` dialog hid the host page from screen readers while the person was still on it. The panel is now modal only when the person opens it (button, `EddiChat.open()`), and the attribute is removed on close ([`launcher.ts`](../../ui/chat/src/embed/launcher.ts)). Covered in `launcher.test.ts`.

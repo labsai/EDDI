@@ -117,6 +117,8 @@ Validation happens at **save time** (and on ZIP import): a finite policy without
 
 The body also takes an optional `planHash` (from `approval-status`): the decision then applies only to exactly that plan — a different one is refused with `409` (`planHash does not match`), and with [strict plan binding](#plan-binding-planhash) a human decision without it is a `400`.
 
+**Being told instead of polling.** A signed-in client holding [`GET /me/events`](user-events.md) receives `approval.pending` when a turn or tool call pauses that it may decide (the owner, while they may still `USE` the agent, and every admin and approver — the rules of [Who May Decide](#who-may-decide)), and `approval.decided` when it is decided, cancelled or times out. Ids only; read the details here. Group gates arrive the same way, with `surface: "group"`.
+
 Status codes are discriminating: `400` invalid body (missing verdict, note > 4 KB, a missing `planHash` under strict binding — the pause is **not** consumed), `404` unknown conversation, `409` not in a resumable state (body names the current state) or a decision for another pause or plan, `200` success. HITL operations on a conversation whose descriptor is missing (legacy/corruption) fail **closed** — only admins/approvers may act on them.
 
 #### `pauseDetails` shape

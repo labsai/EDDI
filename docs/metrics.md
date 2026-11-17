@@ -334,6 +334,15 @@ eddi_team_budget_refusals_total             # New work refused for a spent budge
 eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
 ```
 
+### Spend-Control Change Metrics
+
+Writes to the model price catalog and tenant quotas over MCP, and the decisions on the looser ones
+([Spend-Control Changes](spend-control-changes.md)).
+
+```text
+eddi_spendcontrol_changes_total             # tags: kind (MODEL_PRICES|TENANT_QUOTA), result (APPLIED|PROPOSED|APPROVED|REJECTED|WITHDRAWN|STALE|EXPIRED)
+```
+
 ### Input Parser Metrics
 
 The parser's [semantic fallback](semantic-parser.md#semantic-fallback). The counter appears on the
@@ -371,6 +380,27 @@ its message dropped every single cycle while every other metric stays green.
 fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
+
+### User Event Stream Metrics
+
+The per-user stream `GET /me/events` (see [User Events](user-events.md)). Charted
+in the **User event stream** row of the Full Metrics Reference. Every value is
+per node: in a cluster, sum across pods.
+
+```text
+eddi_user_events_connections                # Open /me/events streams on this node (gauge)
+eddi_user_events_delivered_total            # Events written to a stream; tag: kind
+eddi_user_events_dropped_total              # Events or streams dropped; tag: reason
+eddi_user_events_rejected_total             # Streams refused at a cap (429); tag: reason
+```
+
+`kind` is the event kind (`approval.pending`, `team.ended`, …). `dropped` has two
+reasons: `slow_consumer` (a stream more than `eddi.user-events.buffer-size` frames
+behind was closed — its client reconnects) and `dispatch_queue_full` (an event
+found the node's fan-out queue full and nobody on this node got it). `rejected`
+is `user_limit` (`eddi.user-events.max-connections-per-user`) or `node_limit`
+(`eddi.user-events.max-connections`). A steady `user_limit` rate usually means a
+client that opens a stream per component instead of one per tab.
 
 ### Self-continuation Metrics
 
@@ -1190,6 +1220,8 @@ eddi_cluster_events_published_total         # Cluster events published {type}
 eddi_cluster_events_consumed_total          # Cluster events handled from other nodes {type}
 eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
+eddi_cluster_events_transient_published_total # Transient events (core NATS, never stored or queued — the user event stream) published {type}
+eddi_cluster_events_transient_dropped_total   # Transient events dropped because NATS was unreachable {type}
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_events_dispatch_queue          # Received events waiting to be handled on this node, both lanes (gauge)

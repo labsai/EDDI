@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { useLocation } from "react-router-dom";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ConnectionsPage } from "@/pages/connections";
 import { toast } from "sonner";
 

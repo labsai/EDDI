@@ -4,7 +4,7 @@ import {
   deleteAttachment,
   deleteAllAttachments,
   type AttachmentMeta,
-} from "@/lib/api/attachments";
+} from "@eddi/app-kit/lib/api/attachments";
 
 /** Normalized attachment row for display (backend may send `filename`). */
 export interface ConversationAttachment {

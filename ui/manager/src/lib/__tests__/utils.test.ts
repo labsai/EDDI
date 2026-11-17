@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cn, formatRelativeTime, statusConfig, hashColor, getInitials, isValidUrl, formatDuration } from "@/lib/utils";
+import { cn, formatRelativeTime, statusConfig, hashColor, getInitials, isValidUrl, formatDuration } from "@eddi/app-kit/lib/utils";
 
 describe("cn", () => {
   it("merges class names", () => {

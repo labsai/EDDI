@@ -1,10 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
-import { reportDeployOutcome } from "@/lib/deploy-outcome";
-import { chatKeys } from "@/lib/query-keys";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { runDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
+import { chatKeys } from "@eddi/app-kit/lib/query-keys";
 
 /**
  * One id for every "saved — not yet live" toast, so only the most recent save's

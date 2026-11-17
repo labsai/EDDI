@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -25,8 +25,8 @@ import {
   Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, AgentPublicKey, ChannelConnector } from "@/lib/api/agents";
+import { useSkills } from "@eddi/app-kit/hooks/use-capabilities";
+import type { Agent, AgentPublicKey, ChannelConnector } from "@eddi/app-kit/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -36,18 +36,18 @@ import {
   type AgentHitlConfig,
   type HitlRejectionAction,
   type ToolApprovalsConfig,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
-import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
-import { CONFIDENCE_COLORS } from "@/lib/constants";
-import { EditorSection } from "./editor-section";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@eddi/app-kit/lib/hitl-config";
+import { CONFIDENCE_COLORS } from "@eddi/app-kit/lib/constants";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
-import { ApprovalContextEditor } from "./approval-context-editor";
-import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ApprovalContextEditor } from "@eddi/app-kit/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@eddi/app-kit/lib/hitl-approval-context";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { Button } from "@eddi/ui";
 import { toast } from "sonner";
 
@@ -350,7 +350,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           title={t("agentDetail.revokeSigningKeyConfirm", "Revoke signing key v{{version}}?", { version: revokeVersion ?? 0 })}
           description={t(
             "agentDetail.revokeSigningKeyDesc",
-            "Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it, so peers stop trusting messages signed with it. A revoked versioned key stays listed, and peer verification does not refuse it yet: a message signed with it, by anyone holding a copy of its private key, can still verify. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
+            "Peers stop trusting every message signed with this key, whenever it was signed. Its private key is deleted from the vault (best effort: if the delete fails, revoking again retries it). This cannot be undone. Revoking the legacy v0 key removes it; a revoked versioned key stays listed, marked revoked. If it is the newest key, the agent stops signing, and every save with signing on is refused, until you generate a new one or turn signing off.",
           )}
           confirmLabel={t("agentDetail.revokeSigningKey", "Revoke")}
           cancelLabel={t("common.cancel", "Cancel")}
@@ -388,7 +388,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Failures are logged, not blocked")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input

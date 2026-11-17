@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { OrphansPage } from "@/pages/orphans";
 
 vi.mock("@/hooks/use-onboarding", () => ({
