@@ -199,6 +199,51 @@ Targets can be **agents** or **groups**. A group target starts a discussion with
 the rendered input as its question — group members see only that text, not the
 `event` map: put what they need into `inputTemplate`.
 
+### Business outcome events (health-outcomes targets)
+
+A target with `"kind": "health-outcomes"` starts **no conversation**: the
+request's events become [Agent Health business events](agent-health.md#business-outcomes)
+of the agents in its `agentIds` — "order A-123 was placed", "ticket 77 was
+reopened" — which Agent Health matches to the session that set the reference and
+counts as that session's outcome. Everything above still applies: the signature,
+the replay cache, the delivery budget, the vault secret rules, CloudEvents and
+the routing by `triggers`.
+
+```json
+"targets": [
+  { "name": "crm-outcomes", "kind": "health-outcomes", "agentIds": ["<agentId>"], "triggers": ["order.*", "ticket.*"] }
+]
+```
+
+- `agentIds` (1–50) is the **binding**: an event naming another agent is refused,
+  so a leaked signing secret can only feed the agents the target was set up for.
+  Saving the target needs **EDIT** on each of them (it changes how they are
+  judged). No `targetId`, no `GROUP` type, no `observeMode`; webhook
+  integrations only.
+- The body — or a CloudEvent's `data` — is one event, an array of them, or
+  `{"events": [...]}`, at most `eddi.health.events.max-per-request` (100):
+
+```json
+{ "agentId": "<agentId>", "ref": { "orderId": "A-123" }, "event": "order.placed",
+  "value": 49.90, "at": "2026-11-10T09:12:00Z", "id": "crm-evt-981" }
+```
+
+  `ref` names one reference the agent's current version declares in
+  `healthConfig.externalRefs`; `conversationId` may replace it. `agentId` may be
+  left out when the target binds one agent; `event` defaults to the CloudEvent /
+  webhook event type; `at` to the receipt (at most 5 minutes ahead, not older than
+  the turn-row retention); `id` makes a redelivery idempotent (without it, an
+  event identical in every field is stored once).
+- Answer: `202 {"accepted": 2, "duplicates": 0, "refused": [{"index": 3, "reason": "agent_not_bound", "message": "…"}]}`
+  when any event was stored (each refused event says why: `agent_not_bound`,
+  `agent_missing`, `event_missing`, `event_invalid`, `ref_or_conversation_required`,
+  `ref_invalid`, `ref_not_declared`, `conversation_id_invalid`, `value_invalid`,
+  `at_invalid`, `id_invalid`, `not_an_object`, `hashing_unavailable`,
+  `agent_backlog_full`); `422` when none was; `429` when every refusal was a full
+  backlog (`eddi.health.events.max-pending-per-agent`, 10 000 unmatched events per
+  agent); `413` past the per-request cap; `503` with Agent Health off. A repeat
+  of an accepted delivery is `200 {"duplicate": true}`.
+
 ## What the agent sees
 
 - **Input text** — `inputTemplate` rendered with the event as its only data, or
@@ -330,4 +375,5 @@ Each event consumes what a REST conversation would: one conversation slot
   when a vault secret changes. With `eddi-v1`, send both signatures during the
   switch.
 - An integration's targets require USE access to the target agents and groups when
-  it is saved, as for Slack.
+  it is saved, as for Slack — and a `health-outcomes` target EDIT on each of its
+  `agentIds`.

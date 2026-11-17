@@ -219,7 +219,19 @@ principal, not a user: erasing or exporting it is refused with 400.
     nothing for a fenced user and deletes again what it wrote while the fence went up, and the daily
     orphan sweep covers rows evaluated just before a conversation was deleted. The export carries
     them under `sessions` in the `agentHealthOutcomes` section of `additionalData`, newest first, at
-    most 10,000; past that the section says `"truncated": true`
+    most 10,000; past that the section says `"truncated": true`. Turn and session rows also carry the
+    agent's **business references** (`refs`, e.g. `orderId=A-123`, or a salted hash when the agent sets
+    `healthConfig.hashRefs`), exported with them
+20. **Agent Health business events** (`agentHealthEvents`) — **permanently deleted** by the
+    `agentHealthEvents` participant: every event an external system reported through a
+    `health-outcomes` webhook target that was **matched** to one of the user's sessions (a matched
+    event carries the session's user). An event holds the integration id, agent, event type, the
+    business reference in its stored form (plain, or a salted hash), an optional number and times — no
+    text. An event that matched nothing names no user; it can no longer match once the erasure deleted
+    the user's conversations and sessions, and is deleted when `eddi.health.event-match-window` (72 h)
+    passes. A match found while the erasure's fence is up is dropped. Events also go when their
+    conversation is deleted, and expire with the turn rows. The export carries them under `events` in
+    the `agentHealthEvents` section, newest first, at most 10,000 ([details](agent-health.md#business-outcomes))
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -330,6 +342,10 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 - New conversation creation is blocked → returns **403 Forbidden**
 - Message processing (`say`) is blocked → returns **403 Forbidden**
 - Existing data is preserved (not deleted)
+- Ratings are refused (403), and **Agent Health business events** about the user's sessions are
+  dropped when they are matched: nothing new is derived from a restricted user's conversations
+  (counted as `eddi_health_events_total{outcome="restricted"}`; a restriction that cannot be read
+  keeps the event pending — fail closed)
 - Restriction status is stored as a user memory entry under the reserved key
   `_gdpr_processing_restricted` (category `gdpr`). Keys starting with `_gdpr_` are
   reserved for this bookkeeping: agents (`rememberFact`/`forgetFact`), property

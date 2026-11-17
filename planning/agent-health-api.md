@@ -330,3 +330,46 @@ What the H3 backend does where this contract leaves room. Nothing above changed 
 - **Series** of the effectiveness measures are per **session end day**; a day without closed sessions is `value: null, n: 0`.
 - Not done in H3: the "mostly assumed from silence" **reason** (H4 status rules; the breakdown carries what it needs), and
   `healthConfig` interactive-origin overrides (plan §4.5) — which origins are judged is fixed for now.
+
+## 15. Backend notes (H5)
+
+What the H5 backend does where this contract leaves room. (§14 is reserved for the H4 notes.) Points marked
+**deviation** are additions the UI should know about.
+
+- **§8 Export — implemented, with additions (deviation).** `GET /agents/{agentId}/health/export` takes `format=json|csv`
+  (default `json`), `kind=daily|sessions` (default `daily`), `period` or `from`/`to`, and — added — the optional `version`
+  and repeatable `origin` of §1 (§11.7: the UI may keep sending only `format`, `period`, `kind`; absent origins mean the
+  preset's default, as everywhere). `daily` needs VIEW; `sessions` follows the drill-down rule of §6/§13 exactly, with
+  its `403` bodies. Served as an attachment (`Content-Disposition: attachment; filename="agent-health-<kind>-<from>-<to>.<format>"`,
+  `Cache-Control: no-store`), streamed.
+  - **CSV** — a header row, RFC 4180 quoting, a cell a spreadsheet would read as a formula (`= + - @`, tab, CR at the start
+    of a text) gets a leading `'`. **Daily columns, in this order:** `day, turns, conversations, failedTurns,
+    agentFailedTurns, platformFailedTurns, costUsd, totalTokens, sessions, engagedSessions, closedSessions, resolved,
+    resolvedConfirmed, resolvedSelfReported, resolvedAgentClosed, resolvedSilence, escalated, abandoned, deflected,
+    failed, endedQuietly`, then per event type the current version declares in `outcomeEvents` (declaration order)
+    `event:<type>, event:<type>:value`. One row per day of the window, zeros for a day without data. **Session columns:**
+    `conversationId, sessionNo, startedAt, endedAt, agentVersion, origin, engaged, outcome, evidence, provisional, turns,
+    costUsd, failures, refs` (`refs` space-separated, in the stored form — `name=value`, or `name#<hmac>` when hashed).
+  - **JSON** — `{ agentId, kind, period: {from, to, days}, version?, origins, columns (daily only), items: [ {column: value} ],
+    truncated (sessions only) }`; `refs` is an array.
+  - Never a user id, never content. `sessions` holds at most 10 000 rows, newest end first.
+- **Business section (§1) — `event:<eventType>` measures.** One per event type the agent's **current** version declares in
+  `healthConfig.outcomeEvents` (also types mapped to `NONE`), in declaration order; none declared → `measures: []`.
+  `kind: INFORMATIONAL`, `unit: count`, `band: GREY`, `thresholds: null`, `critical: false`. `value`/`n` = business events
+  of that type **matched** to the agent's sessions whose `at` falls in the period (version and origin filters apply to the
+  matched session); `baseline` scaled to the exposure and `significant` tested like the adoption counts (§12).
+  `label` is the type, plus ` → OUTCOME` when mapped. **Deviation —** `breakdown` has three entries: `byReference` and
+  `byConversationId` (counts) and `valueSum` (`value` = the sum of the events' `value`s, `null` when none carried one;
+  `n` = events with a value). The value sum has no baseline. Business measures are **not** series ids yet (`/series` answers
+  `400` for `event:*`) and are not in the version compare.
+- **Evidence values `external_event` / `conversation_id_event` are now written** (§13 said they matched nothing). They rank
+  above `agent_action` and count as `confirmed` in the resolution breakdown. A session decided by an event is
+  `provisional` while its window is open, like a mapped action.
+- **Drill-down rows** carry no refs (unchanged shape); the sessions export does.
+- **Webhook answer of a `health-outcomes` target** (not REST of this contract, documented in `docs/webhook-triggers.md`):
+  `202 {accepted, duplicates, refused: [{index, reason, message}]}`, `422` when nothing was stored, `429` when every refusal
+  was a full per-agent backlog, `413` past 100 events, `503` with Agent Health off; a replayed delivery `200 {duplicate: true}`.
+- **Agent save warning.** Creating or updating an agent whose `healthConfig.externalRefs` names a property no `property.json`
+  of its workflows sets answers `X-Eddi-Warnings: health-ref-not-set:<name>` (comma-separated); the save succeeds.
+- Not done in H5: the Manager's integration editor has no dedicated form for `kind`/`agentIds` (editing such a target there keeps `kind` and `agentIds` — the form spreads unknown fields — but shows no fields for them; create it via `/channelstore/channels`);
+  no MCP export tool (`read_agent_health` carries the business section); business measures in series and compare.

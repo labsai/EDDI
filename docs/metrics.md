@@ -916,6 +916,7 @@ eddi_health_rollup_lag_seconds      # Gauge: age of the oldest waiting agent day
 eddi_health_outcomes_sessions_total # Session outcome rows the outcome evaluation wrote (each re-evaluation counts again)
 eddi_health_outcomes_failures_total # Conversation evaluations that failed (the feed retries them for up to an hour, then with their next change or due time)
 eddi_health_outcomes_lag_seconds    # Gauge: how far the outcome evaluation's watermark is behind the clock (shared state, cached 10 s)
+eddi_health_events_total            # Business events of health-outcomes webhook targets; tag: outcome (accepted|duplicate|refused|matched|expired|restricted|erased)
 ```
 
 No tag carries an agent id. `eddi_health_dropped_total` should stay at zero for its first three reasons:
@@ -930,6 +931,11 @@ growing, or a rising `eddi_health_rollup_failures_total`, means the daily rows â
 and with them the health views â€” are falling behind the turns. Both gauges read
 the shared queue when scraped, so every node reports the same cluster-wide
 backlog. See [Agent Health](agent-health.md#daily-rollup).
+
+`eddi_health_events_total` counts what became of the business events of `health-outcomes` webhook targets:
+a steady `expired` share means events arrive for references no session set (a wrong `externalRefs`
+name, or a reference the agent never records), `refused` that senders send malformed or unbound events,
+and `restricted` / `erased` events dropped for GDPR. See [Agent Health](agent-health.md#business-outcomes).
 
 ### Agent Identity & Signing Metrics
 
