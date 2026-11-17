@@ -67,9 +67,13 @@ public interface HealthAdminStoresContract {
         assertEquals("task", profiles().read("a").orElseThrow().preset());
         assertNull(profiles().read("a").orElseThrow().critical(), "a replace drops what the new body leaves out");
 
+        assertEquals(List.of("b"), profiles().listByAuthor("bob").stream().map(HealthProfile::agentId).toList());
+        assertTrue(profiles().listByAuthor("nobody").isEmpty());
         assertEquals(1, profiles().clearAuthor("bob"));
         assertNull(profiles().read("b").orElseThrow().updatedBy());
         assertEquals("sales", profiles().read("b").orElseThrow().preset(), "the profile stays");
+        assertTrue(profiles().listByAuthor("bob").isEmpty());
+        assertEquals(0, profiles().clearAuthor("bob"), "nothing left to blank");
 
         assertTrue(profiles().delete("a"));
         assertFalse(profiles().delete("a"));
@@ -96,6 +100,10 @@ public interface HealthAdminStoresContract {
         assertEquals(1, alertStates().deleteEvaluatedBefore(AT.minusSeconds(86_400 * 30L)));
         assertTrue(alertStates().read("r1", List.of("b")).isEmpty());
         assertTrue(alertStates().read("r1", List.of()).isEmpty());
+
+        assertEquals(2, alertStates().deleteByAgent("a"), "every rule's state of a deleted agent");
+        assertTrue(alertStates().read("r1", List.of("a")).isEmpty());
+        assertTrue(alertStates().read("r2", List.of("a")).isEmpty());
     }
 
     @Test
@@ -104,7 +112,8 @@ public interface HealthAdminStoresContract {
         HealthReportLink older = new HealthReportLink("r-1", "a", "a".repeat(64), List.of("reliability", "adoption"), "30d", AT.minusSeconds(60),
                 "alice", AT.plusSeconds(3600));
         HealthReportLink newer = new HealthReportLink("r-2", "a", "b".repeat(64), List.of("effectiveness"), "7d", AT, "bob", AT.minusSeconds(10));
-        HealthReportLink other = new HealthReportLink("r-3", "x", "c".repeat(64), List.of(), "90d", AT, "alice", AT.plusSeconds(3600));
+        HealthReportLink other = new HealthReportLink("r-3", "x", "c".repeat(64), List.of(), "90d", AT, "alice", AT.plusSeconds(3600),
+                List.of("team:ops", "team:sales"), true);
         reportLinks().create(older);
         reportLinks().create(newer);
         reportLinks().create(other);
@@ -113,6 +122,11 @@ public interface HealthAdminStoresContract {
         assertEquals(older, found.orElseThrow());
         assertTrue(reportLinks().findByTokenHash("d".repeat(64)).isEmpty());
         assertEquals(List.of("r-2", "r-1"), reportLinks().listByAgent("a").stream().map(HealthReportLink::id).toList());
+        HealthReportLink snapshot = reportLinks().findByTokenHash("c".repeat(64)).orElseThrow();
+        assertEquals(List.of("team:ops", "team:sales"), snapshot.creatorTeams(), "the creator's team snapshot survives");
+        assertTrue(snapshot.creatorAdmin());
+        assertEquals(List.of(), older.creatorTeams());
+        assertEquals(List.of("r-3", "r-1"), reportLinks().listByCreator("alice").stream().map(HealthReportLink::id).toList());
 
         assertFalse(reportLinks().delete("x", "r-1"), "revoking needs the link's own agent");
         assertTrue(reportLinks().delete("a", "r-1"));
@@ -124,5 +138,9 @@ public interface HealthAdminStoresContract {
         assertEquals(1, reportLinks().deleteExpiredBefore(AT));
         assertTrue(reportLinks().listByAgent("a").isEmpty());
         assertEquals(1, reportLinks().listByAgent("x").size());
+
+        assertEquals(1, reportLinks().deleteByAgent("x"), "revoke all");
+        assertTrue(reportLinks().listByAgent("x").isEmpty());
+        assertEquals(0, reportLinks().deleteByAgent("x"));
     }
 }
