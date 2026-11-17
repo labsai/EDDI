@@ -202,7 +202,11 @@ public class ClusterAdminService implements ClusterStartable {
         this.meterRegistry = meterRegistry;
     }
 
-    /** The node-addressed operations the actions fan out to. */
+    /**
+     * Publishes this node's draining flag in its presence record, provisions the
+     * shared claims bucket, keeps this node's drain key in step, and registers the
+     * RPC handlers for the node-addressed operations the actions fan out to.
+     */
     @Override
     public void startCluster() {
         presence.get().contribute(() -> Map.of("draining", natsLeases.get().isDraining()));

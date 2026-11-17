@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -25,8 +25,8 @@ import {
   Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
-import { useSkills } from "@/hooks/use-capabilities";
-import type { Agent, AgentPublicKey, ChannelConnector } from "@/lib/api/agents";
+import { useSkills } from "@eddi/app-kit/hooks/use-capabilities";
+import type { Agent, AgentPublicKey, ChannelConnector } from "@eddi/app-kit/lib/api/agents";
 import {
   DEFAULT_MAX_REVISIONS_PER_TURN,
   MAX_NOTIFY_RECIPIENTS,
@@ -36,18 +36,18 @@ import {
   type AgentHitlConfig,
   type HitlRejectionAction,
   type ToolApprovalsConfig,
-} from "@/lib/api/hitl";
+} from "@eddi/app-kit/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
-import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
-import { CONFIDENCE_COLORS } from "@/lib/constants";
-import { EditorSection } from "./editor-section";
+import { isValidIsoDuration, requiresApprovalTimeout } from "@eddi/app-kit/lib/hitl-config";
+import { CONFIDENCE_COLORS } from "@eddi/app-kit/lib/constants";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 import { ToolApprovalsEditor } from "./tool-approvals-editor";
-import { ApprovalContextEditor } from "./approval-context-editor";
-import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
-import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ApprovalContextEditor } from "@eddi/app-kit/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@eddi/app-kit/lib/hitl-approval-context";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { Button } from "@eddi/ui";
 import { toast } from "sonner";
 
@@ -388,7 +388,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign group-conversation messages"), t("agentDetail.signA2ADesc", "Sign this agent's group-conversation messages with its newest signing key")],
-          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it")],
+          ["requirePeerVerification", t("agentDetail.requirePeer", "Require peer verification"), t("agentDetail.requirePeerDesc", "Check the signatures of earlier speakers' messages before this agent replies in a group conversation. Other agents' messages that do not verify are withheld from it. In a group, once any member, the moderator or the facilitator requires verification, votes, negotiation tables and lessons count only signed entries for everyone, so every agent that writes there should sign. A verifying agent gets no artifact tools. In every conversation, 1:1 chats included, it is shown no group- or global-visible memory about the user that another agent wrote")],
         ] as const).map(([field, label, desc]) => (
           <label key={field} className="flex items-start gap-2.5 py-1">
             <input

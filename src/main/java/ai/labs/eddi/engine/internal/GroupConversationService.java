@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.userevents.GroupUserEvents;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -106,9 +108,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Phase-based orchestrator for multi-agent group conversations. Supports 6
- * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE,
- * TASK_FORCE) plus fully custom phase definitions.
+ * Phase-based orchestrator for multi-agent group conversations. Supports 7
+ * preset discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI,
+ * DEBATE, TASK_FORCE, NEGOTIATION) plus fully custom phase definitions
+ * ({@code CUSTOM}).
  * <p>
  * Agents participate through their normal pipelines via
  * {@link IConversationService#say}. The orchestrator constructs phase-specific
@@ -268,6 +271,14 @@ public class GroupConversationService implements IGroupConversationService, User
     TeamBudgetContext teamBudgetContext;
 
     /**
+     * Raises the per-user stream's team events ({@code GET /me/events}). Same
+     * field-injection pattern and null-safety as {@link #liveDiscussionRegistry}:
+     * {@code null} in the direct-construction unit tests, which then raise nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
+
+    /**
      * I8's lesson store. Same field-injection pattern and null-safety as
      * {@link #attachmentStore} — {@code null} in direct-construction unit tests,
      * where a RETRO phase runs but persists nothing (warned, never failed).
@@ -388,7 +399,7 @@ public class GroupConversationService implements IGroupConversationService, User
         this.scheduleStore = scheduleStore;
         this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
-        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId);
+        this.signingGuard = new GroupSigningGuard(agentStore, agentSigningService, defaultTenantId, groupStore);
         this.contextBuilder = new GroupContextBuilder(templatingEngine);
         this.contextBuilder.setSigningGuard(signingGuard);
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
@@ -414,14 +425,17 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        this.phaseExecutionEngine.setSigningGuard(signingGuard);
         this.phaseExecutionEngine
                 .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
                 this::discussionOwnerMayUse);
+        this.facilitatorEngine.setSigningGuard(signingGuard);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 discussionControls, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
+        this.taskForceEngine.setSigningGuard(signingGuard);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
         // for the executeDiscussion/resolvePhases/cleanupEphemeralAgents callbacks
         // resumeDiscussion and cleanupAfterTerminalState make back into the facade.
@@ -920,6 +934,10 @@ public class GroupConversationService implements IGroupConversationService, User
                         gc.getId(), gc.getRound(), question, phaseList.size()));
             }
         }
+        if (startPhaseIndex == 0) {
+            // Round 1 or a continuation round; a resume after a pause is not a start.
+            GroupUserEvents.started(userEventPublisher, gc, config);
+        }
 
         // I1: set once the cost ceiling fires under SYNTHESIZE_NOW. From then on the
         // phase loop skips every non-SYNTHESIS phase but still runs any remaining
@@ -951,7 +969,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // recruit tool would then resolve that dead instance, accept the write
             // and tell the model it succeeded, for a mutation nothing will persist.
             if (liveDiscussionRegistry != null) {
-                liveDiscussionRegistry.register(gc);
+                liveDiscussionRegistry.register(gc, signingGuard);
                 holdGroupLease(gc.getId());
             }
 
@@ -1212,9 +1230,11 @@ public class GroupConversationService implements IGroupConversationService, User
                     // ends the phase's repeats early through the same outcome
                     // plumbing convergence uses. Applied BEFORE the persist below so
                     // the table and the turns that produced it share one write.
+                    // Once any reader requires peer verification, the table every member is
+                    // shown is built only from moves that verify for all of them.
                     if (phase.type() == PhaseType.PROPOSAL || phase.type() == PhaseType.BARGAIN) {
-                        NegotiationEngine.applyRepeat(gc, repeatEntries, transcriptSizeBeforeRepeat, repeat,
-                                config.getNegotiationConfig());
+                        NegotiationEngine.applyRepeat(gc, GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                transcriptSizeBeforeRepeat, repeat, config.getNegotiationConfig());
                         if (phase.type() == PhaseType.BARGAIN
                                 && NegotiationEngine.checkAndRecordAgreement(gc, speakers, config.getModeratorAgentId(), phase.name())) {
                             outcome = PhaseOutcome.endRepeats("Unanimous acceptance — agreement reached");
@@ -1318,7 +1338,8 @@ public class GroupConversationService implements IGroupConversationService, User
                         boolean arbitrated = false;
                         if (phase.skipIf() == AgentGroupConfiguration.PhaseSkipCondition.AGREEMENT_REACHED) {
                             boolean hadDecision = gc.getDecision() != null;
-                            NegotiationEngine.recordArbitration(gc, repeatEntries, phase.name());
+                            NegotiationEngine.recordArbitration(gc, GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                    phase.name());
                             arbitrated = !hadDecision && gc.getDecision() != null;
                         }
                         if (config.isRecordDissents()) {
@@ -1350,7 +1371,11 @@ public class GroupConversationService implements IGroupConversationService, User
                     // not the retrospective — and BEFORE the persist below, so a
                     // crash cannot lose lessons a stored document claims were taken.
                     if (phase.type() == PhaseType.RETRO && lastRepeat) {
-                        RetroEngine.harvest(gc, config.getRetroConfig(), repeatEntries, userMemoryStore, phase.name(), listener);
+                        // Lessons become team memory every later discussion reads, so only
+                        // retrospectives that verify for every reader are harvested once
+                        // any reader requires it.
+                        RetroEngine.harvest(gc, config.getRetroConfig(), GroupSigningGuard.recordedEntries(signingGuard, gc, config, repeatEntries),
+                                userMemoryStore, phase.name(), listener);
                     }
 
                     // Overview dashboard: refresh the one-line member stances from
@@ -1393,7 +1418,9 @@ public class GroupConversationService implements IGroupConversationService, User
 
                     // A human tie-break owns this boundary: a deferred escalation is
                     // recorded and dropped (the decider is about to be asked anyway).
-                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase);
+                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase,
+                            config.getFacilitator() != null ? config.getFacilitator().agentId() : null,
+                            entry -> signingGuard.sign(gc, entry));
                     // I12: apply the checkpoint's stashed structural effects now that
                     // the repeat's own decisions are recorded and persisted.
                     if (deferredFacilitatorAction != null) {
@@ -1424,14 +1451,15 @@ public class GroupConversationService implements IGroupConversationService, User
                                                                 || !gc.getTaskList().findExecutableTasks().isEmpty())));
                                 if (boundaryGateWillPause) {
                                     var suppressed = deferredFacilitatorAction.escalation();
-                                    gc.getTranscript().add(new TranscriptEntry(
-                                            config.getFacilitator().agentId(), "Facilitator",
+                                    // Signed for the facilitator: the question is its own.
+                                    gc.getTranscript().add(signingGuard.sign(gc, new TranscriptEntry(
+                                            config.getFacilitator().agentId(), AgentGroupStore.FACILITATOR_SPEAKER_NAME,
                                             "Facilitator escalation to " + suppressed.principalId()
                                                     + " suppressed — this phase requires human approval, which takes "
                                                     + "precedence. The facilitator's question for the approver: "
                                                     + suppressed.question(),
                                             phaseIdx, phase.name(), TranscriptEntryType.FACILITATION, Instant.now(),
-                                            null, null));
+                                            null, null)));
                                     LOGGER.infof("Facilitator escalation for group %s suppressed at phase %d — the "
                                             + "phase's own approval gate takes precedence", LogSanitizer.sanitize(gc.getGroupId()), phaseIdx);
                                     // fall through to the HITL gate below
@@ -1774,7 +1802,32 @@ public class GroupConversationService implements IGroupConversationService, User
                     || gc.getState() == GroupConversationState.CANCELLED) {
                 cleanupEphemeralAgents(gc, config);
             }
+            // Last, once the state this leg leaves behind is settled (a pause converted to
+            // a cancel above included): paused, waiting for a human, or ended.
+            GroupUserEvents.afterLeg(userEventPublisher, gc, config);
         }
+    }
+
+    /**
+     * Raises the per-user stream's event for a discussion's current state outside a
+     * running leg — the cancel of a paused discussion. Best effort: the group's
+     * configuration is read for its HUMAN members, and without it only the owner is
+     * told.
+     */
+    public void announceUserEvents(GroupConversation gc) {
+        if (userEventPublisher == null || gc == null) {
+            return;
+        }
+        AgentGroupConfiguration config = null;
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Group %s not readable for its user events: %s", LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+        }
+        GroupUserEvents.afterLeg(userEventPublisher, gc, config);
     }
 
     // =================================================================
@@ -2121,9 +2174,11 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     private GroupLifecycleOps lifecycleOps() {
-        return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
+        var ops = new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
                 deploymentStore, sharedArtifactStore, attachmentStore, operationsInProgress, discussionControls, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
+        ops.setSigningGuard(signingGuard);
+        return ops;
     }
 
     public static void propagateDynamicAgentTracking(
@@ -2267,6 +2322,73 @@ public class GroupConversationService implements IGroupConversationService, User
             }
         }
         return ceiling;
+    }
+
+    /**
+     * {@code task}, from the finished discussion {@code gc}, as the group's records
+     * count it once a member, the moderator or the facilitator requires peer
+     * verification: text that does not verify for all of them is withheld. What a
+     * standing team's cadence carries into its backlog. A group whose configuration
+     * cannot be read is counted as verifying.
+     */
+    public TaskItem recordedTask(GroupConversation gc, TaskItem task) {
+        return GroupSigningGuard.recordedTask(signingGuard, gc, recordsConfigOf(gc.getGroupId()), task);
+    }
+
+    /**
+     * The retry feedback a standing team's cadence keeps from {@code task}, a task
+     * of the finished discussion {@code gc}: its text as {@link #recordedTask}
+     * counts it, who wrote it, and whether it had to verify to be kept.
+     * {@code null} when the task left neither a note nor a result.
+     */
+    public GroupSigningGuard.RecordedFeedback recordedFeedback(GroupConversation gc, TaskItem task) {
+        return GroupSigningGuard.recordedFeedback(signingGuard, gc, recordsConfigOf(gc.getGroupId()), task);
+    }
+
+    /**
+     * Whether group {@code groupId}'s records, as its readers stand now, may quote
+     * retry feedback {@link #recordedFeedback} kept: see
+     * {@link GroupSigningGuard#recordsTrustFeedback}. A group whose configuration
+     * cannot be read is counted as verifying.
+     */
+    public boolean recordsTrustFeedback(String groupId, String authorAgentId, boolean verified, Integer authorKeyVersion) {
+        return GroupSigningGuard.recordsTrustFeedback(signingGuard, recordsConfigOf(groupId), authorAgentId, verified, authorKeyVersion);
+    }
+
+    /**
+     * Whether group {@code groupId}'s records take a backlog task agent
+     * {@code agentId} handed off as that agent's text: none of its readers requires
+     * peer verification, or the agent signs verifiably. A standing team's cadence
+     * pulls only such tasks, and a group whose configuration cannot be read is
+     * counted as verifying.
+     */
+    public boolean recordsTrustAgentText(String groupId, String agentId) {
+        return recordsTrustAgentText(recordsConfigOf(groupId), agentId);
+    }
+
+    /**
+     * As {@link #recordsTrustAgentText(String, String)}, for a group configuration
+     * already read; {@code null} counts as verifying.
+     */
+    public boolean recordsTrustAgentText(AgentGroupConfiguration config, String agentId) {
+        return GroupSigningGuard.recordsTrustAgentText(signingGuard, config, agentId);
+    }
+
+    /**
+     * The group's current configuration, or {@code null} (verified-only) when it
+     * cannot be read.
+     */
+    private AgentGroupConfiguration recordsConfigOf(String groupId) {
+        try {
+            IResourceStore.IResourceId current = groupStore.getCurrentResourceId(groupId);
+            if (current != null) {
+                return groupStore.read(groupId, current.getVersion());
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read group '%s' to learn who reads its records (%s): counting them as verified-only",
+                    LogSanitizer.sanitize(groupId), e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -2689,9 +2811,8 @@ public class GroupConversationService implements IGroupConversationService, User
             throws IResourceStore.ResourceStoreException, GroupDiscussionException {
 
         // F6: a root discussion of a team with no budget left is refused before
-        // anything
-        // is created. A nested child is never gated: its parent already paid for the
-        // slot.
+        // anything is created. A nested child is never gated: its parent already paid
+        // for the slot.
         if (depth == 0 && teamBudgetService != null) {
             teamBudgetService.admit(groupId, TeamBudgetService.Surface.DISCUSSION);
         }
@@ -2940,7 +3061,9 @@ public class GroupConversationService implements IGroupConversationService, User
      * GDPR erasure: cancels, immediately, every discussion running on this node for
      * {@code userId}. Deleting a running discussion's document did not stop it —
      * its next phase wrote the document back — so the cascade signals first. A
-     * discussion on another node is not reachable from here; it is stopped by its
+     * discussion on another node is not signalled by this sweep (in cluster mode
+     * the erasing node asks that node over {@code IClusterRpc.GDPR_STOP}, which
+     * ends in {@link #stopInFlightWorkByHash}); failing that, it is stopped by its
      * next conditional write ({@link RunningDiscussionWrites}) finding the document
      * gone rather than recreating it.
      */

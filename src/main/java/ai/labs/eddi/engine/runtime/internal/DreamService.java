@@ -401,7 +401,7 @@ public class DreamService {
             // would pick a winner after all, and consolidating a superseded one would
             // bring the retired value back.
             if (dreamConfig.isSummarizeInteractions()) {
-                var outcome = summarizeInteractions(userId, acceptedOnly(currentEntries), dreamConfig, conflicts);
+                var outcome = summarizeInteractions(userId, agentId, acceptedOnly(currentEntries), dreamConfig, conflicts);
                 summarized = outcome.entriesReduced();
                 estimatedCost = outcome.estimatedCostUsd();
                 summarizationError = outcome.error();
@@ -607,7 +607,7 @@ public class DreamService {
      * {@link #isTransientLlmFailure}</li>
      * </ul>
      */
-    private SummarizationOutcome summarizeInteractions(String userId,
+    private SummarizationOutcome summarizeInteractions(String userId, String agentId,
                                                        List<UserMemoryEntry> entries,
                                                        AgentConfiguration.DreamConfig config, AtomicInteger conflicts) {
         int totalConsolidated = 0;
@@ -818,9 +818,24 @@ public class DreamService {
                     .map(UserMemoryEntry::sourceAgentId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
+            // A merge of several agents' entries is the housekeeping agent's own model
+            // text. Credited to the first original, it read as the user's (no owner) or
+            // as that agent's, and a reader that requires peer verification loaded the
+            // other agents' unsigned facts with it.
             String sourceAgent = distinctAgents.size() == 1
                     ? distinctAgents.iterator().next()
-                    : groupEntries.getFirst().sourceAgentId();
+                    : distinctAgents.isEmpty() ? null : agentId;
+            // Who wrote the merged text goes by who wrote the originals' values, not by
+            // who owns them: a user's global key an agent overwrote keeps the user as
+            // owner, and a merge of it written as no agent's passed that agent's text to
+            // every verifying reader as the user's.
+            Set<String> distinctWriters = groupEntries.stream()
+                    .map(UserMemoryEntry::lastWriterAgentId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toSet());
+            String writer = distinctWriters.size() == 1
+                    ? distinctWriters.iterator().next()
+                    : distinctWriters.isEmpty() ? null : agentId;
             // Defence in depth: should a future grouping change ever hand us a
             // self-scoped group spanning several agents, skip it rather than
             // widen it — a privacy boundary must fail closed.
@@ -907,7 +922,7 @@ public class DreamService {
                             groupEntries.getFirst().category(),
                             mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
-                            earliestCreated, Instant.now());
+                            earliestCreated, Instant.now(), writer);
                     var toWrite = cite ? consolidatedEntry.withSourceEntryIds(sourceEntryIds(entry, groupEntries)) : consolidatedEntry;
                     // An entry that reuses an original is meant to overwrite it. Any other
                     // entry must be new: the collision check above ran before this write,
@@ -994,9 +1009,10 @@ public class DreamService {
 
     /**
      * Transient-failure signatures in an exception message — throttling, timeouts
-     * and server-side 5xx, which resolve on their own. Mirrors
-     * {@code CascadingModelExecutor.isRetryableError} /
-     * {@code AgentExecutionHelper} (both private to their modules).
+     * and server-side 5xx, which resolve on their own. A deliberately simpler,
+     * message-only counterpart of {@code RetryConfiguration.isRetryableError}
+     * (which classifies through {@code LlmFailureClassifier} and is what
+     * {@code CascadingModelExecutor} uses).
      */
     private static final Pattern TRANSIENT_LLM_FAILURE = Pattern.compile(
             "timeout|timed out|rate limit|too many requests|429|50[234]|529|overloaded|temporarily unavailable",
@@ -1345,8 +1361,8 @@ public class DreamService {
     }
 
     /**
-     * Parse the LLM consolidation response into structured entries. Handles
-     * markdown fences ({@code ```json ... ```}) and extracts the JSON array.
+     * One entry of the model's consolidation answer: a key/value pair and the refs
+     * it cites.
      */
     record ConsolidatedEntry(String key, String value, List<Integer> sources) {
 
@@ -1508,6 +1524,12 @@ public class DreamService {
         return start < 0 || end <= start ? null : cleaned.substring(start, end + 1);
     }
 
+    /**
+     * Parse the LLM consolidation response into structured entries. Handles
+     * markdown fences ({@code ```json ... ```}) and extracts the JSON array;
+     * anything unparseable yields an empty list, which the caller treats as "keep
+     * the originals".
+     */
     List<ConsolidatedEntry> parseConsolidatedEntries(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
             return List.of();

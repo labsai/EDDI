@@ -13,7 +13,8 @@ package ai.labs.eddi.modules.nlp.internal;
  * bounded. The bounds are part of the parser's workflow configuration
  * ({@code maxInputTokens}, {@code maxSuggestions}, {@code maxSolutions}) so an
  * agent designer can widen or narrow them; the defaults below are generous
- * enough that ordinary conversational input is never affected.
+ * enough that ordinary conversational input is never affected. A value below 1
+ * falls back to its default.
  *
  * @param maxInputTokens
  *            maximum number of whitespace separated tokens taken from one user

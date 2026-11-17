@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
-import { useCreateAgent } from "@/hooks/use-agents";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { useCreateAgent } from "@eddi/app-kit/hooks/use-agents";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 
 interface CreateAgentDialogProps {
   open: boolean;

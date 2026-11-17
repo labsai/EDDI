@@ -31,12 +31,14 @@ import org.jboss.logging.Logger;
  * credential.
  *
  * <h3>Why forwarding the token here is safe</h3> The one-argument
- * {@link RestInterfaceFactory#get(Class)} addresses {@code 127.0.0.1} on this
- * process's own HTTP port. The destination is not merely same-origin, it is
- * this very process — so the token is handed back to the service that issued
- * the request it came from. The two-argument overload, which names an arbitrary
- * remote instance for cross-instance sync, deliberately does <b>not</b> get
- * this filter: that is the case where forwarding a token would leak it.
+ * {@link RestInterfaceFactory#get(Class)} addresses this process's own HTTP
+ * listener (loopback, or the one specific address {@code quarkus.http.host}
+ * binds). The destination is not merely same-origin, it is this very process —
+ * so the token is handed back to the service that issued the request it came
+ * from. When that address cannot be resolved (a random port), the filter is not
+ * attached at all. The two-argument overload, which names an arbitrary remote
+ * instance for cross-instance sync, deliberately does <b>not</b> get this
+ * filter: that is the case where forwarding a token would leak it.
  *
  * <h3>Consequences worth knowing</h3> With the caller's token attached, the
  * inner request authenticates as the real user rather than as nobody. So

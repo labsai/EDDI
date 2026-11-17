@@ -94,4 +94,11 @@ class AbstractResourceStoreTest {
         assertSame(mockId, result);
         verify(historizedStore).getCurrentResourceId("id1");
     }
+
+    @Test
+    void shouldDelegateGetNewestVersionIncludingDeleted() throws Exception {
+        when(historizedStore.getNewestVersionIncludingDeleted("id1")).thenReturn(4);
+
+        assertEquals(4, store.getNewestVersionIncludingDeleted("id1"));
+    }
 }

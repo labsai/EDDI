@@ -1,4 +1,4 @@
-import { setBrand } from "./brand";
+import { setBrand } from "@eddi/app-kit/lib/brand";
 
 /**
  * Per document: how many calls there have been, and the newest brand whose

@@ -75,7 +75,8 @@ public interface IRestRagIngestion {
     @GET
     @Path("/{id}/ingestion/{ingestionId}/status")
     @Produces(MediaType.APPLICATION_JSON)
-    @APIResponse(responseCode = "200", description = "Ingestion status: pending, processing, completed, or failed.")
+    @APIResponse(responseCode = "200",
+                 description = "Ingestion status: pending, processing, completed, or failed.")
     @Operation(summary = "Get ingestion status", description = "Poll the status of an async ingestion operation.")
     Response getIngestionStatus(@PathParam("id") String ragConfigId, @PathParam("ingestionId") String ingestionId);
 

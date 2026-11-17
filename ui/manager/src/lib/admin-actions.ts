@@ -1,5 +1,5 @@
-import { isApiError } from "@/lib/api-client";
-import type { AdminAction } from "@/lib/api/audit";
+import { isApiError } from "@eddi/app-kit/lib/api-client";
+import type { AdminAction } from "@eddi/app-kit/lib/api/audit";
 
 /** The mutating methods `AdminActionAuditFilter` records. */
 export const ADMIN_ACTION_METHODS = ["POST", "PUT", "PATCH", "DELETE"] as const;

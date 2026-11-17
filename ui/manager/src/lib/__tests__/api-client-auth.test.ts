@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
-import { api } from "../api-client";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { api } from "@eddi/app-kit/lib/api-client";
 
 const PATH = "/agentstore/agents";
 const URL = `${window.location.origin}${PATH}`;

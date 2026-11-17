@@ -126,6 +126,7 @@ public class ConversationMemory implements IConversationMemory {
      * Transient like the config beside it; {@code null} = derive from the config.
      */
     private transient Boolean memoryToolsEnabled;
+    private transient boolean peerVerificationRequired;
 
     public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
         this(agentId, agentVersion, userId);
@@ -650,6 +651,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
         this.memoryToolsEnabled = memoryToolsEnabled;
+    }
+
+    @Override
+    public boolean isPeerVerificationRequired() {
+        return peerVerificationRequired;
+    }
+
+    @Override
+    public void setPeerVerificationRequired(boolean peerVerificationRequired) {
+        this.peerVerificationRequired = peerVerificationRequired;
     }
 
     /**

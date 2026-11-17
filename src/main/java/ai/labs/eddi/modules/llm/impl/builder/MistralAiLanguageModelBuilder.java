@@ -35,7 +35,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * synchronous and the streaming client alike. Mistral's
  * {@code reasoning_effort}, {@code service_tier}, {@code top_k},
  * {@code min_tokens} and {@code prompt_mode} cannot be configured: langchain4j
- * 1.22.0 has no setter for them and its Mistral client offers no way to add raw
+ * 1.23.0 has no setter for them and its Mistral client offers no way to add raw
  * body fields.
  */
 @ApplicationScoped

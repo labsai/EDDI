@@ -16,7 +16,8 @@ import java.util.function.LongSupplier;
 /**
  * A process-local {@link ISharedKv} with the same create / compare-and-set /
  * expiry semantics as a NATS KV bucket: a single monotonic revision counter for
- * the whole bucket, and a value that is not rewritten within the TTL vanishes.
+ * the whole bucket, and a value that is not rewritten within the TTL vanishes
+ * (a {@code null} or zero TTL means no expiry).
  * <p>
  * Used as the degraded-mode fallback of components whose policy is
  * {@code local}, by the in-memory {@link ISharedStateFactory}, and by the unit

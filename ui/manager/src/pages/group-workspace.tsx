@@ -5,17 +5,17 @@ import {
   SquareKanban, ClipboardList, Plus, Trash2, RefreshCw, Users, DollarSign, CheckCircle2, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@eddi/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Badge, Button } from "@eddi/ui";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { HandoffInbox } from "@/components/groups/handoff-inbox";
 import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
-import { getErrorMessage } from "@/lib/api-client";
-import { cn, formatUsd } from "@/lib/utils";
-import { TeamBudgetCard } from "@/components/workforce/team-budget-card";
-import { useGroup, useGroupDescriptors, useResolvedGroupVersion } from "@/hooks/use-groups";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
+import { TeamBudgetCard } from "@eddi/app-kit/components/workforce/team-budget-card";
+import { useGroup, useGroupDescriptors, useResolvedGroupVersion } from "@eddi/app-kit/hooks/use-groups";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { useSchedules } from "@/hooks/use-schedules";
@@ -34,7 +34,7 @@ import {
   isValidCron,
   listTimeZones,
   type ScheduleConfiguration,
-} from "@/lib/api/schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 import {
   useGroupWorkspace,
   useAddWorkspaceBacklogTask,
@@ -406,6 +406,25 @@ export function GroupWorkspacePage() {
                   )}
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
+                {(workspace.backlogFeedback ?? [])
+                  .filter((f) => f.taskId === task.id)
+                  .map((f, i) => (
+                    <div
+                      key={`${f.runId}-${i}`}
+                      className="mt-1 border-s-2 border-border ps-2 text-[10px] text-muted-foreground"
+                      data-testid={`backlog-feedback-${task.id}-${i}`}
+                    >
+                      <div className="flex items-center gap-1.5 font-medium">
+                        <span>{t("groupWorkspace.feedbackRun", "Retry feedback, run {{run}}", { run: f.runId })}</span>
+                        {f.verified && (
+                          <Badge variant="outline" data-testid={`backlog-feedback-verified-${task.id}-${i}`}>
+                            {t("groupWorkspace.feedbackVerified", "Verified")}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="whitespace-pre-wrap break-words">{f.text}</p>
+                    </div>
+                  ))}
                 {task.bet && (
                   <BetDetails
                     taskId={task.id}

@@ -6,7 +6,7 @@ import { ThemeProvider } from "@eddi/ui";
 import { type ReactNode } from "react";
 import { usePlatformStatus } from "@/hooks/use-platform-status";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 
 function createWrapper() {
   const queryClient = new QueryClient({

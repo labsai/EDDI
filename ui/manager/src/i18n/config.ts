@@ -1,10 +1,5 @@
-import i18n from "i18next";
-import { initReactI18next } from "react-i18next";
-import LanguageDetector from "i18next-browser-languagedetector";
-import { setDefaultVariables, setupI18n, SUPPORTED_LANGUAGES, type LocaleLoader, type SupportedLanguage } from "@eddi/ui";
-import { withConversationLocales } from "@eddi/conversation";
+import { i18n, setupAppI18n, type AppLocaleLoaders } from "@eddi/app-kit/i18n/app-i18n";
 import en from "./locales/en.json";
-import { brandVariables, getBrand, subscribeBrand } from "@/lib/brand";
 
 // The locale list, the RTL subset and the lazy backend are @eddi/ui's, shared
 // with the Chat UI (ui/packages/ui/src/i18n). Re-exported for the Manager's own
@@ -27,10 +22,15 @@ export { isRtlLanguage, RTL_LANGUAGES, SUPPORTED_LANGUAGES, type SupportedLangua
  * still missing. That also keeps the test suite synchronous — nothing has to
  * await a chunk to assert on English text.
  *
+ * These files hold the Manager's own strings. What the components shared with
+ * Workforce render lives in @eddi/app-kit (`src/i18n/locales`), and Workforce's
+ * own strings in `ui/workforce/src/i18n/locales`; `setupAppI18n` merges the
+ * package's bundle (and @eddi/conversation's) into each of these.
+ *
  * The record's type makes a locale added to `SUPPORTED_LANGUAGES` without a
  * loader here a compile error.
  */
-const LOCALE_LOADERS: Record<Exclude<SupportedLanguage, "en">, LocaleLoader> = {
+const LOCALE_LOADERS: AppLocaleLoaders = {
   de: () => import("./locales/de.json"),
   fr: () => import("./locales/fr.json"),
   es: () => import("./locales/es.json"),
@@ -46,42 +46,13 @@ const LOCALE_LOADERS: Record<Exclude<SupportedLanguage, "en">, LocaleLoader> = {
 /**
  * Resolves once the detected language's bundle is in memory.
  *
- * `main.tsx` awaits this before the first render. Without it the app paints in
- * English and then swaps to the real language a moment later — a visible flash
- * of the wrong language on every cold load in a non-English locale. Awaiting
- * costs one chunk fetch that would have happened anyway.
- *
- * It never rejects: a failed locale chunk resolves through i18next's own
- * fallback to English, which is a worse UI than intended but a working one.
- * `setupI18n` (@eddi/ui) also keeps `dir` and `lang` on `<html>` in step with
- * the RESOLVED language.
+ * `main.tsx` awaits this (through `startApp`) before the first render. Without
+ * it the app paints in English and then swaps to the real language a moment
+ * later — a visible flash of the wrong language on every cold load in a
+ * non-English locale. It never rejects: a failed locale chunk resolves through
+ * i18next's own fallback to English. `setupI18n` (@eddi/ui) also keeps `dir` and
+ * `lang` on `<html>` in step with the RESOLVED language.
  */
-/**
- * The shared `conversation.*` strings (@eddi/conversation) ride along in each
- * locale's bundle: the components the Manager takes from that package render
- * them.
- */
-const bundles = withConversationLocales(en, LOCALE_LOADERS);
-
-export const i18nReady: Promise<unknown> = setupI18n({
-  i18n,
-  languages: SUPPORTED_LANGUAGES,
-  english: bundles.english,
-  loaders: bundles.loaders,
-  plugins: [LanguageDetector, initReactI18next],
-  // `{{productName}}` / `{{shortName}}` in any string, from the deployment's
-  // brand (src/lib/brand.ts). Set before `i18nReady` resolves, so the first
-  // render already carries the brand (white-label plan, R11).
-  defaultVariables: brandVariables(getBrand()),
-  init: {
-    detection: {
-      order: ["localStorage", "navigator"],
-      caches: ["localStorage"],
-    },
-  },
-});
-
-// A brand applied at runtime (the settings page, after a save).
-subscribeBrand(() => setDefaultVariables(i18n, brandVariables(getBrand())));
+export const i18nReady: Promise<unknown> = setupAppI18n(en, LOCALE_LOADERS);
 
 export default i18n;

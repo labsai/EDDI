@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 
 function renderDialog(props: { isPending?: boolean; onOpenChange?: (o: boolean) => void } = {}) {
   const onOpenChange = props.onOpenChange ?? vi.fn();

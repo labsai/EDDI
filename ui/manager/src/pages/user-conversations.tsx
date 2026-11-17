@@ -15,16 +15,16 @@ import {
   Target,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { AgentPicker } from "@/components/shared/agent-picker";
-import { ENVIRONMENTS } from "@/lib/constants";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
+import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
+import { ENVIRONMENTS } from "@eddi/app-kit/lib/constants";
 import {
   useUserConversation,
   useCreateUserConversation,
   useDeleteUserConversation,
 } from "@/hooks/use-user-conversations";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@eddi/app-kit/hooks/use-debounce";
 
 export function UserConversationsPage({
   embedded,

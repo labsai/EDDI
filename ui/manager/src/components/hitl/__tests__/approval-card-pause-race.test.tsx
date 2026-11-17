@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
-import { useApprovalStatus } from "@/hooks/use-hitl";
-import { getApprovalStatus, type ApprovalStatusSummary } from "@/lib/api/hitl";
+import { useApprovalStatus } from "@eddi/app-kit/hooks/use-hitl";
+import { getApprovalStatus, type ApprovalStatusSummary } from "@eddi/app-kit/lib/api/hitl";
 
-vi.mock("@/lib/api/hitl", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api/hitl")>()),
+vi.mock("@eddi/app-kit/lib/api/hitl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@eddi/app-kit/lib/api/hitl")>()),
   getApprovalStatus: vi.fn(),
 }));
 

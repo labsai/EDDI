@@ -21,10 +21,9 @@ import java.util.Map;
  * {@link java.util.concurrent.RejectedExecutionException}, so the status is
  * already right — but the body reads {@code "error": "capacity_exceeded"},
  * which is the wrong event: nothing is saturated, the quota store could not
- * answer. That is what
- * {@code POST /agents/&#123;environment&#125;/&#123;agentId&#125;} returned
+ * answer. That is what {@code POST /agents/&#123;agentId&#125;/start} returned
  * during a quota-store outage, because
- * {@code RestAgentEngine.startConversationWithContext} catches only the three
+ * {@code RestAgentEngine.startConversationWithContext} catches only the
  * conditions it reports itself and lets everything else reach a mapper — while
  * {@code docs/metrics.md} and the dashboard both promise the honest code on
  * that path.

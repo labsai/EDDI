@@ -59,9 +59,7 @@ public final class JacksonCanonicalizer {
      * <strong>Not RFC 8785 (JCS).</strong> Numbers keep Jackson's default
      * serialization, so a payload containing numbers may canonicalize to different
      * bytes than a true JCS implementation would produce — see the class-level
-     * note. This method's Javadoc used to claim RFC 8785 outright, which would send
-     * a peer implementing verification against JCS number formatting straight into
-     * failing signature checks.
+     * note.
      *
      * @param json
      *            the input JSON string

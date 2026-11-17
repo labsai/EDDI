@@ -17,7 +17,7 @@ import {
 import {
   ApiCallsEditor,
   type HttpCallsConfig as ApiCallsConfig,
-} from "@/components/editors/apicalls-editor";
+} from "@eddi/app-kit/components/editors/apicalls-editor";
 import {
   OutputEditor,
   type OutputConfig,

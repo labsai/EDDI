@@ -438,8 +438,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Live memories of conversations currently executing on THIS pod, keyed by
      * conversationId. Lets {@link #cancelConversation} set the cooperative
      * {@code cancelled} flag that {@code LifecycleManager} checks at task
-     * boundaries. Cross-pod cancellation of an actively-executing turn is not
-     * supported — the DB CAS handles the paused/persisted states.
+     * boundaries. A turn running on another node is reached in cluster mode through
+     * {@link #signalRemoteInFlight}; the DB CAS handles the paused/persisted
+     * states.
      */
     private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations = new ConcurrentHashMap<>();
 
@@ -1113,9 +1114,9 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
         // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
-        // its
-        // own schedule delete, so gating this on AWAITING_HUMAN would miss that window
-        // and leave a stale one-shot timer armed against the now-ended conversation.
+        // its own schedule delete, so gating this on AWAITING_HUMAN would miss that
+        // window and leave a stale one-shot timer armed against the now-ended
+        // conversation.
         conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
         // An ended conversation runs no more turns: withdraw a pending continuation
         // (its fire would refuse an ENDED conversation anyway; this is the prompt
@@ -1159,8 +1160,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            // The current step needs no history: read only the tail (see readConversation
-            // below).
+            // The current step needs no history: read only the tail (see the
+            // conversationId-only readConversation below).
             var tail = Boolean.TRUE.equals(returnCurrentStepOnly) ? requireTail(conversationId) : null;
             var conversationMemorySnapshot = tail != null ? tail.snapshot() : requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
@@ -1464,6 +1465,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+                streamingHandler.onToolResult(toolName, callId, status, durationMs, summary);
+            }
+
+            @Override
             public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                 streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
             }
@@ -1739,7 +1745,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
                 | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException | TurnCapacityExceededException e) {
-            // All five are thrown before the turn is admitted, and none is an internal
+            // All of these are thrown before the turn is admitted, and none is an internal
             // fault of this class: the generic handler below logs a full ERROR stack
             // trace, which for the restriction-unavailable case meant every turn of
             // every user wrote two of them (here and again in RestAgentEngine) for the
@@ -2529,6 +2535,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
 
         @Override
+        public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            delegate.onToolResult(toolName, callId, status, durationMs, summary);
+        }
+
+        @Override
         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
             idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, true));
             delegate.onSkipped(snapshot);
@@ -2701,10 +2712,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     List<String> groups = visibility == Visibility.group ? groupIds : List.of();
                     boolean sameIdentity = (visibility == Visibility.global) == (current.visibility() == Visibility.global);
                     if (sameIdentity) {
+                        // The row keeps its owner, but the value is the one this
+                        // conversation held, so its agent is the writer — on a global
+                        // row the owner may be another agent.
                         Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
                         userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), visibility,
                                 current.sourceAgentId(), groups, conversationId, false, current.accessCount(), current.createdAt(),
-                                current.updatedAt()));
+                                current.updatedAt(), agentId));
                     } else if (sameKey.stream().noneMatch(e -> (e.visibility() == Visibility.global) == (visibility == Visibility.global))) {
                         // The entry moves between the shared global row and this agent's
                         // row, which are different documents.
@@ -3448,10 +3462,9 @@ public class ConversationService implements IConversationService, UserErasurePar
     //
     // Bodies moved to ConversationHitlService (R3 step 1). These stay as declared
     // delegators: cancelConversation, resumeConversation,
-    // getConversationMemorySnapshot
-    // and listPendingApprovals are IConversationService contract methods, and the
-    // cluster's internals are reached by characterization tests through
-    // getDeclaredMethod on this class.
+    // getConversationMemorySnapshot and listPendingApprovals are
+    // IConversationService contract methods, and the cluster's internals are
+    // reached by characterization tests through getDeclaredMethod on this class.
 
     @Override
     public CancelOutcome cancelConversation(String conversationId,
