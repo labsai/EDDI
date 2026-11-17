@@ -416,6 +416,22 @@ public final class NegotiationEngine {
      */
     public static String appendStateIfRelevant(String input, GroupConversation gc, DiscussionPhase phase,
                                                NegotiationConfig config) {
+        return appendStateIfRelevant(input, gc, phase, config, null);
+    }
+
+    /**
+     * As
+     * {@link #appendStateIfRelevant(String, GroupConversation, DiscussionPhase, NegotiationConfig)},
+     * showing an open proposal, and each signature on it, only if the transcript
+     * entry that made it is trusted by {@code records} (see
+     * {@link GroupSigningGuard#recordView}) as the group's readers stand now. The
+     * table keeps what was admitted when it was recorded, but who reads it can
+     * change since (a recruit that verifies peers joins), so it is checked again
+     * here. {@code null} (or a view of readers that verify nothing) shows the table
+     * as stored.
+     */
+    static String appendStateIfRelevant(String input, GroupConversation gc, DiscussionPhase phase,
+                                        NegotiationConfig config, GroupSigningGuard.View records) {
         int maxRendered = config != null ? config.maxRenderedConcessions() : MAX_RENDERED_CONCESSIONS;
         NegotiationState state = gc.getNegotiation();
         if (state == null || (state.getProposals().isEmpty() && state.getConcessions().isEmpty())) {
@@ -430,10 +446,11 @@ public final class NegotiationEngine {
         sb.append("Open proposals:\n");
         boolean anyOpen = false;
         for (Proposal p : state.getProposals()) {
-            if (GroupConversation.PROPOSAL_OPEN.equals(p.status())) {
+            if (GroupConversation.PROPOSAL_OPEN.equals(p.status()) && trustedEntry(records, gc, p, p.byAgentId())) {
                 anyOpen = true;
+                List<String> signers = p.acceptedBy().stream().filter(a -> trustedEntry(records, gc, p, a)).toList();
                 sb.append("- [").append(p.id()).append("] by ").append(p.byAgentId())
-                        .append(" (accepted by: ").append(String.join(", ", p.acceptedBy())).append("): ")
+                        .append(" (accepted by: ").append(String.join(", ", signers)).append("): ")
                         .append(truncate(p.terms())).append('\n');
             }
         }
@@ -444,7 +461,11 @@ public final class NegotiationEngine {
         if (state.getConcessions().isEmpty()) {
             sb.append("- (empty)\n");
         } else {
-            List<Concession> ledger = state.getConcessions();
+            List<Concession> ledger = state.getConcessions().stream().filter(c -> trustedConcession(records, c)).toList();
+            int withheld = state.getConcessions().size() - ledger.size();
+            if (withheld > 0) {
+                sb.append("- (").append(withheld).append(" concession(s) withheld: not verified)\n");
+            }
             int omitted = Math.max(0, ledger.size() - maxRendered);
             if (omitted > 0) {
                 sb.append("- (").append(omitted).append(" earlier concession(s) omitted)\n");
@@ -459,6 +480,36 @@ public final class NegotiationEngine {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Whether the transcript entry by which {@code agentId} put its name to
+     * {@code p} is one {@code records} trusts. An entry that cannot be found fails
+     * closed when the readers verify.
+     */
+    private static boolean trustedEntry(GroupSigningGuard.View records, GroupConversation gc, Proposal p, String agentId) {
+        if (records == null || !records.verifying()) {
+            return true;
+        }
+        Integer index = p.acceptanceEntryIndices() != null ? p.acceptanceEntryIndices().get(agentId) : null;
+        List<TranscriptEntry> transcript = gc.getTranscript();
+        return index != null && index >= 0 && index < transcript.size() && records.trusts(transcript.get(index));
+    }
+
+    /**
+     * Whether {@code records} lets the concession's text be quoted. A concession
+     * keeps no pointer to the transcript entry it came from, so it counts only if
+     * its author signs verifiably now ({@link GroupSigningGuard.View#vouchesFor})
+     * or is no agent (a HUMAN member) and no stored entry of that author failed to
+     * verify. Fails closed when the readers verify; with none that do, the ledger
+     * shows as stored.
+     */
+    private static boolean trustedConcession(GroupSigningGuard.View records, Concession c) {
+        if (records == null || !records.verifying()) {
+            return true;
+        }
+        return (records.vouchesFor(c.byAgentId()) || records.hasNonAgentEntry(c.byAgentId())) && records.stored().stream().noneMatch(
+                entry -> entry != null && Objects.equals(entry.speakerAgentId(), c.byAgentId()) && !records.trusts(entry));
     }
 
     private static String truncate(String value) {

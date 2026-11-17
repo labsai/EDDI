@@ -5,7 +5,7 @@ import {
   SquareKanban, ClipboardList, Plus, Trash2, RefreshCw, Users, DollarSign, CheckCircle2, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@eddi/ui";
+import { Badge, Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";
@@ -406,6 +406,25 @@ export function GroupWorkspacePage() {
                   )}
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
+                {(workspace.backlogFeedback ?? [])
+                  .filter((f) => f.taskId === task.id)
+                  .map((f, i) => (
+                    <div
+                      key={`${f.runId}-${i}`}
+                      className="mt-1 border-s-2 border-border ps-2 text-[10px] text-muted-foreground"
+                      data-testid={`backlog-feedback-${task.id}-${i}`}
+                    >
+                      <div className="flex items-center gap-1.5 font-medium">
+                        <span>{t("groupWorkspace.feedbackRun", "Retry feedback, run {{run}}", { run: f.runId })}</span>
+                        {f.verified && (
+                          <Badge variant="outline" data-testid={`backlog-feedback-verified-${task.id}-${i}`}>
+                            {t("groupWorkspace.feedbackVerified", "Verified")}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="whitespace-pre-wrap break-words">{f.text}</p>
+                    </div>
+                  ))}
                 {task.bet && (
                   <BetDetails
                     taskId={task.id}

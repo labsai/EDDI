@@ -261,7 +261,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
                 memory::isCancelled, TurnCounter.onStep(memory, KEY_MEMORY_WRITES),
                 // A fact the tool wrote is stored ACCEPTED: it is no longer contested
                 // in this conversation, though its conversation property is unchanged.
-                key -> ContestedMemoryMarker.lift(memory.getConversationProperties(), Set.of(key)));
+                key -> ContestedMemoryMarker.lift(memory.getConversationProperties(), Set.of(key)), memory.isPeerVerificationRequired());
         tools.add(tool);
         // Conversation id, not user id: sanitize() strips control characters, it does
         // not make an identifier non-personal, and this line fires on every turn that
