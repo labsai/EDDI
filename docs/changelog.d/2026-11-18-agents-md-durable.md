@@ -18,14 +18,16 @@ This pass removes that class of content (66 KB → 61 KB) and writes down what m
   discussion-style and test-method counts; Java, Node and Quarkus versions; the lists of CI
   job names; the repository-migration dates and the one-time `./mvnw clean` note; the
   GitBook cutover status; the count of Checkstyle violations in `src/test/java`; the
-  enumeration of `ToolSourceProvider` implementations. The outbound-HTTP row's "pending
-  consolidation" status became the standing exception it describes (`BoundedJdkHttpClient`
-  for the langchain4j model builders).
+  enumeration of `ToolSourceProvider` implementations. The outbound-HTTP row keeps naming the two
+  callers not yet on `OutboundHttp` (`HttpClientWrapper` for `httpcalls.json`,
+  `BoundedJdkHttpClient` for the model builders), and points at the consolidation plan for
+  their status rather than stating it.
 - **§3's "In Progress / Upcoming" table became "Planned — Read the Plan First".** The old
   table said of itself that it lagged. The new one maps an area to its plan under
   [`planning/`](../../planning/) and carries no phase numbers and no status; the changelog
-  and each plan's opening block own those. Rows that had no plan to point at (DAG pipeline,
-  the time-travelling debugger) are gone. §6 follows (it pointed at the table).
+  and each plan's opening block own those. Outbound HTTP consolidation, which had a plan but
+  no row, got one. Work with no plan (DAG pipeline, time-travelling debugger, visual pipeline
+  builder) is named in one line under the table. §6 follows (it pointed at the table).
 - **§2 rule 8 (changelog) is the rule plus a pointer** to [`README.md`](../changelog.d/README.md);
   the collator's mechanics, the CI job's matching rules and the size thresholds are in that
   README, in `ci.yml` and in the skill, and were a third copy here.
@@ -49,6 +51,8 @@ Drift fixed in the other agent-instruction files:
   counts any `## ` heading, setext headings and register rows, net of removals);
   `JlamaRuntimeFlagsTest` was missing from the guards to run after touching `AGENTS.md`; the
   `backend` path filter list lacked `docs-site/**/*.md` and `.gitignore`.
+- [`planning/hitl-framework-plan.md`](../../planning/hitl-framework-plan.md) still listed
+  `tiePolicy: HUMAN_DECIDES` as refused at save time; it shipped on 2026-11-05.
 
 ### Design decisions
 

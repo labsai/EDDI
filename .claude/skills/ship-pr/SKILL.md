@@ -40,8 +40,8 @@ commit it on the *same branch* as the work.
 > heading (dated or not), a `---`/`===`-underlined heading, or a dated register row
 > `| YYYY-MM-DD |` — lines inside fenced code blocks do not count. Editing the header or
 > fixing a typo in a past entry nets to zero and is still fine — adding an *entry in place* is
-> the one thing it rejects, because every open PR inserting at the same point in the same file is a conflict
-> git cannot merge.
+> the one thing it rejects, because every open PR inserting at the same point in the same file
+> is a conflict git cannot merge.
 
 Inside the fragment, write exactly what used to go at the top of the live file — one or more
 `## <title> (YYYY-MM-DD)` entries — but give every relative link **one extra `../`**, since a
@@ -504,7 +504,8 @@ branch and wait for CI again. To land several, first build `main` plus all of th
 and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
 
 **4. Merge one.** When `main` has a merge queue, only through it:
-`gh pr merge <n> --squash --auto` adds the PR to the queue. Never `--admin`. Clean any AI
+`gh pr merge <n> --squash --auto` adds the PR to the queue. Without one, `gh pr merge <n>
+--squash`, after steps 1–3. Never `--admin`. Clean any AI
 attribution out of the squash message.
 
 **5. Watch `main`'s `CI/CD` run for the merge commit** before starting on the next PR. If it

@@ -10,9 +10,9 @@
 
 > **Editing this file?** It is loaded into every session, so every sentence costs context each time, and every restated fact is one more place to go stale. Keep it to **rules, mental models and pointers**:
 >
-> - **Do not restate what another file owns** — versions (`pom.xml`), CI jobs and their names (`ci.yml`), counts of anything (tools, providers, tests, locales), port numbers of a single app, feature lists (`docs/`). Link to the owner instead.
+> - **Do not restate what another file owns** — versions (`pom.xml`), CI jobs and their names (`ci.yml`), counts of anything (tools, providers, tests, locales), feature lists (`docs/`), the status of planned work (`planning/`, the changelog). Link to the owner instead.
 > - **No history.** Why a rule exists belongs here in one clause; the incident, the PR numbers and "this used to…" belong in the changelog.
-> - **A feature gets a row in §3's table and a page under `docs/`**, not a paragraph here. Procedures go into a skill ([`.claude/skills/`](.claude/skills/ship-pr/SKILL.md)) or the doc that owns the topic.
+> - **A feature gets a row in a §3 table and a page under `docs/`**, not a paragraph here. Procedures go into a skill under `.claude/skills/` (as [`ship-pr`](.claude/skills/ship-pr/SKILL.md) does) or into the doc that owns the topic.
 > - **Section and rule numbers are an API.** Tests, Javadoc, `ci.yml` comments and the skills cite them (`§2 rule 8`, `§4.1 rule 2`, `§4.7`). Never renumber; add at the end of a list. Several sentences are pinned by tests (`BuildQualityGatesTest`, `ChangelogFragmentTest`, `JlamaRuntimeFlagsTest`) — run them after an edit.
 
 ## 1. Project Context
@@ -42,7 +42,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine. When designing a new feature, always ask: "should this be configurable by the agent designer?" If yes, expose it as a config field with sensible defaults — don't hardcode behavior or pick a single "best" approach.
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output. The rules that keep it sound are §4.1.
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in the database or imported via ZIP.
-- **CI/CD**: GitHub Actions; [`ci.yml`](.github/workflows/ci.yml) is the authority on what runs and what it is called. `[skip docker]` in a commit message skips image builds. Releases are tag-based and the tag must **not** be `v`-prefixed (`6.2.0` → `labsai/eddi:6.2.0`), or nothing fires.
+- **CI/CD**: GitHub Actions; [`ci.yml`](.github/workflows/ci.yml) is the authority on what runs and what it is called. `[skip docker]` in a commit message skips image builds. There is deliberately no DAST job. Releases are tag-based and the tag must **not** be `v`-prefixed (`6.2.0` → `labsai/eddi:6.2.0`), or nothing fires.
 - **Release version**: **never hand-edit it.** `post-release.yml` and `python scripts/bump-version.py` move it — see [`docs/release-versioning.md`](docs/release-versioning.md#after-a-ga-release). The Helm chart's *own* `version` is different: any change under `helm/` still bumps it by hand, together with `EXPECTED_CHART_VERSION` in `DeploymentManifestsTest`.
 
 ### Build & Test Commands
@@ -183,8 +183,11 @@ Areas with a written plan and work still open. This list carries no status on pu
 | HITL — the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses | [`planning/hitl-framework-plan.md`](planning/hitl-framework-plan.md) |
 | Guardrails — config-driven input/output guardrails in `LlmTask` | [`planning/guardrails-architecture.md`](planning/guardrails-architecture.md) |
 | Multi-channel adapters (Teams) | [`planning/multi-agent-ux-improvements.md`](planning/multi-agent-ux-improvements.md) |
+| Outbound HTTP consolidation — `httpcalls` and the model builders onto `OutboundHttp` | [`planning/http-client-consolidation-plan.md`](planning/http-client-consolidation-plan.md) |
 | Documentation site cutover | [`planning/docs-site-migration-plan.md`](planning/docs-site-migration-plan.md) |
 | Native image (GraalVM) | [`planning/native-image-migration.md`](planning/native-image-migration.md) |
+
+Intended, with no plan written yet: a DAG pipeline (parallel task execution and a dependency graph), a time-travelling debugger and a visual pipeline builder. Write the plan before the code.
 
 Tests: instruction and branch coverage thresholds are enforced by JaCoCo (`pom.xml` has the numbers), so new code arrives with its tests.
 
@@ -329,7 +332,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. The langchain4j model builders are the exception: they need langchain4j's own client type and use `BoundedJdkHttpClient` (`modules/llm/impl/builder`), which caps response size. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. Two callers are not on it yet — `httpcalls.json` (`HttpClientWrapper`) and the langchain4j model builders (`BoundedJdkHttpClient`); [`planning/http-client-consolidation-plan.md`](planning/http-client-consolidation-plan.md) moves them, so do not copy either. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
