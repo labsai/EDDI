@@ -11,11 +11,14 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("RuleSetSaveValidator")
@@ -142,6 +145,28 @@ class RuleSetSaveValidatorTest {
                 .findProblems(set(rule("A", dependency("B")), rule("B", dependency("A")), rule("C", dependency("D")), rule("D", dependency("C"))));
         assertTrue(problems.stream().anyMatch(p -> p.contains("A -> B -> A")), problems.toString());
         assertTrue(problems.stream().anyMatch(p -> p.contains("C -> D -> C")), problems.toString());
+    }
+
+    @Test
+    @DisplayName("a reported cycle starts at the rule that comes first in the ruleset, whatever order the walk found it in")
+    void cycleStartsAtTheFirstRule() {
+        var forward = RuleSetSaveValidator.findProblems(set(rule("X", dependency("Y")), rule("Y", dependency("Z")), rule("Z", dependency("X"))));
+        assertTrue(forward.getFirst().contains("(X -> Y -> Z -> X)"), forward.toString());
+        var rotated = RuleSetSaveValidator.findProblems(set(rule("Z", dependency("X")), rule("X", dependency("Y")), rule("Y", dependency("Z"))));
+        assertTrue(rotated.getFirst().contains("(Z -> X -> Y -> Z)"), rotated.toString());
+    }
+
+    @Test
+    @DisplayName("a cycle through 100,000 rules is reported in linear time, with every rule on it")
+    void longCycleIsLinear() {
+        var rules = new RuleConfiguration[100_000];
+        for (int i = 0; i < rules.length; i++) {
+            rules[i] = rule("r" + i, dependency("r" + ((i + 1) % rules.length)));
+        }
+        var problems = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> RuleSetSaveValidator.findProblems(set(rules)));
+        assertEquals(1, problems.size(), "one cyclic component, one problem");
+        assertTrue(problems.getFirst().contains("(r0 -> r1 -> "), problems.getFirst().substring(0, 200));
+        assertTrue(problems.getFirst().contains(" -> r99999 -> r0)"), "the cycle closes at the rule it started from");
     }
 
     @Test

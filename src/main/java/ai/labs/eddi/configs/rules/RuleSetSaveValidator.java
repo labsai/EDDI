@@ -166,6 +166,13 @@ public final class RuleSetSaveValidator {
         Deque<String> stack = new ArrayDeque<>();
         List<List<String>> cycles = new ArrayList<>();
         int counter = 0;
+        // the rule order (dependencies is insertion-ordered), so a reported cycle
+        // starts
+        // at the rule that comes first, whatever order the walk found its members in
+        Map<String, Integer> ruleOrder = new HashMap<>();
+        for (String name : dependencies.keySet()) {
+            ruleOrder.put(name, ruleOrder.size());
+        }
 
         for (String root : dependencies.keySet()) {
             if (index.containsKey(root)) {
@@ -205,7 +212,7 @@ public final class RuleSetSaveValidator {
                     } while (!member.equals(node));
                     boolean cyclic = component.size() > 1 || dependencies.getOrDefault(node, Set.of()).contains(node);
                     if (cyclic) {
-                        cycles.add(cycleWithin(component, dependencies));
+                        cycles.add(cycleWithin(component, dependencies, ruleOrder));
                     }
                 }
                 if (!work.isEmpty()) {
@@ -217,21 +224,31 @@ public final class RuleSetSaveValidator {
     }
 
     /**
-     * A cycle through the members of a cyclic component: from any member, follow
-     * edges that stay inside the component until a name repeats.
+     * A cycle through the members of a cyclic component: from the member that comes
+     * first in rule order, follow the first edge (in condition order) that stays
+     * inside the component until a name repeats. Every member of a cyclic component
+     * has such an edge, so the walk always closes. Linear in the size of the
+     * component and its edges: the start is the minimum of the members' rule
+     * positions, and the path remembers each name's position instead of being
+     * searched.
+     *
+     * @param ruleOrder
+     *            each rule name's position in the ruleset (first rule carrying it)
      */
-    private static List<String> cycleWithin(Set<String> component, Map<String, Set<String>> dependencies) {
-        List<String> path = new ArrayList<>();
-        // start at the first member in rule order, so the path reads the way the rules
-        // do
-        String current = component.iterator().next();
-        for (String name : dependencies.keySet()) {
-            if (component.contains(name)) {
-                current = name;
-                break;
+    private static List<String> cycleWithin(Set<String> component, Map<String, Set<String>> dependencies, Map<String, Integer> ruleOrder) {
+        String current = null;
+        int first = Integer.MAX_VALUE;
+        for (String member : component) {
+            int position = ruleOrder.getOrDefault(member, Integer.MAX_VALUE);
+            if (current == null || position < first) {
+                current = member;
+                first = position;
             }
         }
-        while (!path.contains(current)) {
+        List<String> path = new ArrayList<>();
+        Map<String, Integer> positionInPath = new HashMap<>();
+        while (!positionInPath.containsKey(current)) {
+            positionInPath.put(current, path.size());
             path.add(current);
             String following = null;
             for (String candidate : dependencies.getOrDefault(current, Set.of())) {
@@ -242,7 +259,7 @@ public final class RuleSetSaveValidator {
             }
             current = following;
         }
-        List<String> cycle = new ArrayList<>(path.subList(path.indexOf(current), path.size()));
+        List<String> cycle = new ArrayList<>(path.subList(positionInPath.get(current), path.size()));
         cycle.add(current);
         return cycle;
     }
