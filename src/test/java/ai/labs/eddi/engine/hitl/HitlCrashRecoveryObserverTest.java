@@ -167,8 +167,10 @@ class HitlCrashRecoveryObserverTest {
             verify(memStore, never()).setConversationState(anyString(), any());
             verify(memStore, never()).compareAndSetState(anyString(), any(), any());
 
-            // schedule replaced: delete-by-name ONCE (before create), then create
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            // created; nothing was read, so nothing is deleted — and never by name, which
+            // could take a newer pause's row or a row that is not a timeout
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(captor.capture());
             var schedule = captor.getValue();
@@ -215,19 +217,36 @@ class HitlCrashRecoveryObserverTest {
             Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
-            // Resume landed between the sweep read and the re-arm — no longer
-            // AWAITING_HUMAN
+            // Resume landed between the pre-write check and the create — no longer
+            // AWAITING_HUMAN at the re-check after it
             var resumed = new ConversationMemorySnapshot();
             resumed.setConversationState(ConversationState.READY);
-            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(resumed);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(awaitingSnapshot(pausedAt), resumed);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            // deleted twice: once before create (idempotent replace), once to withdraw
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            // withdrawn by id: only the row this sweep created
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
+        }
+
+        @Test
+        @DisplayName("a pause that ended before the sweep writes anything gets no schedule at all")
+        void noWriteWhenPauseEndedBeforeTheSweepWrites() throws Exception {
+            Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
+                    pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
+            var resumed = new ConversationMemorySnapshot();
+            resumed.setConversationState(ConversationState.READY);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(resumed);
+
+            observer(true, true).runRecovery();
+
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test
@@ -241,16 +260,18 @@ class HitlCrashRecoveryObserverTest {
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("AUTO_REJECT", "PT30M", scannedPausedAt)));
             Instant newerPausedAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+            // the pre-write check still sees the scanned pause; the re-check after the
+            // create sees the newer one
             when(memStore.loadConversationMemorySnapshot(CONV_ID))
-                    .thenReturn(awaitingSnapshot(newerPausedAt));
+                    .thenReturn(awaitingSnapshot(scannedPausedAt), awaitingSnapshot(newerPausedAt));
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            // deleted twice: once before create (idempotent replace), once to withdraw
-            // the stale schedule (state is AWAITING_HUMAN but the bookmark differs)
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            // the stale schedule is withdrawn by id (state is AWAITING_HUMAN but the
+            // bookmark differs); a row the newer pause armed is not touched
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
 
@@ -273,7 +294,7 @@ class HitlCrashRecoveryObserverTest {
 
             verify(memStore, never()).setConversationState(anyString(), any());
             verify(memStore, never()).compareAndSetState(anyString(), any(), any());
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(captor.capture());
             var schedule = captor.getValue();
@@ -501,7 +522,7 @@ class HitlCrashRecoveryObserverTest {
             assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
                     "crash recovery must not destroy a paused group conversation");
 
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(captor.capture());
             assertEquals("group", captor.getValue().getMetadata().get("surface"));
@@ -523,16 +544,16 @@ class HitlCrashRecoveryObserverTest {
         void groupRearmWithdrawnWhenNoLongerPaused() throws Exception {
             var gc = pausedGc("AUTO_REJECT", "PT10M", Instant.now().minus(1, ChronoUnit.HOURS));
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
-            // Approve landed between the sweep read and the re-arm
+            // Approve landed between the pre-write check and the create
             var resumed = pausedGc("AUTO_REJECT", "PT10M", null);
             resumed.setState(GroupConversationState.IN_PROGRESS);
-            when(gcStore.read(GC_ID)).thenReturn(resumed);
+            when(gcStore.read(GC_ID)).thenReturn(gc, resumed);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
     }

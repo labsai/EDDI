@@ -488,11 +488,26 @@ public class MongoScheduleStore implements IScheduleStore {
         if (limit <= 0) {
             return new ArrayList<>(); // Mongo's limit(0) means "no limit"; PostgreSQL returns nothing
         }
-        // The primary: the sweep deletes by name on what this returns, and a lagging
-        // secondary that misses the armed row (or shows a stale enabled flag) would
-        // have it
-        // deleted and re-created.
-        return readSchedulesWithFilter(schedulePrimaryReadCollection, eq(NAME, name), limit);
+        // The primary: the HITL recovery sweep deletes and re-creates rows on what this
+        // returns, and a lagging secondary that misses the armed row (or shows a stale
+        // enabled flag) would have it treated as missing.
+        try (var cursor = schedulePrimaryReadCollection.find(eq(NAME, name)).limit(limit).iterator()) {
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            while (cursor.hasNext()) {
+                Document doc = cursor.next();
+                try {
+                    result.add(fromDocument(doc));
+                } catch (Exception e) {
+                    // One undecodable row must not hide its readable siblings (see the
+                    // interface): it is left in place, and named so it can be removed.
+                    LOGGER.warnf("Schedule %s named '%s' cannot be decoded — skipped: %s", sanitize(String.valueOf(doc.get(ID))),
+                            sanitize(name), sanitize(e.getMessage()));
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules by name", e);
+        }
     }
 
     @Override
@@ -912,12 +927,7 @@ public class MongoScheduleStore implements IScheduleStore {
     // ========================= Helpers =========================
 
     private List<ScheduleConfiguration> readSchedulesWithFilter(Bson filter, int limit) throws IResourceStore.ResourceStoreException {
-        return readSchedulesWithFilter(scheduleCollection, filter, limit);
-    }
-
-    private List<ScheduleConfiguration> readSchedulesWithFilter(MongoCollection<Document> collection, Bson filter, int limit)
-            throws IResourceStore.ResourceStoreException {
-        try (var cursor = collection.find(filter).limit(limit).iterator()) {
+        try (var cursor = scheduleCollection.find(filter).limit(limit).iterator()) {
             List<ScheduleConfiguration> result = new ArrayList<>();
             while (cursor.hasNext()) {
                 result.add(fromDocument(cursor.next()));

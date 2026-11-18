@@ -175,7 +175,12 @@ public interface IScheduleStore {
      * Every schedule with the given name, up to {@code limit}, in no particular
      * order. For a caller that must judge all the rows sharing a name rather than
      * an arbitrary one of them — the HITL crash-recovery sweep, which decides
-     * whether a pause still has a timeout that can fire.
+     * whether a pause still has a timeout that can fire, and deletes what it judged
+     * by id. Read from the primary where the store has replicas. A row that cannot
+     * be decoded is skipped (logged at WARN with its id) instead of failing the
+     * read: the poller cannot fire it either, and one broken row must not stop the
+     * sweep from judging — and repairing — the rest. A {@code limit} of zero or
+     * less returns nothing.
      */
     List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException;
 

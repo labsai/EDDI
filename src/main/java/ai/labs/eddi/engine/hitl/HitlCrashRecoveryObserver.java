@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -408,9 +409,10 @@ public class HitlCrashRecoveryObserver {
                                     : HitlTimeoutPolicy.WAIT_INDEFINITELY;
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                                 Instant scannedPausedAt = snapshot.getHitlPausedAt();
-                                // Replace whatever is there: this pause was just restored, so
-                                // a row its earlier timeout fire left behind (the fire that
-                                // started the lost resume) is not a timeout still to come.
+                                // This pause was just restored, so a row its earlier timeout
+                                // fire left behind (the fire that started the lost resume) is
+                                // not a timeout still to come: replaced without the backoff.
+                                // A row that can still fire, or one a person disabled, stays.
                                 rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
                                         HitlSchedules.SURFACE_REGULAR, conversationId,
                                         snapshot.getAgentId(), policy.name(), snapshot.getHitlApprovalTimeout(),
@@ -607,7 +609,8 @@ public class HitlCrashRecoveryObserver {
         /**
          * Nothing of this pause can fire: no row, rows of earlier pauses only, rows
          * that can never fire again (dead-lettered, out of retries, disabled by an
-         * undeploy), or rows that could not be read — the schedule is (re-)created.
+         * undeploy), rows that are not HITL timeouts, or rows the store could not
+         * decode — the schedule is (re-)created.
          */
         MISSING
     }
@@ -698,8 +701,10 @@ public class HitlCrashRecoveryObserver {
     /**
      * A row is this pause's when it carries its pause id. A row from an older build
      * carries none: it counts as this pause's while it can fire (it decides
-     * whatever pause is current), and once it fired, if it fired after this pause
-     * began.
+     * whatever pause is current), when it was created after this pause began (the
+     * row of an earlier pause was created before that pause ended — so a row a
+     * person disabled during this pause stays disabled), and once it fired, if it
+     * fired after this pause began.
      */
     private boolean ofThisPause(ScheduleConfiguration row, String pauseId, Instant pausedAt) {
         Object value = row.getMetadata() != null ? row.getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY) : null;
@@ -707,6 +712,9 @@ public class HitlCrashRecoveryObserver {
             return value.toString().equals(pauseId);
         }
         if (canFire(row)) {
+            return true;
+        }
+        if (row.getCreatedAt() != null && !row.getCreatedAt().isBefore(pausedAt)) {
             return true;
         }
         return row.getLastFired() != null && !row.getLastFired().isBefore(pausedAt);
@@ -727,7 +735,10 @@ public class HitlCrashRecoveryObserver {
      * {@code overdueGrace} from now if that time already passed; the next sweep
      * then finds it armed. A row of this pause a person disabled is left alone; a
      * spent one (its timeout fired and completed while the pause still waits) is
-     * re-armed {@link #SPENT_REARM_BACKOFF} after that fire.
+     * re-armed {@link #SPENT_REARM_BACKOFF} after that fire. Only the timeout rows
+     * that were read and judged are deleted, one by one by id — never every row
+     * under the name, which could take a newer pause's timeout or a row that is not
+     * a timeout at all.
      *
      * @param policyName
      *            a {@code HitlTimeoutPolicy} name, or for human-turn schedules (I6)
@@ -736,12 +747,16 @@ public class HitlCrashRecoveryObserver {
      * @param overdueGrace
      *            minimum delay before a re-created, already-overdue timeout fires
      * @param replace
-     *            replace any existing row unconditionally — for a pause that was
-     *            just restored after a lost resume, whose earlier row is spent
+     *            for a pause that was just restored after a lost resume: a spent
+     *            row is replaced at once (no backoff — the fire that started the
+     *            lost resume is not a timeout still to come), and a failed read
+     *            still creates the row; an armed or hand-disabled row of the pause
+     *            is kept
      * @param stillPaused
-     *            re-checked AFTER the schedule is created — a resume/cancel may
-     *            land between the sweep read and the create; the freshly created
-     *            schedule is withdrawn if the pause is gone
+     *            whether the scanned pause is still the current one — checked
+     *            before anything is deleted or created, and again after the create
+     *            (a resume/cancel may land in between; the freshly created schedule
+     *            is then withdrawn)
      * @return true if a schedule was created and kept
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
@@ -774,20 +789,22 @@ public class HitlCrashRecoveryObserver {
             List<ScheduleConfiguration> rows;
             TimeoutArming arming;
             try {
+                // The store skips a row it cannot decode (and logs it): such a row cannot
+                // be fired by the poller either, so it is no timeout of this pause.
                 rows = scheduleStore.readSchedulesByName(scheduleName, ROWS_PER_NAME);
                 arming = timeoutArming(rows, pauseId, pausedAt);
             } catch (Exception e) {
                 if (replace) {
                     // The pause was just restored; nothing could be learned about its rows, and
-                    // the replacement below is the repair this pass exists for.
+                    // the replacement below is the repair this pass exists for. No row is
+                    // deleted (none was read); a row of this pause that is still armed then
+                    // fires once more and is refused by pause id or state.
                     rows = List.of();
                     arming = TimeoutArming.MISSING;
                 } else {
                     // A failed read says nothing about the rows: an armed one must not be
                     // deleted and re-created on a transient error, and a disabled one must
                     // not come back enabled. Nothing is written; the next sweep tries again.
-                    // (A row that cannot be decoded cannot be told apart from the rest here,
-                    // so it stays until it is repaired by hand: loud, not destructive.)
                     LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — leaving them as they are", scheduleName,
                             e.getMessage());
                     return false;
@@ -797,11 +814,31 @@ public class HitlCrashRecoveryObserver {
                 LOGGER.debugf("HITL timeout for %s (%s) left as it is: %s", conversationId, surface, arming);
                 return false;
             }
+
+            // Re-check BEFORE writing anything: if the scanned pause ended since the scan,
+            // a row read above may already be the timeout of a newer pause (a pause is
+            // committed before its timeout row is created, so a newer pause's row can only
+            // be among the rows read when that pause was already current at this check).
+            if (stillPaused != null && !stillPaused.getAsBoolean()) {
+                LOGGER.debugf("HITL timeout for %s (%s) not re-armed — no longer paused on the scanned pause", conversationId,
+                        surface);
+                return false;
+            }
+
+            // Exactly the timeout rows read and judged above, by id — rows of earlier
+            // pauses, rows that can never fire again, spent ones. None of them can fire for
+            // this pause (else the pause would be ARMED or DISABLED). A row created after
+            // the read is not among them, and a row that is not a HITL timeout at all (a
+            // foreign row under the name) is not ours to remove.
+            int deleted = deleteReadTimeoutRows(rows);
+
             if (rows.size() >= ROWS_PER_NAME) {
-                // The read stopped at its bound: a current armed or hand-disabled row may be
-                // among the rows not seen, so deleting by name could remove it.
+                // The read stopped at its bound: an armed or hand-disabled row of this pause
+                // may be among the rows not seen, so nothing is created yet. The rows read
+                // were removed above; the next pass reads the rest.
                 LOGGER.warnf("HITL timeout schedule(s) %s: %d or more rows, none armed for the pause in the part read — "
-                        + "not replacing them blind; clean up the stale rows under this name", scheduleName, rows.size());
+                        + "removed %d stale timeout row(s); the next recovery pass reads the rest", scheduleName, rows.size(),
+                        deleted);
                 return false;
             }
             if (!replace && arming == TimeoutArming.SPENT) {
@@ -814,9 +851,6 @@ public class HitlCrashRecoveryObserver {
                         conversationId, surface, lastFired, fireAt);
                 spentRearm = true;
             }
-            // Clears every row under the name — rows of earlier pauses, rows that can
-            // never fire again, spent ones — before the create.
-            scheduleStore.deleteSchedulesByName(scheduleName);
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(scheduleName);
@@ -828,24 +862,13 @@ public class HitlCrashRecoveryObserver {
             schedule.setMetadata(HitlSchedules.timeoutMetadata(policyName, surface, conversationId, pauseId));
             String createdId = scheduleStore.createSchedule(schedule);
 
-            // Re-check AFTER creating: a resume/cancel landing between the sweep
-            // read and the create would otherwise leave an armed timeout on a
-            // conversation that is no longer paused.
-            try {
-                if (stillPaused != null && !stillPaused.getAsBoolean()) {
-                    // Only the row this sweep created: a newer pause may already have its own
-                    // timeout under the same name, and that one is not ours to remove.
-                    if (createdId != null) {
-                        scheduleStore.deleteSchedule(createdId);
-                    }
-                    LOGGER.infof("Withdrew re-armed HITL timeout for %s — no longer paused", conversationId);
-                    return false;
-                }
-            } catch (Exception e) {
-                // Cannot verify — keep the schedule; the timeout handler's
-                // resume/cancel is CAS-guarded and no-ops on a non-paused state.
-                LOGGER.debugf("Post-rearm state re-check failed for %s: %s (keeping schedule)",
-                        conversationId, e.getMessage());
+            // Re-check AFTER creating: a resume/cancel landing between the check above
+            // and the create would otherwise leave an armed timeout on a conversation that
+            // is no longer paused on this pause. The suppliers answer "still paused" when
+            // they cannot read the state, so the row is then kept.
+            if (stillPaused != null && !stillPaused.getAsBoolean()) {
+                withdraw(createdId, scheduleName, conversationId);
+                return false;
             }
 
             LOGGER.infof("Re-armed HITL timeout for %s (%s) at %s (policy: %s)",
@@ -858,6 +881,46 @@ public class HitlCrashRecoveryObserver {
         } catch (Exception e) {
             LOGGER.warnf("Failed to re-arm HITL timeout for %s: %s", conversationId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Deletes, by id, the HITL timeout rows among {@code rows} — the rows a sweep
+     * read and judged unable to fire for its pause.
+     *
+     * @return how many were deleted
+     */
+    private int deleteReadTimeoutRows(List<ScheduleConfiguration> rows) throws ResourceStoreException {
+        int deleted = 0;
+        for (ScheduleConfiguration row : rows) {
+            if (row.getId() != null && HitlSchedules.isHitlTimeout(row.getMetadata())) {
+                scheduleStore.deleteSchedule(row.getId());
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    /**
+     * Withdraws the row a sweep created for a pause that ended meanwhile — only
+     * that row: a newer pause may already have its own timeout under the same name.
+     * A row that cannot be withdrawn stays armed but is harmless: it is bound to
+     * the ended pause, so its fire is refused (pause mismatch, or nothing paused to
+     * decide) and completes.
+     */
+    private void withdraw(String createdId, String scheduleName, String conversationId) {
+        if (createdId == null) {
+            LOGGER.warnf("Could not withdraw the re-armed HITL timeout %s for %s (the store returned no id) — "
+                    + "its fire will be refused, it names a pause that is no longer current", scheduleName, conversationId);
+            return;
+        }
+        try {
+            scheduleStore.deleteSchedule(createdId);
+            LOGGER.infof("Withdrew re-armed HITL timeout for %s — no longer paused", conversationId);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not withdraw the re-armed HITL timeout %s (%s) for %s: %s — "
+                    + "its fire will be refused, it names a pause that is no longer current", scheduleName, createdId, conversationId,
+                    e.getMessage());
         }
     }
 

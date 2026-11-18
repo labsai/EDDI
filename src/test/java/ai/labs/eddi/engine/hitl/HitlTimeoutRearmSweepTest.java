@@ -87,10 +87,17 @@ class HitlTimeoutRearmSweepTest {
             rows.removeIf(row -> name.equals(row.getName()));
             return before - rows.size();
         });
+        // Like both stores: the rows of the name, at most `limit` of them.
         when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenAnswer(invocation -> {
             String name = invocation.getArgument(0);
-            return rows.stream().filter(row -> name.equals(row.getName())).toList();
+            int limit = invocation.getArgument(1);
+            return rows.stream().filter(row -> name.equals(row.getName())).limit(limit).toList();
         });
+        doAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            rows.removeIf(row -> id.equals(row.getId()));
+            return null;
+        }).when(scheduleStore).deleteSchedule(anyString());
 
         observer = new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, mock(IConversationService.class),
                 mock(IGroupConversationService.class), true, true, Optional.empty());
@@ -184,7 +191,7 @@ class HitlTimeoutRearmSweepTest {
 
             assertEquals(List.of(armed), rowsNamed(REGULAR_NAME), "the armed row must be the same row");
             assertEquals(deadline, armed.getNextFire(), "the deadline must not move");
-            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
             verify(scheduleStore, never()).createSchedule(any());
             assertEquals(1, pollAt(deadline), "the timeout handler must get its fire at the deadline");
         }
@@ -323,7 +330,7 @@ class HitlTimeoutRearmSweepTest {
             sweeps(SWEEPS);
 
             assertEquals(List.of(claimed), rowsNamed(REGULAR_NAME));
-            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
             verify(scheduleStore, never()).createSchedule(any());
         }
 
@@ -372,28 +379,36 @@ class HitlTimeoutRearmSweepTest {
             sweeps(SWEEPS);
 
             assertEquals(List.of(armed), rowsNamed(REGULAR_NAME));
-            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
             verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
-        @DisplayName("a result that hit its bound is not classified as 'missing': nothing is deleted by name")
-        void truncatedResultNotDeleted() throws Exception {
+        @DisplayName("a result that hit its bound creates nothing: the stale rows read are removed, the protected row beyond is kept")
+        void truncatedResultDrainsStaleRowsAndKeepsProtectedOne() throws Exception {
             Instant pausedAt = Instant.now().minusSeconds(10);
             regularPause("AUTO_REJECT", "PT5M", pausedAt);
             for (int i = 0; i < 100; i++) {
                 armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(2 + i)),
                         Instant.now().plus(Duration.ofHours(10)));
             }
-            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenAnswer(
-                    invocation -> rows.stream().filter(row -> REGULAR_NAME.equals(row.getName())).limit((int) invocation.getArgument(1))
-                            .toList());
+            // This pause's own row, disabled by a person, beyond the first page of the
+            // read.
+            ScheduleConfiguration disabled = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plus(Duration.ofMinutes(5)));
+            disabled.setEnabled(false);
 
-            sweeps(2);
+            sweeps(1);
 
-            assertEquals(100, rowsNamed(REGULAR_NAME).size());
-            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME), "the 100 stale rows read are removed by id");
             verify(scheduleStore, never()).createSchedule(any());
+
+            sweeps(SWEEPS);
+
+            assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME), "the next pass sees the disabled row and respects it");
+            assertFalse(disabled.isEnabled());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test
@@ -411,6 +426,31 @@ class HitlTimeoutRearmSweepTest {
             sweeps(1);
 
             verify(scheduleStore, times(1)).createSchedule(any());
+            assertTrue(rowsNamed(REGULAR_NAME).contains(foreign), "a row that is not a HITL timeout is not the sweep's to delete");
+        }
+
+        @Test
+        @DisplayName("a newer pause's timeout read by a sweep of the earlier pause is neither deleted nor joined by a stale row")
+        void newerPausesRowReadBeforeTheCheckSurvives() throws Exception {
+            // The scan saw pause A; before the read, A was resumed and pause B committed
+            // and armed its own row. Judged for A, B's row is "an earlier pause's" — only
+            // the re-check before any write tells them apart.
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            Instant newerPause = Instant.now().minusSeconds(1);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            ScheduleConfiguration newer = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", newerPause,
+                    newerPause.plusSeconds(300));
+            var current = new ConversationMemorySnapshot();
+            current.setConversationState(ConversationState.AWAITING_HUMAN);
+            current.setHitlPausedAt(newerPause);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(current);
+
+            sweeps(1);
+
+            assertEquals(List.of(newer), rowsNamed(REGULAR_NAME), "the newer pause's own timeout must survive");
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test
@@ -419,24 +459,82 @@ class HitlTimeoutRearmSweepTest {
             Instant pausedAt = Instant.now().minusSeconds(10);
             Instant newerPause = Instant.now().minusSeconds(1);
             regularPause("AUTO_REJECT", "PT5M", pausedAt);
-            doAnswer(invocation -> {
-                String id = invocation.getArgument(0);
-                rows.removeIf(row -> id.equals(row.getId()));
-                return null;
-            }).when(scheduleStore).deleteSchedule(anyString());
+            var stillA = new ConversationMemorySnapshot();
+            stillA.setConversationState(ConversationState.AWAITING_HUMAN);
+            stillA.setHitlPausedAt(pausedAt);
             var gone = new ConversationMemorySnapshot();
             gone.setConversationState(ConversationState.AWAITING_HUMAN);
             gone.setHitlPausedAt(newerPause); // the scanned pause was resumed; a new one began
-            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenAnswer(invocation -> {
+            // First check (before writing): still pause A. Between the create and the
+            // second check, A is resumed and B pauses and arms its own row.
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(stillA).thenAnswer(invocation -> {
                 armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", newerPause, newerPause.plusSeconds(300));
                 return gone;
             });
 
             sweeps(1);
 
+            verify(scheduleStore, times(1)).createSchedule(any());
             List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
-            assertEquals(1, named.size(), "the newer pause's own timeout must survive");
+            assertEquals(1, named.size(), "the row this sweep created is withdrawn; the newer pause's own timeout survives");
             assertEquals(HitlDecision.pauseIdOf(newerPause), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
+        }
+
+        @Test
+        @DisplayName("a withdrawal that fails leaves a row bound to the ended pause — logged, the sweep goes on")
+        void failedWithdrawalIsNotFatal() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            var stillA = new ConversationMemorySnapshot();
+            stillA.setConversationState(ConversationState.AWAITING_HUMAN);
+            stillA.setHitlPausedAt(pausedAt);
+            var ended = new ConversationMemorySnapshot();
+            ended.setConversationState(ConversationState.READY);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(stillA, ended);
+            doThrow(new ResourceStoreException("down")).when(scheduleStore).deleteSchedule(anyString());
+
+            assertDoesNotThrow(() -> sweeps(1));
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertEquals(HitlDecision.pauseIdOf(pausedAt), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY),
+                    "the leftover is bound to the ended pause, so its fire is refused");
+        }
+
+        @Test
+        @DisplayName("a legacy row (no pause id) a person disabled during this pause stays disabled")
+        void legacyHandDisabledRowOfThisPauseKept() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(600);
+            regularPause("AUTO_APPROVE", "PT1H", pausedAt);
+            ScheduleConfiguration legacy = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", pausedAt,
+                    pausedAt.plus(Duration.ofHours(1)));
+            legacy.getMetadata().remove(HitlSchedules.METADATA_PAUSE_ID_KEY);
+            legacy.setCreatedAt(pausedAt.plusMillis(5)); // armed right after the pause began
+            legacy.setEnabled(false); // switched off by hand; it keeps its next fire
+
+            sweeps(SWEEPS);
+
+            assertEquals(List.of(legacy), rowsNamed(REGULAR_NAME));
+            assertFalse(legacy.isEnabled());
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a disabled legacy row created before this pause began belongs to an earlier pause — replaced")
+        void legacyDisabledRowOfEarlierPauseReplaced() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(60);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            ScheduleConfiguration legacy = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE",
+                    pausedAt.minus(Duration.ofHours(3)), pausedAt.minus(Duration.ofHours(2)));
+            legacy.getMetadata().remove(HitlSchedules.METADATA_PAUSE_ID_KEY);
+            legacy.setEnabled(false);
+
+            sweeps(SWEEPS);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertNotSame(legacy, named.get(0));
+            assertEquals(HitlDecision.pauseIdOf(pausedAt), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
         }
 
         @Test

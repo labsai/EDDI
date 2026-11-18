@@ -86,9 +86,11 @@ public final class HitlSchedules {
     }
 
     /**
-     * True for a name in the timeout namespace ({@code hitl-timeout-...}, group
-     * timeouts included). Crash recovery treats a row under such a name as the
-     * pause's timeout, so only the server may write one.
+     * True for a name in the timeout namespace ({@code hitl-timeout-...}; the group
+     * prefix {@code hitl-timeout-group-} starts with it). The server finds a
+     * pause's timeout by this name and, on resume and cancel, deletes every row
+     * under it, so only the server may write one: the schedule REST API (and the
+     * MCP tools and the import, which write through it) refuse such a name.
      */
     public static boolean isReservedTimeoutName(String name) {
         return name != null && name.trim().toLowerCase(Locale.ROOT).startsWith(NAME_PREFIX_REGULAR);

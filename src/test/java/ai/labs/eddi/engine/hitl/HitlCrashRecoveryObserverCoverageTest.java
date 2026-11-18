@@ -160,7 +160,8 @@ class HitlCrashRecoveryObserverCoverageTest {
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
             // createSchedule throws → rearmSchedule's own catch returns false; the
             // enclosing per-item try still completes. (Exercises rearmSchedule outer
-            // catch too.)
+            // catch too.) The pre-write check sees the pause still current.
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(awaitingSnapshot(pausedAt));
             doThrow(new RuntimeException("schedule store down"))
                     .when(scheduleStore).createSchedule(any());
 
@@ -204,8 +205,9 @@ class HitlCrashRecoveryObserverCoverageTest {
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            // only the pre-create delete — NOT a withdraw delete
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            // nothing withdrawn (and nothing deleted by name)
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test
@@ -214,13 +216,14 @@ class HitlCrashRecoveryObserverCoverageTest {
             Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
-            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(null);
+            // the pre-write check still sees the pause; the re-check after the create none
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(awaitingSnapshot(pausedAt), (ConversationMemorySnapshot) null);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
 
@@ -237,12 +240,12 @@ class HitlCrashRecoveryObserverCoverageTest {
             var snap = new ConversationMemorySnapshot();
             snap.setConversationState(ConversationState.AWAITING_HUMAN);
             snap.setHitlPausedAt(null);
-            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snap);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(awaitingSnapshot(pausedAt), snap);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
     }
@@ -401,6 +404,7 @@ class HitlCrashRecoveryObserverCoverageTest {
         void innerCatchIsolatesGroupItem() throws Exception {
             var gc = pausedGc("AUTO_APPROVE", "PT10M", Instant.now().minus(1, ChronoUnit.HOURS));
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
+            when(gcStore.read(GC_ID)).thenReturn(gc);
             doThrow(new RuntimeException("schedule store down"))
                     .when(scheduleStore).createSchedule(any());
 
@@ -418,7 +422,8 @@ class HitlCrashRecoveryObserverCoverageTest {
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
         @Test
@@ -426,12 +431,12 @@ class HitlCrashRecoveryObserverCoverageTest {
         void groupRecheckNullWithdraws() throws Exception {
             var gc = pausedGc("AUTO_APPROVE", "PT10M", Instant.now().minus(1, ChronoUnit.HOURS));
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
-            when(gcStore.read(GC_ID)).thenReturn(null);
+            when(gcStore.read(GC_ID)).thenReturn(gc, (GroupConversation) null);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
 
@@ -442,12 +447,12 @@ class HitlCrashRecoveryObserverCoverageTest {
             var gc = pausedGc("AUTO_APPROVE", "PT10M", scanned);
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
             var current = pausedGc("AUTO_APPROVE", "PT10M", Instant.now().minus(1, ChronoUnit.MINUTES));
-            when(gcStore.read(GC_ID)).thenReturn(current);
+            when(gcStore.read(GC_ID)).thenReturn(gc, current);
 
             when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore).deleteSchedule("new-1");
         }
 

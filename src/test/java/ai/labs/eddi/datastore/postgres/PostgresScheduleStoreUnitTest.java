@@ -23,7 +23,9 @@ import java.sql.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
@@ -592,6 +594,23 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(sut.readSchedulesByName("hitl-timeout-conv-1", 0).isEmpty());
 
         verify(connection, never()).prepareStatement(anyString());
+    }
+
+    @Test
+    void readSchedulesByName_skipsAnUndecodableRowAndKeepsItsSiblings() throws Exception {
+        // Two rows under the name; the first one's metadata is not JSON. One broken row
+        // must not fail the read (the HITL sweep could then never repair the pause).
+        when(resultSet.next()).thenReturn(true, true, false);
+        when(resultSet.getString("id")).thenReturn("broken-row", "readable-row");
+        when(resultSet.getString("metadata")).thenReturn("{not json", "{\"hitlType\":\"hitl_timeout\"}");
+        when(jsonSerialization.deserialize(eq("{not json"), eq(Map.class))).thenThrow(new RuntimeException("bad json"));
+        when(jsonSerialization.deserialize(eq("{\"hitlType\":\"hitl_timeout\"}"), eq(Map.class)))
+                .thenReturn(new HashMap<>(Map.of("hitlType", "hitl_timeout")));
+
+        List<ScheduleConfiguration> rows = sut.readSchedulesByName("hitl-timeout-conv-1", 100);
+
+        assertEquals(1, rows.size());
+        assertEquals("readable-row", rows.get(0).getId());
     }
 
     @Test

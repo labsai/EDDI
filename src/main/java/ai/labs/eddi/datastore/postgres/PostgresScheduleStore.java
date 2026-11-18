@@ -563,7 +563,21 @@ public class PostgresScheduleStore implements IScheduleStore {
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {
             ps.setString(1, name);
             ps.setInt(2, limit);
-            return readScheduleList(ps);
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    try {
+                        result.add(fromResultSet(rs));
+                    } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                        // One undecodable row (unreadable metadata, say) must not hide its
+                        // readable siblings (see the interface): it is left in place, and
+                        // named so it can be removed.
+                        LOGGER.warnf("Schedule %s named '%s' cannot be decoded — skipped: %s", sanitize(rs.getString("id")),
+                                sanitize(name), sanitize(e.getMessage()));
+                    }
+                }
+            }
+            return result;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules by name: " + name, e);
         }
