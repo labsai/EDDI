@@ -38,6 +38,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -134,6 +135,40 @@ public class SlackEventHandler {
      */
     private final Counter ignoredThreadReplies;
 
+    private final MeterRegistry meterRegistry;
+
+    /**
+     * Turns that outlived the wait and are still being waited for. Bounded by
+     * {@link #MAX_PENDING_LATE_ANSWERS}: each is only a callback on the turn's
+     * future — no thread and no timer of its own — and each is released when the
+     * turn completes, fails or runs out its window.
+     */
+    private final AtomicInteger pendingLateAnswers = new AtomicInteger();
+
+    /**
+     * How many late answers may be pending at once. Past it a turn that outlives
+     * the wait gets the old notice (ask again) instead of a promise EDDI may not
+     * keep.
+     */
+    static final int MAX_PENDING_LATE_ANSWERS = 200;
+
+    /** The longest {@code Retry-After} a post waits out; a longer one is capped. */
+    static final long MAX_RETRY_AFTER_MILLIS = 30_000L;
+
+    /** Posted when a turn failed after the wait gave up. */
+    static final String LATE_ANSWER_FAILED_NOTICE = "⚠️ Sorry, I could not finish that — the agent ran into an error. Please try again.";
+
+    /** Posted when the wait gave up and the answer will follow. */
+    static String lateAnswerPendingNotice(int waitedSeconds) {
+        return "⏳ That is taking longer than " + waitedSeconds
+                + " seconds. I'll post the answer in this thread when it is ready.";
+    }
+
+    /** Posted when a turn was still running after the late-answer window. */
+    static String lateAnswerExpiredNotice(int windowSeconds) {
+        return "⚠️ I stopped waiting for that answer after " + windowSeconds + " more seconds. Please ask again.";
+    }
+
     /**
      * Timeouts and the API retry budget. These were compile-time constants, so an
      * agent whose turn legitimately ran past sixty seconds always failed on Slack
@@ -205,6 +240,7 @@ public class SlackEventHandler {
             ISlackApprovalRecordStore approvalRecords,
             IUserMemoryStore userMemoryStore,
             MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
         this.ignoredThreadReplies = meterRegistry.counter("eddi.slack.thread.replies.ignored");
         this.channelTargetRouter = channelTargetRouter;
         this.observeGate = observeGate;
@@ -895,8 +931,25 @@ public class SlackEventHandler {
             // the approval card now (idempotent via the persisted approval record).
             notifyApprovers(resolved, conversationId, agentId, loadHitlBookmark(conversationId));
             return;
+        } catch (TurnTimeoutException e) {
+            // The wait gave up, the turn did not: the answer is posted when it ends.
+            if (deferToLateAnswer(e.pending(), channelId, threadTs, botToken,
+                    late -> deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, late))) {
+                return;
+            }
+            throw e;
         }
+        deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, snapshot);
+    }
 
+    /**
+     * Post what a turn produced — the answer, or the notice for a turn that was
+     * dropped or paused — and, for a pause, the approval card. Shared by the normal
+     * path and by a turn that completes after the wait gave up.
+     */
+    private void deliverOutcome(ResolvedTarget resolved, String conversationId, String agentId, String channelId,
+                                String threadTs, String botToken, SimpleConversationMemorySnapshot snapshot)
+            throws Exception {
         // A queued-say skip (pause/busy committed by a prior turn) surfaces here as
         // the STILL_AWAITING marker — the input was dropped, not this turn pausing.
         // Post the "still awaiting" notice and do NOT re-notify approvers (no second
@@ -1304,32 +1357,47 @@ public class SlackEventHandler {
     private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
                                  String botToken)
             throws Exception {
+        SimpleConversationMemorySnapshot snapshot;
         try {
-            SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
-            if (snapshot == SKIPPED_STILL_AWAITING) {
-                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
-                return;
-            }
-            if (snapshot == SKIPPED_ENDED) {
-                throw new IConversationService.ConversationEndedException("Conversation has ended!");
-            }
-            if (snapshot == SKIPPED_NOT_ACTIVE) {
-                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
-                return;
-            }
-            boolean paused = snapshot != null
-                    && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
-            String response = SlackHitlSupport.extractSlackResponseText(snapshot);
-            if (paused) {
-                if (response != null && !response.startsWith("_")) {
-                    postMessageChunked(channelId, threadTs, response, botToken);
-                }
-                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
-            } else {
-                postMessageChunked(channelId, threadTs, response, botToken);
-            }
+            snapshot = sendAndWait(conversationId, enrichedInput);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            return;
+        } catch (TurnTimeoutException e) {
+            // The wait gave up, the turn did not: the answer is posted when it ends.
+            if (deferToLateAnswer(e.pending(), channelId, threadTs, botToken,
+                    late -> deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, late))) {
+                return;
+            }
+            throw e;
+        }
+        deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, snapshot);
+    }
+
+    private void deliverFollowUpOutcome(String conversationId, String channelId, String threadTs, String botToken,
+                                        SimpleConversationMemorySnapshot snapshot)
+            throws Exception {
+        if (snapshot == SKIPPED_STILL_AWAITING) {
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            return;
+        }
+        if (snapshot == SKIPPED_ENDED) {
+            throw new IConversationService.ConversationEndedException("Conversation has ended!");
+        }
+        if (snapshot == SKIPPED_NOT_ACTIVE) {
+            postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
+            return;
+        }
+        boolean paused = snapshot != null
+                && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+        String response = SlackHitlSupport.extractSlackResponseText(snapshot);
+        if (paused) {
+            if (response != null && !response.startsWith("_")) {
+                postMessageChunked(channelId, threadTs, response, botToken);
+            }
+            postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), botToken);
+        } else {
+            postMessageChunked(channelId, threadTs, response, botToken);
         }
     }
 
@@ -1653,7 +1721,110 @@ public class SlackEventHandler {
                     }
                 });
 
-        return responseFuture.get(slackConfig.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
+        try {
+            return responseFuture.get(slackConfig.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            // The turn is still running. The caller may keep waiting for it (see
+            // deferToLateAnswer), so the future travels with the exception.
+            throw new TurnTimeoutException(e.getMessage(), responseFuture);
+        }
+    }
+
+    /**
+     * The wait for a turn gave up, but the turn did not: {@link #pending()} is its
+     * outcome, still to come. Still a {@link TimeoutException}, so a caller that
+     * does not defer sees what it always saw.
+     */
+    static final class TurnTimeoutException extends TimeoutException {
+        private static final long serialVersionUID = 1L;
+
+        private final transient CompletableFuture<SimpleConversationMemorySnapshot> pending;
+
+        TurnTimeoutException(String message, CompletableFuture<SimpleConversationMemorySnapshot> pending) {
+            super(message);
+            this.pending = pending;
+        }
+
+        CompletableFuture<SimpleConversationMemorySnapshot> pending() {
+            return pending;
+        }
+    }
+
+    /**
+     * What to do with the outcome of a turn that completes after the wait gave up.
+     */
+    @FunctionalInterface
+    private interface LateDelivery {
+        void deliver(SimpleConversationMemorySnapshot snapshot) throws Exception;
+    }
+
+    /**
+     * Keep waiting, without waiting, for a turn the first wait gave up on: tell the
+     * thread its answer will follow, and post the answer — or a failure notice —
+     * when the turn completes, exactly once.
+     * <p>
+     * Costs a callback on the turn's own future: no thread and no timer per pending
+     * answer. The future is bounded by
+     * {@code eddi.slack.late-answer-window-seconds} (a turn still running then gets
+     * a notice asking the user to try again) and the number of pending answers by
+     * {@link #MAX_PENDING_LATE_ANSWERS}; both are released the moment the turn
+     * ends.
+     *
+     * @return {@code true} when the late answer is taken on and the thread has been
+     *         told; {@code false} when it is off or full, so the caller reports the
+     *         timeout as before
+     */
+    private boolean deferToLateAnswer(CompletableFuture<SimpleConversationMemorySnapshot> pending, String channelId,
+                                      String threadTs, String botToken, LateDelivery delivery) {
+        int window = slackConfig.getLateAnswerWindowSeconds();
+        if (window <= 0) {
+            return false;
+        }
+        if (pendingLateAnswers.incrementAndGet() > MAX_PENDING_LATE_ANSWERS) {
+            pendingLateAnswers.decrementAndGet();
+            LOGGER.warnf("[SLACK] %d turns are already being waited for after the timeout — not taking on another "
+                    + "(channel %s)", MAX_PENDING_LATE_ANSWERS, sanitize(channelId));
+            return false;
+        }
+        // The notice first: a turn that finishes in the next instant must not post its
+        // answer ahead of the line that says one is coming.
+        postMessage(channelId, threadTs, lateAnswerPendingNotice(slackConfig.getRequestTimeoutSeconds()), botToken);
+        try {
+            pending.orTimeout(window, TimeUnit.SECONDS).whenCompleteAsync((snapshot, error) -> {
+                pendingLateAnswers.decrementAndGet();
+                completeLateAnswer(snapshot, error, window, channelId, threadTs, botToken, delivery);
+            }, executorService);
+        } catch (RuntimeException e) {
+            // The executor is shutting down: nothing will ever run the callback.
+            pendingLateAnswers.decrementAndGet();
+            postMessage(channelId, threadTs, LATE_ANSWER_FAILED_NOTICE, botToken);
+        }
+        return true;
+    }
+
+    private void completeLateAnswer(SimpleConversationMemorySnapshot snapshot, Throwable error, int windowSeconds,
+                                    String channelId, String threadTs, String botToken, LateDelivery delivery) {
+        if (error != null) {
+            boolean expired = error instanceof TimeoutException;
+            LOGGER.warnf("[SLACK] A turn that outlived the wait %s (channel %s)",
+                    expired ? "was still running after the late-answer window" : "failed", sanitize(channelId));
+            countLateAnswer(expired ? "expired" : "failed");
+            postMessage(channelId, threadTs,
+                    expired ? lateAnswerExpiredNotice(windowSeconds) : LATE_ANSWER_FAILED_NOTICE, botToken);
+            return;
+        }
+        try {
+            delivery.deliver(snapshot);
+            countLateAnswer("posted");
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SLACK] Could not deliver the late answer in channel %s", sanitize(channelId));
+            countLateAnswer("failed");
+            postMessage(channelId, threadTs, LATE_ANSWER_FAILED_NOTICE, botToken);
+        }
+    }
+
+    private void countLateAnswer(String outcome) {
+        meterRegistry.counter("eddi.slack.late.answers", "outcome", outcome).increment();
     }
 
     /**
@@ -1734,6 +1905,10 @@ public class SlackEventHandler {
             } catch (SlackDeliveryException e) {
                 if (attempt < maxRetries) {
                     long backoff = slackConfig.getApiRetryBaseMs() * (1L << (attempt - 1));
+                    // A rate-limited call (HTTP 429) says how long Slack wants callers to
+                    // wait. Honour it — retrying sooner is refused again — but bounded: the
+                    // sender is a worker holding an event, so the wait is capped.
+                    backoff = Math.max(backoff, Math.min(e.getRetryAfterMillis(), MAX_RETRY_AFTER_MILLIS));
                     LOGGER.warnf("Slack API call failed (attempt %d/%d), retrying in %dms: %s",
                             attempt, maxRetries, backoff, e.getMessage());
                     try {

@@ -51,6 +51,12 @@ public class SlackConfig {
     public static final String DEFAULT_API_BASE_URL = "https://slack.com/api/";
 
     /**
+     * Default seconds a turn that outlived {@code request-timeout-seconds} may keep
+     * running and still have its answer posted to the thread.
+     */
+    public static final int DEFAULT_LATE_ANSWER_WINDOW_SECONDS = 900;
+
+    /**
      * A literal loopback host: {@code localhost}, {@code 127.x.x.x} or
      * {@code [::1]}.
      */
@@ -70,6 +76,14 @@ public class SlackConfig {
      */
     @ConfigProperty(name = "eddi.slack.api-base-url", defaultValue = DEFAULT_API_BASE_URL)
     String apiBaseUrl = DEFAULT_API_BASE_URL;
+
+    /**
+     * {@code eddi.slack.late-answer-window-seconds}: how long after the first wait
+     * gave up a turn may still complete and have its answer posted; 0 turns late
+     * answers off. Field-injected for the same reason as {@link #apiBaseUrl}.
+     */
+    @ConfigProperty(name = "eddi.slack.late-answer-window-seconds", defaultValue = "" + DEFAULT_LATE_ANSWER_WINDOW_SECONDS)
+    int lateAnswerWindowSeconds = DEFAULT_LATE_ANSWER_WINDOW_SECONDS;
 
     @Inject
     public SlackConfig(
@@ -104,10 +118,40 @@ public class SlackConfig {
         this.apiBaseUrl = validateApiBaseUrl(apiBaseUrl);
     }
 
-    /** Fails the startup on a bad {@code eddi.slack.api-base-url}. */
+    /**
+     * As above, with the late-answer window given.
+     *
+     * @param lateAnswerWindowSeconds
+     *            see {@link #getLateAnswerWindowSeconds}; negative falls back to
+     *            the default
+     */
+    public SlackConfig(int requestTimeoutSeconds, int groupCompletionTimeoutSeconds, int apiMaxRetries, long apiRetryBaseMs,
+            String apiBaseUrl, int lateAnswerWindowSeconds) {
+        this(requestTimeoutSeconds, groupCompletionTimeoutSeconds, apiMaxRetries, apiRetryBaseMs, apiBaseUrl);
+        this.lateAnswerWindowSeconds = lateAnswerWindowSeconds >= 0 ? lateAnswerWindowSeconds : DEFAULT_LATE_ANSWER_WINDOW_SECONDS;
+    }
+
+    /**
+     * Fails the startup on a bad {@code eddi.slack.api-base-url}, and settles the
+     * late-answer window.
+     */
     @PostConstruct
     void checkApiBaseUrl() {
         this.apiBaseUrl = validateApiBaseUrl(apiBaseUrl);
+        if (lateAnswerWindowSeconds < 0) {
+            lateAnswerWindowSeconds = DEFAULT_LATE_ANSWER_WINDOW_SECONDS;
+        }
+    }
+
+    /**
+     * Seconds, counted from the moment the wait for a turn gave up
+     * ({@link #getRequestTimeoutSeconds}), during which the turn may still complete
+     * and have its answer — or a failure notice — posted to the thread. After that
+     * the thread is told to ask again. 0 turns late answers off: the thread is told
+     * to ask again at once, as before.
+     */
+    public int getLateAnswerWindowSeconds() {
+        return lateAnswerWindowSeconds;
     }
 
     /**

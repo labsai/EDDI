@@ -561,6 +561,18 @@ earlier with one gets approval cards without buttons until it is renamed). See
 
 All Slack API calls use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Failed messages are logged but don't crash the event handler.
 
+When Slack rate-limits a message post (HTTP 429), EDDI waits for the `Retry-After` Slack names before the next attempt instead of its own shorter backoff — at most 30 seconds, so a worker is never parked for long; a longer request is waited out for 30 seconds and tried again. A `Retry-After` that is not a number of seconds is ignored.
+
+### Slow answers
+
+A turn that does not finish within `eddi.slack.request-timeout-seconds` (default 60) is not abandoned. The thread is told "That is taking longer than 60 seconds. I'll post the answer in this thread when it is ready.", and when the turn completes its answer is posted to the thread — **once**, with the same handling as an answer that came in time (a pause still gets its approval card). If the turn ended in an error the thread gets a failure notice instead, and a turn still running after `eddi.slack.late-answer-window-seconds` (default 900) is given up on with a notice asking the user to ask again. The outcomes are counted in `eddi_slack_late_answers_total{outcome=posted|failed|expired}` ([Metrics](metrics.md#slack-metrics)).
+
+Waiting costs a callback on the turn, not a thread or a timer, and at most 200 turns are waited for at once on a node; past that, or with `eddi.slack.late-answer-window-seconds=0`, the thread gets the former notice ("ask again in a moment, or raise `eddi.slack.request-timeout-seconds`") and a late answer is not posted. Pending late answers live in memory: a restart of the node drops them.
+
+### Who can reach what
+
+The Slack integration scopes by **channel**, not by person. A channel message reaches only the targets of the integration that owns the channel. A **direct message** is not tied to any channel: it is routed by the Slack app that signed it (the app the user DMed) to that integration's default target — or, with a trigger keyword, to any of that integration's targets. So every member of the workspace who can DM the app reaches every target of its integration, whatever channels the integration lists, and EDDI has no per-target or per-user access control of its own on this path; restrict who can install or message the app in Slack if that matters. This is current behaviour, documented here; it is not changed by the thread and mention rules above.
+
 ### Testing against a fake Slack
 
 `eddi.slack.api-base-url` (default `https://slack.com/api/`) is where EDDI sends every Web API call, so a Slack-compatible test double can stand in for Slack: point it at `http://localhost:<port>/api/` (plain `http` is accepted for a loopback address only; anything else must be `https`). The value is checked at startup. EDDI's own tests use an in-process fake of this API (`FakeSlackApi`) to run the client and the event handler through posted answers, `ok:false`, rate limits and late answers. See the [Configuration Reference](configuration-reference.md#slack).

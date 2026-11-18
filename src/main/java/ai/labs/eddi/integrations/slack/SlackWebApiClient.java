@@ -247,7 +247,7 @@ public class SlackWebApiClient {
             // Retryable HTTP errors — throw so caller can retry
             if (RETRYABLE_STATUS_CODES.contains(response.status())) {
                 throw new SlackDeliveryException(
-                        "Slack API returned retryable HTTP " + response.status());
+                        "Slack API returned retryable HTTP " + response.status(), retryAfterMillis(response));
             }
 
             // Non-retryable HTTP errors — log and return null
@@ -281,6 +281,25 @@ public class SlackWebApiClient {
             LOGGER.errorf(e, "Unexpected non-retryable error calling Slack API: %s", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * What Slack's {@code Retry-After} header asks for, in milliseconds: a rate
+     * limited call (HTTP 429) names the seconds to wait. Anything but a plain
+     * non-negative number of seconds — absent, an HTTP date, garbage — is 0, and
+     * the caller falls back to its own backoff.
+     */
+    static long retryAfterMillis(OutboundResponse<?> response) {
+        String value = response.firstHeader("Retry-After").map(String::trim).orElse("");
+        if (value.isEmpty() || value.length() > 9) {
+            return 0;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) {
+                return 0;
+            }
+        }
+        return Long.parseLong(value) * 1000L;
     }
 
     /**

@@ -49,9 +49,35 @@ and a reply that opened with another person's mention was dropped.
   `OutboundEngine` behind the real facade, so `SlackWithFakeSlackApiTest` is a plain unit test and
   needs no socket. The vault `allowedHosts` check for a vaulted bot token still judges slack.com.
 
+- **Late answers and rate limits (G5).** `sendAndWait` gave up after `eddi.slack.request-timeout-seconds`
+  with "ask again" and nothing ever posted the turn's eventual answer. The timed-out wait now
+  carries the turn's future (`TurnTimeoutException`); `SlackEventHandler.deferToLateAnswer` tells
+  the thread the answer will follow and attaches one callback to that future, which posts the
+  outcome through the same delivery code as an in-time answer (`deliverOutcome`, so a pause still
+  gets its approval card; also the group follow-up path), a failure notice if the turn failed, or an
+  "ask again" notice when the turn is still running after the new
+  `eddi.slack.late-answer-window-seconds` (default 900; `0` restores the old behaviour). No thread
+  or timer per pending answer: the callback runs only on completion, the future is bounded by
+  `orTimeout`, and at most 200 are pending per node (past that the old notice is used). Outcomes are
+  counted in `eddi.slack.late.answers{outcome=posted|failed|expired}`. `Retry-After` on an HTTP
+  429 is read by `SlackWebApiClient` and carried in `SlackDeliveryException`; the message post
+  waits for it instead of its own shorter backoff, capped at 30 s. The DM bypass of channel scoping
+  and the missing per-target access control are product decisions and unchanged; the Slack page
+  now describes them.
+
+- **Not changed here.** A null `event_id` (G6) is handled by open PR #1401, the signature-before-parse
+  and body-limit work of the interactive endpoint by #1394; the approval-card `ok:false` handling
+  (G2) is left to #1438.
+
 **Files:** [`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
+[`SlackConfig.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackConfig.java),
+[`SlackWebApiClient.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackWebApiClient.java),
+[`SlackHitlResumeObserver.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackHitlResumeObserver.java),
+[`ChannelTargetRouter.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java),
 [`SlackThreadParticipationTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/SlackThreadParticipationTest.java),
-[`slack-integration.md`](../slack-integration.md), [`metrics.md`](../metrics.md)
+[`SlackWithFakeSlackApiTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/SlackWithFakeSlackApiTest.java),
+[`slack-integration.md`](../slack-integration.md), [`metrics.md`](../metrics.md),
+[`configuration-reference.md`](../configuration-reference.md)
 
 ### Behaviour changes an upgrader will notice
 
@@ -61,3 +87,8 @@ and a reply that opened with another person's mention was dropped.
   talked to it there; someone new must mention the bot once.
 - A reply that starts with another person's mention is now answered when the bot is in the thread
   (before, it was dropped).
+- A turn that takes longer than 60 s no longer ends with "ask again": the thread is told the answer
+  will follow and gets it (or a failure notice). Set `eddi.slack.late-answer-window-seconds=0` to
+  keep the old behaviour. Pending late answers are lost on a restart.
+- DMs get the error notice, the help text and the continuation after an approval.
+- New properties: `eddi.slack.api-base-url`, `eddi.slack.late-answer-window-seconds`.
