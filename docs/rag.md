@@ -383,13 +383,37 @@ refreshed within 30 seconds, so a node may refuse for that long after a re-embed
 **Re-embedding.** `GET /ragstore/rags/{id}/vector-space?version=N` shows the recorded and the
 configured space and whether they match. `POST /ragstore/rags/{id}/reembed?version=N` (EDIT) then:
 
-0. refuses, with `409` and nothing changed, what cannot be done safely: another knowledge base keeps
-   its chunks under the same tag in the same store (`SHARED_CHUNKS`, the 6.5.0 name layout: same name,
-   same table — deleting by the tag would take its chunks too; give them separate tables and re-embed
-   each); a pgvector table that other knowledge bases keep rows in would have to change its column size
-   (`SHARED_TABLE_SIZE`); the version asked for is not the latest (`NOT_LATEST_VERSION`, because agents use
-   the latest and the record would describe the wrong model); an embedding setting names a variable that
-   cannot be resolved now (`EMBEDDING_SETTINGS_UNRESOLVED`, retryable);
+0. refuses, with `409` and nothing changed, what cannot be done safely:
+   - the version asked for is not the latest (`NOT_LATEST_VERSION`, because agents use the latest and the
+     record would describe the wrong model);
+   - an embedding setting or a store parameter names a variable that cannot be resolved now
+     (`EMBEDDING_SETTINGS_UNRESOLVED`, retryable);
+   - another knowledge base keeps its chunks under the same tag in the same store (`SHARED_CHUNKS`, the
+     6.5.0 name layout: same name, same table — deleting by the tag would take its chunks too; give them
+     separate tables and re-embed each);
+   - the **embedding probe** fails (`EMBEDDING_PROBE_FAILED`): one embedding call is made with the new
+     settings before anything is touched. It proves the credentials and the model work — a re-embed that
+     cannot embed must not delete — and measures the size the new vectors will have, which every check
+     below uses;
+   - the new size does not fit where the vectors go, **per store type**:
+     - *pgvector*: the table must be an EDDI pgvector table (`NOT_A_PGVECTOR_TABLE`);
+       `storeParameters.dimension` must be the new size, because the table is recreated from it
+       (`DIMENSION_SETTING_MISMATCH` names the value to set); and a table whose column has another size is
+       dropped and recreated, which is refused while other knowledge bases keep rows in it
+       (`SHARED_TABLE_SIZE`);
+     - *Qdrant, Chroma, Elasticsearch, MongoDB Atlas*: a collection keeps its vector size and EDDI cannot
+       recreate it. If a size is recorded for it and differs, the re-embed is refused —
+       `SHARED_TABLE_SIZE` while other knowledge bases keep vectors there, `STORE_CANNOT_CHANGE_SIZE` when
+       this one is alone, which says to recreate the collection with the new size (or point
+       `collectionName`/`indexName` at a new one) and re-embed. A collection EDDI never ingested into since
+       sizes are tracked has no recorded size, so it cannot be judged here: the first ingestion is refused
+       with the same advice;
+     - *in-memory*: nothing to decide, the store is replaced;
+   - the other knowledge bases cannot all be checked (`503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE`): one could not
+     be read, or its store parameters could not be resolved, so it cannot be ruled out that it shares the
+     store. The log names it. Only a knowledge base that can be read can be classified, so one unreadable
+     document anywhere blocks re-embedding until it is fixed — deliberately: a sharer that is not seen is
+     the one whose data is lost;
 1. claims every source, so nothing runs while the vectors go — a run in flight anywhere answers `409`
    and changes nothing;
 2. **forgets every source's content hashes first**, so that after a crash at any later point the next run —
@@ -398,8 +422,12 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
    that is then empty is dropped, under an exclusive lock and in one transaction, and recreated by the
    next write, which is how a new vector size gets a new column; a table that still holds other
    knowledge bases' rows, or is busy, is left alone, a table that is not an EDDI pgvector table is never
-   touched, and a store that cannot delete by metadata answers `501` — empty it by hand first). A
-   direct `/ingest` on the same instance waits (`409`-class refusal) while this runs;
+   touched, and a store that cannot delete by metadata answers `501` — empty it by hand first). The
+   answer's `tableRecreated` says which: `true` when the pgvector table was dropped, `false` when it was
+   busy or still holds other knowledge bases' rows — then `warnings` says that the table keeps its old
+   column size, that ingestion of the new size is refused until it is dropped, and what to do. A direct
+   `/ingest` on **the same instance** is refused (`409` `VECTOR_SPACE_MISMATCH`, "being re-embedded")
+   while this runs; the mark is per instance, not cluster-wide;
 4. records the configured space as this knowledge base's, and forgets the location's vector size when
    nothing else keeps vectors there;
 5. forgets each source's ingestion state and starts an ordinary run of every enabled source.
@@ -410,12 +438,32 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
 | `409` `SHARED_CHUNKS` | Another knowledge base keeps its chunks under the same tag in the same store (6.5.0 name layout). `knowledgeBases` lists them |
 | `409` `SHARED_TABLE_SIZE` | A pgvector table other knowledge bases keep rows in would have to change its vector size |
 | `409` `NOT_LATEST_VERSION` | `version` is not the latest. `latestVersion` says which is |
+| `409` `EMBEDDING_PROBE_FAILED` | The embedding call with the new settings failed; nothing was removed. The error says why (credentials, model, rate limit) |
+| `409` `NOT_A_PGVECTOR_TABLE` | `storeParameters.table` names a table that is not an EDDI pgvector table |
+| `409` `DIMENSION_SETTING_MISMATCH` | pgvector: `storeParameters.dimension` is not the size the new model returns |
+| `409` `STORE_CANNOT_CHANGE_SIZE` | The collection keeps another vector size and EDDI cannot recreate it; the error says what to do |
 | `409` `EMBEDDING_SETTINGS_UNRESOLVED` | An embedding setting names a variable that cannot be resolved now; retry |
 | `409` (no code) | A run is in flight for a source (`sourceId`) |
 | `501` | The store cannot delete by metadata |
+| `503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE` | Another knowledge base could not be read or resolved, so sharers cannot be ruled out; nothing was changed |
 | `503` | The vector store failed; the sources' hashes were already forgotten, so the next run of each embeds everything again |
 
 The `409` bodies are `{"error": text, "code": …}`; a refused search, ingest or run uses `code: VECTOR_SPACE_MISMATCH`.
+The `202` body also carries `tableRecreated` (`true`, `false`, or `null` for any store but pgvector) and `warnings`
+(a list of what is still to do).
+
+**What counts as "the same place".** Two knowledge bases share a store when their locations are equal after
+global variables are resolved the way the store factory resolves them (`${vars:host}` and the host it stands
+for are one place); unresolvable variables refuse the operation instead of guessing. Aliases the comparison
+cannot see are **not** recognised: `localhost` and `127.0.0.1`, two DNS names of one server, a vault
+reference and the secret it holds, a connection string written two ways. Where such aliases exist, give each
+knowledge base a table or collection of its own — which is the safe setup anyway.
+
+**In a cluster.** The "being re-embedded" mark that refuses a direct `/ingest` is held by the instance that
+runs the re-embed; another instance does not see it. Each instance caches a record for up to 30 seconds, and
+the column size it read from a pgvector table for up to a minute (or until the store is rebuilt), so another
+node may refuse — or, for a store that does not check the column itself, accept — for that long after a
+re-embed. Sources are claimed in the shared state store, so those are safe cluster-wide.
 
 The `202` answer has, per source, the `runId` to follow in
 `GET /ragstore/rags/{id}/sources/{sourceId}/runs`, and a list `notReEmbedded`. **Documents sent
@@ -844,7 +892,7 @@ every prompt that retrieves it. So an **uploaded** file is read the way a person
 | Format | Left out |
 | --- | --- |
 | Word | runs marked hidden (`w:vanish`, `w:specVanish` or `w:webHidden`, unless switched off) and runs set at one point or smaller (`w:sz` 2 or less). A paragraph whose *mark* is hidden keeps its text |
-| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** rows hidden by an autofilter (any sheet that has an `autoFilter` keeps all its rows) and rows or columns collapsed by grouping (`outlineLevel`), because a filter or a collapsed group is not the author hiding text. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
+| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** a hidden row that lies inside the sheet's `autoFilter` range (a filter can be the reason), and rows or columns collapsed by grouping (`outlineLevel`) — also when they are explicitly hidden as well, because a collapsed group is not the author hiding text. **Dropped:** a row or column hidden by hand that is neither grouped nor inside a filter's range; a row without a row number (`r`) is kept, since its place cannot be told. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
 | PowerPoint | slides marked "hide slide" (`show="0"`) and any shape marked hidden — text boxes, pictures, groups (with everything in them), connectors and any other shape kind; a hidden shape ends where it ends and never takes the next one's text with it |
 | HTML | elements the markup hides outright — the `hidden` attribute, `display:none`, zero `opacity`, off-screen or zero-size elements — on top of what the page converter always drops (comments, one-pixel text, transparent text, text the same colour as an explicitly set background) |
 

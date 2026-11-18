@@ -94,12 +94,17 @@ public final class StoreParameterChecks {
      * This list can drift; the real guard is the check, when a table is used, that
      * it has the columns EDDI's pgvector layout creates.
      */
-    static final Set<String> EDDI_TABLES = Set.of("agent_triggers", "alert_events", "alert_rules", "alert_windows", "approval_decisions",
-            "attachments", "audit_ledger", "audit_samples", "autonomy_state", "branding", "branding_assets", "conversation_checkpoints",
-            "conversation_memories", "conversation_ratings", "database_logs", "deployments", "eddi_schedule_fire_logs", "eddi_schedules",
-            "global_variables", "group_lesson_history", "group_outcomes", "hitl_tool_execution_journal", "migration_log",
-            "model_price_catalog", "rag_ingested_files", "rag_ingestion_documents", "rag_ingestion_runs", "rag_ingestion_sources",
-            "resources", "resources_history", "spend_control_changes", "user_conversations", "usermemories");
+    static final Set<String> EDDI_TABLES = Set.of(
+            "agent_triggers", "alert_events", "alert_rules", "alert_windows", "approval_decisions", "attachments", "audit_ledger",
+            "audit_samples", "autonomy_state", "branding", "branding_assets", "connection_grants", "connection_name_claims",
+            "connection_oauth_states", "connection_settings", "conversation_checkpoints", "conversation_memories", "conversation_ratings",
+            "database_logs", "deployments", "eddi_schedule_fire_logs", "eddi_schedules", "email_mailbox_notices", "email_mailbox_state",
+            "email_message_ledger", "email_suppressions", "global_variables", "group_lesson_history", "group_outcomes",
+            "hitl_tool_execution_journal", "migration_log", "model_price_catalog", "rag_ingested_files", "rag_ingestion_documents",
+            "rag_ingestion_runs", "rag_ingestion_sources", "resources", "resources_history", "secret_vault_deks", "secret_vault_meta",
+            "secret_vault_secrets", "slack_hitl_approval_records", "spend_control_changes", "system_settings", "team_budget_months",
+            "tenant_quotas", "tenant_usage", "tool_quota_counters", "user_conversations", "user_directory", "usermemories",
+            "workspace_notifications", "workspace_settings");
 
     private static String foreignTable(Map<String, String> params) {
         String table = literal(params.get("table"));

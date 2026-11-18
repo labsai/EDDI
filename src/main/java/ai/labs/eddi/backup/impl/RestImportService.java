@@ -2162,7 +2162,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // The lenient update where the store offers it: the interactive one refuses
         // what
         // older versions accepted, and the archive cannot be edited first.
-        RestUpdate<RagConfiguration> update = store instanceof RestRagStore lenient ? lenient::updateRagLenient : store::updateRag;
+        RestUpdate<RagConfiguration> update = (id, version, document) -> RestRagStore.updateOlderConfig(store, id, version, document);
         return updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, update, transaction);
     }
 

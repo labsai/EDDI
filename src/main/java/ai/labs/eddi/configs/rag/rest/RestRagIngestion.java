@@ -953,6 +953,18 @@ public class RestRagIngestion implements IRestRagIngestion {
             refusal.put("code", e.code());
             refusal.put("knowledgeBases", e.knowledgeBases());
             return Response.status(Response.Status.CONFLICT).entity(refusal).build();
+        } catch (KnowledgeBaseStorageGuard.SharerScanIncompleteException e) {
+            // Which knowledge base could not be read is in the log; the client is told that
+            // the
+            // check could not be completed, and that nothing was changed.
+            LOGGER.warnf("Re-embedding knowledge base %s refused: %s (unreadable: %s)", sanitize(ragConfigId), e.getMessage(),
+                    e.unreadable());
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The other knowledge bases could not all be checked, so it cannot be ruled out that one of "
+                            + "them keeps its chunks in the same store; removing this one's vectors might remove theirs. Nothing was "
+                            + "changed. Retry once every knowledge base can be read; the server log names the one that could not.",
+                            "code", "KNOWLEDGE_BASE_SCAN_INCOMPLETE"))
+                    .build();
         } catch (VectorSpaceMismatchException | OperatorFailureException e) {
             // An unresolvable variable, say: nothing was changed, and it is worth retrying.
             return Response.status(Response.Status.CONFLICT)
@@ -989,6 +1001,10 @@ public class RestRagIngestion implements IRestRagIngestion {
         // Follow each run with GET /ragstore/rags/{id}/sources/{sourceId}/runs.
         body.put("sources", started);
         body.put("notReEmbedded", result.notReEmbedded());
+        // pgvector only: whether the table was dropped to be recreated at the
+        // configured vector size.
+        body.put("tableRecreated", result.tableRecreated());
+        body.put("warnings", result.warnings());
         return Response.accepted(body).build();
     }
 

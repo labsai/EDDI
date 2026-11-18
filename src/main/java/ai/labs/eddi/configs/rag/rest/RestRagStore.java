@@ -31,11 +31,13 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -123,6 +125,19 @@ public class RestRagStore implements IRestRagStore {
         return update(id, version, ragConfiguration, false);
     }
 
+    private static final Set<RagConfiguration> TOLERATED = Collections.newSetFromMap(new WeakHashMap<>());
+
+    /**
+     * The one update older configurations go through — an import or a sync of an
+     * archive, and an upgrade — whichever way the store was obtained: the lenient
+     * update where the store is this class (it is also true of the CDI client
+     * proxy, which subclasses it), the interactive one for anything else, such as a
+     * test double.
+     */
+    public static Response updateOlderConfig(IRestRagStore store, String id, Integer version, RagConfiguration config) {
+        return store instanceof RestRagStore lenient ? lenient.updateRagLenient(id, version, config) : store.updateRag(id, version, config);
+    }
+
     /**
      * Keeps an older configuration usable on the lenient paths: retrieval settings
      * out of range are clamped, and what the interactive save would refuse (an
@@ -132,6 +147,13 @@ public class RestRagStore implements IRestRagStore {
     public static void tolerateLegacySettings(RagConfiguration config) {
         if (config == null) {
             return;
+        }
+        // Said once per configuration object: a retried or tracked update presents the
+        // same one again.
+        synchronized (TOLERATED) {
+            if (!TOLERATED.add(config)) {
+                return;
+            }
         }
         List<String> problems = config.findStrictProblems();
         if (config.clampRetrievalSettings()) {

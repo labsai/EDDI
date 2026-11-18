@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -19,15 +20,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -72,6 +78,41 @@ class RestRagStoreLegacyConfigTest {
         config.setMinScore(1.5);
         config.setMaxResults(0);
         return config;
+    }
+
+    @Test
+    @DisplayName("the one update older configurations go through — import, sync and upgrade — is the lenient one on the real store")
+    void olderConfigUpdateIsLenient() {
+        RagConfiguration config = old();
+
+        assertEquals(200, RestRagStore.updateOlderConfig(restRagStore, KB_ID, 1, config).getStatus());
+        assertEquals("legacy-store", config.getStoreType());
+    }
+
+    @Test
+    @DisplayName("and the interactive one for any other store, such as a test double")
+    void otherStoresGetTheInteractiveUpdate() {
+        IRestRagStore double_ = mock(IRestRagStore.class);
+        RagConfiguration config = old();
+
+        RestRagStore.updateOlderConfig(double_, KB_ID, 1, config);
+
+        verify(double_).updateRag(KB_ID, 1, config);
+    }
+
+    @Test
+    @DisplayName("an upgrade, a sync and an import all reach the store through that one helper, never through updateRag directly")
+    void everyOlderConfigPathUsesTheHelper() throws Exception {
+        // The upgrade executor and the import service — which a sync of an archive from
+        // another instance goes
+        // through — are the two callers; neither may call the interactive update itself
+        // again.
+        for (String file : new String[]{"UpgradeExecutor.java", "RestImportService.java"}) {
+            String source = Files.readString(Path.of("src/main/java/ai/labs/eddi/backup/impl", file));
+            assertTrue(source.contains("RestRagStore.updateOlderConfig("), file);
+            assertFalse(source.matches("(?s).*getStore\\(IRestRagStore\\.class\\)\\.updateRag\\(.*"), file);
+            assertFalse(source.contains("store::updateRag"), file);
+        }
     }
 
     @Test

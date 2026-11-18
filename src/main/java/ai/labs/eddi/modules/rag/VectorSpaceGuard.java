@@ -137,7 +137,11 @@ public class VectorSpaceGuard {
     }
 
     private static Identity identityOf(String ragConfigId, RagConfiguration config) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
+        return identityOf(null, ragConfigId, config);
+    }
+
+    private static Identity identityOf(GlobalVariableResolver resolver, String ragConfigId, RagConfiguration config) {
+        String location = locationOf(resolver, ragConfigId, config);
         if (location == null) {
             return null;
         }
@@ -146,6 +150,42 @@ public class VectorSpaceGuard {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    /**
+     * Where the knowledge base's vectors are, with the global variables its store
+     * parameters name resolved the way the store factory resolves them — so
+     * {@code ${vars:host}} and the host it stands for are one location. Aliases a
+     * resolver cannot see ({@code localhost} and {@code 127.0.0.1}, two DNS names
+     * of one server, a vault reference and the secret it holds) are not recognised;
+     * the documentation says so.
+     *
+     * @throws OperatorFailureException
+     *             when a variable cannot be resolved now
+     */
+    public String locationOf(String ragConfigId, RagConfiguration config) {
+        return locationOf(variables, ragConfigId, config);
+    }
+
+    private static String locationOf(GlobalVariableResolver resolver, String ragConfigId, RagConfiguration config) {
+        RagConfiguration resolved = config;
+        Map<String, String> params = config.getStoreParameters();
+        if (resolver != null && params != null && params.values().stream().anyMatch(value -> value != null && value.contains("${"))) {
+            Map<String, String> values;
+            try {
+                values = resolver.resolveAll(params);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not resolve the store parameters of knowledge base '%s': %s", LogSanitizer.sanitize(config.getName()),
+                        LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+                throw unresolved();
+            }
+            resolved = new RagConfiguration();
+            resolved.setName(config.getName());
+            resolved.setStoreNamespace(config.getStoreNamespace());
+            resolved.setStoreType(config.getStoreType());
+            resolved.setStoreParameters(values == null ? params : values);
+        }
+        return KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, resolved);
     }
 
     /**
@@ -190,7 +230,7 @@ public class VectorSpaceGuard {
      * anything. Used by the status endpoint.
      */
     public Status status(String ragConfigId, RagConfiguration config) {
-        Identity identity = identityOf(ragConfigId, config);
+        Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null) {
             return new Status(false, null, null, true);
         }
@@ -205,6 +245,16 @@ public class VectorSpaceGuard {
             return null;
         }
         return model.withDimension(readSize(identity));
+    }
+
+    /**
+     * The vector size recorded for the knowledge base's location, or null. Used by
+     * a re-embed to see whether the size it is about to write is the one the
+     * location holds.
+     */
+    public Integer recordedSize(String ragConfigId, RagConfiguration config) {
+        Identity identity = identityOf(variables, ragConfigId, config);
+        return identity == null ? null : readSize(identity);
     }
 
     private Integer readSize(Identity identity) {
@@ -231,7 +281,7 @@ public class VectorSpaceGuard {
      *             when the configured space cannot be resolved
      */
     public void requireCompatible(String ragConfigId, RagConfiguration config) {
-        Identity identity = identityOf(ragConfigId, config);
+        Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null) {
             return;
         }
@@ -272,7 +322,7 @@ public class VectorSpaceGuard {
      *             when the size is not the one this knowledge base's vectors have
      */
     public void verifyDimension(String ragConfigId, RagConfiguration config, int actual, boolean record) {
-        Identity identity = identityOf(ragConfigId, config);
+        Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null || actual <= 0) {
             return;
         }
@@ -316,8 +366,9 @@ public class VectorSpaceGuard {
             return null;
         }
         try {
-            var info = storeFactory.inspectPgVectorTable(ragConfigId, config, KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
-            return info.exists() && info.layoutMatches() ? info.columnDimension() : null;
+            // The catalogue only, remembered per store: this is asked for every document
+            // and every query.
+            return storeFactory.pgVectorColumnDimension(ragConfigId, config);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not read the real vector size of the pgvector table of knowledge base %s: %s",
                     LogSanitizer.sanitize(ragConfigId), LogSanitizer.sanitize(String.valueOf(e.getMessage())));
@@ -334,7 +385,7 @@ public class VectorSpaceGuard {
      *            keeps vectors there
      */
     public void reset(String ragConfigId, RagConfiguration config, boolean clearSize) {
-        Identity identity = identityOf(ragConfigId, config);
+        Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null) {
             return;
         }
@@ -384,9 +435,9 @@ public class VectorSpaceGuard {
         String cached = recorded.getIfPresent(key);
         if (cached == null) {
             cached = stateStore.storeFingerprint(key).orElse(null);
-            if (cached != null) {
-                recorded.put(key, cached);
-            }
+            // An absent record is remembered too (as ""): a knowledge base with no size
+            // record would otherwise cost a state-store read on every agent turn.
+            recorded.put(key, cached == null ? "" : cached);
         }
         return cached;
     }

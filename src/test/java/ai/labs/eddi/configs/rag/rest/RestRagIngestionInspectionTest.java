@@ -284,6 +284,37 @@ class RestRagIngestionInspectionTest {
     }
 
     @Test
+    @DisplayName("an incomplete scan of the other knowledge bases is a 503 with its own code and no knowledge base named")
+    void reembedIncompleteScan() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenThrow(
+                new KnowledgeBaseStorageGuard.SharerScanIncompleteException("1 knowledge base(s) could not be read", List.of("secret-kb-id")));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(503, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals("KNOWLEDGE_BASE_SCAN_INCOMPLETE", body.get("code"));
+        assertFalse(String.valueOf(body.get("error")).contains("secret-kb-id"));
+        assertFalse(String.valueOf(body.get("error")).contains("could not be emptied"));
+    }
+
+    @Test
+    @DisplayName("the result says whether the pgvector table was recreated, and what is still to do")
+    void reembedReportsTheTable() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenReturn(new KnowledgeBaseReembedService.Result(null, List.of(), List.of("x"), false,
+                List.of("the table keeps its old size")));
+
+        Map<?, ?> body = (Map<?, ?>) rest.reembed(KB_ID, 1).getEntity();
+
+        assertEquals(false, body.get("tableRecreated"));
+        assertEquals(List.of("the table keeps its old size"), body.get("warnings"));
+    }
+
+    @Test
     @DisplayName("an unresolved variable is a retryable 409 with its own code, not a 5xx")
     void reembedUnresolvedVariable() {
         KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);

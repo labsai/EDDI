@@ -29,7 +29,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -205,8 +207,7 @@ class VectorSpaceGuardTest {
     @DisplayName("the table's real column size wins over the configured one")
     void pgvectorRealColumnSize() {
         EmbeddingStoreFactory factory = mock(EmbeddingStoreFactory.class);
-        when(factory.inspectPgVectorTable(anyString(), any(), anyString()))
-                .thenReturn(new EmbeddingStoreFactory.PgVectorTableInfo(true, true, 1536, false));
+        when(factory.pgVectorColumnDimension(anyString(), any())).thenReturn(1536);
         guard.storeFactory = factory;
         // Configured 3072; the legacy table was made for 1536.
         RagConfiguration config = pgvector("big", Map.of("dimension", "3072"));
@@ -289,6 +290,66 @@ class VectorSpaceGuardTest {
         assertEquals(1.0, meters.counter(VectorSpaceGuard.REFUSED_METRIC, "reason", "space").count());
         assertEquals(1.0, meters.counter(VectorSpaceGuard.REFUSED_METRIC, "reason", "dimension").count());
         assertTrue(meters.getMeters().stream().allMatch(meter -> meter.getId().getTags().stream().noneMatch(tag -> tag.getValue().contains(ID))));
+    }
+
+    @Test
+    @DisplayName("a knowledge base with no size record costs one state-store read, not one per turn")
+    void anAbsentSizeRecordIsRemembered() {
+        RagConfiguration config = qdrant("emb-8");
+        guard.requireCompatible(ID, config);
+
+        for (int i = 0; i < 5; i++) {
+            guard.verifyDimension(ID, config, 8, false);
+        }
+
+        String sizeKey = records.keySet().stream().filter(key -> key.startsWith(VectorSpaceGuard.SIZE_PREFIX)).findFirst().orElse(null);
+        assertNull(sizeKey, "a query never writes the size");
+        verify(stateStore, times(1)).storeFingerprint(startsWith(VectorSpaceGuard.SIZE_PREFIX));
+    }
+
+    @Test
+    @DisplayName("the hot path asks the factory for the column size only, never for the probe that scans the table")
+    void theHotPathNeverProbesForOtherRows() {
+        EmbeddingStoreFactory factory = mock(EmbeddingStoreFactory.class);
+        when(factory.pgVectorColumnDimension(anyString(), any())).thenReturn(1536);
+        guard.useStoreFactory(factory);
+
+        guard.verifyDimension(ID, pgvector("m", Map.of()), 1536, true);
+
+        verify(factory).pgVectorColumnDimension(anyString(), any());
+        verify(factory, never()).inspectPgVectorTable(anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("a store parameter that names a variable and the value it stands for are one location, so they share one size record")
+    void locationsAreComparedAsResolved() {
+        RagConfiguration viaVariable = qdrant("emb-8");
+        viaVariable.setStoreParameters(Map.of("host", "${vars:qdrant-host}", "collectionName", "shared"));
+        RagConfiguration literal = qdrant("emb-8");
+        literal.setStoreParameters(Map.of("host", "qdrant.internal", "collectionName", "shared"));
+        doAnswer(call -> {
+            Map<String, String> resolved = new HashMap<>(call.<Map<String, String>>getArgument(0));
+            resolved.replaceAll((key, value) -> "${vars:qdrant-host}".equals(value) ? "qdrant.internal" : value);
+            return resolved;
+        }).when(variables).resolveAll(any());
+
+        assertEquals(guard.locationOf("a", viaVariable), guard.locationOf("b", literal));
+        guard.requireCompatible("a", viaVariable);
+        guard.verifyDimension("a", viaVariable, 8, true);
+
+        assertEquals(8, guard.recordedSize("b", literal));
+    }
+
+    @Test
+    @DisplayName("an unresolvable variable in a store parameter refuses with the retryable sentence")
+    void unresolvedStoreParameterRefuses() {
+        RagConfiguration config = qdrant("emb-8");
+        config.setStoreParameters(Map.of("host", "${vars:qdrant-host}", "collectionName", "shared"));
+        doThrow(new IllegalStateException("variable store down")).when(variables).resolveAll(any());
+
+        assertThrows(OperatorFailureException.class, () -> guard.locationOf(ID, config));
+        assertThrows(OperatorFailureException.class, () -> guard.requireCompatible(ID, config));
+        assertTrue(records.isEmpty());
     }
 
     @Test

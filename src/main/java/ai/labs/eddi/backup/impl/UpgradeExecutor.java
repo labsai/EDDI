@@ -43,6 +43,7 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.rest.RestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
@@ -1078,7 +1079,7 @@ public class UpgradeExecutor {
             case "rag" -> new ExtensionStoreOps<>(
                     RagConfiguration.class,
                     IRagStore.class,
-                    (id, version, config) -> getStore(IRestRagStore.class).updateRag(id, version, config),
+                    (id, version, config) -> RestRagStore.updateOlderConfig(getStore(IRestRagStore.class), id, version, config),
                     IRestRagStore.resourceURI,
                     IRestRagStore.versionQueryParam);
             // Loud, not silent: a type registered in WorkflowExtensions but missing

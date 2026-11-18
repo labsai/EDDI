@@ -8,9 +8,17 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseReembedService.ReembedRefusedException;
+import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory.PgVectorTableInfo;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory.RemovalOutcome;
 import ai.labs.eddi.modules.rag.OperatorFailureException;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.exception.AuthenticationException;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,6 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,11 +48,15 @@ import static org.mockito.Mockito.when;
 class KnowledgeBaseReembedServiceTest {
 
     private static final String ID = "kb1";
+    /** What the fake embedding model returns: the size of the new vectors. */
+    private static final int NEW_SIZE = 768;
 
     private IngestionPipeline pipeline;
     private RagSourceIngestionService sources;
     private IIngestionStateStore stateStore;
     private EmbeddingStoreFactory storeFactory;
+    private EmbeddingModelFactory modelFactory;
+    private EmbeddingModel model;
     private VectorSpaceGuard guard;
     private KnowledgeBaseStorageGuard storageGuard;
     private KnowledgeBaseReembedService service;
@@ -58,9 +71,11 @@ class KnowledgeBaseReembedServiceTest {
         sources = mock(RagSourceIngestionService.class);
         stateStore = mock(IIngestionStateStore.class);
         storeFactory = mock(EmbeddingStoreFactory.class);
+        modelFactory = mock(EmbeddingModelFactory.class);
+        model = mock(EmbeddingModel.class);
         guard = mock(VectorSpaceGuard.class);
         storageGuard = mock(KnowledgeBaseStorageGuard.class);
-        service = new KnowledgeBaseReembedService(pipeline, sources, stateStore, storeFactory, guard, storageGuard);
+        service = new KnowledgeBaseReembedService(pipeline, sources, stateStore, storeFactory, guard, storageGuard, modelFactory);
 
         web = new IngestionSource();
         web.setId("web1");
@@ -72,13 +87,22 @@ class KnowledgeBaseReembedServiceTest {
         knowledgeBase.setName("docs");
         knowledgeBase.setStoreNamespace("id");
         knowledgeBase.setSources(List.of(web, upload));
-        when(storageGuard.sharersOf(anyString(), any())).thenReturn(List.of());
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), eq(EmbeddingInputType.DOCUMENT))).thenReturn(model);
+        when(model.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[NEW_SIZE])));
+        when(storageGuard.sharersOf(anyString(), any(), any())).thenReturn(List.of());
         when(pipeline.claimForMaintenance(eq(ID), any())).thenReturn(Optional.of("claim"));
         when(sources.runAsync(eq(ID), any(), any(), any(), any())).thenReturn(Optional.of("run-1"));
+        when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.CHUNKS_DELETED);
     }
 
     private String key(IngestionSource source) {
         return IngestionPipeline.stateKeyForSourceId(ID, source.effectiveId());
+    }
+
+    private void pgvector(int declared, PgVectorTableInfo info) {
+        knowledgeBase.setStoreType("pgvector");
+        knowledgeBase.setStoreParameters(Map.of("dimension", String.valueOf(declared)));
+        when(storeFactory.inspectPgVectorTable(eq(ID), any(), anyString())).thenReturn(info);
     }
 
     @Test
@@ -91,19 +115,35 @@ class KnowledgeBaseReembedServiceTest {
         assertEquals("run-1", result.sources().get(0).runId());
         assertEquals(1, result.notReEmbedded().size());
         assertTrue(result.notReEmbedded().get(0).contains("/ingest"), result.notReEmbedded().get(0));
+        assertNull(result.tableRecreated(), "only a pgvector table is recreated");
 
-        InOrder order = inOrder(storeFactory, guard, stateStore, sources);
-        // The durable step comes first: whatever happens next, a run embeds everything
-        // again.
+        InOrder order = inOrder(model, storeFactory, guard, stateStore, sources);
+        // The probe comes before anything is touched, and the durable step before the
+        // removal.
+        order.verify(model).embed(anyString());
         order.verify(stateStore).invalidateContent(key(web));
         order.verify(stateStore).invalidateContent(key(upload));
         order.verify(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
         order.verify(guard).reset(eq(ID), eq(knowledgeBase), anyBoolean());
         order.verify(stateStore).purgeSource(key(web));
         order.verify(sources).runAsync(eq(ID), eq(knowledgeBase), eq(web), any(), any());
-        // Direct ingests wait only while the vectors go.
         verify(guard).beginMaintenance(ID);
         verify(guard).endMaintenance(ID);
+    }
+
+    @Test
+    @DisplayName("a re-embed that cannot embed deletes nothing: the probe fails first, with the reason")
+    void aFailingProbeDeletesNothing() {
+        when(model.embed(anyString())).thenThrow(new AuthenticationException("401 sk-live-secret"));
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_EMBEDDING_FAILED, refused.code());
+        assertTrue(refused.getMessage().contains("credentials"), refused.getMessage());
+        assertFalse(refused.getMessage().contains("sk-live-secret"), refused.getMessage());
+        verify(pipeline, never()).claimForMaintenance(anyString(), any());
+        verify(stateStore, never()).invalidateContent(anyString());
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
     }
 
     @Test
@@ -146,7 +186,6 @@ class KnowledgeBaseReembedServiceTest {
         assertEquals("run-1", result.sources().get(0).runId());
         assertNull(result.sources().get(1).runId());
         assertTrue(result.sources().get(1).note().contains("could not be cleared"));
-        // Both were marked before anything was removed.
         InOrder order = inOrder(stateStore, storeFactory);
         order.verify(stateStore).invalidateContent(key(upload));
         order.verify(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
@@ -164,7 +203,6 @@ class KnowledgeBaseReembedServiceTest {
         verify(pipeline).releaseClaim(ID, web, "claim");
         verify(stateStore, never()).invalidateContent(anyString());
         verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
-        verify(guard, never()).reset(anyString(), any(), anyBoolean());
         verify(stateStore, never()).purgeSource(anyString());
     }
 
@@ -177,13 +215,36 @@ class KnowledgeBaseReembedServiceTest {
 
         verify(pipeline, never()).claimForMaintenance(anyString(), any());
         verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+        verify(model, never()).embed(anyString());
+    }
+
+    @Test
+    @DisplayName("an incomplete scan of the other knowledge bases refuses with its own exception, before anything changes")
+    void incompleteScanRefuses() {
+        when(storageGuard.sharersOf(anyString(), any(), any())).thenThrow(
+                new KnowledgeBaseStorageGuard.SharerScanIncompleteException("1 knowledge base(s) could not be read", List.of("broken-kb")));
+
+        var incomplete = assertThrows(KnowledgeBaseStorageGuard.SharerScanIncompleteException.class,
+                () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(List.of("broken-kb"), incomplete.unreadable());
+        verify(model, never()).embed(anyString());
+        verify(stateStore, never()).invalidateContent(anyString());
+    }
+
+    @Test
+    @DisplayName("the other knowledge bases' locations are compared as the guard resolves them")
+    void sharersAreFoundByTheGuardsResolvedLocation() {
+        service.reembed(ID, knowledgeBase);
+
+        verify(storageGuard).sharersOf(eq(ID), eq(knowledgeBase), any());
     }
 
     @Test
     @DisplayName("another knowledge base with the same chunk tag in the same store (6.5.0 name layout) refuses the operation, naming it")
     void sameNameSameTableRefuses() {
         knowledgeBase.setStoreNamespace(null);
-        when(storageGuard.sharersOf(eq(ID), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer("kb2", "docs"),
+        when(storageGuard.sharersOf(eq(ID), any(), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer("kb2", "docs"),
                 new KnowledgeBaseStorageGuard.Sharer("kb3", "other")));
 
         var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
@@ -196,24 +257,45 @@ class KnowledgeBaseReembedServiceTest {
     }
 
     @Test
-    @DisplayName("a shared table with other ids is no obstacle: their chunks carry other tags")
+    @DisplayName("a shared table with other ids is no obstacle when the size is the same: their chunks carry other tags")
     void sharedTableWithOtherIdsIsFine() {
-        when(storageGuard.sharersOf(eq(ID), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer("kb2", "kb2")));
+        when(storageGuard.sharersOf(eq(ID), any(), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer("kb2", "kb2")));
 
         var result = service.reembed(ID, knowledgeBase);
 
         assertTrue(!result.refused());
-        // The location's vector size is kept: somebody else still holds vectors there.
         verify(guard).reset(ID, knowledgeBase, false);
     }
 
     @Test
-    @DisplayName("a changed vector size on a pgvector table that other knowledge bases keep rows in is refused up front")
+    @DisplayName("pgvector: a table that is not an EDDI table is refused at the start, before any source's hashes are wiped")
+    void foreignTableIsRefusedFirst() {
+        pgvector(NEW_SIZE, new PgVectorTableInfo(true, false, null, false));
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_NOT_A_PGVECTOR_TABLE, refused.code());
+        verify(pipeline, never()).claimForMaintenance(anyString(), any());
+        verify(stateStore, never()).invalidateContent(anyString());
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("pgvector: a model of another size than storeParameters.dimension is refused up front with the setting to change")
+    void declaredDimensionMustBeTheNewSize() {
+        pgvector(1536, new PgVectorTableInfo(true, true, 1536, false));
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_DIMENSION_SETTING, refused.code());
+        assertTrue(refused.getMessage().contains("768") && refused.getMessage().contains("storeParameters.dimension"), refused.getMessage());
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("pgvector: a size change on a table other knowledge bases keep rows in is refused before anything is deleted")
     void sharedPgVectorTableCannotChangeSize() {
-        knowledgeBase.setStoreType("pgvector");
-        knowledgeBase.setStoreParameters(Map.of("dimension", "768"));
-        when(storeFactory.inspectPgVectorTable(eq(ID), any(), anyString()))
-                .thenReturn(new EmbeddingStoreFactory.PgVectorTableInfo(true, true, 1536, true));
+        pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, 1536, true));
 
         var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
 
@@ -224,17 +306,67 @@ class KnowledgeBaseReembedServiceTest {
     }
 
     @Test
-    @DisplayName("the same size on a shared pgvector table, or a table of the knowledge base's own, goes ahead")
-    void sameSizeOrOwnTableGoesAhead() {
-        knowledgeBase.setStoreType("pgvector");
-        knowledgeBase.setStoreParameters(Map.of("dimension", "1536"));
-        when(storeFactory.inspectPgVectorTable(eq(ID), any(), anyString()))
-                .thenReturn(new EmbeddingStoreFactory.PgVectorTableInfo(true, true, 1536, true));
+    @DisplayName("pgvector: a table of its own is recreated at the new size, and the result says so")
+    void ownTableIsRecreated() {
+        pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, 1536, false));
+        when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.TABLE_DROPPED);
+
+        var result = service.reembed(ID, knowledgeBase);
+
+        assertEquals(Boolean.TRUE, result.tableRecreated());
+        assertTrue(result.warnings().isEmpty());
+        verify(guard).reset(ID, knowledgeBase, true);
+    }
+
+    @Test
+    @DisplayName("pgvector: a busy table is not dropped, and the result says it keeps its old size and what to do")
+    void busyTableIsReported() {
+        pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, 1536, false));
+        when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.TABLE_BUSY);
+
+        var result = service.reembed(ID, knowledgeBase);
+
+        assertEquals(Boolean.FALSE, result.tableRecreated());
+        assertEquals(1, result.warnings().size());
+        assertTrue(result.warnings().get(0).contains("1536") && result.warnings().get(0).contains("768"), result.warnings().get(0));
+        assertTrue(result.warnings().get(0).contains("DROP TABLE") || result.warnings().get(0).contains("re-embed again"));
+    }
+
+    @Test
+    @DisplayName("another store: a collection that keeps a different size, alone in it, is refused with what the operator must do")
+    void collectionCannotChangeSize() {
+        knowledgeBase.setStoreType("qdrant");
+        when(guard.recordedSize(eq(ID), any())).thenReturn(1536);
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_STORE_CANNOT_RESIZE, refused.code());
+        assertTrue(refused.getMessage().contains("collectionName") && refused.getMessage().contains("1536"), refused.getMessage());
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+        verify(stateStore, never()).invalidateContent(anyString());
+    }
+
+    @Test
+    @DisplayName("another store: a shared collection with a different size is refused as shared, naming the others")
+    void sharedCollectionCannotChangeSize() {
+        knowledgeBase.setStoreType("qdrant");
+        when(guard.recordedSize(eq(ID), any())).thenReturn(1536);
+        when(storageGuard.sharersOf(eq(ID), any(), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer("kb2", "kb2")));
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_SHARED_TABLE_SIZE, refused.code());
+        assertEquals(List.of("kb2"), refused.knowledgeBases());
+    }
+
+    @Test
+    @DisplayName("another store: the same size, or no recorded size, goes ahead")
+    void sameOrUnknownSizeGoesAhead() {
+        knowledgeBase.setStoreType("qdrant");
+        when(guard.recordedSize(eq(ID), any())).thenReturn(NEW_SIZE);
         assertTrue(!service.reembed(ID, knowledgeBase).refused());
 
-        knowledgeBase.setStoreParameters(Map.of("dimension", "768"));
-        when(storeFactory.inspectPgVectorTable(eq(ID), any(), anyString()))
-                .thenReturn(new EmbeddingStoreFactory.PgVectorTableInfo(true, true, 1536, false));
+        when(guard.recordedSize(eq(ID), any())).thenReturn(null);
         assertTrue(!service.reembed(ID, knowledgeBase).refused());
     }
 

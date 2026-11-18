@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiFunction;
 
 /**
  * Decides, when a knowledge base is written, which vector store it may address
@@ -233,28 +234,69 @@ public class KnowledgeBaseStorageGuard {
     }
 
     /**
+     * The scan of the other knowledge bases could not be completed, so it cannot be
+     * ruled out that one of them shares the store. Fail closed: a sharer that is
+     * not seen is the one whose data is lost.
+     */
+    public static class SharerScanIncompleteException extends IllegalStateException {
+
+        private final List<String> unreadable;
+
+        public SharerScanIncompleteException(String message, List<String> unreadable) {
+            super(message);
+            this.unreadable = List.copyOf(unreadable);
+        }
+
+        /**
+         * The knowledge bases that could not be read or resolved; for the log, not for
+         * a client.
+         */
+        public List<String> unreadable() {
+            return unreadable;
+        }
+    }
+
+    /**
+     * {@link #sharersOf(String, RagConfiguration, BiFunction)} with the locations
+     * as written.
+     */
+    public List<Sharer> sharersOf(String selfId, RagConfiguration self) {
+        return sharersOf(selfId, self, KnowledgeBaseStorage::vectorSpaceLocation);
+    }
+
+    /**
      * Every other knowledge base whose vectors are in the same store location as
      * {@code self}'s — the current version of each is read.
      *
-     * @throws IllegalStateException
-     *             when the list of knowledge bases cannot be read in full: a sharer
-     *             that is not seen is the one whose data is lost
+     * @param locator
+     *            where a knowledge base's vectors are; the caller passes one that
+     *            resolves global variables, so {@code ${vars:host}} and the host it
+     *            stands for are one place. It may throw an
+     *            {@code IllegalStateException} for one it cannot resolve
+     * @throws SharerScanIncompleteException
+     *             when a knowledge base could not be read or its location resolved,
+     *             or there are too many to list; the unreadable ones are named in
+     *             the log (not in the message)
      */
-    public List<Sharer> sharersOf(String selfId, RagConfiguration self) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(selfId, self);
+    public List<Sharer> sharersOf(String selfId, RagConfiguration self, BiFunction<String, RagConfiguration, String> locator) {
+        String location = locator.apply(selfId, self);
         if (location == null) {
             return List.of();
         }
         List<Sharer> sharers = new ArrayList<>();
-        for (int page = 0; page < MAX_PAGES; page++) {
+        List<String> unreadable = new ArrayList<>();
+        boolean listed = false;
+        for (int page = 0; page < MAX_PAGES && !listed; page++) {
             List<DocumentDescriptor> descriptors;
             try {
                 descriptors = documentDescriptorStore.readDescriptors(RAG_DESCRIPTOR_TYPE, null, page, PAGE_SIZE, false);
             } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                throw new IllegalStateException("Could not list knowledge bases to find those sharing a store location", e);
+                LOGGER.warnf(e, "Could not list the knowledge bases to find those sharing a store location");
+                throw new SharerScanIncompleteException("The list of knowledge bases could not be read", List.of());
             }
             if (descriptors == null || descriptors.isEmpty()) {
-                return sharers;
+                listed = true;
+                break;
             }
             for (DocumentDescriptor descriptor : descriptors) {
                 IResourceStore.IResourceId resourceId;
@@ -270,7 +312,7 @@ public class KnowledgeBaseStorageGuard {
                 }
                 try {
                     RagConfiguration other = ragStore.read(resourceId.getId(), resourceId.getVersion());
-                    if (location.equals(KnowledgeBaseStorage.vectorSpaceLocation(resourceId.getId(), other))) {
+                    if (location.equals(locator.apply(resourceId.getId(), other))) {
                         String tag;
                         try {
                             tag = KnowledgeBaseStorage.chunkKbId(resourceId.getId(), other);
@@ -282,16 +324,22 @@ public class KnowledgeBaseStorageGuard {
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Deleted since it was listed: it keeps nothing there.
                 } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
-                    throw new IllegalStateException("Could not read knowledge base " + resourceId.getId() + " to find out whether it shares "
-                            + "a store location", e);
+                    LOGGER.warnf("Knowledge base %s could not be read or resolved while looking for knowledge bases that share a store "
+                            + "location: %s", LogSanitizer.sanitize(resourceId.getId()), LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+                    unreadable.add(resourceId.getId());
                 }
             }
             if (descriptors.size() < PAGE_SIZE) {
-                return sharers;
+                listed = true;
             }
         }
-        throw new IllegalStateException("More than " + MAX_PAGES * PAGE_SIZE + " knowledge bases exist; the ones sharing a store location "
-                + "cannot be listed");
+        if (!listed) {
+            throw new SharerScanIncompleteException("More than " + MAX_PAGES * PAGE_SIZE + " knowledge bases exist", List.of());
+        }
+        if (!unreadable.isEmpty()) {
+            throw new SharerScanIncompleteException(unreadable.size() + " knowledge base(s) could not be read", unreadable);
+        }
+        return sharers;
     }
 
     private String explicitKeyOf(DocumentDescriptor descriptor, String selfId) {

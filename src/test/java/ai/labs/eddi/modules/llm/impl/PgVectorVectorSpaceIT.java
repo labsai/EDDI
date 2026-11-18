@@ -11,6 +11,9 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseReembedService;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+import dev.langchain4j.model.output.Response;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
 import ai.labs.eddi.modules.rag.VectorSpaceMismatchException;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -162,11 +165,11 @@ class PgVectorVectorSpaceIT {
         addRow(factory.getOrCreateForIngestion(id, three), id, 1f, 2f, 3f);
         assertEquals(3, factory.inspectPgVectorTable(id, three, id).columnDimension());
 
-        boolean dropped = factory.removeKnowledgeBaseVectors(id, three);
+        var outcome = factory.removeKnowledgeBaseVectors(id, three);
 
-        assertTrue(dropped);
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED, outcome);
         assertFalse(tableExists(table));
-        // A node whose cache still points at the dropped table reads it as empty.
+        // Nothing is cached any more, and a read of the absent table is empty.
         assertEquals(0, count(factory.getOrCreate(id, three), 3));
 
         RagConfiguration five = kb("drop", "m", 5, null);
@@ -184,9 +187,9 @@ class PgVectorVectorSpaceIT {
         addRow(factory.getOrCreateForIngestion(a, configA), a, 1f, 2f, 3f);
         addRow(factory.getOrCreateForIngestion(b, configB), b, 1f, 2f, 3f);
 
-        boolean dropped = factory.removeKnowledgeBaseVectors(a, configA);
+        var outcome = factory.removeKnowledgeBaseVectors(a, configA);
 
-        assertFalse(dropped);
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_KEPT_SHARED, outcome);
         assertTrue(tableExists("shared_two_kbs"));
         assertEquals(1, count(factory.getOrCreate(b, configB), 3), "only A's chunks went");
         assertTrue(factory.inspectPgVectorTable(a, configA, a).otherRows());
@@ -202,9 +205,15 @@ class PgVectorVectorSpaceIT {
         IngestionPipeline pipeline = mock(IngestionPipeline.class);
         IIngestionStateStore stateStore = mock(IIngestionStateStore.class);
         KnowledgeBaseStorageGuard storageGuard = mock(KnowledgeBaseStorageGuard.class);
-        when(storageGuard.sharersOf(anyString(), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer(b, b)));
+        when(storageGuard.sharersOf(anyString(), any(), any())).thenReturn(List.of(new KnowledgeBaseStorageGuard.Sharer(b, b)));
+        // The new settings embed to 5 dimensions: the probe measures the size every
+        // later check uses.
+        EmbeddingModel model = mock(EmbeddingModel.class);
+        when(model.embed(anyString())).thenReturn(Response.from(Embedding.from(ones(5))));
+        EmbeddingModelFactory models = mock(EmbeddingModelFactory.class);
+        when(models.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class))).thenReturn(model);
         var service = new KnowledgeBaseReembedService(pipeline, mock(RagSourceIngestionService.class), stateStore, factory,
-                mock(VectorSpaceGuard.class), storageGuard);
+                mock(VectorSpaceGuard.class), storageGuard, models);
 
         // A is now configured for another size.
         var refused = assertThrows(KnowledgeBaseReembedService.ReembedRefusedException.class,
@@ -270,6 +279,73 @@ class PgVectorVectorSpaceIT {
         assertNotNull(factory.inspectPgVectorTable(id, config, id));
         assertFalse(factory.inspectPgVectorTable(id, config, id).layoutMatches());
         assertNull(factory.inspectPgVectorTable(id, config, id).columnDimension());
+    }
+
+    @Test
+    @DisplayName("a node whose cached store points at a table another node dropped reads it as empty, not as an error")
+    void staleCachedStoreReadsAsEmpty() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee11";
+        RagConfiguration config = kb("stale", "m", 3, null);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+        // The other node: its own factory, so its own cache — it has the store, and the
+        // first node drops the table.
+        EmbeddingStoreFactory otherNode = newFactory();
+        EmbeddingStore<TextSegment> cachedThere = otherNode.getOrCreateForIngestion(id, config);
+        assertEquals(1, count(cachedThere, 3));
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED, factory.removeKnowledgeBaseVectors(id, config));
+        assertFalse(tableExists("eddi_kbid_" + id));
+
+        assertEquals(0, count(cachedThere, 3), "42P01 reads as an absent table");
+        otherNode.clearCache();
+    }
+
+    @Test
+    @DisplayName("a table that is in use is not dropped, and the outcome says it was busy")
+    void busyTableIsNotDropped() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee12";
+        RagConfiguration config = kb("busy", "m", 3, null);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+
+        try (Connection reader = admin(); Statement s = reader.createStatement()) {
+            reader.setAutoCommit(false);
+            // An open transaction holding a read lock: the drop cannot take its exclusive
+            // one.
+            s.execute("SELECT count(*) FROM eddi_kbid_" + id);
+            var outcome = factory.removeKnowledgeBaseVectors(id, config);
+
+            assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_BUSY, outcome);
+            assertTrue(tableExists("eddi_kbid_" + id));
+            reader.rollback();
+        }
+        // Idle now, and empty (the chunks were deleted): the next attempt drops it.
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED, factory.removeKnowledgeBaseVectors(id, config));
+    }
+
+    @Test
+    @DisplayName("the column size is read from the catalogue and remembered per store: asking again costs no query")
+    void columnSizeIsRememberedPerStore() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee13";
+        RagConfiguration config = kb("remembered", "m", 3, null);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+
+        assertEquals(3, factory.pgVectorColumnDimension(id, config));
+        // A table of another size is not seen until the store is rebuilt — the cache is
+        // by store, not per call.
+        try (Connection c = admin(); Statement s = c.createStatement()) {
+            s.execute("ALTER TABLE eddi_kbid_" + id + " RENAME TO moved_away_" + id);
+        }
+        assertEquals(3, factory.pgVectorColumnDimension(id, config));
+        try (Connection c = admin(); Statement s = c.createStatement()) {
+            s.execute("ALTER TABLE moved_away_" + id + " RENAME TO eddi_kbid_" + id);
+        }
+    }
+
+    private static EmbeddingStoreFactory newFactory() {
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        SecretResolver secrets = mock(SecretResolver.class);
+        when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secrets.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        return new EmbeddingStoreFactory(variables, secrets);
     }
 
     private static int rowCount(String table) throws SQLException {

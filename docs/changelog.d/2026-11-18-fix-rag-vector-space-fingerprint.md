@@ -11,20 +11,21 @@ store (pgvector, MongoDB Atlas, Elasticsearch, Qdrant, Chroma) used to keep the 
 reported "unchanged", old and new vectors mixed, and a change of vector size surfaced as a 502 carrying the
 raw `PSQLException` and the failing `INSERT`. Now:
 
-- `VectorSpace` (provider, model or Azure deployment, Gemini `taskType`, vector size) is recorded per store
-  *location* (store type + server + table or collection) in EDDI's own database, next to the ingestion state,
-  for every store type. A pgvector-only metadata table was rejected: no other store has an equivalent place and
-  a record kept two ways must be kept in step. `VectorSpaceGuard` refuses search, `/ingest` and source runs
-  when the configured space differs, with a message naming both spaces and the way out (`409`,
-  `code: VECTOR_SPACE_MISMATCH`; at retrieval the agent gets no context from that knowledge base and the
-  `rag:trace:*` entry says why).
-- A knowledge base with no record (created by an older version) adopts the configured space on first use and
-  logs it once. It cannot be verified, so one whose model was changed before the upgrade stays as wrong as it
-  was; it keeps working.
-- The vector size is measured: the first embedding of an ingestion is checked against the record and, for
-  pgvector, against `storeParameters.dimension` (default 1536) before anything is written; a query's embedding is
-  checked too. A run now **stops** at the first rejected credential, unknown model or space mismatch instead of
-  calling the provider once per remaining document (H5).
+- `VectorSpace` (provider, model or Azure deployment, Gemini `taskType`, vector size) is recorded in EDDI's own
+  database, next to the ingestion state, for every store type. The **model** is recorded per store location and chunk
+  tag, i.e. per knowledge base (retrieval and deletion are filtered by the tag, so two knowledge bases on one table can
+  hold different models); the **vector size** per location, and for pgvector it is checked against the table's real
+  column. A pgvector-only metadata table was rejected: no other store has an equivalent place and a record kept two
+  ways must be kept in step. `VectorSpaceGuard` refuses search, `/ingest` and source runs when the configured space
+  differs, with a message naming both spaces and the way out (`409`, `code: VECTOR_SPACE_MISMATCH`; at retrieval the
+  agent gets no context from that knowledge base and the `rag:trace:*` entry says why).
+- A knowledge base with no record (created by an older version) adopts the configured space on first use, under its
+  own key, and logs it once. It cannot be verified, so one whose model was changed before the upgrade stays as wrong as
+  it was; it keeps working.
+- The vector size is measured: the first embedding of an ingestion is checked against the table's real column
+  (pgvector) or the recorded size before anything is written; a query's embedding is checked too. A run now **stops**
+  at the first rejected credential, unknown model, space mismatch or store (`SQLException`) failure instead of calling
+  the provider once per remaining document (H5).
 - `GET /ragstore/rags/{id}/vector-space` shows the recorded and the configured space.
   `POST /ragstore/rags/{id}/reembed` claims every source, removes the knowledge base's vectors, records the
   new space and starts a run of every enabled source (follow them in each source's run history). A pgvector
@@ -109,9 +110,29 @@ An independent review found the single-knowledge-base case sound and these gaps;
 - **S1/S3/S4/S5/S6/S7/S8/N3.** Real pgvector column size; `eddi_rag_vector_space_refused_total{reason}` plus a once-a-minute
   WARN without stack trace; the empty-table drop runs in one transaction under `LOCK TABLE … ACCESS EXCLUSIVE NOWAIT`, a table
   that is not an EDDI pgvector table is never touched, a search on a node whose cache points at a dropped table reads it as
-  empty, a direct `/ingest` waits while its knowledge base is re-embedded; no input-echo, URL-credential or driver text to
+  empty, a direct `/ingest` is refused while its knowledge base is re-embedded (on that instance); no input-echo, URL-credential or driver text to
   clients; `reembed` refuses a version that is not the latest; nothing is adopted or reset while a variable is unresolved;
   hidden-content extraction keeps autofilter/grouped Excel rows, handles `specVanish`/`webHidden`, no longer lets a hidden
   connector swallow the next PowerPoint shape, and says "only hidden sheets" for a workbook that has nothing else; a refused
   ingest no longer builds the store first.
 - **Tests.** `PgVectorVectorSpaceIT` (Testcontainers pgvector; needs Docker, run by CI) and unit tests for each item.
+
+### Second review round (same branch)
+
+- **Older configs through upgrade and sync (was only import).** `RestRagStore.updateOlderConfig` is the one update that an
+  upgrade, a sync (which runs through the import service) and an import all use; the interactive 400s stay for REST/MCP/
+  Manager saves. The clamp WARN is written once per configuration.
+- **No table scan on the hot path.** The vector-space check reads only the table's column size from the catalogue, remembered
+  per store (a minute, or until the store is rebuilt or its table dropped); the "other rows" probe runs inside `reembed` only.
+  An absent size record is remembered too.
+- **`reembed` never empties what cannot refill.** One embedding call with the new settings comes first: it proves credentials and
+  model, and measures the new size. A size that does not fit is refused up front for every store type (pgvector: declared
+  `dimension`, shared table; other stores: a collection that keeps another size, shared or alone, with what to do). A foreign
+  pgvector table is refused before any source's hashes are wiped. The result reports `tableRecreated` and `warnings`
+  (a busy table keeps its old size).
+- **Drop semantics.** Only SQLState `55P03` is "busy"; `42P01` is success; anything else is a failure naming the likely cause.
+- **Sharers compared as resolved**, `${vars:...}` included; an unresolvable variable, an unreadable knowledge base or an incomplete
+  scan answers `503 KNOWLEDGE_BASE_SCAN_INCOMPLETE` (own code and sentence) instead of "could not be emptied". Aliases that cannot
+  be seen (`localhost` vs `127.0.0.1`, DNS aliases) are documented.
+- **`visibleTextOnly`**: a hidden Excel row is kept only inside an `autoFilter` range or when grouped; `StoreParameterChecks.EDDI_TABLES`
+  now holds all the tables EDDI creates and a test derives the list from the `CREATE TABLE IF NOT EXISTS` statements.
