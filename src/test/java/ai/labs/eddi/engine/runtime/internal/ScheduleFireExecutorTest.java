@@ -47,7 +47,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -594,7 +597,7 @@ class ScheduleFireExecutorTest {
             var schedule = makeCronSchedule("sched-i" + draining, "persistent");
             when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
                     .thenReturn(new IConversationService.ConversationResult("conv-i", null));
-            var dispatched = new java.util.concurrent.CountDownLatch(1);
+            var dispatched = new CountDownLatch(1);
             doAnswer(inv -> {
                 dispatched.countDown();
                 return null;
@@ -602,10 +605,10 @@ class ScheduleFireExecutorTest {
             if (draining) {
                 executor.beginShutdown();
             }
-            var result = new java.util.concurrent.atomic.AtomicReference<ScheduleFireLog>();
+            var result = new AtomicReference<ScheduleFireLog>();
             var thread = new Thread(() -> result.set(executor.fire(schedule, "instance-1", 1)));
             thread.start();
-            assertTrue(dispatched.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(dispatched.await(10, TimeUnit.SECONDS));
             thread.interrupt();
             thread.join(10_000);
 
