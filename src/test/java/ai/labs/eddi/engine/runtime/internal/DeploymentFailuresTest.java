@@ -8,7 +8,6 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.model.DeploymentFailure;
-import ai.labs.eddi.engine.runtime.client.workflows.WorkflowStoreClientLibrary.WorkflowInitializationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -22,7 +21,7 @@ class DeploymentFailuresTest {
     @DisplayName("an unknown step type, an invalid config and a missing reference each get their own code, found in the cause chain")
     void classifiesByCause() {
         assertEquals(DeploymentFailures.STEP_TYPE_UNKNOWN,
-                DeploymentFailures.codeOf(new WorkflowInitializationException("x", new UnrecognizedExtensionException("Extension 'a' not found"))));
+                DeploymentFailures.codeOf(new RuntimeException("x", new UnrecognizedExtensionException("Extension 'a' not found"))));
         assertEquals(DeploymentFailures.CONFIG_INVALID,
                 DeploymentFailures.codeOf(new RuntimeException(new WorkflowConfigurationException("temperature must be 0..2"))));
         assertEquals(DeploymentFailures.REFERENCE_MISSING,

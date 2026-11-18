@@ -587,16 +587,17 @@ class RestExportServiceTest {
         }
 
         @Test
-        @DisplayName("returns empty string on serialization failure")
+        @DisplayName("a configuration that cannot be serialized fails the export instead of writing an empty file (E9)")
         void serializationFailure() throws Exception {
             var resId = testResourceId("r1", 1);
             Map<IResourceId, Object> input = Map.of(resId, "bad");
 
             when(jsonSerialization.serialize("bad")).thenThrow(new IOException("fail"));
 
-            Map<IResourceId, String> result = invokeConvert(input);
-
-            assertEquals("", result.get(resId));
+            Throwable thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> invokeConvert(input));
+            Throwable cause = thrown instanceof java.lang.reflect.InvocationTargetException ? thrown.getCause() : thrown;
+            var failure = org.junit.jupiter.api.Assertions.assertInstanceOf(jakarta.ws.rs.WebApplicationException.class, cause);
+            assertEquals(500, failure.getResponse().getStatus());
         }
     }
 

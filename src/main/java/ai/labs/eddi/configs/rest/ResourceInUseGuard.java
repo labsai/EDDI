@@ -21,7 +21,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
@@ -95,7 +94,7 @@ public class ResourceInUseGuard {
     private final ResourceAccessGuard accessGuard;
 
     /** The request being served; unavailable (and unused) outside one. */
-    @Context
+    @Inject
     UriInfo requestUri;
 
     @Inject

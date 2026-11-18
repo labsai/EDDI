@@ -1004,7 +1004,7 @@ class RestImportServiceArchiveContractTest {
         }
 
         @Test
-        @DisplayName("a create drops the step it cannot resolve instead of failing the whole import")
+        @DisplayName("a create with allowIncomplete drops the step it cannot resolve instead of failing the whole import")
         void missingExtensionFileOnCreateDropsTheStep() throws Exception {
             stubSelectiveArchive();
             when(jsonSerialization.deserialize(anyString(), eq(WorkflowConfiguration.class)))
@@ -1020,8 +1020,10 @@ class RestImportServiceArchiveContractTest {
                 // A create has no local copy to answer the reference from. Failing the
                 // import with "The archive references ... but does not contain ..." told
                 // the operator to fix an archive the product itself had written.
+                // Without allowIncomplete the same archive is refused with 422 (see
+                // RestImportServiceUnresolvableReferenceTest); the caller opts in here.
                 response = importService.importAgent(
-                        new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                        new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
             }
 
             assertEquals(201, response.getStatus());

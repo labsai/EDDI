@@ -41,6 +41,7 @@ class ResourceInUseGuardTest {
 
     private static final String LLM_URI = "eddi://ai.labs.llm/llmstore/llms/";
     private static final String WORKFLOW_URI = "eddi://ai.labs.workflow/workflowstore/workflows/";
+    private static final String WF1 = "aaaaaaaaaaaaaaaaaaaaaaa1";
 
     private IAgentStore agentStore;
     private IWorkflowStore workflowStore;
@@ -77,7 +78,7 @@ class ResourceInUseGuardTest {
     @DisplayName("a config a workflow uses is not deleted: 409 naming the workflow (L5)")
     void usedConfigIsRefused() throws Exception {
         when(workflowStore.getWorkflowDescriptorsContainingResource(LLM_URI + "abc?version=1", false))
-                .thenReturn(List.of(descriptor("Support flow", WORKFLOW_URI + "wf1?version=3")));
+                .thenReturn(List.of(descriptor("Support flow", WORKFLOW_URI + WF1 + "?version=3")));
 
         var conflict = assertThrows(WebApplicationException.class, () -> guard.requireUnused(LLM_URI, "abc", 1, false));
 
@@ -91,7 +92,7 @@ class ResourceInUseGuardTest {
         @SuppressWarnings("unchecked")
         var first = (Map<String, Object>) usedBy.getFirst();
         assertEquals("workflow", first.get("type"));
-        assertEquals("wf1", first.get("id"));
+        assertEquals(WF1, first.get("id"));
         assertEquals("Support flow", first.get("name"));
         assertEquals(3, first.get("version"));
     }

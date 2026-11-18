@@ -155,18 +155,22 @@ class RestAgentAdministrationFailureTest {
         }
 
         @Test
-        @DisplayName("the plain JSON status stays as it was")
-        void jsonUnchanged() throws Exception {
+        @DisplayName("the plain JSON status carries the reason code and a fixed message, never the secrets or the fix (F5)")
+        void jsonCarriesReasonCodeOnly() throws Exception {
             when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(refusedAgent());
 
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) admin.getDeploymentStatus(ENV, AGENT_ID, 1, "json").getEntity();
 
-            assertEquals(Map.of("status", "ERROR"), body);
+            assertEquals("ERROR", body.get("status"));
+            var failure = (ai.labs.eddi.engine.model.DeploymentFailure) body.get("failure");
+            assertEquals(ai.labs.eddi.engine.model.DeploymentFailure.VAULT_GRANT_MISSING, failure.code());
+            org.junit.jupiter.api.Assertions.assertNull(failure.secrets());
+            org.junit.jupiter.api.Assertions.assertNull(failure.fix());
         }
 
         @Test
-        @DisplayName("a caller without EDIT gets the status but not the failure")
+        @DisplayName("a caller without EDIT gets the reason code but not the secrets or the fix")
         void noEditNoFailure() throws Exception {
             when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(refusedAgent());
             when(guard.hasAccess(AGENT_ID, AccessLevel.EDIT)).thenReturn(false);
@@ -174,7 +178,10 @@ class RestAgentAdministrationFailureTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) admin.getDeploymentStatus(ENV, AGENT_ID, 1, "detailed").getEntity();
 
-            assertEquals(Map.of("status", "ERROR"), body);
+            var failure = (ai.labs.eddi.engine.model.DeploymentFailure) body.get("failure");
+            assertEquals("ERROR", body.get("status"));
+            org.junit.jupiter.api.Assertions.assertNull(failure.secrets());
+            org.junit.jupiter.api.Assertions.assertNull(failure.fix());
         }
     }
 

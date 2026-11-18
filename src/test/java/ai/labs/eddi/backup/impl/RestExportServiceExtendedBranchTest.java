@@ -262,7 +262,7 @@ class RestExportServiceExtendedBranchTest {
          * {@code snippets/} directory to make the archive look like it carried some.
          */
         @Test
-        @DisplayName("a snippet listing that will not answer costs the snippets, not the export")
+        @DisplayName("a snippet listing that will not answer fails the export instead of silently leaving the snippets out (E9)")
         void snippetListingFailureIsNotFatal() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
                     "exportSnippets", Path.class, Set.class, Set.class);
@@ -277,7 +277,9 @@ class RestExportServiceExtendedBranchTest {
             names.add("greeting");
             Path agentPath = Files.createTempDirectory("test-snippets");
 
-            method.invoke(exportService, agentPath, names, null);
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(exportService, agentPath, names, null));
+            assertEquals(500, ((jakarta.ws.rs.WebApplicationException) failure.getCause()).getResponse().getStatus());
 
             assertFalse(Files.exists(agentPath.resolve("snippets")),
                     "a listing that never answered must not leave a snippets directory suggesting it did");
@@ -340,7 +342,7 @@ class RestExportServiceExtendedBranchTest {
         }
 
         @Test
-        @DisplayName("schedule export exception is handled gracefully")
+        @DisplayName("a schedule export that fails fails the export instead of leaving the schedules out (E9)")
         void scheduleExportException() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
                     "exportSchedules", String.class, Path.class, Set.class);
@@ -349,9 +351,9 @@ class RestExportServiceExtendedBranchTest {
             when(scheduleStore.readSchedulesByAgentId("agent1"))
                     .thenThrow(new RuntimeException("DB error"));
 
-            // Should not throw
-            assertDoesNotThrow(() -> method.invoke(exportService, "agent1",
-                    Files.createTempDirectory("test-sched"), null));
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(exportService, "agent1", Files.createTempDirectory("test-sched"), null));
+            assertEquals(500, ((jakarta.ws.rs.WebApplicationException) failure.getCause()).getResponse().getStatus());
         }
 
         @Test
