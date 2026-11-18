@@ -56,7 +56,12 @@ public final class PostgresText {
         int length = value.length();
         for (int i = 0; i < length; i++) {
             char c = value.charAt(i);
-            if (c == 0 || Character.isSurrogate(c)) {
+            if (c == 0) {
+                return replaceText(value, i);
+            }
+            if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
+                i++; // a valid pair stays
+            } else if (Character.isSurrogate(c)) {
                 return replaceText(value, i);
             }
         }
