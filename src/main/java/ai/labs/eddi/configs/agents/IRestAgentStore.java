@@ -216,8 +216,10 @@ public interface IRestAgentStore extends IRestVersionInfo {
     @Operation(operationId = "revokeAgentSigningKey", summary = "Revoke one of this agent's signing keys",
                description = "Marks identity.keys entry keyVersion revoked (every entry of that version, if it is declared twice) and "
                        + "saves the agent as a new, compatible version; the private key is then deleted from the secrets vault. "
-                       + "Revocation stops this agent signing with the key; peer verification does not refuse it yet, so a "
-                       + "message signed with it, by anyone holding a copy of its private key, can still verify. "
+                       + "Revocation stops this agent signing with the key, and a revoked key vouches for nothing: peers that "
+                       + "verify withhold entries signed with it, and audit verification reports them AGENT_KEY_REVOKED, "
+                       + "whenever they claim to have been signed. A node that already loaded the key can keep signing audit "
+                       + "entries with it for up to 60 seconds. "
                        + "keyVersion 0 is the legacy unversioned key (identity.publicKey), which has no revoked flag and is removed "
                        + "instead; an identity.keys entry declared as version 0 is revoked with it. Revoking the newest key stops the agent signing — it does not fall back to an older key — so "
                        + "generate its replacement first; until then a save with signInterAgentMessages on is refused. Revoking a key "
