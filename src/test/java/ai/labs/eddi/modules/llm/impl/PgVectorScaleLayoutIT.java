@@ -64,6 +64,8 @@ class PgVectorScaleLayoutIT {
     private static final String TABLE = "eddi_kbid_" + KB_ID;
     private static final int DOCUMENTS = 300;
     private static final int CHUNKS_PER_DOCUMENT = 10;
+    private static final String SCOPED_USER = "scoped";
+    private static final String SCOPED_SCHEMA = "myschema";
 
     @Container
     static final PostgreSQLContainer PG = new PostgreSQLContainer(
@@ -82,6 +84,16 @@ class PgVectorScaleLayoutIT {
             s.execute("ALTER ROLE test SET auto_explain.log_min_duration = 0");
             s.execute("ALTER ROLE test SET auto_explain.log_format = 'text'");
             s.execute("ALTER ROLE test SET enable_seqscan = off");
+            // Created here, as the owner, so the scoped role below never installs it
+            // into its own schema.
+            s.execute("CREATE EXTENSION IF NOT EXISTS vector");
+            // A login whose current_schema() is myschema, with public behind it on the
+            // search_path. Not a superuser, and its DDL is logged.
+            s.execute("CREATE ROLE " + SCOPED_USER + " LOGIN PASSWORD '" + SCOPED_USER + "'");
+            s.execute("CREATE SCHEMA " + SCOPED_SCHEMA + " AUTHORIZATION " + SCOPED_USER);
+            s.execute("GRANT USAGE, CREATE ON SCHEMA public TO " + SCOPED_USER);
+            s.execute("ALTER ROLE " + SCOPED_USER + " SET search_path = " + SCOPED_SCHEMA + ", public");
+            s.execute("ALTER ROLE " + SCOPED_USER + " SET log_statement = 'ddl'");
         }
         GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
         SecretResolver secrets = mock(SecretResolver.class);
@@ -228,6 +240,182 @@ class PgVectorScaleLayoutIT {
         assertEquals(1, factory.pgVectorPoolCount());
     }
 
+    @Test
+    @DisplayName("search_path myschema, public: an unqualified table is created in myschema as v2; public.docs keeps v1; a rebuild creates no index")
+    void unqualifiedTableResolvesInCurrentSchema() throws Exception {
+        legacyPublicTable("docs");
+        Set<String> publicIndexes = new HashSet<>(indexes("public", "docs").keySet());
+        String unqualifiedId = "65f0aa11bb22cc33dd44ef01";
+        String qualifiedId = "65f0aa11bb22cc33dd44ef02";
+
+        String firstBuild = ddlLoggedDuring(() -> {
+            EmbeddingStore<TextSegment> store = factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
+            store.add(Embedding.from(new float[]{1f, 0f, 0f}), segment("written through docs"));
+        });
+
+        // langchain4j created myschema.docs, and its layout was decided for that table
+        // —
+        // not taken over from the old-layout public.docs further down the search_path.
+        assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs"));
+        assertEquals(Set.of("docs_pkey", "docs_hnsw_idx", "docs_doc_src_idx", "docs_src_run_idx"), indexes(SCOPED_SCHEMA, "docs").keySet());
+        assertEquals(3, createIndexStatements(firstBuild), firstBuild);
+        assertEquals(1, count(SCOPED_SCHEMA + ".docs"));
+        assertEquals("json", metadataType("public.docs"));
+        assertEquals(1, count("public.docs"));
+        assertEquals(publicIndexes, indexes("public", "docs").keySet());
+
+        String qualifiedBuild = ddlLoggedDuring(() -> {
+            EmbeddingStore<TextSegment> store = factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()));
+            var found = store.search(EmbeddingSearchRequest.builder().queryEmbedding(Embedding.from(new float[]{0f, 1f, 0f})).maxResults(3).build());
+            assertEquals(1, found.matches().size());
+            assertEquals("written before the upgrade", found.matches().get(0).embedded().text());
+            store.add(Embedding.from(new float[]{0f, 0f, 1f}), segment("written through public.docs"));
+        });
+
+        // public.docs is used as it is: still v1, no new index, the row lands there.
+        assertEquals("json", metadataType("public.docs"));
+        assertEquals(publicIndexes, indexes("public", "docs").keySet(), "no index is added to an existing v1 table");
+        assertEquals(0, createIndexStatements(qualifiedBuild), qualifiedBuild);
+        assertEquals(2, count("public.docs"));
+        assertEquals(1, count(SCOPED_SCHEMA + ".docs"));
+
+        // A second build of both finds every index where it is and creates none.
+        factory.clearCache();
+        String rebuild = ddlLoggedDuring(() -> {
+            factory.getOrCreate(unqualifiedId, scopedKb("docs", Map.of()));
+            factory.getOrCreate(qualifiedId, scopedKb("public.docs", Map.of()));
+        });
+        assertEquals(0, createIndexStatements(rebuild), rebuild);
+        assertEquals("json", metadataType("public.docs"));
+    }
+
+    @Test
+    @DisplayName("search_path myschema, public: layout v2 on an unqualified table is not refused because of an old-layout public table")
+    void explicitV2NotRefusedByPublicTable() throws Exception {
+        legacyPublicTable("docs_v2");
+        try (Connection c = scoped()) {
+            assertFalse(PgVectorSchema.inspect(c, "docs_v2").exists(), "public.docs_v2 is not the table langchain4j would use");
+            assertEquals("json", PgVectorSchema.inspect(c, "public.docs_v2").metadataType());
+        }
+
+        factory.getOrCreate("65f0aa11bb22cc33dd44ef03", scopedKb("docs_v2", Map.of("layout", "v2")));
+
+        assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs_v2"));
+        assertEquals(4, indexes(SCOPED_SCHEMA, "docs_v2").size());
+        assertEquals("json", metadataType("public.docs_v2"));
+    }
+
+    @Test
+    @DisplayName("search_path myschema, public: v2 tables of one name in both schemas each get, and keep, their own indexes")
+    void indexesAreLookedUpInTheTablesSchema() throws Exception {
+        String qualifiedId = "65f0aa11bb22cc33dd44ef04";
+        String unqualifiedId = "65f0aa11bb22cc33dd44ef05";
+        Set<String> expected = Set.of("shared_pkey", "shared_hnsw_idx", "shared_doc_src_idx", "shared_src_run_idx");
+
+        // A table outside current_schema(), named with its schema.
+        String qualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of())));
+        assertEquals("jsonb", metadataType("public.shared"));
+        assertEquals(expected, indexes("public", "shared").keySet());
+        assertEquals(3, createIndexStatements(qualifiedBuild), qualifiedBuild);
+
+        // The same name unqualified is myschema.shared. public.shared's indexes are on
+        // the search_path under the very names this table's indexes get, and must not
+        // be mistaken for them.
+        String unqualifiedBuild = ddlLoggedDuring(() -> factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of())));
+        assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".shared"));
+        assertEquals(expected, indexes(SCOPED_SCHEMA, "shared").keySet());
+        assertEquals(3, createIndexStatements(unqualifiedBuild), unqualifiedBuild);
+
+        try (Connection c = scoped()) {
+            for (String suffix : List.of(PgVectorSchema.SUFFIX_HNSW, PgVectorSchema.SUFFIX_DOC_SOURCE, PgVectorSchema.SUFFIX_SOURCE_RUN)) {
+                assertTrue(PgVectorSchema.indexExists(c, "shared", suffix), suffix);
+                assertTrue(PgVectorSchema.indexExists(c, "public.shared", suffix), suffix);
+            }
+        }
+
+        factory.clearCache();
+        String rebuild = ddlLoggedDuring(() -> {
+            factory.getOrCreate(qualifiedId, scopedKb("public.shared", Map.of()));
+            factory.getOrCreate(unqualifiedId, scopedKb("shared", Map.of()));
+        });
+        assertEquals(0, createIndexStatements(rebuild), rebuild);
+    }
+
+    /** A knowledge base on {@code table} that logs in as the scoped role. */
+    private static RagConfiguration scopedKb(String table, Map<String, String> extra) {
+        Map<String, String> params = new HashMap<>(Map.of("user", SCOPED_USER, "password", SCOPED_USER, "table", table));
+        params.putAll(extra);
+        return kb("id", "search-path-" + table, params);
+    }
+
+    private static Connection scoped() throws SQLException {
+        return DriverManager.getConnection(PG.getJdbcUrl(), SCOPED_USER, SCOPED_USER);
+    }
+
+    /**
+     * {@code public.
+     * <table>
+     * } as every EDDI release up to 6.7 created it — json metadata, no index
+     * besides the key — holding one row, and usable by the scoped role.
+     */
+    private static void legacyPublicTable(String table) throws SQLException {
+        PgVectorEmbeddingStore old = PgVectorEmbeddingStore.builder().host(PG.getHost()).port(PG.getMappedPort(5432)).database("eddi_vectors")
+                .user("test").password("test").table("public." + table).dimension(3).createTable(true).build();
+        old.add(Embedding.from(new float[]{0f, 1f, 0f}), segment("written before the upgrade"));
+        try (Connection c = admin(); Statement s = c.createStatement()) {
+            s.execute("GRANT ALL ON public." + table + " TO " + SCOPED_USER);
+        }
+        assertEquals("json", metadataType("public." + table));
+    }
+
+    private static TextSegment segment(String text) {
+        return TextSegment.from(text, new Metadata(new HashMap<>(Map.of("documentId", "doc", "sourceKey", "src"))));
+    }
+
+    @FunctionalInterface
+    private interface Action {
+        void run() throws Exception;
+    }
+
+    /**
+     * The server log the scoped role's DDL wrote while {@code action} ran. Its DDL
+     * is logged ({@code log_statement = ddl}); the window is bounded by two marker
+     * statements of that role, and read once the closing one has reached the log —
+     * so a statement missing from it was not sent, rather than not yet logged.
+     */
+    private static String ddlLoggedDuring(Action action) throws Exception {
+        String start = marker();
+        action.run();
+        String end = marker();
+        for (int attempt = 0; attempt < 100; attempt++) {
+            String logs = PG.getLogs();
+            int to = logs.indexOf(end);
+            if (to >= 0) {
+                int from = logs.indexOf(start);
+                assertTrue(from >= 0 && from < to, "the opening marker is logged before the closing one");
+                return logs.substring(from, to);
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("the server log never showed marker " + end);
+    }
+
+    private static String marker() throws SQLException {
+        String marker = "eddi-ddl-marker-" + UUID.randomUUID();
+        try (Connection c = scoped(); Statement s = c.createStatement()) {
+            s.execute("COMMENT ON SCHEMA " + SCOPED_SCHEMA + " IS '" + marker + "'");
+        }
+        return marker;
+    }
+
+    private static int createIndexStatements(String log) {
+        int count = 0;
+        for (int at = log.indexOf("CREATE INDEX"); at >= 0; at = log.indexOf("CREATE INDEX", at + 1)) {
+            count++;
+        }
+        return count;
+    }
+
     private static String metadataType(String table) throws SQLException {
         try (Connection c = admin();
                 var ps = c.prepareStatement(
@@ -241,9 +429,15 @@ class PgVectorScaleLayoutIT {
     }
 
     private static Map<String, String> indexes(String table) throws SQLException {
+        return indexes("public", table);
+    }
+
+    private static Map<String, String> indexes(String schema, String table) throws SQLException {
         Map<String, String> result = new HashMap<>();
-        try (Connection c = admin(); var ps = c.prepareStatement("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = ?")) {
-            ps.setString(1, table);
+        try (Connection c = admin();
+                var ps = c.prepareStatement("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = ? AND tablename = ?")) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     result.put(rs.getString(1), rs.getString(2));
