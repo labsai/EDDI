@@ -49,6 +49,12 @@ sweep** on the existing schedule machinery:
   dropped and rebuilt, like the audit ledger's late indexes), MongoDB on a
   background thread; both start with the first sweep. Until the index is valid the sweep
   reads nothing, so it never scans the collection.
+- **`job.finished` on a failed write.** Main meanwhile raised `job.finished`
+  with state `schedule_failed` when the arm's write failed, since that used to
+  end the job. With the sweep on it no longer does, so the event is raised only
+  when the sweep is switched off (or the decision could not be recorded);
+  otherwise the turn is left to the sweep and the job carries on.
+  [`user-events.md`](../user-events.md) says so.
 - **Configuration:** `eddi.continuation.recovery.enabled` (`true`),
   `.interval` (`60s`), `.grace-period` (`60s`), `.batch-size` (`100`) — in
   [`configuration-reference.md`](../configuration-reference.md).

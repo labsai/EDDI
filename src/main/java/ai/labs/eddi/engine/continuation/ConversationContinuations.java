@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
@@ -190,6 +191,15 @@ public class ConversationContinuations {
      */
     @Inject
     UserEventPublisher userEventPublisher;
+
+    /**
+     * Whether {@link ContinuationRecoverySweep} runs — then a schedule write that
+     * failed does not end the job, because the sweep arms the next turn from the
+     * stored decision. Field-injected for the same reason as the publisher;
+     * {@code false} in tests that build this class by hand.
+     */
+    @ConfigProperty(name = "eddi.continuation.recovery.enabled", defaultValue = "true")
+    boolean recoveryEnabled;
 
     @Inject
     public ConversationContinuations(IScheduleStore scheduleStore, IConversationMemoryStore memoryStore, MeterRegistry meterRegistry) {
@@ -405,7 +415,8 @@ public class ConversationContinuations {
      * Arms the continuation {@link #decide} wrote to the current step — called only
      * once the turn has been committed. A one-shot schedule due now: the next poll
      * claims it. Never throws: a schedule that cannot be written is logged and
-     * counted ({@code schedule_failed}); the committed turn stands.
+     * counted ({@code schedule_failed}); the committed turn stands, and the
+     * recovery sweep arms the schedule from the stored decision.
      * <p>
      * <b>Spent rows.</b> A fired one-shot is disabled, not deleted, so every
      * continuation that ran would stay behind under the conversation's schedule
@@ -461,11 +472,29 @@ public class ConversationContinuations {
             return true;
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
-            // The job stops here as surely as at its limit: nothing will fire the next
-            // turn, so its owner hears that it ended, and why.
-            announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
+            if (recoveryWillArm(memory, number.intValue())) {
+                // Not the end of the job: the decision is stored with the committed step,
+                // and the recovery sweep arms the next turn from it. Announcing
+                // job.finished now would be followed by the job carrying on.
+                LOGGER.infof("Continuation %d of conversation %s is left to the recovery sweep", number.intValue(), sanitize(conversationId));
+            } else {
+                // Nothing will fire the next turn: the job stops here as surely as at its
+                // limit, so its owner hears that it ended, and why.
+                announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
+            }
             return false;
         }
+    }
+
+    /**
+     * Whether the recovery sweep will arm this continuation after a failed write:
+     * the sweep runs, the record can be stored and read back, and the memory holds
+     * the unhandled record of exactly this decision.
+     */
+    private boolean recoveryWillArm(IConversationMemory memory, int number) {
+        PendingContinuation pending = memory.getPendingContinuation();
+        return recoveryEnabled && memoryStore != null && pending != null && pending.getNumber() != null && pending.getNumber() == number
+                && pending.getDecidedAt() != null;
     }
 
     /**
@@ -474,8 +503,8 @@ public class ConversationContinuations {
      * {@code job.finished} for the conversation's owner, with the refusal reason as
      * its state when there is one ({@code limit}, {@code cost_ceiling}, …) and
      * {@code done} otherwise. A next turn that was decided but whose schedule could
-     * not be written ends the job too, with state {@code schedule_failed}. Never
-     * throws.
+     * not be written ends the job too, with state {@code schedule_failed} — unless
+     * the recovery sweep will arm it ({@link #recoveryWillArm}). Never throws.
      */
     private void announceFinished(String conversationId, IConversationMemory memory, IWritableConversationStep step) {
         String reason;

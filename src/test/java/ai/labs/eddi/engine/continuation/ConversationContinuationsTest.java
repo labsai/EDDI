@@ -348,9 +348,9 @@ class ConversationContinuationsTest {
             continuations.userEventPublisher = publisher;
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
             continuations.decide(memory);
-            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createSchedule(any());
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
 
-            continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production);
+            assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
 
             var event = ArgumentCaptor.forClass(UserEvent.class);
             var audience = ArgumentCaptor.forClass(UserEventAudience.class);
@@ -358,6 +358,44 @@ class ConversationContinuationsTest {
             assertEquals(UserEvent.KIND_JOB_FINISHED, event.getValue().kind());
             assertEquals(ConversationContinuations.REASON_SCHEDULE_FAILED, event.getValue().state());
             assertEquals(UserEventAudience.principal("user-1"), audience.getValue());
+        }
+
+        @Test
+        @DisplayName("with the recovery sweep on, a failed write is not the end of the job: no job.finished, the sweep arms it")
+        void storeFailureLeftToTheSweep() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            var withStore = new ConversationContinuations(scheduleStore, mock(IConversationMemoryStore.class), meters,
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+            withStore.userEventPublisher = publisher;
+            withStore.recoveryEnabled = true;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            withStore.decide(memory, Environment.production);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
+
+            assertFalse(withStore.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+
+            assertEquals(1.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED), "the failed write is still counted");
+            assertNotNull(memory.getPendingContinuation(), "the decision the sweep arms from is still there");
+            verify(publisher, never()).publish(any(), any());
+        }
+
+        @Test
+        @DisplayName("with the recovery sweep switched off, a failed write still ends the job and says so")
+        void storeFailureWithRecoveryOff() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            var withStore = new ConversationContinuations(scheduleStore, mock(IConversationMemoryStore.class), meters,
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+            withStore.userEventPublisher = publisher;
+            withStore.recoveryEnabled = false;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            withStore.decide(memory, Environment.production);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
+
+            withStore.armIfDecided(CONVERSATION_ID, memory, Environment.production);
+
+            var event = ArgumentCaptor.forClass(UserEvent.class);
+            verify(publisher).publish(event.capture(), any());
+            assertEquals(ConversationContinuations.REASON_SCHEDULE_FAILED, event.getValue().state());
         }
 
         @Test
