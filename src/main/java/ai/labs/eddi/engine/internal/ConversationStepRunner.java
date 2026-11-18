@@ -35,14 +35,18 @@ import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.security.CallerIdentity;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -119,6 +123,9 @@ class ConversationStepRunner {
         this.conversationStateCache = conversationStateCache;
         this.inFlightConversations = inFlightConversations;
         this.agentTimeout = agentTimeout;
+        Cache<String, Long> fences = Caffeine.newBuilder().maximumSize(RAISED_FENCES_MAX)
+                .expireAfterWrite(raisedFenceRetention(agentTimeout)).build();
+        this.raisedFences = fences.asMap();
     }
 
     /**
@@ -1432,7 +1439,7 @@ class ConversationStepRunner {
      * ({@link #raisedFences}). Only on this path, never on a turn that delivered
      * normally: no extra round trip on the happy path.
      */
-    private void fenceAbandonedWrite(String conversationId, IConversationMemory live) {
+    void fenceAbandonedWrite(String conversationId, IConversationMemory live) {
         Long token = live != null ? live.getFenceToken() : null;
         if (token == null) {
             return;
@@ -1449,10 +1456,44 @@ class ConversationStepRunner {
 
     /**
      * Single node: fences raised by {@link #fenceAbandonedWrite}, so the
-     * conversation's next turn — loaded before the raise — writes with a token the
-     * store accepts. Consumed when that turn starts.
+     * conversation's next turn — loaded before the raise, i.e. already queued —
+     * writes with a token the store accepts. Consumed when that turn starts; any
+     * later turn loads the raised {@code _fence} from the store and needs no entry.
+     * Bounded (see {@link #raisedFenceRetention}), so a conversation abandoned once
+     * and never continued does not keep its entry for the life of the JVM.
      */
-    private final Map<String, Long> raisedFences = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Long> raisedFences;
+
+    /** At most this many conversations with a raised fence are remembered. */
+    static final int RAISED_FENCES_MAX = 10_000;
+
+    /** Queued turns per conversation the retention allows for (with headroom). */
+    private static final int RAISED_FENCE_QUEUED_TURNS = 25;
+
+    /** Floor of the retention, whatever the agent timeout. */
+    private static final Duration RAISED_FENCE_MIN_RETENTION = Duration.ofMinutes(10);
+
+    /**
+     * How long a raised fence is remembered: long enough for every turn that was
+     * already queued behind the abandoned one to start. A queued turn starts once
+     * the turns ahead of it end, and each of those ends at the latest when the
+     * watchdog gives up on it ({@code systemRuntime.agentTimeoutInSeconds}). With
+     * {@code eddi.conversation.max-queued-turns-per-conversation} at its default of
+     * 20, 25 watchdog periods cover a full queue; never below ten minutes. A turn
+     * that starts later still loaded the document after the raise, so a forgotten
+     * entry costs it nothing.
+     */
+    static Duration raisedFenceRetention(int agentTimeoutSeconds) {
+        Duration byQueue = Duration.ofSeconds(Math.max(0, agentTimeoutSeconds) * (long) RAISED_FENCE_QUEUED_TURNS);
+        return byQueue.compareTo(RAISED_FENCE_MIN_RETENTION) > 0 ? byQueue : RAISED_FENCE_MIN_RETENTION;
+    }
+
+    /**
+     * The fence remembered for {@code conversationId}, or {@code null}; for tests.
+     */
+    Long rememberedFence(String conversationId) {
+        return raisedFences.get(conversationId);
+    }
     /**
      * Cluster mode: a turn cancelled because this node lost its lease, whether it
      * then completed or failed. The conversation belongs to whoever holds the lease

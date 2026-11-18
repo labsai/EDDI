@@ -128,7 +128,12 @@ An independent review of the branch found one regression and eight gaps.
 
 - A say turn's answer waits for the conversation write and, when long-term properties changed, for the user-memory
   write.
-- Single-node conversations get a `_fence` field (0 until a write is abandoned).
+- Single-node conversations get a `_fence` field: 0, raised by one for each write the watchdog abandons. When such a
+  deployment later switches to cluster mode, a turn writes with its lease's fencing token, which is the NATS KV
+  revision of the lease bucket (its stream sequence: it starts at 1 on a fresh bucket and grows with every lease
+  write, heartbeat and release of any conversation). A conversation whose stored fence is above that token (it had
+  two or more abandoned writes and its turn takes one of the very first leases) is answered `fenced` (retryable) until
+  the bucket's revision passes it — normally within the first few lease operations, i.e. seconds.
 
 ### Left open
 
