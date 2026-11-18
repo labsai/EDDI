@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -85,16 +86,9 @@ class HitlTimeoutRearmSweepTest {
             rows.removeIf(row -> name.equals(row.getName()));
             return before - rows.size();
         });
-        when(scheduleStore.countPendingSchedulesByName(anyString())).thenAnswer(invocation -> {
+        when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenAnswer(invocation -> {
             String name = invocation.getArgument(0);
-            return (int) rows.stream()
-                    .filter(row -> name.equals(row.getName()))
-                    .filter(row -> row.isEnabled() || ScheduleConfiguration.DISABLED_BY_UNDEPLOY.equals(row.getDisabledReason()))
-                    .count();
-        });
-        when(scheduleStore.readScheduleByName(anyString())).thenAnswer(invocation -> {
-            String name = invocation.getArgument(0);
-            return rows.stream().filter(row -> name.equals(row.getName())).findFirst();
+            return rows.stream().filter(row -> name.equals(row.getName())).toList();
         });
 
         observer = new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, mock(IConversationService.class),
@@ -259,17 +253,176 @@ class HitlTimeoutRearmSweepTest {
         }
 
         @Test
-        @DisplayName("once the timeout fired for this pause, the sweep does not arm it again")
-        void spentRowNotRearmed() throws Exception {
+        @DisplayName("a timeout that fired and completed while the pause still waits is re-armed once, after the backoff")
+        void spentRowRearmedAfterBackoff() throws Exception {
             Instant pausedAt = Instant.now().minusSeconds(60);
             regularPause("AUTO_REJECT", "PT30S", pausedAt);
             armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(30));
-            assertEquals(1, pollAt(Instant.now()));
+            Instant firedAt = Instant.now();
+            assertEquals(1, pollAt(firedAt));
 
             sweeps(SWEEPS);
 
+            verify(scheduleStore, times(1)).createSchedule(any());
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertEquals(firedAt.plus(HitlCrashRecoveryObserver.SPENT_REARM_BACKOFF), named.get(0).getNextFire());
+            assertEquals(0, pollAt(Instant.now()), "not again right away — no retry loop");
+        }
+
+        @Test
+        @DisplayName("M1: a DEAD_LETTERED row of this pause can never fire — it is replaced")
+        void deadLetteredRowReplaced() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(600);
+            regularPause("AUTO_REJECT", "PT1M", pausedAt);
+            ScheduleConfiguration dead = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plusSeconds(60));
+            dead.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
+            dead.setFailCount(5);
+
+            sweeps(SWEEPS);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertNotSame(dead, named.get(0));
+            assertEquals(1, pollAt(Instant.now()), "the replacement is due at once");
+        }
+
+        @Test
+        @DisplayName("M1: a FAILED row out of retries (older build's ladder) is replaced")
+        void failedAtMaxRetriesReplaced() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(600);
+            regularPause("ABORT", "PT1M", pausedAt);
+            ScheduleConfiguration exhausted = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "ABORT", pausedAt,
+                    pausedAt.plusSeconds(60));
+            exhausted.setFireStatus(ScheduleConfiguration.FireStatus.FAILED);
+            exhausted.setFailCount(5);
+
+            sweeps(SWEEPS);
+
+            verify(scheduleStore, times(1)).createSchedule(any());
+            assertNotSame(exhausted, rowsNamed(REGULAR_NAME).get(0));
+        }
+
+        @Test
+        @DisplayName("M1: a row CLAIMED by another node (a fire in progress) is left untouched")
+        void claimedRowUntouched() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(90);
+            regularPause("AUTO_APPROVE", "PT1M", pausedAt);
+            ScheduleConfiguration claimed = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", pausedAt,
+                    pausedAt.plusSeconds(60));
+            claimed.setFireStatus(ScheduleConfiguration.FireStatus.CLAIMED);
+            claimed.setClaimedBy("node-2");
+            claimed.setClaimedAt(Instant.now().minusSeconds(5));
+
+            sweeps(SWEEPS);
+
+            assertEquals(List.of(claimed), rowsNamed(REGULAR_NAME));
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             verify(scheduleStore, never()).createSchedule(any());
-            assertEquals(0, pollAt(Instant.now().plus(Duration.ofHours(1))), "no second fire for the same pause");
+        }
+
+        @Test
+        @DisplayName("M1: a legacy row an undeploy switched off cannot fire — replaced by an enabled one")
+        void undeployDisabledRowReplaced() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            ScheduleConfiguration undeployed = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT",
+                    pausedAt, pausedAt.plus(Duration.ofMinutes(5)));
+            undeployed.setEnabled(false);
+            undeployed.setDisabledReason(ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+
+            sweeps(SWEEPS);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertTrue(named.get(0).isEnabled());
+            assertEquals(pausedAt.plus(Duration.ofMinutes(5)), named.get(0).getNextFire(), "at the original deadline");
+        }
+
+        @Test
+        @DisplayName("a row of this pause a person disabled is respected")
+        void handDisabledRowLeftAlone() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            ScheduleConfiguration disabled = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plus(Duration.ofMinutes(5)));
+            disabled.setEnabled(false);
+
+            sweeps(SWEEPS);
+
+            assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME));
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("S2: rows that cannot be read are replaced, not failed on every sweep")
+        void unreadableRowsHealed() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(300));
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt()))
+                    .thenThrow(new ResourceStoreException("malformed row"))
+                    .thenAnswer(invocation -> rows.stream().filter(row -> REGULAR_NAME.equals(row.getName())).toList());
+
+            sweeps(SWEEPS);
+
+            verify(scheduleStore, times(1)).createSchedule(any());
+            assertEquals(1, rowsNamed(REGULAR_NAME).size());
+        }
+
+        @Test
+        @DisplayName("S2: two live rows of earlier pauses are both replaced by one for this pause")
+        void twoStaleLiveRowsReplaced() throws Exception {
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(3)),
+                    Instant.now().plus(Duration.ofHours(10)));
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(2)),
+                    Instant.now().plus(Duration.ofHours(10)));
+            Instant pausedAt = Instant.now().minusSeconds(5);
+            regularPause("AUTO_REJECT", "PT1M", pausedAt);
+
+            sweeps(SWEEPS);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size());
+            assertEquals(HitlDecision.pauseIdOf(pausedAt), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
+        }
+
+        @Test
+        @DisplayName("S2: a spent row of this pause listed before a stale live row does not hide nor keep the stale one")
+        void spentPlusStaleIsDeterministic() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(120);
+            regularPause("AUTO_REJECT", "PT30S", pausedAt);
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(30));
+            Instant firedAt = Instant.now().minusSeconds(60);
+            pollAt(firedAt);
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(5)),
+                    Instant.now().plus(Duration.ofHours(10)));
+
+            sweeps(SWEEPS);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size(), "the stale row of the earlier pause is gone");
+            assertEquals(HitlDecision.pauseIdOf(pausedAt), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
+            assertEquals(firedAt.plus(HitlCrashRecoveryObserver.SPENT_REARM_BACKOFF), named.get(0).getNextFire());
+        }
+
+        @Test
+        @DisplayName("S2: a legacy row (no pause id) that fired during this pause is spent — no fire on every sweep")
+        void legacySpentRowNoLoop() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(600);
+            regularPause("AUTO_REJECT", "PT1M", pausedAt);
+            ScheduleConfiguration legacy = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plusSeconds(60));
+            legacy.getMetadata().remove(HitlSchedules.METADATA_PAUSE_ID_KEY);
+            Instant firedAt = pausedAt.plusSeconds(61);
+            pollAt(firedAt);
+
+            sweeps(SWEEPS);
+
+            verify(scheduleStore, times(1)).createSchedule(any());
+            assertEquals(firedAt.plus(HitlCrashRecoveryObserver.SPENT_REARM_BACKOFF), rowsNamed(REGULAR_NAME).get(0).getNextFire());
+            assertEquals(0, pollAt(Instant.now()));
         }
 
         @Test

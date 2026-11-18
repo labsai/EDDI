@@ -172,6 +172,14 @@ public interface IScheduleStore {
     Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
+     * Every schedule with the given name, up to {@code limit}, in no particular
+     * order. For a caller that must judge all the rows sharing a name rather than
+     * an arbitrary one of them — the HITL crash-recovery sweep, which decides
+     * whether a pause still has a timeout that can fire.
+     */
+    List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Delete all schedules owned by a user (GDPR Art. 17 erasure).
      * <p>
      * A schedule carries the {@code userId} it fires conversations as. Left behind,

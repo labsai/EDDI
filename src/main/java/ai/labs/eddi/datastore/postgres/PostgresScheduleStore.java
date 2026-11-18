@@ -554,6 +554,19 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {
+            ps.setString(1, name);
+            ps.setInt(2, limit);
+            return readScheduleList(ps);
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();

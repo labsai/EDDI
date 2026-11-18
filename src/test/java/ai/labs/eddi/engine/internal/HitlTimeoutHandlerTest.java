@@ -22,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -49,8 +50,11 @@ class HitlTimeoutHandlerTest {
         // Inject mocks into @Inject fields via reflection
         setField(handler, "conversationService", conversationService);
         setField(handler, "groupConversationService", groupConversationService);
-        setField(handler, "meterRegistry", new SimpleMeterRegistry());
+        meters = new SimpleMeterRegistry();
+        setField(handler, "meterRegistry", meters);
     }
+
+    private SimpleMeterRegistry meters;
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {
         Field field = target.getClass().getDeclaredField(fieldName);
@@ -287,6 +291,7 @@ class HitlTimeoutHandlerTest {
                     "policy", "ABORT",
                     "surface", "group-human",
                     "conversationId", "gc-1");
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null)).thenReturn(true);
 
             handler.handleTimeout(metadata);
 
@@ -430,6 +435,120 @@ class HitlTimeoutHandlerTest {
 
             gc.setState(GroupConversation.GroupConversationState.COMPLETED);
             assertDoesNotThrow(() -> handler.handleTimeout(human));
+        }
+    }
+
+    // =========================================================================
+    // A decision that can never apply ends the pause; a paused-only cancel that
+    // lost a race on the still-waiting pause is retried (review S1)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Undecidable pauses and lost cancels")
+    class UndecidableAndLostCancel {
+
+        private static final String PAUSE_ID = "1700000000000";
+
+        private Map<String, Object> regular(String policy) {
+            return HitlSchedules.timeoutMetadata(policy, HitlSchedules.SURFACE_REGULAR, "conv-1", PAUSE_ID);
+        }
+
+        private double undecidable(String surface, String reason) {
+            var counter = meters.find(HitlTimeoutHandler.METRIC_UNDECIDABLE).tag("surface", surface).tag("reason", reason).counter();
+            return counter != null ? counter.count() : 0;
+        }
+
+        private GroupConversation groupPausedAt(GroupConversation.GroupConversationState state, long pausedAtMillis) {
+            var gc = new GroupConversation();
+            gc.setState(state);
+            gc.setPausedAt(Instant.ofEpochMilli(pausedAtMillis));
+            return gc;
+        }
+
+        @Test
+        @DisplayName("regular: the stored plan changed after the pause → the pause it was armed for is cancelled and counted")
+        void planChanged_cancelsThePause() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_APPROVE")));
+
+            verify(conversationService).cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID);
+            assertEquals(1.0, undecidable("regular", HitlTimeoutHandler.REASON_PLAN_CHANGED));
+        }
+
+        @Test
+        @DisplayName("regular: a decision refused as invalid → the pause is cancelled, not left waiting")
+        void invalidDecision_cancelsThePause() throws Exception {
+            doThrow(new IllegalArgumentException("invalid"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_REJECT")));
+
+            verify(conversationService).cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID);
+            assertEquals(1.0, undecidable("regular", HitlTimeoutHandler.REASON_INVALID_DECISION));
+        }
+
+        @Test
+        @DisplayName("regular: the cancel of an undecidable pause fails while it still waits → retried")
+        void undecidableCancelFails_isRetried() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            doThrow(new IllegalStateException("store blip"))
+                    .when(conversationService).cancelPausedConversation(eq("conv-1"), anyString(), any());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_REJECT")));
+        }
+
+        @Test
+        @DisplayName("group: a plan mismatch → the discussion's pause is cancelled, bound to the pause id")
+        void groupPlanChanged_cancelsThePause() throws Exception {
+            var md = HitlSchedules.timeoutMetadata("AUTO_APPROVE", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
+            doThrow(new IGroupConversationService.GroupPlanMismatchException("plan changed"))
+                    .when(groupConversationService).resumeDiscussion(eq("gc-1"), any(), isNull());
+
+            assertDoesNotThrow(() -> handler.handleTimeout(md));
+
+            verify(groupConversationService).cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, "42");
+            assertEquals(1.0, undecidable("group", HitlTimeoutHandler.REASON_PLAN_CHANGED));
+        }
+
+        @Test
+        @DisplayName("group ABORT: the paused-only cancel returns false but the same pause still waits → retried")
+        void groupAbortLostRace_isRetried() throws Exception {
+            var md = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, "42")).thenReturn(false);
+            when(groupConversationService.readGroupConversation("gc-1"))
+                    .thenReturn(groupPausedAt(GroupConversation.GroupConversationState.AWAITING_APPROVAL, 42));
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(md));
+        }
+
+        @Test
+        @DisplayName("group ABORT: false because the discussion paused again since → completes")
+        void groupAbortNewerPause_isDone() throws Exception {
+            var md = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, "42")).thenReturn(false);
+            when(groupConversationService.readGroupConversation("gc-1"))
+                    .thenReturn(groupPausedAt(GroupConversation.GroupConversationState.AWAITING_APPROVAL, 99));
+
+            assertDoesNotThrow(() -> handler.handleTimeout(md));
+        }
+
+        @Test
+        @DisplayName("human-turn ABORT: false while the same turn still waits → retried")
+        void humanAbortLostRace_isRetried() throws Exception {
+            var md = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP_HUMAN, "gc-1", "42");
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, "42")).thenReturn(false);
+            when(groupConversationService.readGroupConversation("gc-1"))
+                    .thenReturn(groupPausedAt(GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT, 42));
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(md));
         }
     }
 }

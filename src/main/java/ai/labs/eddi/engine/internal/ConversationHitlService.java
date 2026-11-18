@@ -2365,12 +2365,7 @@ class ConversationHitlService {
             // its next start) — so make the gap visible instead of a routine WARN.
             LOGGER.errorf("Failed to schedule HITL timeout for conversation %s — the pause waits without its timeout "
                     + "until crash recovery re-arms it: %s", sanitize(conversationId), sanitize(e.getMessage()));
-            Counter armFailures = meterRegistry != null
-                    ? meterRegistry.counter(METRIC_TIMEOUT_ARM_FAILURES, "surface", HitlSchedules.SURFACE_REGULAR)
-                    : null;
-            if (armFailures != null) {
-                armFailures.increment();
-            }
+            meterRegistry.counter(METRIC_TIMEOUT_ARM_FAILURES, "surface", HitlSchedules.SURFACE_REGULAR).increment();
         }
     }
 

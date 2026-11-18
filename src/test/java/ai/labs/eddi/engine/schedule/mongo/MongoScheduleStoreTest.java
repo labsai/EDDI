@@ -566,6 +566,18 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("readSchedulesByName — every row of the name, bounded")
+    void readSchedulesByNameReadsEveryRowOfTheName() throws Exception {
+        setupSchedulePageIteration();
+
+        assertEquals(1, store.readSchedulesByName("hitl-timeout-conv-1", 100).size());
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertTrue(filter.getValue().toString().contains("hitl-timeout-conv-1"), filter.getValue().toString());
+    }
+
+    @Test
     @DisplayName("countPendingSchedulesByName — a driver failure becomes a ResourceStoreException")
     void countPendingSchedulesByNameStoreFailureIsWrapped() {
         when(scheduleCollection.countDocuments(any(Bson.class))).thenThrow(new IllegalStateException("cluster down"));

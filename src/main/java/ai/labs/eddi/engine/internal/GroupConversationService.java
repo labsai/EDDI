@@ -442,6 +442,7 @@ public class GroupConversationService implements IGroupConversationService, User
         this.hitlCoordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, auditLedgerService,
                 signingGuard, discussionControls, executorService, callerIdentityContext, this,
                 counterGroupHitlPause, counterGroupHitlResume, counterGroupFailure);
+        this.hitlCoordinator.setMeterRegistry(meterRegistry);
         this.hitlCoordinator.setTieBreakPauses(new GroupTieBreakPauses(groupStore, conversationStore, auditLedgerService, discussionControls,
                 executorService, callerIdentityContext, this, hitlCoordinator, phaseExecutionEngine, meterRegistry, counterGroupHitlPause,
                 counterGroupHitlResume));

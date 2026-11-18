@@ -574,6 +574,27 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void readSchedulesByName_selectsEveryRowOfTheNameBounded() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        assertTrue(sut.readSchedulesByName("hitl-timeout-conv-1", 100).isEmpty());
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")),
+                sql.getAllValues().toString());
+        verify(preparedStatement).setString(1, "hitl-timeout-conv-1");
+        verify(preparedStatement).setInt(2, 100);
+    }
+
+    @Test
+    void readSchedulesByName_wrapsADatabaseFailure() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.readSchedulesByName("hitl-timeout-conv-1", 100));
+    }
+
+    @Test
     void countPendingSchedulesByName_wrapsADatabaseFailure() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 

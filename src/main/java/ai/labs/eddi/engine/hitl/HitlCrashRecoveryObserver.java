@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.hitl;
 
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -30,6 +29,7 @@ import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -592,60 +592,118 @@ public class HitlCrashRecoveryObserver {
 
     /** What the schedule store holds for the timeout of one pause. */
     enum TimeoutArming {
-        /** A row that can still fire exists — leave it exactly as it is. */
-        ARMED,
         /**
-         * Nothing can fire, but a row bound to this very pause is left behind: its
-         * timeout already fired and was handled (or an operator switched it off).
+         * A row of this pause that can still fire exists — leave it exactly as it is.
+         */
+        ARMED,
+        /** A row of this pause was switched off by a person — respect that. */
+        DISABLED,
+        /**
+         * Nothing of this pause can fire, but its timeout already fired and completed
+         * while the pause still waits — re-armed after {@link #SPENT_REARM_BACKOFF}.
          */
         SPENT,
-        /** Nothing for this pause can fire — the schedule must be created. */
+        /**
+         * Nothing of this pause can fire: no row, rows of earlier pauses only, rows
+         * that can never fire again (dead-lettered, out of retries, disabled by an
+         * undeploy), or rows that could not be read — the schedule is (re-)created.
+         */
         MISSING
     }
 
     /**
-     * Looks up the timeout schedule of the pause {@code pauseId} by name.
-     * <p>
-     * A row counts as able to fire while it is enabled — pending, claimed by a fire
-     * in progress, or {@code FAILED} and waiting for its retry — or was switched
-     * off only by an undeploy, exactly as
-     * {@link IScheduleStore#countPendingSchedulesByName} counts. When the only such
-     * row is bound to an <em>earlier</em> pause (its delete on resume failed and
-     * the create for the new pause failed too), it is reported missing so it is
-     * replaced. With several rows under the name the store cannot say which one
-     * {@code readScheduleByName} returns, so any row able to fire counts as armed:
-     * a stale one fires, is refused as a pause mismatch and completes, and the next
-     * sweep then finds the pause unarmed.
+     * How long after a completed fire a pause that is still waiting gets its
+     * timeout again. The fire handler completes only when the decision was applied
+     * or has nothing left to apply to, and ends the pause itself when a decision
+     * can never apply; this is the safety net for anything else (a row whose
+     * metadata names no usable policy, say) — slow enough that a decision which
+     * keeps failing is not retried in a loop.
      */
-    TimeoutArming timeoutArming(String scheduleName, String pauseId) throws IResourceStore.ResourceStoreException {
-        int pending = scheduleStore.countPendingSchedulesByName(scheduleName);
-        Optional<ScheduleConfiguration> row = scheduleStore.readScheduleByName(scheduleName);
-        if (pending == 0) {
-            return row.isPresent() && boundTo(row.get(), pauseId) ? TimeoutArming.SPENT : TimeoutArming.MISSING;
+    static final Duration SPENT_REARM_BACKOFF = Duration.ofHours(1);
+
+    /** Upper bound of rows read per schedule name — normally one or two. */
+    private static final int ROWS_PER_NAME = 100;
+
+    /**
+     * The scheduler's {@code eddi.schedule.max-retries}: a FAILED row that has used
+     * them is never due again. Field-injected; the default in tests built with
+     * {@code new}.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.schedule.max-retries", defaultValue = "5")
+    int scheduleMaxRetries = 5;
+
+    /**
+     * The arming of the pause {@code pauseId} (paused at {@code pausedAt}), judged
+     * over every row stored under the schedule name, so the answer does not depend
+     * on which of several rows a store returns first.
+     */
+    TimeoutArming timeoutArming(List<ScheduleConfiguration> rows, String pauseId, Instant pausedAt) {
+        boolean disabled = false;
+        boolean spent = false;
+        for (ScheduleConfiguration row : rows) {
+            if (!ofThisPause(row, pauseId, pausedAt)) {
+                continue; // a row of an earlier pause: never armed for this one
+            }
+            if (canFire(row)) {
+                return TimeoutArming.ARMED;
+            }
+            if (completed(row)) {
+                spent = true;
+            } else if (!row.isEnabled() && row.getDisabledReason() == null) {
+                disabled = true;
+            }
         }
-        if (pending == 1 && row.isPresent() && canFire(row.get()) && boundToOtherPause(row.get(), pauseId)) {
-            return TimeoutArming.MISSING;
+        if (disabled) {
+            return TimeoutArming.DISABLED;
         }
-        return TimeoutArming.ARMED;
+        return spent ? TimeoutArming.SPENT : TimeoutArming.MISSING;
     }
 
-    private static boolean canFire(ScheduleConfiguration schedule) {
-        return schedule.isEnabled() || ScheduleConfiguration.DISABLED_BY_UNDEPLOY.equals(schedule.getDisabledReason());
+    /**
+     * Whether the poller can still fire the row: enabled — pending, claimed by a
+     * fire in progress (on any node; a dead claimer's lease expires and the row is
+     * claimed again) or FAILED with retries left — and not dead-lettered. A row an
+     * undeploy switched off cannot fire (an older build disabled HITL timeouts with
+     * their agent; current builds leave them armed, as the timeout of a pause must
+     * apply whatever the deployment does), so it is replaced by an enabled one.
+     */
+    boolean canFire(ScheduleConfiguration row) {
+        if (!row.isEnabled()) {
+            return false;
+        }
+        var status = row.getFireStatus();
+        if (status == ScheduleConfiguration.FireStatus.DEAD_LETTERED) {
+            return false;
+        }
+        return status != ScheduleConfiguration.FireStatus.FAILED || row.getFailCount() < scheduleMaxRetries;
     }
 
-    private static boolean boundTo(ScheduleConfiguration schedule, String pauseId) {
-        return pauseId != null && pauseId.equals(schedulePauseId(schedule));
+    /** What {@code markCompleted} leaves behind for a one-shot that fired. */
+    private static boolean completed(ScheduleConfiguration row) {
+        return !row.isEnabled() && row.getNextFire() == null && row.getLastFired() != null && row.getDisabledReason() == null;
     }
 
-    /** A row from an older build carries no pause id and is never called stale. */
-    private static boolean boundToOtherPause(ScheduleConfiguration schedule, String pauseId) {
-        String rowPauseId = schedulePauseId(schedule);
-        return rowPauseId != null && !rowPauseId.equals(pauseId);
+    /**
+     * A row is this pause's when it carries its pause id. A row from an older build
+     * carries none: it counts as this pause's while it can fire (it decides
+     * whatever pause is current), and once it fired, if it fired after this pause
+     * began.
+     */
+    private boolean ofThisPause(ScheduleConfiguration row, String pauseId, Instant pausedAt) {
+        Object value = row.getMetadata() != null ? row.getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY) : null;
+        if (value != null) {
+            return value.toString().equals(pauseId);
+        }
+        if (canFire(row)) {
+            return true;
+        }
+        return row.getLastFired() != null && !row.getLastFired().isBefore(pausedAt);
     }
 
-    private static String schedulePauseId(ScheduleConfiguration schedule) {
-        Object value = schedule.getMetadata() != null ? schedule.getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY) : null;
-        return value != null ? value.toString() : null;
+    private static Instant lastFire(List<ScheduleConfiguration> rows) {
+        return rows.stream().map(ScheduleConfiguration::getLastFired).filter(Objects::nonNull)
+                .max(Instant::compareTo).orElse(null);
     }
 
     /**
@@ -655,10 +713,9 @@ public class HitlCrashRecoveryObserver {
      * or re-created, so repeated sweeps cannot push a deadline out. A missing
      * schedule is created at the original due time (pausedAt + timeout), or
      * {@code overdueGrace} from now if that time already passed; the next sweep
-     * then finds it armed. A spent row for this pause (its timeout fired and
-     * completed while the pause stayed) is not re-armed: the fire handler completes
-     * only when the decision was applied or can never be, and retries every other
-     * case itself.
+     * then finds it armed. A row of this pause a person disabled is left alone; a
+     * spent one (its timeout fired and completed while the pause still waits) is
+     * re-armed {@link #SPENT_REARM_BACKOFF} after that fire.
      *
      * @param policyName
      *            a {@code HitlTimeoutPolicy} name, or for human-turn schedules (I6)
@@ -702,14 +759,34 @@ public class HitlCrashRecoveryObserver {
 
         try {
             if (!replace) {
-                TimeoutArming arming = timeoutArming(scheduleName, pauseId);
-                if (arming != TimeoutArming.MISSING) {
+                List<ScheduleConfiguration> rows;
+                TimeoutArming arming;
+                try {
+                    rows = scheduleStore.readSchedulesByName(scheduleName, ROWS_PER_NAME);
+                    arming = timeoutArming(rows, pauseId, pausedAt);
+                } catch (Exception e) {
+                    // A row that cannot be read (malformed, say) would fail every sweep;
+                    // the delete below clears it and the pause gets a readable one.
+                    LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — replacing them", scheduleName, e.getMessage());
+                    rows = List.of();
+                    arming = TimeoutArming.MISSING;
+                }
+                if (arming == TimeoutArming.ARMED || arming == TimeoutArming.DISABLED) {
                     LOGGER.debugf("HITL timeout for %s (%s) left as it is: %s", conversationId, surface, arming);
                     return false;
                 }
+                if (arming == TimeoutArming.SPENT) {
+                    Instant lastFired = lastFire(rows);
+                    Instant retryAt = (lastFired != null ? lastFired : Instant.now()).plus(SPENT_REARM_BACKOFF);
+                    if (retryAt.isAfter(fireAt)) {
+                        fireAt = retryAt;
+                    }
+                    LOGGER.warnf("HITL timeout for %s (%s) fired at %s but the pause is still waiting — re-arming it for %s",
+                            conversationId, surface, lastFired, fireAt);
+                }
             }
-            // Clears rows that cannot fire for this pause (spent rows of earlier
-            // pauses, or the one stale row timeoutArming reported) before the create.
+            // Clears every row under the name — rows of earlier pauses, rows that can
+            // never fire again, spent ones — before the create.
             scheduleStore.deleteSchedulesByName(scheduleName);
 
             var schedule = new ScheduleConfiguration();

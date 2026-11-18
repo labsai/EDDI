@@ -484,6 +484,11 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        return readSchedulesWithFilter(eq(NAME, name), limit);
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         // Fix #12: bounded result set
         return readSchedulesWithFilter(new Document(), limit);
