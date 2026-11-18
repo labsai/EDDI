@@ -10,7 +10,11 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationS
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import de.undercouch.bson4jackson.BsonFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +63,58 @@ class ConversationDocumentSizeTest {
         long json = new ObjectMapper().findAndRegisterModules().writeValueAsBytes(snapshot).length;
         assertTrue(ConversationDocumentSize.estimate(snapshot) >= json * 0.9,
                 "estimate " + ConversationDocumentSize.estimate(snapshot) + " vs JSON " + json);
+    }
+
+    /**
+     * S7 calibration: the estimate against the BSON the MongoDB store really writes
+     * (the same bson4jackson mapper PersistenceModule configures), for a step-heavy
+     * document of small results — the shape the first estimate under-counted by
+     * ~28% (field names, timestamps, array index names).
+     */
+    @Test
+    @DisplayName("calibration: never below the real BSON size, at most 35% above it")
+    void calibratedAgainstRealBson() throws Exception {
+        var bson = new ObjectMapper(new BsonFactory());
+        bson.registerModule(new JavaTimeModule());
+        bson.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        new SerializationCustomizer(false).customize(bson);
+
+        for (int[] shape : new int[][]{{2000, 30, 1}, {200, 30, 12}, {500, 10, 2000}, {10, 5, 12}}) {
+            var snapshot = generated(shape[0], shape[1], shape[2]);
+            long real = bson.writeValueAsBytes(snapshot).length;
+            long estimate = ConversationDocumentSize.estimate(snapshot);
+            String shown = "steps=%d results=%d valueLength=%d: estimate %d, BSON %d".formatted(shape[0], shape[1], shape[2], estimate, real);
+            assertTrue(estimate >= real, shown);
+            assertTrue(estimate <= real * 1.35, shown);
+        }
+    }
+
+    private static ConversationMemorySnapshot generated(int steps, int results, int valueLength) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationId("aabbccddeeff112233445566");
+        snapshot.setAgentId("agent-1");
+        snapshot.setUserId("user-1");
+        for (int i = 0; i < steps; i++) {
+            var step = new ConversationStepSnapshot();
+            var workflow = new WorkflowRunSnapshot();
+            for (int r = 0; r < results; r++) {
+                Object value = switch (r % 3) {
+                    case 0 -> "v".repeat(valueLength);
+                    case 1 -> List.of("a", "b");
+                    default -> Map.of("k", "x".repeat(valueLength));
+                };
+                workflow.getLifecycleTasks().add(new ResultSnapshot("key:" + r, value, List.of(value), new Date(), "wf-1", r % 2 == 0));
+            }
+            step.getWorkflows().add(workflow);
+            var output = new ConversationOutput();
+            output.put("input", "hello " + i);
+            output.put("actions", List.of("greet"));
+            output.put("output", List.of(Map.of("type", "text", "text", "answer " + i)));
+            step.setConversationOutput(output);
+            snapshot.getConversationSteps().add(step);
+            snapshot.getConversationOutputs().add(output);
+        }
+        return snapshot;
     }
 
     @Test

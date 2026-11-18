@@ -43,8 +43,30 @@ public final class ConversationDocumentSize {
      * cost.
      */
     private static final int ENTRY_OVERHEAD = 8;
-    /** A number, a boolean, a date: BSON stores at most 8 bytes for each. */
+    /** A number or a boolean: BSON stores at most 8 bytes for each. */
     private static final int SCALAR_SIZE = 8;
+    /**
+     * A date or time: stored as an ISO-8601 string
+     * ({@code 2026-11-18T11:47:19.620+00:00}).
+     */
+    private static final int DATE_SIZE = 40;
+    /**
+     * The fixed part of one stored step result: its field names ({@code key},
+     * {@code result}, {@code possibleResults}, {@code timestamp},
+     * {@code originWorkflowId}, {@code committed}, {@code public}), their type tags
+     * and terminators, the timestamp string, the two booleans, the string length
+     * prefixes, the embedded document's own header and its array index name.
+     * Calibrated against the BSON the MongoDB store writes
+     * ({@code ConversationDocumentSizeTest}).
+     */
+    private static final int RESULT_OVERHEAD = 112;
+    /**
+     * A step's own field names ({@code conversationOutput}, {@code workflows}) and
+     * headers.
+     */
+    private static final int STEP_OVERHEAD = 64;
+    /** A workflow run's field name ({@code lifecycleTasks}) and header. */
+    private static final int WORKFLOW_OVERHEAD = 32;
     /** Fixed fields of the document (ids, revisions, state, bookmarks). */
     private static final int DOCUMENT_OVERHEAD = 1024;
     /** Container nesting the walk follows before it stops counting. */
@@ -133,7 +155,7 @@ public final class ConversationDocumentSize {
                 if (step == null) {
                     continue;
                 }
-                size += ENTRY_OVERHEAD + value(step.getConversationOutput(), 1);
+                size += STEP_OVERHEAD + value(step.getConversationOutput(), 1);
                 if (step.getWorkflows() == null) {
                     continue;
                 }
@@ -141,12 +163,12 @@ public final class ConversationDocumentSize {
                     if (workflow == null || workflow.getLifecycleTasks() == null) {
                         continue;
                     }
-                    size += ENTRY_OVERHEAD;
+                    size += WORKFLOW_OVERHEAD;
                     for (ResultSnapshot result : workflow.getLifecycleTasks()) {
                         if (result == null) {
                             continue;
                         }
-                        size += 4 * ENTRY_OVERHEAD + SCALAR_SIZE + utf8Length(result.getKey()) + utf8Length(result.getOriginWorkflowId())
+                        size += RESULT_OVERHEAD + utf8Length(result.getKey()) + utf8Length(result.getOriginWorkflowId())
                                 + value(result.getResult(), 1) + value(result.getPossibleResults(), 1);
                     }
                 }
@@ -158,8 +180,8 @@ public final class ConversationDocumentSize {
             if (property == null) {
                 return SCALAR_SIZE;
             }
-            // name, scope, visibility, the scalar slots
-            return 6 * ENTRY_OVERHEAD + 4 * SCALAR_SIZE + utf8Length(property.getName()) + value(property.getValueString(), 1)
+            // field names (name, valueString, scope, visibility, …), headers, scalar slots
+            return 6 * ENTRY_OVERHEAD + 6 * SCALAR_SIZE + utf8Length(property.getName()) + value(property.getValueString(), 1)
                     + value(property.getValueObject(), 1) + value(property.getValueList(), 1);
         }
 
@@ -170,8 +192,10 @@ public final class ConversationDocumentSize {
             if (value instanceof CharSequence text) {
                 return ENTRY_OVERHEAD + utf8Length(text);
             }
-            if (value instanceof Number || value instanceof Boolean || value instanceof Date || value instanceof Temporal
-                    || value instanceof Character) {
+            if (value instanceof Date || value instanceof Temporal) {
+                return DATE_SIZE;
+            }
+            if (value instanceof Number || value instanceof Boolean || value instanceof Character) {
                 return SCALAR_SIZE;
             }
             if (value instanceof Enum<?> constant) {
