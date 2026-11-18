@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -92,6 +93,12 @@ public record ConversationListing(String conversationId, List<Entry> entries, Se
      *            whether this is a recorded view of a root rather than a root
      */
     public record Entry(String displayName, AttachmentSelector selector, String mimeType, long sizeBytes, boolean derived) {
+
+        public Entry {
+            Objects.requireNonNull(displayName, "displayName");
+            // A null selector fails here too, on the dereference.
+            Objects.requireNonNull(selector.storageRef(), "selector.storageRef");
+        }
 
         /**
          * The root blob the entry belongs to — the one access and grants are decided

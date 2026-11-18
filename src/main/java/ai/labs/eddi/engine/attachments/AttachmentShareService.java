@@ -233,7 +233,12 @@ public class AttachmentShareService {
      */
     static String echo(String raw) {
         String s = raw == null ? "" : raw.strip();
-        return s.length() <= MAX_ECHO_CHARS ? s : s.substring(0, MAX_ECHO_CHARS) + "…";
+        if (s.length() <= MAX_ECHO_CHARS) {
+            return s;
+        }
+        // Never cut between the halves of a surrogate pair (an emoji, say).
+        int end = Character.isHighSurrogate(s.charAt(MAX_ECHO_CHARS - 1)) ? MAX_ECHO_CHARS - 1 : MAX_ECHO_CHARS;
+        return s.substring(0, end) + "…";
     }
 
     /** The 0-based index a 1-based entry number names, or {@code null}. */
@@ -393,9 +398,10 @@ public class AttachmentShareService {
     }
 
     /**
-     * One entry in the source conversation's ledger. It records the root, the
-     * target, the reason and the file's MIME type and size — no bytes and no file
-     * name. Never throws into the share path.
+     * One entry in the source conversation's ledger. It records the target
+     * conversation (and agent, when known), the reason and the file's MIME type and
+     * size — no bytes, no file name and no storage reference. Never throws into the
+     * share path.
      */
     private void audit(String sourceConversationId, String targetConversationId, ShareReason reason,
                        ConversationListing.Entry entry, ShareParties parties) {

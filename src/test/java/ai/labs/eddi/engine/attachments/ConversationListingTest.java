@@ -13,6 +13,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -172,6 +173,15 @@ class ConversationListingTest {
         assertTrue(listing.entryFor(new AttachmentSelector(REF_A, "1-2", null, null)).isEmpty());
         assertTrue(listing.entryFor(null).isEmpty());
         assertTrue(listing.entryForRoot(REF_A).isPresent());
+    }
+
+    @Test
+    void entryWithoutNameOrReference_isRejectedAtConstruction() {
+        assertThrows(NullPointerException.class,
+                () -> new ConversationListing.Entry(null, AttachmentSelector.wholeFile(REF_A), "application/pdf", 1, false));
+        assertThrows(NullPointerException.class, () -> new ConversationListing.Entry("a.pdf", null, "application/pdf", 1, false));
+        assertThrows(NullPointerException.class,
+                () -> new ConversationListing.Entry("a.pdf", AttachmentSelector.wholeFile(null), "application/pdf", 1, false));
     }
 
     @Test

@@ -175,6 +175,21 @@ class AttachmentShareServiceTest {
         }
 
         @Test
+        void echo_neverSplitsASurrogatePair() {
+            // Built from the code point: the formatter would turn an escape into a raw
+            // character.
+            String emoji = new String(Character.toChars(0x1F4C4));
+            String text = "x".repeat(AttachmentShareService.MAX_ECHO_CHARS - 1) + emoji + "tail";
+
+            String echoed = AttachmentShareService.echo(text);
+
+            assertFalse(Character.isHighSurrogate(echoed.charAt(echoed.length() - 2)), echoed);
+            assertEquals("x".repeat(AttachmentShareService.MAX_ECHO_CHARS - 1) + "…", echoed);
+            assertEquals("short", AttachmentShareService.echo("  short "));
+            assertEquals("", AttachmentShareService.echo(null));
+        }
+
+        @Test
         void sameFileTwice_resolvesOnce() {
             var r = service.resolveNames(listing, List.of("report.pdf", "3"));
             assertEquals(1, r.resolved().size());
