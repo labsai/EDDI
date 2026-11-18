@@ -506,6 +506,32 @@ class HitlTimeoutHandlerTest {
         }
 
         @Test
+        @DisplayName("regular: plan changed, the cancel finds nothing but the conversation is back in AWAITING_HUMAN → retried")
+        void planChangedCancelNothingWhileAwaiting_isRetried() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_APPROVE")));
+        }
+
+        @Test
+        @DisplayName("regular: a timeout row that names no pause never cancels the current pause on a plan mismatch")
+        void planChangedUnboundRow_doesNotCancel() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            var unbound = HitlSchedules.timeoutMetadata("AUTO_APPROVE", HitlSchedules.SURFACE_REGULAR, "conv-1", null);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(unbound));
+
+            verify(conversationService, never()).cancelPausedConversation(anyString(), anyString(), any());
+            verify(conversationService, never()).cancelPausedConversation(anyString(), anyString());
+            assertEquals(1.0, undecidable("regular", HitlTimeoutHandler.REASON_UNBOUND));
+        }
+
+        @Test
         @DisplayName("regular: plan changed, and the pause is no longer the one the timeout was armed for → completes")
         void planChangedPauseGone_isDone() throws Exception {
             doThrow(new IConversationService.PlanMismatchException("plan changed"))

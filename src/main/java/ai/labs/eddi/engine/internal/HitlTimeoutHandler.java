@@ -191,6 +191,8 @@ public class HitlTimeoutHandler {
      */
     static final String METRIC_UNDECIDABLE = "eddi_hitl_timeout_undecidable";
     static final String REASON_PLAN_CHANGED = "plan_changed";
+    /** The timeout row names no pause, so it may not end one. */
+    static final String REASON_UNBOUND = "unbound_plan_changed";
 
     /**
      * The regular resume refused the timeout's decision because the plan stored
@@ -210,6 +212,16 @@ public class HitlTimeoutHandler {
      * (IN_PROGRESS) may fail and restore it, and only this fire would then end it.
      */
     private void endUndecidableRegularPause(String conversationId, HitlDecision decision, String reason, Exception cause) {
+        if (decision.getPauseId() == null) {
+            // A row armed by an older build names no pause: it decides whatever pause is
+            // current, so it has no standing to END one — the cancel would skip the
+            // pause-identity check and could end a newer pause nobody timed out on.
+            LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) but it names no pause — "
+                    + "not cancelling the current pause; it needs a person's attention",
+                    decision.getVerdict(), conversationId, reason, cause.getMessage());
+            countUndecidable(HitlSchedules.SURFACE_REGULAR, REASON_UNBOUND);
+            return;
+        }
         LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) — cancelling the pause it was armed for",
                 decision.getVerdict(), conversationId, reason, cause.getMessage());
         try {
@@ -217,9 +229,12 @@ public class HitlTimeoutHandler {
             if (outcome == IConversationService.CancelOutcome.CANCELLED) {
                 countUndecidable(HitlSchedules.SURFACE_REGULAR, reason);
                 LOGGER.infof("HITL timeout for conversation %s: the undecidable pause was cancelled", conversationId);
-            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
-                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
-                throw new IllegalStateException("a decision on the pause is still in flight");
+            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL && regularPauseStillWaiting(conversationId)) {
+                // IN_PROGRESS: a decision is in flight and may fail and restore the pause.
+                // AWAITING_HUMAN: that restore already happened, or the state read is stale.
+                // A pause that was replaced meanwhile is refused as PauseMismatch on the
+                // retry and completes then.
+                throw new IllegalStateException("the pause is still waiting or a decision on it is still in flight");
             } else {
                 LOGGER.infof("HITL timeout for conversation %s: the undecidable pause is no longer waiting (%s)", conversationId,
                         outcome);
