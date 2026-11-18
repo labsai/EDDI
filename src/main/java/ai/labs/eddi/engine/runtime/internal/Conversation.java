@@ -626,13 +626,13 @@ public class Conversation implements IConversation {
      * PostgreSQL data error, a fence, a conflict) the turn did not exist, yet the
      * memories it set did. Now the write is handed to the turn's committer
      * ({@link IConversationMemory#deferUntilCommitted}), which runs it right after
-     * a successful store. The stored document therefore records nothing owed: the
-     * markers of this turn's writes are cleared before the store and carried by the
-     * deferred write instead. If that write fails, the committer marks the
-     * conversation {@code ERROR}, and the next turn treats every longTerm property
-     * as unpersisted (see {@link #captureRestoredLongTermBaseline}), so the write
-     * is made then. A memory that cannot defer (none in production) is written at
-     * once, as before.
+     * a successful store (every path that stores a turn does, see
+     * {@code ConversationStepRunner#commitDeferredWork}). The stored document still
+     * names the keys owed ({@code pendingLongTermWrites}, recorded on every exit of
+     * the turn): if the write fails, or the node dies before it, the next turn
+     * finds them and writes them — upserts are idempotent. After a successful write
+     * the committer clears them. A memory that cannot defer (none in production) is
+     * written at once, as before.
      */
     private void commitLongTermPropertiesAfterTheTurn() throws IResourceStore.ResourceStoreException {
         if (propertiesHandler.getUserMemoryStore() == null) {
@@ -650,11 +650,11 @@ public class Conversation implements IConversation {
             storePropertiesPermanently(owed);
             return;
         }
-        // What the deferred write will write, decided now so the stored document agrees
-        // with it: nothing is owed any more, and the keys it rewrites are no longer
-        // contested (the write records them as ACCEPTED).
+        // The keys the deferred write rewrites are no longer contested (it records them
+        // as ACCEPTED); decided now so the stored document agrees. The owed markers
+        // stay
+        // in the stored document until the write has succeeded (S5).
         liftContestedMarkers(longTermKeysToWrite(owed));
-        conversationMemory.setPendingLongTermWrites(new LinkedHashSet<>());
     }
 
     /**

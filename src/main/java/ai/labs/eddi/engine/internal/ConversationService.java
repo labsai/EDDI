@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
@@ -1595,6 +1596,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
+            // S6: a conversation already over eddi.conversations.max-document-bytes cannot
+            // store another turn. Refused here, before the pipeline, instead of after every
+            // model and tool call has been paid for (an upgrade puts existing ones there).
+            if (maxConversationDocumentBytes > 0) {
+                conversationStepRunner.requireWithinDocumentLimit(preloaded != null ? preloaded : convertConversationMemory(conversationMemory));
+            }
+
             IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
             if (resolvedAgent == null) {
                 final IConversationMemory memoryToResolve = conversationMemory;
@@ -1785,7 +1793,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             // TenantQuotaService.recordDenial's own.
             releaseTurn(admittedTurn);
             throw e;
-        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException | IllegalArgumentException e) {
+        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException | IllegalArgumentException
+                | ConversationTooLargeException e) {
             // IllegalArgumentException: a malformed conversation id, refused by the store
             // before any lookup. A client mistake (the REST layer answers 400), not a
             // fault worth an ERROR stack trace.
@@ -3344,11 +3353,6 @@ public class ConversationService implements IConversationService, UserErasurePar
         conversationStepRunner.logConversationError(loggingContext, conversationId, t);
     }
 
-    /** See {@link ConversationStepRunner#runAfterCommit}. */
-    boolean runAfterCommit(Map<String, String> loggingContext, String conversationId, IConversationMemory memory) {
-        return conversationStepRunner.runAfterCommit(loggingContext, conversationId, memory);
-    }
-
     private IConversationMemory loadAndValidateConversationMemory(String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
         return conversationStepRunner.loadAndValidateConversationMemory(agentId, conversationId);
@@ -3414,18 +3418,15 @@ public class ConversationService implements IConversationService, UserErasurePar
         processingTurn.deferredDelivery.defer(committedState -> {
             TurnError notStored = processingTurn.deferredDelivery.notStored();
             if (notStored != null) {
-                memorySnapshot.setConversationState(ConversationState.ERROR);
-                memorySnapshot.setError(notStored);
+                // S4: carries no answer — every surface (MCP, Slack, sub-agent tools,
+                // group members) reads the turn as failed, none as a reply.
+                TurnNotStored.withoutAnswer(memorySnapshot, notStored);
                 processingTurn.release();
                 notStoredCompletion.accept(memorySnapshot);
                 return;
             }
             if (committedState != null) {
                 memorySnapshot.setConversationState(committedState);
-            }
-            TurnError error = processingTurn.deferredDelivery.error();
-            if (error != null) {
-                memorySnapshot.setError(error);
             }
             cacheConversationState(conversationId, memorySnapshot.getConversationState());
             processingTurn.release();
@@ -3445,6 +3446,23 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not count a turn that was not stored: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * A deferred long-term memory write that failed after its turn was stored, or
+     * was dropped with a turn that was not
+     * ({@code eddi_turn_long_term_writes_total}, tag {@code outcome}). Never
+     * throws.
+     */
+    void countLongTermWrite(String outcome) {
+        try {
+            Counter counter = meterRegistry.counter("eddi.turn.long_term_writes", "outcome", outcome);
+            if (counter != null) {
+                counter.increment();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count a long-term memory write: %s", e.getMessage());
         }
     }
 

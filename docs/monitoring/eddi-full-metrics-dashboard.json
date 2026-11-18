@@ -1694,7 +1694,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_coordinator_total_processed_total`; of turns refused before they were queued (`eddi_turn_rejected_total`: `in_flight_limit` answered 503 `capacity_exceeded`, `caller_timed_out` answered 408 because the request waited out `systemRuntime.agentTimeoutInSeconds` for a thread); of queued turns dropped unrun because their caller had already timed out (`eddi_turn_skipped_total`); and of turns that ran but whose conversation write failed (`eddi_turn_not_stored_total`, answered `TURN_NOT_STORED`).",
+          "description": "Rate of `eddi_coordinator_total_processed_total`; of turns refused before they were queued (`eddi_turn_rejected_total`: `in_flight_limit` answered 503 `capacity_exceeded`, `caller_timed_out` answered 408 because the request waited out `systemRuntime.agentTimeoutInSeconds` for a thread); of queued turns dropped unrun because their caller had already timed out (`eddi_turn_skipped_total`); and of turns that ran but whose conversation write failed (`eddi_turn_not_stored_total`, answered `TURN_NOT_STORED`), and of deferred long-term memory writes that failed or were dropped (`eddi_turn_long_term_writes_total`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1739,6 +1739,17 @@
               "refId": "D",
               "expr": "sum by (reason) (rate(eddi_turn_not_stored_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "not stored ({{reason}})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (outcome) (rate(eddi_turn_long_term_writes_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "long-term writes ({{outcome}})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"

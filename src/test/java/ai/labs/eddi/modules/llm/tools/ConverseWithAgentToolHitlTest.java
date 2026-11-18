@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -122,6 +123,26 @@ class ConverseWithAgentToolHitlTest {
         assertTrue(result.contains("conv-x"));
         assertTrue(result.contains("/resume"));
         assertFalse(result.contains("TOOL_CALL"), result);
+    }
+
+    @Test
+    void turnNotStored_isNeverReportedAsAnAgentResponse() throws Exception {
+        // S4: the delegated turn ran but was not stored.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        TurnNotStored.withoutAnswer(snapshot, TurnNotStored.Reason.STORE_FAILURE.error());
+
+        Answer<Void> deliver = invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onComplete(snapshot);
+            return null;
+        };
+        doAnswer(deliver).when(conversationService).say(any(), eq("agent-b"), eq("conv-x"),
+                any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tool.converseWithAgent("agent-b", "hello", "conv-x");
+
+        assertFalse(result.startsWith("✅"), result);
+        assertTrue(result.contains("may not have been stored"), result);
     }
 
     @Test

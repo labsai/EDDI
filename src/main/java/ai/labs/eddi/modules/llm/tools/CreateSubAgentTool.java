@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.DynamicOrigin;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -391,6 +392,9 @@ public class CreateSubAgentTool {
                             response = "[Sub-agent conversation " + conversationId + " is busy processing another turn; "
                                     + "initial message not delivered — retry shortly]";
                         }
+                    } else if (snapshot != null && TurnNotStored.isNotStored(snapshot.getError())) {
+                        // Ran but not stored in the sub-agent's conversation: never a reply.
+                        response = "[Initial message not stored: " + snapshot.getError().message() + "]";
                     } else {
                         response = extractResponse(snapshot);
                     }

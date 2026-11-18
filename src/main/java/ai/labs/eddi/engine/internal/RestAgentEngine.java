@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
@@ -286,6 +287,9 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     /** RFC 9110's 422; {@link Response.Status} has no constant for it. */
     private static final int UNPROCESSABLE_CONTENT = 422;
+
+    /** RFC 4918's 507; no {@link Response.Status} constant either. */
+    private static final int INSUFFICIENT_STORAGE = 507;
 
     @Override
     public Response endConversation(String conversationId) {
@@ -572,6 +576,12 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(InputTooLargeExceptionMapper.responseOf(e));
         } catch (ConversationEndedException e) {
             response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+        } catch (ConversationTooLargeException e) {
+            // S6: refused before it ran — the stored conversation is already over
+            // eddi.conversations.max-document-bytes, so no further turn can be stored.
+            LOGGER.warnf("Turn refused for conversation %s: %s", sanitize(conversationId), e.getMessage());
+            response.resume(Response.status(INSUFFICIENT_STORAGE).type(MediaType.APPLICATION_JSON)
+                    .entity(errorBody(TurnNotStored.conversationFull())).build());
         } catch (ConversationAwaitingApprovalException e) {
             // docs/hitl.md: say() into a paused conversation is REJECTED — promptly
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());

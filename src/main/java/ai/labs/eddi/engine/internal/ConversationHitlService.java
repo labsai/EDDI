@@ -929,12 +929,6 @@ class ConversationHitlService {
                         }
                         conversationService.cacheConversationState(conversationId, memory.getConversationState());
                         committedResumeState.set(memory.getConversationState());
-                        // A5: the resumed turn's long-term memory writes, now that it is
-                        // stored (a re-pause defers none). A failure marks it ERROR.
-                        if (!conversationService.runAfterCommit(loggingContext, conversationId, memory)) {
-                            committedResumeState.set(ConversationState.ERROR);
-                            return;
-                        }
                         // Task 10 — AUTO_REJECT no-progress: the re-pause is now durably
                         // persisted (AWAITING_HUMAN); break the loop with a reject-all resume
                         // through the SAME resume path (journal-bearing, no shortcut). The

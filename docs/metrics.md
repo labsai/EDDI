@@ -523,7 +523,8 @@ eddi_runtime_executor_queued                # Conversation work waiting for a th
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
 eddi_turn_rejected_total                    # Turns refused before they were queued; tag: reason (in_flight_limit|conversation_queue = 503 capacity_exceeded, caller_timed_out = 408)
 eddi_turn_skipped_total                     # Queued turns dropped unrun; tag: reason (caller_timed_out)
-eddi_turn_not_stored_total                  # Turns that ran but whose conversation write failed; tag: reason (conversation_too_large|data_rejected|conflict|fenced|store_failure)
+eddi_turn_not_stored_total                  # Turns that ran but are not (verifiably) stored; tag: reason (conversation_too_large|data_rejected|conflict|fenced|conversation_ended|store_failure|outcome_unknown)
+eddi_turn_long_term_writes_total            # Deferred long-term memory writes that failed after a stored turn, or were dropped with an unstored one; tag: outcome (failed|discarded)
 eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
 eddi_datastore_pool_wait_seconds            # Wait for a pooled MongoDB connection, per checkout (timer; PostgreSQL: agroal_blocking_time_*)
 eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for a connection
@@ -588,8 +589,13 @@ the answer (REST: 507, 422, 409 or 503 by reason; a stream ends with an `error`
 event), and the log line names the conversation, the agent and the reason.
 `conversation_too_large` means a conversation reached its size limit and every
 further turn of it fails the same way; `data_rejected` is a PostgreSQL data error;
-`conflict` and `fenced` are lost races with another writer or node;
-`store_failure` is anything else, such as an unavailable database.
+`conflict` and `fenced` are lost races with another writer or node,
+`conversation_ended` an end that won the race; `store_failure` (the database did
+not confirm the write) and `outcome_unknown` (the watchdog gave up on the turn, or it
+failed after its answer) mean the turn *may* have been stored.
+`eddi_turn_long_term_writes_total{outcome="failed"}` counts long-term memory
+writes that failed after their turn was stored (the next turn makes them up);
+`outcome="discarded"` counts writes dropped with a turn that was not stored.
 
 ### Pipeline Metrics
 

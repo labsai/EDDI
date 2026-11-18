@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -607,6 +608,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } else if (e instanceof ConversationEndedException) {
             code = "conversation_ended";
             message = "Conversation has ended";
+        } else if (e instanceof ConversationTooLargeException) {
+            // S6: refused before it ran — the twin answers 507. A fixed text: the
+            // exception's own message names sizes and the property, not secrets, but
+            // the client needs only the decision.
+            code = "conversation_too_large";
+            message = TurnNotStored.conversationFull().message();
         } else if (e instanceof AgentNotReadyException) {
             code = "agent_not_ready";
             message = "Agent is not deployed or not ready";

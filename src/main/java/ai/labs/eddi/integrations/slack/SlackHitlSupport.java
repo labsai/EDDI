@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.engine.hitl.HitlToolCallPreview;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.output.model.OutputItem;
@@ -484,6 +485,10 @@ public final class SlackHitlSupport {
     public static String extractSlackResponseText(SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null) {
             return "_No response from agent._";
+        }
+        if (TurnNotStored.isNotStored(snapshot.getError())) {
+            // The turn ran but is not in the conversation: say so instead of "no response".
+            return "⚠️ " + snapshot.getError().message();
         }
         var outputs = snapshot.getConversationOutputs();
         if (outputs == null || outputs.isEmpty()) {

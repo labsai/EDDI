@@ -7,11 +7,15 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.ConversationTooLargeException;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.TurnError;
 import com.mongodb.MongoException;
 import org.bson.BsonMaximumSizeExceededException;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Set;
 
 /**
@@ -64,9 +68,29 @@ public final class TurnNotStored {
         /** Cluster mode: another node took the conversation over. */
         FENCED("fenced", true, 2000L, 409,
                 "The turn ran but was not stored: another node took over the conversation while it ran. Send it again."),
-        /** Any other failure of the write (unavailable database, driver error). */
-        STORE_FAILURE("store_failure", true, 5000L, 503,
-                "The turn ran but was not stored: the database could not store it. Send it again shortly.");
+        /**
+         * The write was refused because the conversation was ended while the turn ran:
+         * the end stands (410, as for a message to an ended conversation).
+         */
+        CONVERSATION_ENDED("conversation_ended", false, null, 410,
+                "The turn ran but was not stored: the conversation was ended while it ran."),
+        /**
+         * Any other failure of the write — an unavailable database, a socket error, a
+         * write-concern timeout, an interrupt. Not definitive: the database may have
+         * applied the write before it failed to confirm it, so a blind retry can run
+         * the turn twice (S8). Not retryable; read the conversation first.
+         */
+        STORE_FAILURE("store_failure", false, null, 503,
+                "The turn ran, but the database did not confirm its write, so it may not have been stored. Read the conversation "
+                        + "before sending it again."),
+        /**
+         * The turn's outcome was never confirmed: the watchdog gave up on it while it
+         * ran or wrote, or it failed after its answer was produced (S1). It may or may
+         * not be stored.
+         */
+        OUTCOME_UNKNOWN("outcome_unknown", false, null, 503,
+                "The turn ran, but it did not finish in time or failed afterwards, so it may not have been stored. Read the "
+                        + "conversation before sending it again.");
 
         private final String tag;
         private final boolean retryable;
@@ -144,6 +168,35 @@ public final class TurnNotStored {
             }
         }
         return null;
+    }
+
+    /**
+     * Turns the snapshot of a turn that was not stored into one that carries no
+     * answer (S4): state {@code ERROR}, the error set, and no outputs, steps or
+     * properties of the unstored turn. Every surface that reads a snapshot — MCP's
+     * {@code chat_with_agent}, Slack, the sub-agent tools, group members — then
+     * sees a failed turn with nothing to present as its reply, without having to
+     * know about this error code.
+     */
+    public static void withoutAnswer(SimpleConversationMemorySnapshot snapshot, TurnError error) {
+        snapshot.setConversationState(ConversationState.ERROR);
+        snapshot.setError(error);
+        snapshot.setConversationOutputs(new ArrayList<>());
+        snapshot.setConversationSteps(new ArrayList<>());
+        snapshot.setConversationProperties(new LinkedHashMap<>());
+    }
+
+    /**
+     * The error of a say refused at admission because the stored conversation is
+     * already over {@code eddi.conversations.max-document-bytes} (S6): the turn did
+     * not run, nothing was spent on it.
+     */
+    public static final String CONVERSATION_TOO_LARGE_CODE = "CONVERSATION_TOO_LARGE";
+
+    /** See {@link #CONVERSATION_TOO_LARGE_CODE}. */
+    public static TurnError conversationFull() {
+        return new TurnError(CONVERSATION_TOO_LARGE_CODE, false, null,
+                "This conversation has reached its size limit; the message was not processed. Start a new conversation.");
     }
 
     /** Whether {@code error} reports a turn that ran but was not stored. */

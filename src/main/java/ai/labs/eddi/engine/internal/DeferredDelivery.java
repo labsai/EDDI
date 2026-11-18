@@ -49,9 +49,6 @@ final class DeferredDelivery {
      */
     private volatile TurnError notStored;
 
-    /** See {@link #markError}. */
-    private volatile TurnError error;
-
     /**
      * Stores the delivery to run once the turn's outcome is persisted. Called from
      * the completion callback, on the turn's own thread, at most once per turn.
@@ -108,19 +105,6 @@ final class DeferredDelivery {
      */
     TurnError notStored() {
         return notStored;
-    }
-
-    /**
-     * Records why a turn that WAS stored is still reported as failed (its long-term
-     * memory write failed afterwards); the delivery puts it on the snapshot.
-     */
-    void markError(TurnError error) {
-        this.error = error;
-    }
-
-    /** See {@link #markError}; {@code null} when nothing was recorded. */
-    TurnError error() {
-        return error;
     }
 
     /**

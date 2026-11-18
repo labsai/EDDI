@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -92,8 +93,8 @@ class ConversationLongTermPersistenceTest {
         conversation.say("I am vegan", new LinkedHashMap<>());
 
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
-        assertTrue(memory.getPendingLongTermWrites().isEmpty(),
-                "the stored document owes nothing: the deferred write carries the marker");
+        assertEquals(Set.of("dietary_restriction"), memory.getPendingLongTermWrites(),
+                "the stored document names what the deferred write owes until it succeeded (S5)");
         assertNotNull(memory.takeAfterCommit(), "the write waits for the committer");
         // The turn's store failed: the committer never runs it.
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
@@ -475,12 +476,15 @@ class ConversationLongTermPersistenceTest {
 
         Conversation first = nextTurn();
         memory.getConversationProperties().put("home_city", new Property("home_city", "Vienna", Scope.longTerm));
-        // The turn itself completes; its write runs once the turn is stored (A5) and
-        // fails there. The committer then marks the conversation ERROR — which is what
-        // makes the next turn write every longTerm property again.
+        // The turn itself completes and is stored (READY); its write runs after the
+        // store (A5) and fails there. The owed key stays recorded in the conversation
+        // the turn stored — no ERROR, no hand-set state — and that is what makes the
+        // next turn write it.
         assertDoesNotThrow(() -> first.say("I live in Vienna", new LinkedHashMap<>()));
+        assertTrue(memory.getPendingLongTermWrites().contains("home_city"), "the stored document names the owed key");
         assertThrows(ResourceStoreException.class, this::commit);
-        memory.setConversationState(ConversationState.ERROR);
+        assertEquals(ConversationState.READY, memory.getConversationState());
+        assertTrue(memory.getPendingLongTermWrites().contains("home_city"), "still owed after the failed write");
 
         reset(userMemoryStore);
 

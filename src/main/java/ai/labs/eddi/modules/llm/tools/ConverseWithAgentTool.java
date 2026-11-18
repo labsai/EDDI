@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -350,6 +351,11 @@ public class ConverseWithAgentTool {
                 }
                 return ("⏳ Agent conversation %s is busy processing another turn; the message was not "
                         + "delivered — retry shortly.").formatted(convId);
+            }
+
+            // The turn ran but is not in the delegated conversation: never an answer.
+            if (snapshot != null && TurnNotStored.isNotStored(snapshot.getError())) {
+                return "⚠️ Agent conversation %s: %s".formatted(convId, snapshot.getError().message());
             }
 
             String response = extractResponse(snapshot);

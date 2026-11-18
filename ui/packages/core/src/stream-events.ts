@@ -131,6 +131,7 @@ export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
   "conversation_not_found",
   "input_too_large",
   "conversation_ended",
+  "conversation_too_large",
   "agent_not_ready",
   "agent_mismatch",
   "quota_accounting_unavailable",
