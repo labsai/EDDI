@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ToolArgumentBodyEscaper;
 import ai.labs.eddi.modules.llm.capability.ResponseSchemaConverter;
 import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
@@ -365,6 +366,10 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             String serialized = jsonSerialization.serialize(result);
             LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
             return serialized;
+        } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+            // Names the argument and the expectation, never the value.
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: %s", sanitize(apiCall.getName()), sanitize(refused.getMessage()));
+            return errorResult(refused.getMessage());
         } catch (Exception e) {
             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
             return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
@@ -390,7 +395,9 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // exactly as a model-written string always was.
             var checked = ToolArgumentSchemaValidator.check(apiCall.getArgumentSchema(), apiCall.getUnknownFields(), toolRequest.arguments());
             if (checked.arguments() != null) {
-                safeTemplateMerge(templateData, renderArguments(checked.arguments()));
+                Map<String, Object> rendered = renderArguments(checked.arguments());
+                safeTemplateMerge(templateData, rendered);
+                protectRequest(apiCall, templateData, rendered.keySet());
             }
             return templateData;
         }
@@ -399,6 +406,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
                 safeTemplateMerge(templateData, args);
+                protectRequest(apiCall, templateData, args.keySet());
             } catch (IOException e) {
                 // Redacted and capped, never raw: these are model-supplied arguments
                 // that routinely carry credentials — the pause record keeps only a
@@ -422,6 +430,33 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             }
         }
         return templateData;
+    }
+
+    /**
+     * Makes the model's arguments safe to substitute into this call's JSON body and
+     * headers (see {@link ToolArgumentBodyEscaper}); a no-op for a call that opted
+     * out with {@code escapeToolArguments: false}. Runs in the shared template-data
+     * step so the gate-time fingerprint and the execution see the same request.
+     *
+     * @throws ToolArgumentBodyEscaper.ArgumentRefusedException
+     *             an argument cannot be placed in the request
+     */
+    private static void protectRequest(ApiCall apiCall, Map<String, Object> templateData, Set<String> argumentKeys) {
+        templateData.remove(ToolArgumentBodyEscaper.REWRITTEN_BODY_KEY);
+        var request = apiCall.getRequest();
+        if (request == null || !apiCall.escapesToolArguments()) {
+            return;
+        }
+        Set<String> names = new LinkedHashSet<>(argumentKeys);
+        names.removeAll(RESERVED_TEMPLATE_KEYS);
+        ToolArgumentBodyEscaper.rejectControlCharactersInHeaders(request.getHeaders(), templateData, names);
+        if (!ToolArgumentBodyEscaper.isJsonContentType(request.getContentType())) {
+            return;
+        }
+        String rewritten = ToolArgumentBodyEscaper.prepare(request.getBody(), templateData, names, apiCall.getArgumentSchema());
+        if (rewritten != null) {
+            templateData.put(ToolArgumentBodyEscaper.REWRITTEN_BODY_KEY, rewritten);
+        }
     }
 
     /** An httpcall tool: mock-aware and able to judge its arguments up front. */

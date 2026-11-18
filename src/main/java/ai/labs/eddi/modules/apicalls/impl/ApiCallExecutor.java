@@ -504,7 +504,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         }
 
                         Object responseObject;
-                        if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
+                        if (ToolArgumentBodyEscaper.isJsonContentType(actualContentType)) {
                             responseObject = redactedJsonResponse(rawBody, resolvedSecrets, resolveMaxResponseSize(call), call.getName());
                         } else {
                             if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
@@ -897,7 +897,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             if (delay > 0) {
                 Thread.sleep(delay);
             }
-            LOGGER.info(call.getName() + " forEach item " + index + " Request: " + (attempts > 0 ? attempts + ". retry - " : "")
+            LOGGER.debug(call.getName() + " forEach item " + index + " Request: " + (attempts > 0 ? attempts + ". retry - " : "")
                     + RequestRedactor.safeRequestLog(request, secrets));
             attempts++;
             IResponse response;
@@ -911,7 +911,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(call.getName()), index, reason);
                 return new ForEachItemResult(index, null, null, null, reason, timedOut, true, attempts, false);
             }
-            LOGGER.info(call.getName() + " forEach item " + index + " Response: " + RequestRedactor.safeResponseLog(response, secrets));
+            LOGGER.debug(call.getName() + " forEach item " + index + " Response: " + RequestRedactor.safeResponseLog(response, secrets));
             ForEachItemResult result = forEachItemFromResponse(call, index, response, secrets, attempts, saveResponse);
             Map<String, Object> retryData = itemData;
             if (call.getResponseObjectName() != null && result.body() != null) {
@@ -967,7 +967,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> responseHeaders = response.getHttpHeader();
         String contentType = responseHeaders != null ? responseHeaders.get(CONTENT_TYPE) : null;
         contentType = contentType != null ? contentType.split(";")[0] : "<not-present>";
-        if (CONTENT_TYPE_APPLICATION_JSON.equals(contentType)) {
+        if (ToolArgumentBodyEscaper.isJsonContentType(contentType)) {
             return redactedJsonResponse(rawBody, secrets, resolveMaxResponseSize(call), call.getName());
         }
         return truncateResponseBody(redactSuccessText(rawBody, secrets), resolveMaxResponseSize(call), call.getName());
@@ -1145,7 +1145,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                                int amountOfExecutions)
             throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
-        LOGGER.info(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "")
+        LOGGER.debug(call.getName() + " Request: " + (amountOfExecutions > 0 ? amountOfExecutions + ". retry - " : "")
                 + RequestRedactor.safeRequestLog(request, resolvedSecrets));
         int delayInMillis = getDelayInMillis(call, retryCall, amountOfExecutions);
 
@@ -1154,7 +1154,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         long executionEnd = currentTimeMillis();
         long duration = executionEnd - executionStart;
 
-        LOGGER.info(call.getName() + " Response: " + RequestRedactor.safeResponseLog(response, resolvedSecrets));
+        LOGGER.debug(call.getName() + " Response: " + RequestRedactor.safeResponseLog(response, resolvedSecrets));
         LOGGER.info(call.getName()
                 + format(" Execution time: Duration: %sms Delay: %sms Total: %sms\n", duration, delayInMillis, duration + delayInMillis));
 
@@ -1247,7 +1247,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 if (sequentially) {
                     IRequest request = built.request();
                     long executionStart = currentTimeMillis();
-                    LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
+                    LOGGER.debug(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
                     IResponse response = request.send();
                     logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
                 } else {
@@ -1277,7 +1277,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private static void executeFireAndForgetCall(BuiltRequest built, String httpCallsName) throws IRequest.HttpRequestException {
 
         IRequest request = built.request();
-        LOGGER.info(httpCallsName + " Request (f'n'f): " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
+        LOGGER.debug(httpCallsName + " Request (f'n'f): " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
         long executionStart = currentTimeMillis();
         request.send(res -> logExecutionResponse(res, built.resolvedSecrets(), httpCallsName, executionStart, currentTimeMillis(), true));
     }
@@ -1286,7 +1286,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                              long executionEnd, boolean fireAndForget) {
 
         long duration = executionEnd - executionStart;
-        LOGGER.info(
+        LOGGER.debug(
                 httpCallsName + " Response " + (fireAndForget ? "(f'n'f)" : "") + ": " + RequestRedactor.safeResponseLog(response, resolvedSecrets));
         // No trailing "\n": the console pattern ends in %n, and a newline in a log
         // MESSAGE is now escaped rather than printed (CWE-117), so this one would
@@ -1754,7 +1754,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         rejectConnectionReference(targetUriStr, "the request path");
         rejectExpiredSecretContext(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
-        var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
+        // On the LLM tool path the model's arguments are substituted through a
+        // rewritten copy of the body template (ToolArgumentBodyEscaper), so an
+        // argument cannot change the JSON around it. Absent on every other path.
+        String bodyTemplate = templateDataObjects.get(ToolArgumentBodyEscaper.REWRITTEN_BODY_KEY) instanceof String rewrittenBody
+                ? rewrittenBody
+                : requestConfig.getBody();
+        var requestBody = prePostUtils.templateValues(bodyTemplate, templateDataObjects);
         // Resolve global variable references, then vault references in request body
         requestBody = resolveGuardedVariables(requestConfig.getBody(), requestBody, "a request body", templateDataObjects, conversationProperties);
         requestBody = resolveSecrets(requestBody, resolvedSecrets, "a request body");

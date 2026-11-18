@@ -26,10 +26,12 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -233,6 +235,16 @@ public class ApiCallsTask implements ILifecycleTask {
                 continue;
             }
             List<String> spliced = expressionsInsideJsonStrings(request.getBody());
+            if (call.escapesToolArguments()) {
+                // A declared tool argument is JSON-escaped when the model supplies it
+                // (ToolArgumentBodyEscaper), so it no longer warrants a warning; every
+                // other expression (memory, properties, context) still does.
+                Set<String> declared = declaredArgumentNames(call);
+                spliced = spliced.stream().filter(expression -> {
+                    List<String> roots = ToolArgumentBodyEscaper.expressionRoots(expression);
+                    return roots.isEmpty() || !declared.contains(roots.get(0));
+                }).toList();
+            }
             if (!spliced.isEmpty()) {
                 LOGGER.warnf("httpCall '%s' (uri:%s) splices %s into a JSON string literal of its body without escaping. A value "
                         + "containing a quote changes the JSON structure; write {json:serialize(...)} in place of the quoted "
@@ -272,6 +284,17 @@ public class ApiCallsTask implements ILifecycleTask {
             }
         }
         return found;
+    }
+
+    private static Set<String> declaredArgumentNames(ApiCall call) {
+        Set<String> names = new HashSet<>();
+        if (call.getParameters() != null) {
+            names.addAll(call.getParameters().keySet());
+        }
+        if (call.getArgumentSchema() != null && call.getArgumentSchema().get("properties") instanceof Map<?, ?> properties) {
+            properties.keySet().forEach(key -> names.add(String.valueOf(key)));
+        }
+        return names;
     }
 
     private static boolean isExpressionStart(char c) {

@@ -86,6 +86,23 @@ public class ApiCall {
      * catch) and has no effect without one.
      */
     private String unknownFields;
+    /**
+     * Whether a value the <em>model</em> supplies as a tool argument is made safe
+     * for a JSON request body before it is substituted. {@code null} and
+     * {@code true} (the default): inside a JSON string literal it is JSON-escaped,
+     * so it can only be the content of the literal the author wrote it into; a bare
+     * placeholder ({@code "count":{count}}) must be valid JSON of the declared type
+     * and is emitted canonically (a string as a quoted JSON string). Applies only
+     * to a call executed as an LLM tool with a JSON {@code contentType};
+     * author-controlled data ({@code {properties.x}}, {@code {context.y}}, API
+     * responses) is never changed.
+     * <p>
+     * {@code false} restores raw substitution for an author who builds JSON out of
+     * argument text on purpose; the author then owns escaping (use
+     * {@code {json:serialize(x)}}) and the deploy-time warning about unescaped
+     * values in string literals applies to the call again.
+     */
+    private Boolean escapeToolArguments;
     private HttpPreRequest preRequest;
     private Request request;
     private HttpPostResponse postResponse;
@@ -212,6 +229,21 @@ public class ApiCall {
     /** @see #unknownFields */
     public void setUnknownFields(String unknownFields) {
         this.unknownFields = unknownFields;
+    }
+
+    /** @see #escapeToolArguments */
+    public Boolean getEscapeToolArguments() {
+        return escapeToolArguments;
+    }
+
+    /** @see #escapeToolArguments */
+    public void setEscapeToolArguments(Boolean escapeToolArguments) {
+        this.escapeToolArguments = escapeToolArguments;
+    }
+
+    /** Whether tool arguments are escaped for this call: true unless opted out. */
+    public boolean escapesToolArguments() {
+        return !Boolean.FALSE.equals(escapeToolArguments);
     }
 
     public HttpPreRequest getPreRequest() {
