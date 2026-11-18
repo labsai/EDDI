@@ -73,7 +73,10 @@ class AuditLedgerPoisonEntryTest {
         return new RuntimeException("Failed to insert audit entry", new SQLException("refused", sqlState));
     }
 
-    /** The batch write fails as a whole; single inserts fail only for ids starting "poison". */
+    /**
+     * The batch write fails as a whole; single inserts fail only for ids starting
+     * "poison".
+     */
     private void storeRejectsPoisonEntries() {
         doThrow(refusal("22P05")).when(store).appendBatch(anyList());
         doAnswer(invocation -> {
@@ -105,7 +108,8 @@ class AuditLedgerPoisonEntryTest {
         assertEquals(0, service.getQueueSize(), "a refused entry is not re-queued for another three rounds");
         List<String> lines = Files.readAllLines(deadLetter);
         assertEquals(4, lines.size());
-        assertTrue(lines.stream().allMatch(l -> l.contains("\"reason\":\"store rejected the entry: SQLException SQLState 22P05\"")), lines.toString());
+        assertTrue(lines.stream().allMatch(l -> l.contains("\"reason\":\"store rejected the entry: SQLException SQLState 22P05\"")),
+                lines.toString());
         assertTrue(lines.get(0).contains("\"id\":\"poison-1\""));
         assertEquals(4, service.undeliveredSequences("conv-b").size(), "the verifier can tell these gaps were the ledger's own");
         assertTrue(service.undeliveredSequences("conv-a").isEmpty());
@@ -149,7 +153,8 @@ class AuditLedgerPoisonEntryTest {
         assertArrayEquals("héllo 😀".getBytes(StandardCharsets.UTF_8), AuditLedgerService.lenientUtf8("héllo 😀"));
         assertArrayEquals("a�b".getBytes(StandardCharsets.UTF_8), AuditLedgerService.lenientUtf8("a\uDE00b"));
         // the strict decoder accepts what was produced
-        StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(AuditLedgerService.lenientUtf8("x\uD83D")));
+        StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(AuditLedgerService.lenientUtf8("x\uD83D")));
     }
 
     @Test

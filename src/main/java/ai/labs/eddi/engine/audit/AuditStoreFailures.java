@@ -27,8 +27,8 @@ import java.util.Set;
  * (integrity constraint), a JSON or BSON serialisation failure, or a MongoDB
  * write error for an invalid document all mean "reached the store, and it
  * refused this content". Everything else - connection failures (class 08),
- * timeouts, resource exhaustion, a failover, an exception nobody classified - is
- * treated as an outage and takes the back-off path.
+ * timeouts, resource exhaustion, a failover, an exception nobody classified -
+ * is treated as an outage and takes the back-off path.
  */
 final class AuditStoreFailures {
 
@@ -80,7 +80,8 @@ final class AuditStoreFailures {
         Throwable current = failure;
         for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++, current = current.getCause()) {
             if (current instanceof SQLException sql) {
-                return "store rejected the entry: " + sql.getClass().getSimpleName() + (sql.getSQLState() == null ? "" : " SQLState " + sql.getSQLState());
+                return "store rejected the entry: " + sql.getClass().getSimpleName()
+                        + (sql.getSQLState() == null ? "" : " SQLState " + sql.getSQLState());
             }
             if (current instanceof MongoWriteException write) {
                 return "store rejected the entry: MongoWriteException code " + write.getError().getCode();

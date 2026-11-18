@@ -2343,8 +2343,8 @@ public class AuditLedgerService implements UserErasureParticipant {
 
     /**
      * As {@link #serializeDeadLetterEntry(AuditEntry, String)}, with the reason the
-     * entry is being dead-lettered when it is known (the store refused it on its own
-     * content); written as {@code reason}, absent otherwise.
+     * entry is being dead-lettered when it is known (the store refused it on its
+     * own content); written as {@code reason}, absent otherwise.
      */
     String serializeDeadLetterEntry(AuditEntry entry, String type, String reason) {
         Map<String, Object> dlMap = metadataOnlyDeadLetterRecord(entry, type);
