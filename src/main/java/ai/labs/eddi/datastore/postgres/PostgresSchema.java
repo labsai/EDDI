@@ -14,6 +14,9 @@ import java.sql.Statement;
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -33,15 +36,21 @@ import java.util.regex.Pattern;
  * <p>
  * {@link #runOnce} is the one place that closes this:
  * <ul>
- * <li><b>One advisory lock for all DDL</b> ({@link #LOCK_KEY}, distinct from
- * the startup lock so a store creating its schema during startup never waits
- * for its own JVM). Replicas wait for one another; the wait is bounded by
- * {@link #LOCK_TIMEOUT_SECONDS} and then fails instead of hanging a request.
+ * <li><b>One advisory lock per step</b> (a key derived from the step's name and
+ * {@link #LOCK_KEY}, distinct from the startup lock so a store creating its
+ * schema during startup never waits for its own JVM). Replicas creating the
+ * same tables wait for one another; stores that create different tables do not
+ * wait for each other. The wait, and every lock the DDL itself waits for, is
+ * bounded by {@link #LOCK_TIMEOUT_SECONDS}, after which the step fails instead
+ * of stalling; the session's own {@code lock_timeout} is restored afterwards.
  * <li><b>Once per JVM and database.</b> Concurrent first requests of the same
  * store run the DDL once; the others wait and find it done.
- * <li><b>Failures surface.</b> A failed creation throws {@link SQLException} to
- * the caller (after logging its cause) and is retried by the next call; it is
- * never recorded as done.
+ * <li><b>Failures surface, with back-off.</b> A failed creation throws
+ * {@link SQLException} to the caller (after logging its cause) and is never
+ * recorded as done. The next calls are refused with the same error without
+ * touching the database for a short, growing interval (1 s, 2 s, ... 30 s), so
+ * a permanently failing step is not a request storm, and then the DDL is tried
+ * again.
  * </ul>
  * A store adopts it by wrapping its DDL:
  *
@@ -78,7 +87,17 @@ public final class PostgresSchema {
      * for another node's first-install DDL (seconds), short enough that a request
      * does not hang for ever behind a stuck session.
      */
-    static final int LOCK_TIMEOUT_SECONDS = 120;
+    static final int LOCK_TIMEOUT_SECONDS = 60;
+
+    private static final long MAX_BACKOFF_NANOS = TimeUnit.SECONDS.toNanos(30);
+
+    /** Test seam for the back-off clock. */
+    static LongSupplier clock = System::nanoTime;
+
+    /**
+     * Columns whose widening failed and was already reported, so it is logged once.
+     */
+    private static final Set<String> WIDEN_FAILURES = ConcurrentHashMap.newKeySet();
 
     private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z0-9_]+");
 
@@ -99,6 +118,9 @@ public final class PostgresSchema {
 
     private static final class Step {
         volatile boolean done;
+        int failures;
+        long retryAtNanos;
+        SQLException lastFailure;
     }
 
     /** Steps already completed or in progress, per database (weakly keyed). */
@@ -131,8 +153,24 @@ public final class PostgresSchema {
             if (step.done) {
                 return;
             }
-            run(dataSource, name, work);
+            long now = clock.getAsLong();
+            if (step.failures > 0 && now - step.retryAtNanos < 0) {
+                long seconds = Math.max(1, TimeUnit.NANOSECONDS.toSeconds(step.retryAtNanos - now));
+                throw new SQLException(
+                        "Schema step " + name + " failed and is not retried for another " + seconds + " s: " + step.lastFailure.getMessage(),
+                        step.lastFailure.getSQLState(), step.lastFailure);
+            }
+            try {
+                run(dataSource, name, work);
+            } catch (SQLException e) {
+                step.failures++;
+                step.lastFailure = e;
+                step.retryAtNanos = now + Math.min(MAX_BACKOFF_NANOS, TimeUnit.SECONDS.toNanos(1L << Math.min(step.failures - 1, 5)));
+                throw e;
+            }
             step.done = true;
+            step.failures = 0;
+            step.lastFailure = null;
         }
     }
 
@@ -151,39 +189,87 @@ public final class PostgresSchema {
      * work.
      */
     public static void run(DataSource dataSource, String name, ConnectionWork work) throws SQLException {
+        long key = lockKey(name);
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             boolean locked = false;
+            boolean timeoutSet = false;
+            String savedTimeout = null;
             SQLException failure = null;
             try {
+                // The connection is pooled: its own lock_timeout (a role or database default, a
+                // JDBC option) is saved and put back, whatever happens.
+                savedTimeout = single(statement, "SELECT current_setting('lock_timeout')");
                 query(statement, "SELECT set_config('lock_timeout', '" + LOCK_TIMEOUT_SECONDS + "s', false)");
-                query(statement, "SELECT pg_advisory_lock(" + LOCK_KEY + ")");
+                timeoutSet = true;
+                query(statement, "SELECT pg_advisory_lock(" + key + ")");
                 locked = true;
-                query(statement, "SELECT set_config('lock_timeout', '0', false)");
+                // the timeout stays in force during the DDL: an ALTER TABLE queued behind a
+                // long
+                // query fails cleanly instead of holding the lock and stalling the table
                 work.run(connection, statement);
             } catch (SQLException e) {
                 failure = e;
-                LOGGER.errorf(e, "Creating the PostgreSQL schema for %s failed (SQLState %s); the next call retries it", name, e.getSQLState());
+                LOGGER.errorf(e, "Creating the PostgreSQL schema for %s failed (SQLState %s); retried after a back-off", name, e.getSQLState());
                 throw e;
             } finally {
-                release(statement, locked, failure);
+                release(statement, locked, key, timeoutSet ? savedTimeout : null, failure);
             }
         }
     }
 
-    private static void release(Statement statement, boolean locked, SQLException failure) {
+    /**
+     * The advisory-lock key of a step: {@link #LOCK_KEY} mixed with a hash of the
+     * step's name up to a colon, so {@code PostgresResourceStorage:agents} and
+     * {@code PostgresResourceStorage:workflows} (one shared table) take the same
+     * lock while unrelated stores do not.
+     */
+    static long lockKey(String name) {
+        int colon = name.indexOf(':');
+        String base = colon < 0 ? name : name.substring(0, colon);
+        long hash = 0xcbf29ce484222325L;
+        for (int i = 0; i < base.length(); i++) {
+            hash = (hash ^ base.charAt(i)) * 0x100000001b3L;
+        }
+        return LOCK_KEY ^ hash;
+    }
+
+    /** Forgets what every step has done and failed at; for tests only. */
+    public static void resetForTests() {
+        STEPS.clear();
+        WIDEN_FAILURES.clear();
+        clock = System::nanoTime;
+    }
+
+    private static void release(Statement statement, boolean locked, long key, String restoreTimeout, SQLException failure) {
         try {
             if (locked) {
-                query(statement, "SELECT pg_advisory_unlock(" + LOCK_KEY + ")");
-            } else {
-                query(statement, "SELECT set_config('lock_timeout', '0', false)");
+                query(statement, "SELECT pg_advisory_unlock(" + key + ")");
             }
         } catch (SQLException e) {
-            // closing the connection ends the session and with it the lock
-            if (failure != null) {
-                failure.addSuppressed(e);
-            } else {
-                LOGGER.debugf("Releasing the PostgreSQL schema lock failed (the session's end releases it): %s", e.getMessage());
+            noteReleaseFailure(e, failure);
+        }
+        try {
+            if (restoreTimeout != null) {
+                query(statement, "SELECT set_config('lock_timeout', '" + restoreTimeout.replace("'", "''") + "', false)");
             }
+        } catch (SQLException e) {
+            noteReleaseFailure(e, failure);
+        }
+    }
+
+    private static void noteReleaseFailure(SQLException e, SQLException failure) {
+        // closing the connection ends the session and with it the lock
+        if (failure != null) {
+            failure.addSuppressed(e);
+        } else {
+            LOGGER.debugf("Releasing the PostgreSQL schema lock or restoring lock_timeout failed (the session's end releases the lock): %s",
+                    e.getMessage());
+        }
+    }
+
+    private static String single(Statement statement, String sql) throws SQLException {
+        try (ResultSet rs = statement.executeQuery(sql)) {
+            return rs != null && rs.next() ? rs.getString(1) : null;
         }
     }
 
@@ -221,7 +307,8 @@ public final class PostgresSchema {
      * one. A length limit on a column that holds caller-chosen text turns one
      * over-long value into a failed statement (and, in a batch, into a lost batch)
      * where MongoDB stores it; the change from {@code VARCHAR(n)} to {@code TEXT}
-     * rewrites nothing. Does nothing when the catalogue cannot say.
+     * rewrites nothing. Does nothing when the catalogue cannot say, and a failure
+     * of the {@code ALTER} itself is reported once and does not fail the caller.
      */
     public static void widenToText(Statement statement, String table, String column) throws SQLException {
         boolean varchar;
@@ -230,7 +317,19 @@ public final class PostgresSchema {
             varchar = rs != null && rs.next() && "character varying".equals(rs.getString(1));
         }
         if (varchar) {
-            statement.execute("ALTER TABLE " + identifier(table) + " ALTER COLUMN " + identifier(column) + " TYPE TEXT");
+            try {
+                statement.execute("ALTER TABLE " + identifier(table) + " ALTER COLUMN " + identifier(column) + " TYPE TEXT");
+            } catch (SQLException e) {
+                // Best effort: a view or rule over the column, or a lock that did not come in
+                // time, must
+                // not stop the store working on the column it has. Reported once; retried on
+                // the next start.
+                if (WIDEN_FAILURES.add(table + "." + column)) {
+                    LOGGER.warnf(
+                            "Could not change %s.%s from VARCHAR to TEXT (%s); values longer than its limit will be refused until it is changed by hand",
+                            table, column, e.getMessage());
+                }
+            }
         }
     }
 

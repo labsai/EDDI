@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -49,6 +50,7 @@ class PostgresSchemaTest {
         statement = mock(Statement.class);
         when(dataSource.getConnection()).thenReturn(connection);
         when(connection.createStatement()).thenReturn(statement);
+        PostgresSchema.resetForTests();
     }
 
     @Test
@@ -57,9 +59,9 @@ class PostgresSchemaTest {
 
         InOrder order = inOrder(statement);
         order.verify(statement).executeQuery(contains("set_config('lock_timeout'"));
-        order.verify(statement).executeQuery(contains("pg_advisory_lock(" + PostgresSchema.LOCK_KEY));
+        order.verify(statement).executeQuery(contains("pg_advisory_lock(" + PostgresSchema.lockKey("step")));
         order.verify(statement).execute("CREATE TABLE x");
-        order.verify(statement).executeQuery(contains("pg_advisory_unlock(" + PostgresSchema.LOCK_KEY));
+        order.verify(statement).executeQuery(contains("pg_advisory_unlock(" + PostgresSchema.lockKey("step")));
         verify(connection).close();
     }
 
@@ -122,7 +124,9 @@ class PostgresSchemaTest {
     }
 
     @Test
-    void aFailureIsThrownReleasesTheLockAndIsRetriedByTheNextCall() throws Exception {
+    void aFailureIsThrownReleasesTheLockAndIsRetriedAfterTheBackOff() throws Exception {
+        long[] now = {0};
+        PostgresSchema.clock = () -> now[0];
         AtomicInteger attempts = new AtomicInteger();
         SQLException failure = new SQLException("duplicate key value violates unique constraint pg_type_typname_nsp_index", "23505");
 
@@ -133,12 +137,83 @@ class PostgresSchemaTest {
         assertSame(failure, thrown, "the cause reaches the caller");
         verify(statement).executeQuery(contains("pg_advisory_unlock("));
 
+        // inside the back-off the database is not touched: the same error again, from
+        // the remembered one
+        SQLException refused = assertThrows(SQLException.class,
+                () -> PostgresSchema.runOnce(dataSource, "flaky", stmt -> attempts.incrementAndGet()));
+        assertSame(failure, refused.getCause());
+        assertEquals("23505", refused.getSQLState());
+        assertEquals(1, attempts.get(), "no request storm: the DDL did not run again");
+        verify(dataSource, times(1)).getConnection();
+
+        now[0] = TimeUnit.SECONDS.toNanos(2);
         PostgresSchema.runOnce(dataSource, "flaky", stmt -> attempts.incrementAndGet());
-        assertEquals(2, attempts.get(), "a failed creation is not remembered as done");
+        assertEquals(2, attempts.get(), "after the interval the creation is tried again, and a success is remembered");
 
         AtomicInteger afterSuccess = new AtomicInteger();
         PostgresSchema.runOnce(dataSource, "flaky", stmt -> afterSuccess.incrementAndGet());
         assertEquals(0, afterSuccess.get());
+    }
+
+    @Test
+    void theBackOffGrowsWithEveryFailure() throws Exception {
+        long[] now = {0};
+        PostgresSchema.clock = () -> now[0];
+        AtomicInteger attempts = new AtomicInteger();
+        PostgresSchema.Work failing = stmt -> {
+            attempts.incrementAndGet();
+            throw new SQLException("still failing", "55P03");
+        };
+        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "growing", failing)); // retry at +1 s
+        now[0] = TimeUnit.SECONDS.toNanos(1);
+        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "growing", failing)); // second failure: retry at +2 s
+        now[0] = TimeUnit.SECONDS.toNanos(2);
+        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "growing", failing));
+        assertEquals(2, attempts.get(), "one second after the second failure is inside its two-second back-off");
+        now[0] = TimeUnit.SECONDS.toNanos(3);
+        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "growing", failing));
+        assertEquals(3, attempts.get());
+    }
+
+    @Test
+    void theSessionsLockTimeoutIsRestoredAfterASuccessAndAfterAFailure() throws Exception {
+        ResultSet current = mock(ResultSet.class);
+        when(current.next()).thenReturn(true);
+        when(current.getString(1)).thenReturn("5s");
+        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
+
+        PostgresSchema.run(dataSource, "restore-ok", stmt -> stmt.execute("CREATE TABLE x"));
+        InOrder order = inOrder(statement);
+        order.verify(statement).executeQuery(contains("set_config('lock_timeout', '" + PostgresSchema.LOCK_TIMEOUT_SECONDS + "s'"));
+        order.verify(statement).execute("CREATE TABLE x");
+        order.verify(statement).executeQuery(contains("pg_advisory_unlock("));
+        order.verify(statement).executeQuery(contains("set_config('lock_timeout', '5s', false)"));
+
+        assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "restore-fail", stmt -> {
+            throw new SQLException("boom");
+        }));
+        verify(statement, times(2)).executeQuery(contains("set_config('lock_timeout', '5s', false)"));
+        verify(statement, never()).executeQuery(contains("set_config('lock_timeout', '0', false)"));
+    }
+
+    @Test
+    void aStepThatFailsToGetItsLockStillRestoresTheTimeout() throws Exception {
+        ResultSet current = mock(ResultSet.class);
+        when(current.next()).thenReturn(true);
+        when(current.getString(1)).thenReturn("0");
+        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
+        when(statement.executeQuery(contains("pg_advisory_lock("))).thenThrow(new SQLException("lock timeout", "55P03"));
+
+        assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "no-lock", stmt -> {
+        }));
+
+        verify(statement).executeQuery(contains("set_config('lock_timeout', '0', false)"));
+    }
+
+    @Test
+    void stepsOfDifferentStoresTakeDifferentLocksButOneTableOneLock() {
+        assertFalse(PostgresSchema.lockKey("PostgresAuditStore") == PostgresSchema.lockKey("PostgresScheduleStore"));
+        assertEquals(PostgresSchema.lockKey("PostgresResourceStorage:agents"), PostgresSchema.lockKey("PostgresResourceStorage:workflows"));
     }
 
     @Test
@@ -184,6 +259,18 @@ class PostgresSchemaTest {
         when(varchar.getString(1)).thenReturn("text");
         PostgresSchema.widenToText(statement, "eddi_schedules", "name");
         verify(statement, times(1)).execute(contains("ALTER TABLE"));
+    }
+
+    @Test
+    void widenToText_isBestEffort_aViewOverTheColumnDoesNotFailTheStore() throws Exception {
+        ResultSet varchar = mock(ResultSet.class);
+        when(varchar.next()).thenReturn(true);
+        when(varchar.getString(1)).thenReturn("character varying");
+        when(statement.executeQuery(contains("data_type"))).thenReturn(varchar);
+        when(statement.execute(contains("ALTER TABLE"))).thenThrow(new SQLException("cannot alter type of a column used by a view or rule", "0A000"));
+
+        assertDoesNotThrow(() -> PostgresSchema.widenToText(statement, "eddi_schedules", "name"));
+        assertDoesNotThrow(() -> PostgresSchema.widenToText(statement, "eddi_schedules", "name"));
     }
 
     @Test

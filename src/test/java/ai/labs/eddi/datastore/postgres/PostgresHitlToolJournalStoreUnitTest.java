@@ -217,6 +217,7 @@ class PostgresHitlToolJournalStoreUnitTest {
         // and the next call runs the DDL again
         var failure = assertThrows(IllegalStateException.class, () -> store.deleteByConversationId("conv-1"));
         assertTrue(failure.getCause() instanceof SQLException);
+        PostgresSchema.resetForTests(); // the back-off between two calls is covered by PostgresSchemaTest
         assertThrows(IllegalStateException.class, () -> store.deleteByConversationId("conv-1"));
         verify(statement, times(2)).execute(anyString());
     }

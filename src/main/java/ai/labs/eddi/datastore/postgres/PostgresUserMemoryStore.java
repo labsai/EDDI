@@ -238,7 +238,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                     continue;
                 ps.setString(1, userId);
                 ps.setString(2, key);
-                ps.setString(3, MAPPER.writeValueAsString(entry.getValue()));
+                ps.setString(3, PostgresText.json(MAPPER.writeValueAsString(entry.getValue())));
                 ps.addBatch();
             }
             ps.executeBatch();
@@ -309,16 +309,16 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, entry.userId());
             ps.setString(2, entry.key());
-            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(3, PostgresText.json(MAPPER.writeValueAsString(entry.value())));
             ps.setString(4, entry.category());
             ps.setString(5, entry.visibility() != null ? entry.visibility().name() : "self");
             ps.setString(6, entry.sourceAgentId());
-            ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(7, PostgresText.json(MAPPER.writeValueAsString(entry.groupIds())));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
             ps.setString(10, entry.assessment().name());
             ps.setString(11, entry.supersededBy());
-            ps.setString(12, MAPPER.writeValueAsString(entry.sourceEntryIds()));
+            ps.setString(12, PostgresText.json(MAPPER.writeValueAsString(entry.sourceEntryIds())));
             ps.setString(13, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getString("id") : null;
@@ -336,15 +336,15 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(UPSERT_GLOBAL_IF_OWNED)) {
             ps.setString(1, entry.userId());
             ps.setString(2, entry.key());
-            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(3, PostgresText.json(MAPPER.writeValueAsString(entry.value())));
             ps.setString(4, entry.category());
             ps.setString(5, agentId);
-            ps.setString(6, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(6, PostgresText.json(MAPPER.writeValueAsString(entry.groupIds())));
             ps.setString(7, entry.sourceConversationId());
             ps.setBoolean(8, entry.conflicted());
             ps.setString(9, entry.assessment().name());
             ps.setString(10, entry.supersededBy());
-            ps.setString(11, MAPPER.writeValueAsString(entry.sourceEntryIds()));
+            ps.setString(11, PostgresText.json(MAPPER.writeValueAsString(entry.sourceEntryIds())));
             // The writer the entry names, as MongoUserMemoryStore records it: not always
             // the owner.
             ps.setString(12, writerOf(entry));
@@ -428,16 +428,16 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(upsertSql)) {
             ps.setString(1, entry.userId());
             ps.setString(2, entry.key());
-            ps.setString(3, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(3, PostgresText.json(MAPPER.writeValueAsString(entry.value())));
             ps.setString(4, entry.category());
             ps.setString(5, visibility);
             ps.setString(6, entry.sourceAgentId());
-            ps.setString(7, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(7, PostgresText.json(MAPPER.writeValueAsString(entry.groupIds())));
             ps.setString(8, entry.sourceConversationId());
             ps.setBoolean(9, entry.conflicted());
             ps.setString(10, entry.assessment().name());
             ps.setString(11, entry.supersededBy());
-            ps.setString(12, MAPPER.writeValueAsString(entry.sourceEntryIds()));
+            ps.setString(12, PostgresText.json(MAPPER.writeValueAsString(entry.sourceEntryIds())));
             ps.setString(13, writerOf(entry));
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
@@ -490,15 +490,15 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 + " last_writer_agent_id = ?, updated_at = CURRENT_TIMESTAMP"
                 + " WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, MAPPER.writeValueAsString(entry.value()));
+            ps.setString(1, PostgresText.json(MAPPER.writeValueAsString(entry.value())));
             ps.setString(2, entry.category());
             ps.setString(3, entry.visibility() != null ? entry.visibility().name() : Visibility.self.name());
-            ps.setString(4, MAPPER.writeValueAsString(entry.groupIds()));
+            ps.setString(4, PostgresText.json(MAPPER.writeValueAsString(entry.groupIds())));
             ps.setString(5, entry.sourceConversationId());
             ps.setBoolean(6, entry.conflicted());
             ps.setString(7, entry.assessment().name());
             ps.setString(8, entry.supersededBy());
-            ps.setString(9, MAPPER.writeValueAsString(entry.sourceEntryIds()));
+            ps.setString(9, PostgresText.json(MAPPER.writeValueAsString(entry.sourceEntryIds())));
             ps.setString(10, writerOf(entry));
             ps.setString(11, entryId);
             ps.setTimestamp(12, expectedUpdatedAt != null ? Timestamp.from(expectedUpdatedAt) : null);

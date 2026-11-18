@@ -590,9 +590,13 @@ public class AuditLedgerService implements UserErasureParticipant {
 
             // A store that cannot hold some characters (PostgreSQL and U+0000) stores a
             // replacement; sign that, not the original, or the row would read back as
-            // tampered. Same rule as the payload and timestamp normalisation below.
-            if (auditStore.replacesNulCharacter()) {
-                scrubbed = withStorableText(scrubbed);
+            // tampered. Same rule as the payload and timestamp normalisation below. The
+            // identifiers (conversation id included: every column the canonical form reads)
+            // are replaced here, so the sequence counters are keyed by what is stored; the
+            // payload after it has been reduced to its JSON-native tree.
+            boolean replaceUnstorable = auditStore.replacesNulCharacter();
+            if (replaceUnstorable) {
+                scrubbed = withStorableIdentifiers(scrubbed);
             }
 
             // Assign the conversation chain position BEFORE signing — the sequence is
@@ -603,6 +607,12 @@ public class AuditLedgerService implements UserErasureParticipant {
             // Payload maps must be reduced to their STORED shape before signing, for
             // exactly the same reason as the timestamp below: sign what is stored.
             scrubbed = normalizePayloadsForStorage(scrubbed);
+            if (replaceUnstorable) {
+                // on the fully normalised tree: a POJO, record, array or JsonNode value is a
+                // Map,
+                // List or String by now, so no U+0000 can survive into the signature
+                scrubbed = withStorablePayload(scrubbed);
+            }
 
             // A null timestamp must be stamped BEFORE signing, not by the store. v4
             // signs the empty string for null, but PostgresAuditStore substitutes
@@ -2402,12 +2412,18 @@ public class AuditLedgerService implements UserErasureParticipant {
      * store will replace it, see {@link PostgresText}. Identifiers the ledger keys
      * on (the conversation id) are left alone.
      */
-    private static AuditEntry withStorableText(AuditEntry entry) {
-        return new AuditEntry(entry.id(), entry.conversationId(), PostgresText.text(entry.agentId()), entry.agentVersion(),
+    private static AuditEntry withStorableIdentifiers(AuditEntry entry) {
+        return new AuditEntry(entry.id(), PostgresText.text(entry.conversationId()), PostgresText.text(entry.agentId()), entry.agentVersion(),
                 PostgresText.text(entry.userId()), PostgresText.text(entry.environment()), entry.stepIndex(), PostgresText.text(entry.taskId()),
-                PostgresText.text(entry.taskType()), entry.taskIndex(), entry.durationMs(), storableMap(entry.input()), storableMap(entry.output()),
-                storableMap(entry.llmDetail()), storableMap(entry.toolCalls()), storableList(entry.actions()), entry.cost(), entry.timestamp(),
-                entry.hmac(), entry.agentSignature(), entry.sequence());
+                PostgresText.text(entry.taskType()), entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(),
+                entry.toolCalls(), entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
+    private static AuditEntry withStorablePayload(AuditEntry entry) {
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
+                entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), storableMap(entry.input()),
+                storableMap(entry.output()), storableMap(entry.llmDetail()), storableMap(entry.toolCalls()), storableList(entry.actions()),
+                entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
     }
 
     private static Map<String, Object> storableMap(Map<String, Object> map) {

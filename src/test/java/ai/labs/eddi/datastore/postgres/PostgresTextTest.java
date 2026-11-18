@@ -4,10 +4,15 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PostgresTextTest {
 
@@ -85,6 +90,25 @@ class PostgresTextTest {
         assertEquals("{\"a\":\"" + FFFD + "\"}", PostgresText.json("{\"a\":\"\uD83D\"}"));
         String pair = "{\"a\":\"\uD83D\uDE00\"}";
         assertSame(pair, PostgresText.json(pair));
+    }
+
+    @Test
+    void json_typicalJacksonOutputIsTheSameInstance() throws Exception {
+        // quotes, newlines, escaped control characters, an emoji (a surrogate pair):
+        // nothing to
+        // replace, so no copy of the document
+        String json = new ObjectMapper()
+                .writeValueAsString(Map.of("input", "he said \"hi\"\nline two \t \uD83D\uDE00", "k", List.of("\\u0000 stays", "caf\u00e9")));
+        assertTrue(json.contains("\\\"") && json.contains("\\n"), json);
+        assertSame(json, PostgresText.json(json));
+        String escapedPair = "{\"a\":\"\\ud83d\\ude00 \\n \\\"\"}";
+        assertSame(escapedPair, PostgresText.json(escapedPair));
+    }
+
+    @Test
+    void json_aProblemLateInALongDocumentKeepsEverythingBeforeIt() {
+        String prefix = "{\"a\":\"" + "x\\n\\\"y\uD83D\uDE00".repeat(1000);
+        assertEquals(prefix + "\\uFFFD\"}", PostgresText.json(prefix + "\\u0000\"}"));
     }
 
     @Test

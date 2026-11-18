@@ -350,14 +350,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public IResource<T> newResource(T content) throws IOException {
-        String json = jsonSerialization.serialize(content);
+        String json = PostgresText.json(jsonSerialization.serialize(content));
         String id = UUID.randomUUID().toString();
         return new Resource(id, 1, json);
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
-        String json = jsonSerialization.serialize(content);
+        String json = PostgresText.json(jsonSerialization.serialize(content));
         return new Resource(id, version, json);
     }
 
@@ -1002,6 +1002,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
      * index.
      */
     static String toContainmentJsonPath(String jsonPath, String value) {
+        // the stored document holds the same replacement (see PostgresText); a lookup
+        // built from the
+        // raw value would not match it, and a NUL in a jsonpath literal is refused by
+        // PostgreSQL
+        value = PostgresText.text(value);
         StringBuilder path = new StringBuilder("$");
         for (String segment : sanitizeJsonPath(jsonPath).split("\\.")) {
             if (!segment.isEmpty()) {

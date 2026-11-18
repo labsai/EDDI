@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.deploy;
 
+import ai.labs.eddi.datastore.DatastoreType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +36,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -2699,6 +2701,20 @@ class DeploymentManifestsTest {
                     "configmap.yaml must refuse every spelling EDDI does not match, not merely the two "
                             + "mismatches. \"Postgres\", \"MONGODB\" and \"mongo\" all render happily, match "
                             + "neither Java branch, and silently fall through to the MongoDB store");
+            // the guard may be stricter than EDDI, never looser: every value it lets
+            // through must be one
+            // DatastoreType accepts (and parses to the store the chart configured it for)
+            var allowed = Pattern.compile("has \\$declaredType \\(list ((?:\"[^\"]+\"\\s*)+)\\)").matcher(configmap);
+            assertTrue(allowed.find(), "the chart no longer lists the datastore types it accepts in the form this test reads");
+            var accepted = Pattern.compile("\"([^\"]+)\"").matcher(allowed.group(1));
+            int checked = 0;
+            while (accepted.find()) {
+                String value = accepted.group(1);
+                assertDoesNotThrow(() -> DatastoreType.parse(value),
+                        "the chart renders \"" + value + "\" into EDDI_DATASTORE_TYPE but DatastoreType refuses it, so EDDI would not start");
+                checked++;
+            }
+            assertEquals(2, checked, "mongodb and postgres are the chart's datastore types");
             assertTrue(configmap.contains("EDDI_DATASTORE_TYPE: {{ $declaredType | quote }}"),
                     "the ConfigMap must render the VALIDATED binding rather than "
                             + ".Values.eddi.datastoreType. Rendering the raw value is how a guarded string "

@@ -5,6 +5,9 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.datastore.postgres.PostgresText;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,9 +26,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -175,6 +180,65 @@ class AuditLedgerPoisonEntryTest {
         assertEquals("a�b", e.input().get("text"));
         assertEquals(Map.of("k�", List.of("x�y")), e.input().get("nested"));
         assertEquals(List.of("act�"), e.actions());
+    }
+
+    /**
+     * A payload value that is neither a String, a Map nor a List before the ledger
+     * normalises it.
+     */
+    public static class Payload {
+        private final String text;
+
+        public Payload(String text) {
+            this.text = text;
+        }
+
+        public String getText() {
+            return text;
+        }
+    }
+
+    @Test
+    @DisplayName("a POJO payload and a conversation id holding NUL sign what the PostgreSQL layer will store, so the row verifies")
+    void aSignedEntryStillVerifiesAfterThePostgresReplacement() throws Exception {
+        doReturn(true).when(store).replacesNulCharacter();
+        var signing = AuditLedgerService.createForTesting(store, true, 60, "test-master-key-for-the-audit-hmac-0123456789", new SimpleMeterRegistry(),
+                1000, deadLetter.toString());
+        signing.init();
+        signing.submit(new AuditEntry("sign-1", "conv\u0000a", "agent\u0000", 1, "us\u0000er", "production", 0, "task", "LlmTask", 0, 5L,
+                Map.of("pojo", new Payload("a\u0000b"), "arr", new String[]{"x\u0000"}, "set", Set.of("s\u0000"), "node",
+                        new ObjectMapper().readTree("{\"n\":\"v\\u0000\"}")),
+                Map.of("text", "out"), null, null, List.of("act\u0000"), 0.0, Instant.now(), null, null));
+
+        signing.flush();
+
+        var captured = ArgumentCaptor.forClass(List.class);
+        verify(store).appendBatch(captured.capture());
+        AuditEntry signed = (AuditEntry) captured.getValue().getFirst();
+        assertNotNull(signed.hmac(), "the test needs a signing key");
+        // what the PostgreSQL layer does to the row on the way in: identifiers are text
+        // parameters, the
+        // payload maps are serialised and bound as jsonb (both pass through
+        // PostgresText)
+        ObjectMapper mapper = new ObjectMapper();
+        AuditEntry stored = new AuditEntry(signed.id(), PostgresText.text(signed.conversationId()), PostgresText.text(signed.agentId()),
+                signed.agentVersion(), PostgresText.text(signed.userId()), PostgresText.text(signed.environment()), signed.stepIndex(),
+                PostgresText.text(signed.taskId()), PostgresText.text(signed.taskType()), signed.taskIndex(), signed.durationMs(),
+                roundTrip(mapper, signed.input()), roundTrip(mapper, signed.output()), roundTrip(mapper, signed.llmDetail()),
+                roundTrip(mapper, signed.toolCalls()), signed.actions().stream().map(PostgresText::text).toList(), signed.cost(), signed.timestamp(),
+                signed.hmac(), signed.agentSignature(), signed.sequence());
+
+        assertFalse(signed.input().toString().contains("\u0000"), "nothing is left for the proxy to replace");
+        assertEquals(AuditVerificationStatus.VALID, signing.verifyEntry(stored));
+    }
+
+    private static Map<String, Object> roundTrip(ObjectMapper mapper, Map<String, Object> map) throws Exception {
+        if (map == null) {
+            return null;
+        }
+        String json = PostgresText.json(mapper.writeValueAsString(map));
+        return mapper.readValue(json, new TypeReference<Map<String, Object>>() {
+        });
     }
 
     @Test

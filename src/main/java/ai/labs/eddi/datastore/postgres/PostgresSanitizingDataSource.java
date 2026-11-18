@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.inject.Instance;
 import org.postgresql.util.PGobject;
 
@@ -15,11 +17,10 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -113,8 +114,8 @@ public final class PostgresSanitizingDataSource {
 
     private static final class InstanceHandler implements InvocationHandler {
         private final Instance<DataSource> delegate;
-        private DataSource lastTarget;
-        private DataSource lastWrapped;
+        /** Immutable pair, replaced as a whole: reading it takes no lock. */
+        private volatile Wrapped last = new Wrapped(null, null);
 
         InstanceHandler(Instance<DataSource> delegate) {
             this.delegate = delegate;
@@ -131,16 +132,18 @@ public final class PostgresSanitizingDataSource {
             }
             Object result = PostgresSanitizingDataSource.invoke(delegate, method, args);
             if (method.getName().equals("get") && args == null && result instanceof DataSource dataSource) {
-                synchronized (this) {
-                    if (dataSource != lastTarget) {
-                        lastTarget = dataSource;
-                        lastWrapped = wrap(dataSource);
-                    }
-                    return lastWrapped;
+                Wrapped current = last;
+                if (current.target() != dataSource) {
+                    current = new Wrapped(dataSource, wrap(dataSource));
+                    last = current;
                 }
+                return current.wrapped();
             }
             return result;
         }
+    }
+
+    private record Wrapped(DataSource target, DataSource wrapped) {
     }
 
     // ── DataSource -> Connection
@@ -253,14 +256,32 @@ public final class PostgresSanitizingDataSource {
                     args[1] = clean(value, jsonParameters.get(index));
                 } else if (name.equals("setObject")) {
                     if (args[1] instanceof String value) {
+                        // langchain4j binds its jsonb metadata as setObject(i, json, Types.OTHER) with
+                        // no cast in the SQL
+                        boolean json = jsonParameters.get(index) || (args.length == 3 && args[2] instanceof Integer sqlType && sqlType == Types.OTHER
+                                && looksLikeJsonDocument(value));
                         args = args.clone();
-                        args[1] = clean(value, jsonParameters.get(index));
+                        args[1] = clean(value, json);
                     } else if (args[1] instanceof PGobject object) {
                         cleanObject(object);
                     }
                 }
             }
             return PostgresSanitizingDataSource.invoke(target, method, args);
+        }
+
+        /**
+         * A JSON object or array: first non-blank character is an opening brace or
+         * bracket.
+         */
+        private static boolean looksLikeJsonDocument(String value) {
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (!Character.isWhitespace(c)) {
+                    return c == '{' || c == '[';
+                }
+            }
+            return false;
         }
 
         private static String clean(String value, boolean json) {
@@ -283,30 +304,25 @@ public final class PostgresSanitizingDataSource {
 
     /**
      * Statements are fixed strings that run over and over; parse each once. Bounded
-     * for dynamic SQL.
+     * with eviction, so dynamic SQL (IN lists of every length) cannot fill it and
+     * leave the hot statements re-parsed on every execution.
      */
-    private static final int MAX_CACHED_STATEMENTS = 1024;
-    private static final Map<String, BitSet> JSON_PARAMETERS = new ConcurrentHashMap<>();
+    private static final Cache<String, BitSet> JSON_PARAMETERS = Caffeine.newBuilder().maximumSize(1024).build();
 
     /**
      * Cached {@link #jsonParameters}; the returned set is shared and must not be
      * modified.
      */
     static BitSet jsonParametersOf(String sql) {
-        BitSet cached = JSON_PARAMETERS.get(sql);
-        if (cached == null) {
-            cached = jsonParameters(sql);
-            if (JSON_PARAMETERS.size() < MAX_CACHED_STATEMENTS) {
-                JSON_PARAMETERS.put(sql, cached);
-            }
-        }
-        return cached;
+        return JSON_PARAMETERS.get(sql, PostgresSanitizingDataSource::jsonParameters);
     }
 
     /**
      * 1-based indexes of the {@code ?} placeholders that the SQL casts to
-     * {@code json}/{@code jsonb}. Quoted strings, quoted identifiers and comments
-     * are skipped so a {@code ?} inside them is not counted.
+     * {@code json}/{@code jsonb}. Skipped, so a {@code ?} inside them is not
+     * counted: quoted strings (also {@code E'...'} with backslash escapes), quoted
+     * identifiers, comments and dollar-quoted bodies. pgjdbc's {@code ??} is one
+     * literal {@code ?} (the jsonb operators), not two parameters.
      */
     static BitSet jsonParameters(String sql) {
         BitSet json = new BitSet();
@@ -315,14 +331,22 @@ public final class PostgresSanitizingDataSource {
         int i = 0;
         while (i < length) {
             char c = sql.charAt(i);
-            if (c == '\'' || c == '"') {
-                i = skipQuoted(sql, i, c);
+            if (c == '\'') {
+                boolean escapeString = i > 0 && (sql.charAt(i - 1) == 'E' || sql.charAt(i - 1) == 'e')
+                        && (i < 2 || !isIdentifierPart(sql.charAt(i - 2)));
+                i = skipQuoted(sql, i, c, escapeString);
+            } else if (c == '"') {
+                i = skipQuoted(sql, i, c, false);
+            } else if (c == '$') {
+                i = skipDollarQuoted(sql, i);
             } else if (c == '-' && i + 1 < length && sql.charAt(i + 1) == '-') {
                 int end = sql.indexOf('\n', i);
                 i = end < 0 ? length : end + 1;
             } else if (c == '/' && i + 1 < length && sql.charAt(i + 1) == '*') {
                 int end = sql.indexOf("*/", i + 2);
                 i = end < 0 ? length : end + 2;
+            } else if (c == '?' && i + 1 < length && sql.charAt(i + 1) == '?') {
+                i += 2;
             } else if (c == '?') {
                 parameter++;
                 String after = sql.substring(i + 1, Math.min(length, i + 24));
@@ -343,11 +367,20 @@ public final class PostgresSanitizingDataSource {
         return json;
     }
 
-    private static int skipQuoted(String sql, int start, char quote) {
+    private static boolean isIdentifierPart(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    private static int skipQuoted(String sql, int start, char quote, boolean backslashEscapes) {
         int i = start + 1;
         int length = sql.length();
         while (i < length) {
-            if (sql.charAt(i) == quote) {
+            char c = sql.charAt(i);
+            if (backslashEscapes && c == '\\') {
+                i += 2;
+                continue;
+            }
+            if (c == quote) {
                 if (i + 1 < length && sql.charAt(i + 1) == quote) {
                     i += 2;
                     continue;
@@ -357,5 +390,25 @@ public final class PostgresSanitizingDataSource {
             i++;
         }
         return length;
+    }
+
+    /**
+     * {@code $$...$$} or {@code $tag$...$tag$}; a positional {@code $1} is not a
+     * quote.
+     */
+    private static int skipDollarQuoted(String sql, int start) {
+        int length = sql.length();
+        int tagEnd = start + 1;
+        if (tagEnd < length && (Character.isLetter(sql.charAt(tagEnd)) || sql.charAt(tagEnd) == '_')) {
+            while (tagEnd < length && isIdentifierPart(sql.charAt(tagEnd))) {
+                tagEnd++;
+            }
+        }
+        if (tagEnd >= length || sql.charAt(tagEnd) != '$') {
+            return start + 1;
+        }
+        String tag = sql.substring(start, tagEnd + 1);
+        int end = sql.indexOf(tag, tagEnd + 1);
+        return end < 0 ? length : end + tag.length();
     }
 }

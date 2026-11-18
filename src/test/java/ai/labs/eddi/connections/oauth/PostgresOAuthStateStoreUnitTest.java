@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.connections.oauth;
 
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
+
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -168,6 +170,7 @@ class PostgresOAuthStateStoreUnitTest {
         doThrow(new SQLException("could not obtain lock on relation")).doReturn(true).when(statement).execute(anyString());
 
         assertThrows(IllegalStateException.class, () -> store.deleteExpired());
+        PostgresSchema.resetForTests(); // the back-off between two calls is covered by PostgresSchemaTest
         store.deleteExpired();
         store.deleteExpired();
 

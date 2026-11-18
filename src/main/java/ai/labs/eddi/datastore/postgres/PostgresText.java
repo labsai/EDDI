@@ -18,11 +18,13 @@ package ai.labs.eddi.datastore.postgres;
  * The rule applied everywhere is: <b>U+0000, and every unpaired UTF-16
  * surrogate, becomes U+FFFD (the Unicode replacement character)</b>. It is
  * replaced rather than removed so that the length and the positions of the rest
- * of the text stay intact, and so that two different values never collapse into
- * one ({@code "ab"} and {@code "a<NUL>b"} stay distinct, which matters when the
- * value is an id or a lookup key). The replacement is applied to the value that
- * is stored and to the value that is looked up, so a key containing the
- * character still finds its own row. Everything else round-trips unchanged.
+ * of the text stay intact and {@code "ab"} and {@code "a<NUL>b"} stay distinct.
+ * It is not injective: {@code "a<NUL>"}, a literal {@code "a\uFFFD"} and {@code
+ * "a"} followed by an unpaired surrogate all end up as the same stored value,
+ * so two ids that differ only in such characters address one row. The
+ * replacement is applied to the value that is stored and to the value that is
+ * looked up, so a key containing the character still finds its own row.
+ * Everything else round-trips unchanged.
  * <p>
  * Two entry points exist because a JSON document carries the problem in two
  * spellings. {@link #text(String)} handles plain text, where only the raw
@@ -101,17 +103,17 @@ public final class PostgresText {
         if (value == null) {
             return null;
         }
+        int problem = firstJsonProblem(value);
+        return problem < 0 ? value : rewriteJson(value, problem);
+    }
+
+    /**
+     * Index of the first escape or character PostgreSQL would refuse, or -1. Reads
+     * only: typical JSON (quotes, newlines, emoji) is returned as the same instance
+     * without a copy.
+     */
+    private static int firstJsonProblem(String value) {
         int length = value.length();
-        boolean suspect = false;
-        for (int i = 0; i < length && !suspect; i++) {
-            char c = value.charAt(i);
-            suspect = c == 0 || c == '\\' || Character.isSurrogate(c);
-        }
-        if (!suspect) {
-            return value;
-        }
-        StringBuilder out = new StringBuilder(length);
-        boolean changed = false;
         int i = 0;
         while (i < length) {
             char c = value.charAt(i);
@@ -120,8 +122,46 @@ public final class PostgresText {
                 if (next == 'u' && hasHexQuad(value, i + 2)) {
                     int unit = Integer.parseInt(value, i + 2, i + 6, 16);
                     if (unit == 0) {
+                        return i;
+                    } else if (unit >= 0xD800 && unit <= 0xDBFF) {
+                        if (!isLowSurrogateEscape(value, i + 6)) {
+                            return i;
+                        }
+                        i += 12;
+                    } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+                        return i;
+                    } else {
+                        i += 6;
+                    }
+                } else {
+                    i += 2;
+                }
+            } else if (c == 0) {
+                return i;
+            } else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
+                i += 2;
+            } else if (Character.isSurrogate(c)) {
+                return i;
+            } else {
+                i++;
+            }
+        }
+        return -1;
+    }
+
+    private static String rewriteJson(String value, int from) {
+        int length = value.length();
+        StringBuilder out = new StringBuilder(length);
+        out.append(value, 0, from);
+        int i = from;
+        while (i < length) {
+            char c = value.charAt(i);
+            if (c == '\\' && i + 1 < length) {
+                char next = value.charAt(i + 1);
+                if (next == 'u' && hasHexQuad(value, i + 2)) {
+                    int unit = Integer.parseInt(value, i + 2, i + 6, 16);
+                    if (unit == 0) {
                         out.append("\\uFFFD");
-                        changed = true;
                         i += 6;
                     } else if (unit >= 0xD800 && unit <= 0xDBFF) {
                         if (isLowSurrogateEscape(value, i + 6)) {
@@ -129,12 +169,10 @@ public final class PostgresText {
                             i += 12;
                         } else {
                             out.append("\\uFFFD");
-                            changed = true;
                             i += 6;
                         }
                     } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
                         out.append("\\uFFFD");
-                        changed = true;
                         i += 6;
                     } else {
                         out.append(value, i, i + 6);
@@ -148,21 +186,19 @@ public final class PostgresText {
                 }
             } else if (c == 0) {
                 out.append(REPLACEMENT);
-                changed = true;
                 i++;
             } else if (Character.isHighSurrogate(c) && i + 1 < length && Character.isLowSurrogate(value.charAt(i + 1))) {
                 out.append(c).append(value.charAt(i + 1));
                 i += 2;
             } else if (Character.isSurrogate(c)) {
                 out.append(REPLACEMENT);
-                changed = true;
                 i++;
             } else {
                 out.append(c);
                 i++;
             }
         }
-        return changed ? out.toString() : value;
+        return out.toString();
     }
 
     private static boolean hasHexQuad(String value, int from) {

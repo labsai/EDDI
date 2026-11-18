@@ -149,7 +149,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 // without a full-document body, and this is the whole point of the
                 // append path. Serializing up front cost every call one full
                 // serialization of the entire conversation that nothing then used.
-                String json = jsonSerialization.serialize(snapshot);
+                String json = PostgresText.json(jsonSerialization.serialize(snapshot));
                 // Update existing, guarded on the revision this write was derived from.
                 // COALESCE because a row written before _rev existed carries no such key
                 // and must still be writable (it upgrades in the process).
@@ -207,7 +207,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 snapshot.setRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
                 snapshot.setHistoryRevision(ConversationMemorySnapshot.UNVERSIONED_REVISION + 1);
                 snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
-                String json2 = jsonSerialization.serialize(snapshot); // re-serialize with ID and revision
+                String json2 = PostgresText.json(jsonSerialization.serialize(snapshot)); // re-serialize with ID and revision
                 String sql = """
                         INSERT INTO conversation_memories (id, AGENT_ID, AGENT_VERSION, conversation_state, data)
                         VALUES (?::uuid, ?, ?, ?, ?::jsonb)
@@ -248,7 +248,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             snapshot.setRevision(expectedRevision + 1);
             snapshot.setHistoryRevision(expectedRevision + 1);
             snapshot.setFence(snapshot.effectiveFence());
-            String json = jsonSerialization.serialize(snapshot);
+            String json = PostgresText.json(jsonSerialization.serialize(snapshot));
             // Atomic compare-and-store on BOTH arbiters: the state column (see
             // compareAndSetState), so a concurrent terminal writer that moved the row off
             // expectedState is not overwritten; and the revision, so a concurrent
@@ -344,13 +344,13 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         var steps = snapshot.getConversationSteps();
         var outputs = snapshot.getConversationOutputs();
         try {
-            newStepsJson = jsonSerialization.serialize(List.copyOf(steps.subList(baseline, totalSteps)));
-            newOutputsJson = jsonSerialization.serialize(List.copyOf(outputs.subList(baseline, outputs.size())));
+            newStepsJson = PostgresText.json(jsonSerialization.serialize(List.copyOf(steps.subList(baseline, totalSteps))));
+            newOutputsJson = PostgresText.json(jsonSerialization.serialize(List.copyOf(outputs.subList(baseline, outputs.size()))));
             // The body is serialized with EMPTY arrays, so the stored history is neither
             // re-serialized nor shipped; the SQL supplies the arrays by concatenation.
             snapshot.setConversationSteps(new LinkedList<>());
             snapshot.setConversationOutputs(new LinkedList<>());
-            bodyJson = jsonSerialization.serialize(snapshot);
+            bodyJson = PostgresText.json(jsonSerialization.serialize(snapshot));
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to serialize the conversation turn", e);
         } finally {

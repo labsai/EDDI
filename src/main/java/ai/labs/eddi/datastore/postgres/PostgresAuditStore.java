@@ -528,7 +528,7 @@ public class PostgresAuditStore implements IAuditStore {
         ps.setDouble(12, entry.cost());
         ps.setString(13, entry.hmac());
         ps.setTimestamp(14, entry.timestamp() != null ? Timestamp.from(entry.timestamp()) : Timestamp.from(Instant.now()));
-        ps.setString(15, jsonSerialization.serialize(data));
+        ps.setString(15, PostgresText.json(jsonSerialization.serialize(data)));
         ps.setLong(16, entry.sequence());
         ps.setString(17, entry.agentSignature());
     }
@@ -608,7 +608,7 @@ public class PostgresAuditStore implements IAuditStore {
                 + " WHERE id = ?::uuid AND hmac IS NOT DISTINCT FROM ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, redacted.userId());
-            ps.setString(2, jsonSerialization.serialize(data));
+            ps.setString(2, PostgresText.json(jsonSerialization.serialize(data)));
             ps.setString(3, redacted.hmac());
             ps.setString(4, redacted.agentSignature());
             ps.setString(5, redacted.id());
