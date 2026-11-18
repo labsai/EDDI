@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import ai.labs.eddi.datastore.postgres.PostgresText;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -25,7 +26,16 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.function.Function;
 import java.time.Duration;
 import java.time.Instant;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -578,6 +588,13 @@ public class AuditLedgerService implements UserErasureParticipant {
             // Scrub secrets from string values in maps
             AuditEntry scrubbed = scrubSecrets(entry);
 
+            // A store that cannot hold some characters (PostgreSQL and U+0000) stores a
+            // replacement; sign that, not the original, or the row would read back as
+            // tampered. Same rule as the payload and timestamp normalisation below.
+            if (auditStore.replacesNulCharacter()) {
+                scrubbed = withStorableText(scrubbed);
+            }
+
             // Assign the conversation chain position BEFORE signing — the sequence is
             // part of the signed payload, which is what makes a deleted entry's gap
             // impossible to close by renumbering its neighbours.
@@ -963,6 +980,9 @@ public class AuditLedgerService implements UserErasureParticipant {
                 // evidence of anything: re-queue them and let the next pass continue
                 // where the budget cut this one off.
                 requeueDeferred(outcome.deferred());
+                // Entries the store refused on their own are not evidence of an outage: they
+                // go to the sink with their reason and never touch the failure counter.
+                deadLetterRejected(outcome.rejected());
                 if (outcome.unstorable().isEmpty()) {
                     consecutiveFailures.set(0);
                 } else {
@@ -1117,10 +1137,11 @@ public class AuditLedgerService implements UserErasureParticipant {
                     + "dead-letter sink so the shutdown stays inside its grace period", batch.size());
             // Not deferred: deferral means "the next flush takes these", and during
             // shutdown there is no next flush.
-            return new IndividualRetryOutcome(new ArrayList<>(batch), List.of());
+            return new IndividualRetryOutcome(new ArrayList<>(batch), List.of(), List.of());
         }
 
         List<AuditEntry> unstorable = new ArrayList<>();
+        List<RejectedEntry> rejected = new ArrayList<>();
         int consecutiveEntryFailures = 0;
         int stored = 0;
         long deadline = System.nanoTime() + ENTRY_RETRY_BUDGET.toNanos();
@@ -1134,28 +1155,40 @@ public class AuditLedgerService implements UserErasureParticipant {
             boolean storeRefusing = consecutiveEntryFailures >= MAX_CONSECUTIVE_ENTRY_FAILURES;
             if (storeRefusing || outOfBudget || shutdownStarted) {
                 List<AuditEntry> remaining = List.copyOf(batch.subList(i, batch.size()));
-                String abandonReason = abandonedTailReason(storeRefusing, shutdownStarted, stored, unstorable.size(),
+                // An entry the store answered with a refusal of its content shows the store
+                // is there, so it counts with the accepted ones here.
+                String abandonReason = abandonedTailReason(storeRefusing, shutdownStarted, stored + rejected.size(), unstorable.size(),
                         remaining.size());
                 if (abandonReason != null) {
                     LOGGER.error(abandonReason);
                     unstorable.addAll(remaining);
-                    return new IndividualRetryOutcome(unstorable, List.of());
+                    return new IndividualRetryOutcome(unstorable, List.of(), rejected);
                 }
                 LOGGER.warn(budgetExhaustedMessage(unstorable.size(), remaining.size()));
-                return new IndividualRetryOutcome(unstorable, remaining);
+                return new IndividualRetryOutcome(unstorable, remaining, rejected);
             }
             try {
                 auditStore.appendEntry(entry);
                 consecutiveEntryFailures = 0;
                 stored++;
             } catch (Exception e) {
+                if (AuditStoreFailures.isEntryRejected(e)) {
+                    // The store is reachable and refused THIS entry's content (a data error or
+                    // a constraint, by SQLState / exception class, not by counting): isolate it.
+                    // Everything after it in the batch still gets its own attempt.
+                    consecutiveEntryFailures = 0;
+                    rejected.add(new RejectedEntry(entry, AuditStoreFailures.describe(e)));
+                    LOGGER.errorv("Audit entry {0} (conversation {1}, sequence {2}) was refused by the store and is dead-lettered on its own: {3}",
+                            sanitize(entry.id()), sanitize(entry.conversationId()), entry.sequence(), AuditStoreFailures.describe(e));
+                    continue;
+                }
                 consecutiveEntryFailures++;
                 LOGGER.errorv("Audit entry {0} (conversation {1}, sequence {2}) could not be stored: {3}", sanitize(entry.id()),
                         sanitize(entry.conversationId()), entry.sequence(), e.getMessage());
                 unstorable.add(entry);
             }
         }
-        return new IndividualRetryOutcome(unstorable, List.of());
+        return new IndividualRetryOutcome(unstorable, List.of(), rejected);
     }
 
     /**
@@ -1257,8 +1290,19 @@ public class AuditLedgerService implements UserErasureParticipant {
      *            failed at nothing, so they are re-queued without touching
      *            {@code consecutiveFailures} and cannot be dead-lettered on the
      *            strength of someone else's poison row.
+     * @param rejected
+     *            entries the store refused on their own content (see
+     *            {@link AuditStoreFailures}); dead-lettered individually, never
+     *            re-queued, and not counted as an outage
      */
-    private record IndividualRetryOutcome(List<AuditEntry> unstorable, List<AuditEntry> deferred) {
+    private record IndividualRetryOutcome(List<AuditEntry> unstorable, List<AuditEntry> deferred, List<RejectedEntry> rejected) {
+    }
+
+    /**
+     * An entry the store answered with a refusal of its own content, and why. It is
+     * dead-lettered by itself and does not count against the store's availability.
+     */
+    private record RejectedEntry(AuditEntry entry, String reason) {
     }
 
     /**
@@ -2191,6 +2235,29 @@ public class AuditLedgerService implements UserErasureParticipant {
      * to a local file-based dead-letter log.
      */
     private void writeToDeadLetter(List<AuditEntry> entries) {
+        writeToDeadLetter(entries, entry -> null);
+    }
+
+    /**
+     * Dead-letters entries the store refused individually, each with the reason in
+     * its record.
+     */
+    private void deadLetterRejected(List<RejectedEntry> rejected) {
+        if (rejected.isEmpty()) {
+            return;
+        }
+        LOGGER.errorv("Dead-lettering {0} audit entries the store refused on their own; the rest of their batch was stored", rejected.size());
+        droppedCounter.increment(rejected.size());
+        Map<AuditEntry, String> reasons = new IdentityHashMap<>();
+        List<AuditEntry> entries = new ArrayList<>(rejected.size());
+        for (RejectedEntry r : rejected) {
+            reasons.put(r.entry(), r.reason());
+            entries.add(r.entry());
+        }
+        writeToDeadLetter(entries, reasons::get);
+    }
+
+    private void writeToDeadLetter(List<AuditEntry> entries, Function<AuditEntry, String> reasonOf) {
         // These entries already own a chain position, so their absence from the
         // store is a real gap. Remember it, so the verification endpoint can say
         // "this ledger never persisted these" instead of "someone deleted them".
@@ -2200,7 +2267,7 @@ public class AuditLedgerService implements UserErasureParticipant {
         if (clusterSupport != null && clusterSupport.isClustered()) {
             int published = 0;
             for (AuditEntry entry : entries) {
-                if (!clusterSupport.publishDeadLetter(serializeDeadLetterEntry(entry, "audit_dead_letter"))) {
+                if (!clusterSupport.publishDeadLetter(serializeDeadLetterEntry(entry, "audit_dead_letter", reasonOf.apply(entry)))) {
                     break;
                 }
                 published++;
@@ -2216,18 +2283,29 @@ public class AuditLedgerService implements UserErasureParticipant {
         // Fallback: file-based dead-letter log
         try {
             Path dlPath = Path.of(deadLetterPath);
-            var lines = new ArrayList<String>(entries.size());
-            for (AuditEntry entry : entries) {
-                lines.add(serializeDeadLetterEntry(entry, null));
-            }
             // StandardOpenOption.CREATE creates the file, never its parent — and the
             // default path's parent does not exist in the shipped container image.
             Path parent = dlPath.toAbsolutePath().getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
             }
-            Files.write(dlPath, lines, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            LOGGER.infov("Wrote {0} entries to dead-letter log: {1}", entries.size(), dlPath.toAbsolutePath());
+            // One line at a time, each encoded leniently: a malformed character (an
+            // unpaired surrogate in a payload) becomes U+FFFD in that line instead of
+            // throwing, so it can neither lose the lines after it nor itself.
+            int written = 0;
+            try (OutputStream out = Files.newOutputStream(dlPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                for (AuditEntry entry : entries) {
+                    try {
+                        out.write(lenientUtf8(serializeDeadLetterEntry(entry, null, reasonOf.apply(entry)) + "\n"));
+                        out.flush();
+                        written++;
+                    } catch (IOException | RuntimeException e) {
+                        LOGGER.errorv("Could not write audit entry {0} (conversation {1}, sequence {2}) to the dead-letter log: {3}",
+                                sanitize(entry.id()), sanitize(entry.conversationId()), entry.sequence(), e.getMessage());
+                    }
+                }
+            }
+            LOGGER.infov("Wrote {0} of {1} entries to dead-letter log: {2}", written, entries.size(), dlPath.toAbsolutePath());
         } catch (Exception e) {
             LOGGER.errorv("Failed to write to dead-letter log: {0}", e.getMessage());
         }
@@ -2260,7 +2338,19 @@ public class AuditLedgerService implements UserErasureParticipant {
      * @return JSON string
      */
     String serializeDeadLetterEntry(AuditEntry entry, String type) {
+        return serializeDeadLetterEntry(entry, type, null);
+    }
+
+    /**
+     * As {@link #serializeDeadLetterEntry(AuditEntry, String)}, with the reason the
+     * entry is being dead-lettered when it is known (the store refused it on its own
+     * content); written as {@code reason}, absent otherwise.
+     */
+    String serializeDeadLetterEntry(AuditEntry entry, String type, String reason) {
         Map<String, Object> dlMap = metadataOnlyDeadLetterRecord(entry, type);
+        if (reason != null) {
+            dlMap.put("reason", reason);
+        }
         // userId, input and output make the sink a personal-data location that the
         // GDPR erasure cascade does not reach — deliberately, because without them
         // the record is neither replayable nor evidence of what was lost. See
@@ -2284,8 +2374,67 @@ public class AuditLedgerService implements UserErasureParticipant {
             // the gap indistinguishable from a deletion.
             LOGGER.errorv("Jackson serialization failed for dead-letter entry {0}: {1} — writing metadata only",
                     sanitize(entry.id()), e.getMessage());
-            return serializeMetadataOnly(entry, type, e);
+            return serializeMetadataOnly(entry, type, reason, e);
         }
+    }
+
+    /**
+     * UTF-8 bytes of {@code text} that cannot fail on content: a malformed or
+     * unmappable character is written as U+FFFD. {@code Files.write} of a line list
+     * uses a strict encoder and threw on the first unpaired surrogate.
+     */
+    static byte[] lenientUtf8(String text) {
+        CharsetEncoder encoder = StandardCharsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE).replaceWith(new byte[]{(byte) 0xEF, (byte) 0xBF, (byte) 0xBD});
+        try {
+            ByteBuffer encoded = encoder.encode(CharBuffer.wrap(text));
+            byte[] bytes = new byte[encoded.remaining()];
+            encoded.get(bytes);
+            return bytes;
+        } catch (CharacterCodingException e) {
+            // not reachable with REPLACE; keep the line rather than lose it
+            return text.getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    /**
+     * The entry with every string that PostgreSQL cannot store replaced the way the
+     * store will replace it, see {@link PostgresText}. Identifiers the ledger keys
+     * on (the conversation id) are left alone.
+     */
+    private static AuditEntry withStorableText(AuditEntry entry) {
+        return new AuditEntry(entry.id(), entry.conversationId(), PostgresText.text(entry.agentId()), entry.agentVersion(),
+                PostgresText.text(entry.userId()), PostgresText.text(entry.environment()), entry.stepIndex(), PostgresText.text(entry.taskId()),
+                PostgresText.text(entry.taskType()), entry.taskIndex(), entry.durationMs(), storableMap(entry.input()), storableMap(entry.output()),
+                storableMap(entry.llmDetail()), storableMap(entry.toolCalls()), storableList(entry.actions()), entry.cost(), entry.timestamp(),
+                entry.hmac(), entry.agentSignature(), entry.sequence());
+    }
+
+    private static Map<String, Object> storableMap(Map<String, Object> map) {
+        if (map == null || map.isEmpty()) {
+            return map;
+        }
+        Map<String, Object> result = new LinkedHashMap<>(map.size());
+        for (Map.Entry<String, Object> e : map.entrySet()) {
+            result.put(PostgresText.text(e.getKey()), storableValue(e.getValue()));
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object storableValue(Object value) {
+        if (value instanceof String s) {
+            return PostgresText.text(s);
+        } else if (value instanceof Map<?, ?> nested) {
+            return storableMap((Map<String, Object>) nested);
+        } else if (value instanceof List<?> list) {
+            return list.stream().map(AuditLedgerService::storableValue).toList();
+        }
+        return value;
+    }
+
+    private static List<String> storableList(List<String> values) {
+        return values == null ? null : values.stream().map(PostgresText::text).toList();
     }
 
     /**
@@ -2324,8 +2473,11 @@ public class AuditLedgerService implements UserErasureParticipant {
      * gap {@code INCOMPLETE} rather than {@code BROKEN}, and what a replay needs to
      * find the turn again.
      */
-    private String serializeMetadataOnly(AuditEntry entry, String type, JsonProcessingException cause) {
+    private String serializeMetadataOnly(AuditEntry entry, String type, String reason, JsonProcessingException cause) {
         Map<String, Object> dlMap = metadataOnlyDeadLetterRecord(entry, type);
+        if (reason != null) {
+            dlMap.put("reason", reason);
+        }
         dlMap.put("userId", entry.userId());
         dlMap.put("actions", entry.actions());
         dlMap.put("payloadError", "serialization_failed: " + cause.getOriginalMessage());

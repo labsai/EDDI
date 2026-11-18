@@ -330,6 +330,11 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     @Override
+    public boolean replacesNulCharacter() {
+        return true;
+    }
+
+    @Override
     public void appendEntry(AuditEntry entry) {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(INSERT_SQL)) {

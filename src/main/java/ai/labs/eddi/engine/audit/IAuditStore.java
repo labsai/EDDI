@@ -54,6 +54,17 @@ public interface IAuditStore {
     void appendBatch(List<AuditEntry> entries);
 
     /**
+     * Whether this store replaces the character U+0000 (and unpaired surrogates)
+     * with U+FFFD because it cannot hold them. PostgreSQL does; MongoDB keeps them.
+     * The ledger makes an entry storable <em>before</em> signing for such a store:
+     * what is signed must be what is stored, or the row would read back as
+     * tampered.
+     */
+    default boolean replacesNulCharacter() {
+        return false;
+    }
+
+    /**
      * Retrieve audit entries for a conversation, ordered by timestamp descending.
      *
      * @param conversationId

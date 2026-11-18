@@ -330,6 +330,10 @@ Redaction is applied recursively to nested maps and lists.
 
 If a database write fails, entries are **re-queued** for the next flush cycle. After 3 consecutive failures, the batch is dropped from the queue and written to a **dead-letter sink** — NATS JetStream (subject `eddi.<prefix>.dlq.audit`) when a connection is available, otherwise the JSONL file at `eddi.audit.dead-letter-path`.
 
+**One entry the database refuses does not take its batch down.** When a batch write fails, the ledger retries the entries one by one and tells the two kinds of failure apart by what the store said, not by counting: a refusal of *this entry's content* (a PostgreSQL SQLState in class 22 or 23, a JSON/BSON serialisation failure, a MongoDB write error for an invalid document) dead-letters that entry alone, with a `reason` in its record, and the rest of the batch is stored; anything else (a connection failure, a timeout, an unclassified exception) is an outage and takes the re-queue path above. The dead-letter file is written one line at a time with a lenient encoder, so an unpaired surrogate in one payload becomes U+FFFD in that line and cannot lose it or the lines after it. A refused entry counts on `eddi_audit_entries_dropped_total` and its chain position is recorded as undelivered, so `/auditstore/verify` reports `INCOMPLETE`, not `BROKEN`.
+
+**PostgreSQL cannot store U+0000.** On a PostgreSQL deployment the ledger replaces it (and unpaired surrogates) with U+FFFD in every string of an entry *before* signing, so the stored row is byte-for-byte what was signed and verifies. MongoDB keeps the character as it is. See [Architecture: differences the PostgreSQL boundary hides](architecture.md#differences-the-postgresql-boundary-hides).
+
 **Queue overflow has two outcomes, and only one of them is recoverable.** Both increment `eddi_audit_entries_dropped_total`, so the counter on its own does not say which happened:
 
 | Overflow path | What happens at `eddi.audit.max-queue-size` | Recoverable? |
