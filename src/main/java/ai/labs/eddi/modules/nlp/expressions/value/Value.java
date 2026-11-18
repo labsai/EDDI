@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.CharacterUtilities.isNumber;
+import static ai.labs.eddi.utils.CharacterUtilities.toAsciiDigits;
 
 /**
  * @author ginccc
@@ -22,7 +23,7 @@ public class Value extends Expression {
     }
 
     public Value(String expressionName) {
-        super(expressionName);
+        super(toAsciiDigits(expressionName));
     }
 
     @Override
@@ -49,11 +50,11 @@ public class Value extends Expression {
     }
 
     public Integer toInteger() {
-        return Integer.parseInt(expressionName);
+        return Integer.parseInt(toAsciiDigits(expressionName));
     }
 
     public Float toFloat() {
-        return Float.parseFloat(expressionName.replace(',', '.'));
+        return Float.parseFloat(toAsciiDigits(expressionName).replace(',', '.'));
     }
 
     public Boolean toBoolean() {
@@ -74,7 +75,7 @@ public class Value extends Expression {
             return expressionName;
         }
         try {
-            return new BigDecimal(expressionName.replace(',', '.')).stripTrailingZeros();
+            return new BigDecimal(toAsciiDigits(expressionName).replace(',', '.')).stripTrailingZeros();
         } catch (NumberFormatException e) {
             return expressionName;
         }

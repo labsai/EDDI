@@ -188,13 +188,17 @@ class ValueTest {
         }
 
         @Test
-        @DisplayName("unicode digits are not numeric and never throw")
-        void unicodeDigitsDoNotThrow() {
-            Value fullwidth = new Value("１");
-            assertFalse(fullwidth.isNumeric());
-            assertDoesNotThrow(() -> fullwidth.equals(new Value("1")));
-            assertDoesNotThrow(fullwidth::hashCode);
-            assertNotEquals(new Value("1"), fullwidth);
+        @DisplayName("unicode digits are read as numbers, compare exactly and never throw")
+        void unicodeDigitsAreNumbersAndCompareExactly() {
+            for (String digits : new String[]{"\uFF11\uFF12", "\u0661\u0662", "\u0967\u0968", "\u0E51\u0E52"}) {
+                Value value = new Value(digits);
+                assertTrue(value.isNumeric(), digits);
+                assertEquals(12, value.toInteger(), digits);
+                assertEquals(new Value("12"), value, digits);
+                assertEquals(new Value("12").hashCode(), value.hashCode(), digits);
+                assertNotEquals(new Value("13"), value, digits);
+                assertDoesNotThrow(() -> value.equals(new Value("1")));
+            }
         }
 
         @Test

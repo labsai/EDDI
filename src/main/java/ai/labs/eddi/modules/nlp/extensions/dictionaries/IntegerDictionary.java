@@ -30,7 +30,7 @@ public class IntegerDictionary implements IDictionary {
     @Override
     public List<IFoundWord> lookupTerm(final String value) {
         if (CharacterUtilities.isStringInteger(value)) {
-            Expression integerExp = expressionProvider.createExpression("integer", value);
+            Expression integerExp = expressionProvider.createExpression("integer", CharacterUtilities.toAsciiDigits(value));
             IWord word = new Word(value, new Expressions(integerExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));

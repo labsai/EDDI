@@ -36,7 +36,7 @@ public class DecimalDictionary implements IDictionary {
                 value = value.replace(',', '.');
             }
 
-            Expression decimalExp = expressionProvider.createExpression("decimal", value);
+            Expression decimalExp = expressionProvider.createExpression("decimal", CharacterUtilities.toAsciiDigits(value));
             IWord word = new Word(value, new Expressions(decimalExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));
