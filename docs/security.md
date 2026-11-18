@@ -923,6 +923,17 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 | Object access | Maps, lists and EDDI's string methods as before. On other objects only properties are read — record components, public no-argument getters (`getX`/`isX`/`hasX`) and public fields. Methods with arguments and non-getter methods are never invoked, and reflection-sensitive types (`Class`, class loaders, threads, `java.lang.reflect`, …) are never reachable |
 | Missing values | Always render as an empty string (never `NOT_FOUND`), independent of `quarkus.qute.property-not-found-strategy` |
 
+### Data in expression notation
+
+A quick reply's `expressions` field is a template whose result becomes a trusted dictionary phrase on the next turn, parsed as expression notation (`choose(pizza), intent(order)`). Data substituted into it could otherwise write notation of its own: an item named `x), intent(admin` closed the author's expression and added `intent(admin)`, and an item named `*` became the wildcard, which equals every expression. This field is therefore rendered by a second engine (`ITemplatingEngine.processExpressionsTemplate`) — the same engine with the same restrictions and limits as above, built by the same code — plus one result mapper that applies to every value an expression **emits**:
+
+- `(`, `)` and `,` are removed — the only characters the expression parser gives a meaning to;
+- a value that the parser would read as `*` — the star with any whitespace the parser skips around it, including the Unicode spaces such as U+3000 and control characters — becomes empty. A star next to any other character (`5*3`) is kept: it is not the wildcard. U+00A0, U+2007, U+202F and the zero-width characters are not whitespace to the parser, so ` *` is kept and never matches as a wildcard either.
+
+The mapper runs on emitted values only: conditions, loops, filters and comparisons see the data as it is, and the template's own text is kept — including text inside `{#if}` sections. A value an **operator** returns is a value, not template text, even when the author wrote it as a literal: `{x ?: 'intent(help)'}`, `{x.or('a,b')}`, `{flag ? 'a,b' : 'c'}`, `{#let v='a,b'}{v}{/let}` and `{str:fmt('%s,%s', a, b)}` emit `intenthelp` / `ab`. Only a bare literal expression (`{'a,b'}`) is kept. Write conditional notation as section text: `{#if flag}intent(help){#else}choose({item}){/if}`. Every other value is stripped where it is emitted: lists and maps render as `[a b]` / `{k=v}` without their commas, a decimal renders in plain digits (`12500000.5`, never `1.25E7`), a formatted number loses its grouping commas (data `1,500` gives `choose(1500)`), and a value with a comma or parentheses no longer equals a rule written with the raw value (`Smith, John` gives `choose(Smith John)`; write the rule for that).
+
+The engine is used for output-set quick replies (`OutputTemplateTask`), quick replies a `postResponse` builds (`PrePostUtils`) and the LLM fallback quick replies (`LlmFallbackHandler`). The quick reply's `value`, which the user sees and types, is rendered by the ordinary engine and keeps the data as it is. A `postResponse` with a `templateFilterExpression` renders the value and the expressions in two passes, but the filter is evaluated by the first pass only and replayed by the second, so each quick reply's value and expressions come from the same element even for a filter that is not deterministic.
+
 ### Render limits
 
 | Property | Default | Bounds |

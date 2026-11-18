@@ -100,7 +100,12 @@ Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-Data substituted into a quick reply's `expressions` field (a property, an API value) loses the characters `(`, `)` and `,` — the expression is a trusted dictionary phrase on the next turn, and data such as `x), intent(admin` must not be able to add an expression of its own. Your own notation in the field (`choose({properties.item})`) is kept, and the quick reply's `value`, which the user sees and types, keeps the data as it is.
+Data substituted into a quick reply's `expressions` field (a property, an API value) loses the characters `(`, `)` and `,`, and a value that is only `*` (with any surrounding whitespace) becomes empty — the expression is a trusted dictionary phrase on the next turn, and data such as `x), intent(admin` or `*` (the wildcard, which matches every rule) must not be able to add an expression of its own. Your own notation in the field (`choose({properties.item})`) is kept, conditions and filters compare the data as it is, and the quick reply's `value`, which the user sees and types, keeps the data as it is. What to know when you write the field:
+
+- **Text written in the template is kept; every value an expression emits is stripped** — also a literal returned by an operator: `{x ?: 'intent(help)'}`, `{x.or('a,b')}`, `{flag ? 'a,b' : 'c'}`, `{#let v='a,b'}{v}{/let}` and `{str:fmt(...)}` emit `intenthelp` / `ab`. Only a bare `{'a,b'}` is kept. For notation that depends on a condition, use a section: `{#if flag}intent(help){#else}choose({properties.item}){/if}`.
+- **Values change shape:** a list renders as `[a b]`, a formatted number `1,500` as `1500`, a value with a comma or parentheses (`Smith, John`) as `Smith John` — a rule written with the raw value no longer matches it.
+
+The full rule set is in [Security → Data in expression notation](security.md#data-in-expression-notation).
 
 > **`STOP_CONVERSATION` produces no output.** The turn stops right after the task that emitted the action, so an output configured for a rule's `STOP_CONVERSATION` action never runs. Emit `CONVERSATION_END` for a farewell: the output is rendered and the conversation ends.
 

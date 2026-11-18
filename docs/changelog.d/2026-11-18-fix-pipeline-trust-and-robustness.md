@@ -19,7 +19,7 @@ An integration that sent `properties*` expression context to set properties must
 ### What changed and why
 
 - `property(host(api.openai.com))` stored `openai.com` and `1.2.3` became `2.3`, because the leaf went through `Expression.setExpressionName`, which splits at the first dot. `4915112345678` threw in `Integer.parseInt` and failed the turn, `01234` became `1234`. `PropertySetter` now keeps the leaf as a string, except a plain integer (ASCII digits, no leading zero), which becomes an `Integer`, or a `Long` beyond the int range, and `true`/`false`, which become a boolean. Nothing in it can throw.
-- `CharacterUtilities.isNumber` / `isStringInteger` accepted any Unicode digit (`1` fullwidth, Arabic-Indic), and `Value.equals/hashCode` compared through `Float.parseFloat`, which threw `NumberFormatException` for those and made `unknown(123456789)` match input `123456790`. Digits of other scripts are now converted to ASCII where the expression or the value is built (`integer(12)` is still produced for `١٢`), and `Value` compares by `BigDecimal` (the text itself for a number over 100 characters); `equals`/`hashCode` are consistent and never throw.
+- `CharacterUtilities.isNumber` / `isStringInteger` accepted any Unicode digit (`1` fullwidth, Arabic-Indic), and `Value.equals/hashCode` compared through `Float.parseFloat`, which threw `NumberFormatException` for those and made `unknown(123456789)` match input `123456790`. Digits of other scripts are still numbers: the integer and decimal dictionaries convert them to ASCII when they build the expression (`integer(12)` for `١٢`), and `Value` keeps its text as written but converts it where it compares (`١٢` equals `12`, with the same hash). `Value` compares by `BigDecimal` (the text itself for a number over 100 characters); `equals`/`hashCode` are consistent and never throw.
 
 ### Behaviour changes for upgraders
 
@@ -71,7 +71,7 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 
 ### What changed and why
 
-- The `expressions` field of a quick reply is templated with property or API data and becomes a trusted dictionary phrase on the next turn. Data such as `x), intent(admin` therefore produced the user-typeable expression `intent(admin)`. The field is now rendered against `NotationSafeData`, a read-only view of the template data without `(`, `)` and `,`, in `OutputTemplateTask` (output-set quick replies) and `PrePostUtils` (quick replies built by a `postResponse`). The quick reply's value keeps the data, so what the user sees and types is unchanged. If a `postResponse` filter selects other rows on the cleaned data, the quick reply gets no expressions (the parser derives them from its value).
+- The `expressions` field of a quick reply is templated with property or API data and becomes a trusted dictionary phrase on the next turn. Data such as `x), intent(admin` therefore produced the user-typeable expression `intent(admin)`. The field is now rendered by a notation-safe engine that strips expression notation from every value it substitutes (see the review follow-up below for what exactly is stripped), in `OutputTemplateTask` (output-set quick replies), `PrePostUtils` (quick replies built by a `postResponse`) and `LlmFallbackHandler`. The quick reply's value keeps the data, so what the user sees and types is unchanged.
 - `LanguageUtilities.isTimeExpression` turned `12:24:00` into midnight because it tested `contains("24:00")`; it now tests the whole value.
 - `STOP_CONVERSATION` ends the turn right after the task that emitted it, so a farewell output for that action never runs. Semantics unchanged; `agent-config-authoring.md` now says to use `CONVERSATION_END` for a farewell.
 
@@ -96,4 +96,26 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 ### Behaviour changes for upgraders
 
 - An agent whose start turn fails because of its rule set now gets the typed 422 instead of a bare 500.
-- Digits of other scripts are numbers again, converted to ASCII where built (reverts the first draft of the number fix).
+- Digits of other scripts are numbers again for the dictionaries and for rule comparison (reverts the first draft of the number fix, which dropped `integer(...)` for them); only a `property(...)` leaf keeps them as the text written.
+
+## 🔒 fix(templating,nlp,rules): second review follow-up — the wildcard, over-limit tokens, one selection (2026-11-18)
+
+**Repo:** EDDI (`fix/pipeline-trust-and-robustness`)
+
+### What changed and why
+
+- **Wildcard through Unicode whitespace.** The notation-safe engine dropped a value that was only `*` by `String.trim()`, which removes characters up to U+0020 only, while the expression parser skips every `Character.isWhitespace` character: data `"　*"` in `choose({properties.item})` read as `choose(*)` on the next turn, which matches every `choose(x)` rule. Stripping now asks the parser (`ExpressionProvider.isNotationCharacter`, `ExpressionProvider.readsAsWildcard`) instead of keeping its own rules, so it agrees with the parser by construction; a test runs all 65,536 UTF-16 units through strip-then-parse. The parser itself had two notions of whitespace — `String.trim()` for a name in front of `(`, `isWhitespace` everywhere else, so `"\u0001*(a)"` also read as the wildcard — and now uses one: `isWhitespace` plus every character up to U+0020. No-break spaces and zero-width characters stay part of a name, so `" *"` is no wildcard, as before.
+- **Over-limit tokens.** An e-mail token longer than `eddi.expressions.max-length` made `EmailDictionary` throw `ExpressionLimitExceededException` out of the parser and failed the turn (only the integer and decimal dictionaries caught it). `IDictionary.lookupWithinLimits` now catches it for every dictionary lookup with user text — the parser's direct lookup and `MergedTermsCorrection` — so a dictionary added later is covered too; the token is read by the other dictionaries or as unknown.
+- **One selection for `postResponse` quick replies.** Value and expressions are rendered by two engines, so in two passes; the second pass evaluated the `templateFilterExpression` again, and a filter that is not deterministic (`uuidUtils:`, a clock) could select other rows with the same count, giving a value another row's expressions. The first pass now records the filter's verdict per element and the second replays it (`PrePostUtils.IterationSelection`). If the array comes out with another length the second time (a getter that is not idempotent), every quick reply keeps its value and gets no expressions — the next turn still recognises the value, as a temporary dictionary entry without expressions — and a WARN is logged.
+- **`RuleSetSaveValidator`:** the reported cycle is found in linear time (it searched an `ArrayList` per step, quadratic on a 100,000-rule cycle) and starts at the rule that comes first in the ruleset.
+- **Docs:** what the notation-safe engine strips is written down in `docs/security.md` (Data in expression notation) and `docs/agent-config-authoring.md`.
+
+### Behaviour changes for upgraders
+
+- In a quick reply's `expressions` field, every value an expression emits is stripped of `(`, `)` and `,` — also a literal an operator returns (`{x ?: 'intent(help)'}`, `{x.or('a,b')}`, a ternary, `{#let v='a,b'}{v}`, `str:concat`/`str:fmt`). Text written in the template, including text inside `{#if}` sections, is kept: write conditional notation as section text. A list renders as `[a b]`, data `1,500` as `1500`, and a value with a comma or parentheses no longer equals a rule written with the raw value. A value that reads as `*` (with any whitespace the parser skips) becomes empty.
+- A token over the expression length limit is an unknown word for every dictionary, not only for numbers.
+
+### Left open
+
+- `Unknown` (a token no dictionary knew) still trims with `String.trim()`; a user can already type `*` and get `unknown(*)`, so a padded star adds nothing new there.
+- The two `postResponse` passes each get the full render deadline and caps; a failure in either fails the whole quick-reply build, so no half-paired result can be stored.
