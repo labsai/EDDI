@@ -61,7 +61,10 @@ public class WordTextExtractor implements DocumentTextExtractor {
                         }
                         case "r" -> runHidden = false;
                         case "pPr" -> inParagraphProperties = true;
-                        case "vanish" -> {
+                        // vanish: hidden text; specVanish: a paragraph mark that joins the
+                        // paragraph to the next, hidden; webHidden: hidden in the web layout,
+                        // which is what a text extractor is closest to.
+                        case "vanish", "specVanish", "webHidden" -> {
                             // In a paragraph's own properties it hides the paragraph mark, not
                             // text.
                             if (visibleOnly && !inParagraphProperties && !isOff(OpenXmlPackage.attribute(xml, "val"))) {

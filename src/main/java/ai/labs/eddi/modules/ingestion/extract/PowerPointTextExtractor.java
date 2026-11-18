@@ -145,15 +145,19 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
         StringBuilder text = new StringBuilder();
         StringBuilder paragraph = new StringBuilder();
         boolean visibleOnly = limits.visibleTextOnly();
-        // Shapes nest (a group holds shapes): the depth at which one was marked hidden,
-        // so that its text stays out until that very shape ends.
-        int shapeDepth = 0;
+        // Shapes nest (a group holds shapes), and there are shape kinds this reader
+        // does
+        // not name (cxnSp, contentPart, ...). So elements are counted by depth, and a
+        // hidden marker (the cNvPr inside the shape's nv...Pr) hides the shape two
+        // levels above it until exactly that element ends.
+        int depth = 0;
         int hiddenAtDepth = 0;
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(slideXml)) {
             XMLStreamReader xml = reader.reader();
             while (xml.hasNext() && text.length() < limits.maxCharacters()) {
                 int event = xml.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
+                    depth++;
                     switch (xml.getLocalName()) {
                         case "sld" -> {
                             // A slide marked "hide slide" is not shown in the presentation.
@@ -161,14 +165,15 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
                                 return "";
                             }
                         }
-                        case "sp", "grpSp", "pic", "graphicFrame" -> shapeDepth++;
                         case "cNvPr" -> {
                             if (visibleOnly && hiddenAtDepth == 0 && isHidden(OpenXmlPackage.attribute(xml, "hidden"))) {
-                                hiddenAtDepth = Math.max(shapeDepth, 1);
+                                hiddenAtDepth = Math.max(depth - 2, 1);
                             }
                         }
                         case "t" -> {
                             String run = xml.getElementText();
+                            // getElementText consumed the end of the element too.
+                            depth--;
                             if (hiddenAtDepth == 0) {
                                 paragraph.append(run);
                             }
@@ -178,14 +183,15 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
                             // Shapes, transitions, animation timings.
                         }
                     }
-                } else if (event == XMLStreamConstants.END_ELEMENT && "p".equals(xml.getLocalName())) {
-                    appendLine(text, paragraph.toString());
-                    paragraph.setLength(0);
-                } else if (event == XMLStreamConstants.END_ELEMENT && isShape(xml.getLocalName())) {
-                    if (hiddenAtDepth == shapeDepth) {
+                } else if (event == XMLStreamConstants.END_ELEMENT) {
+                    if ("p".equals(xml.getLocalName())) {
+                        appendLine(text, paragraph.toString());
+                        paragraph.setLength(0);
+                    }
+                    if (hiddenAtDepth > 0 && depth == hiddenAtDepth) {
                         hiddenAtDepth = 0;
                     }
-                    shapeDepth = Math.max(0, shapeDepth - 1);
+                    depth--;
                 }
             }
         } catch (XMLStreamException e) {
@@ -193,10 +199,6 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
         }
         appendLine(text, paragraph.toString());
         return text.toString().strip();
-    }
-
-    private static boolean isShape(String localName) {
-        return "sp".equals(localName) || "grpSp".equals(localName) || "pic".equals(localName) || "graphicFrame".equals(localName);
     }
 
     private static boolean isHidden(String value) {

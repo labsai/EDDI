@@ -116,7 +116,11 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
             throw new UnreadableDocumentException("This workbook's sheet index could not be read.", e);
         }
 
-        if (sheets.isEmpty() && !skippedHidden) {
+        if (sheets.isEmpty() && skippedHidden) {
+            throw new UnreadableDocumentException("This workbook has only hidden sheets, so there is no visible content to ingest. "
+                    + "Unhide a sheet, or set visibleTextOnly to false on the ingestion source to read hidden ones too.");
+        }
+        if (sheets.isEmpty()) {
             // Some generators write no relationships. Part order is then the only
             // ordering available, and the numbers in the names are better than nothing.
             archive.parts().keySet().stream()
@@ -180,7 +184,13 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         StringBuilder cell = new StringBuilder();
         boolean visibleOnly = limits.visibleTextOnly();
         Set<Integer> hiddenColumns = new HashSet<>();
+        // A row hidden by hand is dropped; one hidden by an autofilter or collapsed by
+        // grouping is not (the file marks all of them hidden="1"; a filter's rows are
+        // recognised by the sheet's autoFilter element, which follows the data, and a
+        // group's by outlineLevel). So hidden rows are kept until the sheet is read.
         boolean rowHidden = false;
+        boolean filtered = false;
+        List<Boolean> droppableRows = new ArrayList<>();
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(sheetXml)) {
             XMLStreamReader xml = reader.reader();
@@ -189,12 +199,13 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
                         case "col" -> {
-                            if (visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden"))) {
+                            if (visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml)) {
                                 addColumnRange(hiddenColumns, OpenXmlPackage.attribute(xml, "min"), OpenXmlPackage.attribute(xml, "max"),
                                         limits.maxColumnsPerSheet());
                             }
                         }
-                        case "row" -> rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden"));
+                        case "row" -> rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml);
+                        case "autoFilter" -> filtered = true;
                         case "c" -> {
                             cellType = OpenXmlPackage.attribute(xml, "t");
                             column = columnOf(OpenXmlPackage.attribute(xml, "r"));
@@ -211,8 +222,9 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                         placeCell(row, column, hiddenColumns.contains(column) ? "" : resolve(cell.toString(), cellType, sharedStrings),
                                 limits);
                     } else if ("row".equals(xml.getLocalName())) {
-                        if (!rowHidden && row.stream().anyMatch(value -> !value.isEmpty())) {
+                        if (row.stream().anyMatch(value -> !value.isEmpty())) {
                             rows.add(List.copyOf(row));
+                            droppableRows.add(rowHidden);
                         }
                         row = new ArrayList<>();
                     }
@@ -221,7 +233,24 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         } catch (XMLStreamException e) {
             throw new UnreadableDocumentException("A sheet in this workbook could not be read.", e);
         }
+        if (!filtered) {
+            for (int i = rows.size() - 1; i >= 0; i--) {
+                if (droppableRows.get(i)) {
+                    rows.remove(i);
+                }
+            }
+        }
         return rows;
+    }
+
+    /** A row or column in an outline group: collapsed, not hidden by its author. */
+    private static boolean isGrouped(XMLStreamReader xml) {
+        String level = OpenXmlPackage.attribute(xml, "outlineLevel");
+        try {
+            return level != null && Integer.parseInt(level.trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static boolean isOn(String value) {

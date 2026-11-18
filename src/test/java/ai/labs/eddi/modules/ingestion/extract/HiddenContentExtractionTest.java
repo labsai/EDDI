@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -88,6 +89,21 @@ class HiddenContentExtractionTest {
 
             assertTrue(text.contains("Explicitly shown."), text);
             assertTrue(text.contains("Paragraph whose mark is hidden."), text);
+        }
+
+        @Test
+        @DisplayName("specVanish and webHidden hide a run like vanish does")
+        void otherHidingToggles() {
+            byte[] file = docx("""
+                    <w:p><w:r><w:rPr><w:specVanish/></w:rPr><w:t>SPEC-VANISHED</w:t></w:r></w:p>
+                    <w:p><w:r><w:rPr><w:webHidden/></w:rPr><w:t>WEB-HIDDEN</w:t></w:r><w:r><w:t>Shown tail.</w:t></w:r></w:p>
+                    """);
+
+            String text = extractor.extract(file, VISIBLE_ONLY);
+
+            assertFalse(text.contains("SPEC-VANISHED") || text.contains("WEB-HIDDEN"), text);
+            assertTrue(text.contains("Shown tail."), text);
+            assertTrue(extractor.extract(file, EVERYTHING).contains("WEB-HIDDEN"));
         }
 
         @Test
@@ -174,7 +190,7 @@ class HiddenContentExtractionTest {
         }
 
         @Test
-        @DisplayName("a workbook whose every sheet is hidden yields nothing, rather than falling back to reading them all")
+        @DisplayName("a workbook whose every sheet is hidden says so, rather than falling back to reading them all or calling itself unreadable")
         void allSheetsHidden() {
             Map<String, String> parts = new LinkedHashMap<>();
             parts.put("xl/workbook.xml", """
@@ -192,8 +208,61 @@ class HiddenContentExtractionTest {
                     "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><si><t>HIDDEN-SHEET-TEXT</t></si></sst>");
             parts.put("xl/worksheets/sheet1.xml", sheetWith(0));
 
-            assertFalse(extractor.extract(OfficeFixtures.zip(parts), VISIBLE_ONLY).contains("HIDDEN-SHEET-TEXT"));
+            var refused = assertThrows(UnreadableDocumentException.class, () -> extractor.extract(OfficeFixtures.zip(parts), VISIBLE_ONLY));
+            assertTrue(refused.getMessage().contains("only hidden sheets"), refused.getMessage());
             assertTrue(extractor.extract(OfficeFixtures.zip(parts), EVERYTHING).contains("HIDDEN-SHEET-TEXT"));
+        }
+
+        private byte[] sheetOnly(String sheetXmlBody) {
+            Map<String, String> parts = new LinkedHashMap<>();
+            parts.put("xl/workbook.xml", """
+                    <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+                      <sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>
+                    </workbook>
+                    """);
+            parts.put("xl/_rels/workbook.xml.rels", """
+                    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+                      <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+                    </Relationships>
+                    """);
+            parts.put("xl/sharedStrings.xml", "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                    + "<si><t>SHOWN-ROW</t></si><si><t>FILTERED-OUT-ROW</t></si><si><t>GROUPED-ROW</t></si><si><t>HAND-HIDDEN-ROW</t></si></sst>");
+            parts.put("xl/worksheets/sheet1.xml", sheetXmlBody);
+            return OfficeFixtures.zip(parts);
+        }
+
+        @Test
+        @DisplayName("rows hidden by an autofilter are kept: the filter is not the author hiding text")
+        void autofilterRowsAreKept() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                        <row r="2" hidden="1"><c r="A2" t="s"><v>1</v></c></row>
+                      </sheetData>
+                      <autoFilter ref="A1:A2"/>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("SHOWN-ROW") && text.contains("FILTERED-OUT-ROW"), text);
+        }
+
+        @Test
+        @DisplayName("rows collapsed by grouping are kept; a row hidden by hand, with no filter and no group, is dropped")
+        void groupedRowsAreKept() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                        <row r="2" hidden="1" outlineLevel="1"><c r="A2" t="s"><v>2</v></c></row>
+                        <row r="3" hidden="1"><c r="A3" t="s"><v>3</v></c></row>
+                      </sheetData>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("GROUPED-ROW"), text);
+            assertFalse(text.contains("HAND-HIDDEN-ROW"), text);
         }
 
         @Test
@@ -245,6 +314,31 @@ class HiddenContentExtractionTest {
             assertTrue(text.contains("Visible slide text") && text.contains("Visible again"), text);
             assertFalse(text.contains("HIDDEN-SHAPE-TEXT"), text);
             assertFalse(text.contains("HIDDEN-SLIDE-TEXT"), text);
+        }
+
+        @Test
+        @DisplayName("a hidden connector (a shape kind the reader does not name) does not swallow the next shape's text")
+        void aHiddenConnectorDoesNotSwallowTheNextShape() {
+            String connector = "<p:cxnSp><p:nvCxnSpPr><p:cNvPr id=\"9\" name=\"c\" hidden=\"1\"/></p:nvCxnSpPr></p:cxnSp>";
+            byte[] file = OfficeFixtures.zip(Map.of("ppt/slides/slide1.xml", slide("",
+                    shape("", "Before the connector") + connector + shape("", "After the connector"))));
+
+            String text = extractor.extract(file, VISIBLE_ONLY);
+
+            assertTrue(text.contains("Before the connector") && text.contains("After the connector"), text);
+        }
+
+        @Test
+        @DisplayName("a hidden group hides everything inside it, and ends where it ends")
+        void aHiddenGroupEndsWhereItEnds() {
+            String group = "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"3\" name=\"g\" hidden=\"1\"/></p:nvGrpSpPr>"
+                    + shape("", "INSIDE-HIDDEN-GROUP") + "</p:grpSp>";
+            byte[] file = OfficeFixtures.zip(Map.of("ppt/slides/slide1.xml", slide("", group + shape("", "After the group"))));
+
+            String text = extractor.extract(file, VISIBLE_ONLY);
+
+            assertFalse(text.contains("INSIDE-HIDDEN-GROUP"), text);
+            assertTrue(text.contains("After the group"), text);
         }
 
         @Test
