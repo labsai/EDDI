@@ -223,6 +223,15 @@ class DocumentsConfigValidatorTest {
                     .validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), PATH, live, bounds));
             assertDoesNotThrow(() -> DocumentsConfigValidator.validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740992}}"), PATH,
                     live, bounds));
+
+            // 2^53 + 1 is not a double: the bound must keep it exactly, or a value equal
+            // to the bound the operator set would be refused.
+            var odd = DocumentBounds.of(Map.of("derived.maxBytesPerSource", 9_007_199_254_740_993L));
+            assertDoesNotThrow(() -> DocumentsConfigValidator.validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), PATH,
+                    live, odd));
+            var e = assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator
+                    .validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740994}}"), PATH, live, odd));
+            assertTrue(e.getMessage().contains("above the operator bound of 9007199254740993"), e.getMessage());
         }
 
         @Test

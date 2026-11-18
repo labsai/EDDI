@@ -186,14 +186,11 @@ public final class DocumentsConfigValidator {
         }
         BigDecimal number = value.decimalValue();
         bounds.boundFor(path).ifPresent(bound -> {
-            if (number.compareTo(BigDecimal.valueOf(bound)) > 0) {
+            if (number.compareTo(bound) > 0) {
                 throw new IllegalArgumentException(field + " is " + value.asText() + ", above the operator bound of "
-                        + formatBound(bound) + " (" + DocumentBounds.propertyFor(path) + ")");
+                        + DocumentBounds.format(bound) + " (" + DocumentBounds.propertyFor(path) + ")");
             }
         });
     }
 
-    static String formatBound(double bound) {
-        return bound == Math.rint(bound) && Math.abs(bound) < 1e15 ? Long.toString((long) bound) : Double.toString(bound);
-    }
 }

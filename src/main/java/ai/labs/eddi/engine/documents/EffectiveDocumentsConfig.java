@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.TextNode;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -337,9 +338,9 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 value = builtIn; // and the default is bounded like any other value
             }
             var bound = bounds.boundFor(path);
-            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(BigDecimal.valueOf(bound.get())) > 0) {
+            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
                 warnClamped(path, bound.get());
-                return (long) Math.floor(bound.get());
+                return bound.get().setScale(0, RoundingMode.FLOOR).longValueExact();
             }
             return value;
         }
@@ -439,16 +440,17 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 value = fallback; // and the default is bounded like any other value
             }
             var bound = bounds.boundFor(path);
-            if (bound.isPresent() && value > bound.get()) {
+            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
                 warnClamped(path, bound.get());
-                return bound.get();
+                return bound.get().doubleValue();
             }
             return value;
         }
 
-        private void warnClamped(String path, double bound) {
-            warnings.add("documents." + path + " is above the operator bound of " + formatNumber(bound) + " (" + DocumentBounds.propertyFor(path)
-                    + ") and is clamped to it");
+        private void warnClamped(String path, BigDecimal bound) {
+            warnings.add(
+                    "documents." + path + " is above the operator bound of " + DocumentBounds.format(bound) + " (" + DocumentBounds.propertyFor(path)
+                            + ") and is clamped to it");
         }
 
         /**
@@ -502,8 +504,5 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             return null;
         }
 
-        private static String formatNumber(double value) {
-            return value == Math.rint(value) && Math.abs(value) < 1e15 ? Long.toString((long) value) : Double.toString(value);
-        }
     }
 }

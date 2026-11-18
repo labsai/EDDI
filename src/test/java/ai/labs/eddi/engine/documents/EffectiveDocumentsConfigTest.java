@@ -23,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -321,6 +322,15 @@ class EffectiveDocumentsConfigTest {
             var clamped = EffectiveDocumentsConfig.resolve(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), bounded, live);
             assertEquals(9_007_199_254_740_992L, clamped.derived().maxBytesPerSource());
             assertEquals(1, clamped.clampWarnings().size(), clamped.clampWarnings().toString());
+
+            // A bound that a double cannot represent (2^53 + 1) is kept exactly: a value
+            // equal to it passes, one above it is clamped to it, not to 2^53.
+            var odd = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("derived.maxBytesPerSource", 9_007_199_254_740_993L)));
+            var atBound = EffectiveDocumentsConfig.resolve(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), odd, live);
+            assertEquals(9_007_199_254_740_993L, atBound.derived().maxBytesPerSource());
+            assertTrue(atBound.clampWarnings().isEmpty(), atBound.clampWarnings().toString());
+            var aboveBound = EffectiveDocumentsConfig.resolve(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740995}}"), odd, live);
+            assertEquals(9_007_199_254_740_993L, aboveBound.derived().maxBytesPerSource());
         }
 
         @Test
@@ -378,7 +388,7 @@ class EffectiveDocumentsConfigTest {
             assertTrue(bounds.boundFor("a").isEmpty());
             assertTrue(bounds.boundFor("b").isEmpty());
             assertTrue(bounds.boundFor("c").isEmpty());
-            assertEquals(0.0, bounds.boundFor("d").orElseThrow());
+            assertEquals(0, BigDecimal.ZERO.compareTo(bounds.boundFor("d").orElseThrow()));
         }
     }
 }

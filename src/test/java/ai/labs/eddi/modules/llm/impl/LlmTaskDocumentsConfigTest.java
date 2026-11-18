@@ -19,12 +19,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Deploy time never refuses a {@code documents} value: a stored configuration
- * that carries a key not available in this version (saved by a newer version,
- * or written straight to the database) loads, resolves to off, and logs one
- * WARN naming the task and the key. The assertions read the lines
- * {@code warnOnDocumentsConfig} returns, which are exactly the lines it logs:
- * capturing the log itself is not reliable in a shared test JVM.
+ * The deploy-time warning helper, {@code LlmTask.warnOnDocumentsConfig}: for a
+ * stored key that is not available, or an operator default that is ignored, it
+ * never throws and returns one warning naming the task and the key. The
+ * assertions read the lines it returns, which are exactly the lines it logs
+ * (capturing the log itself is not reliable in a shared test JVM). That
+ * {@code configure()} calls it with the stored configuration is verified in
+ * {@code LlmTaskConfigureTest}; that the key resolves to its built-in value is
+ * verified in {@code EffectiveDocumentsConfigTest}.
  */
 @DisplayName("LlmTask.warnOnDocumentsConfig — the deploy-time documents warnings")
 class LlmTaskDocumentsConfigTest {

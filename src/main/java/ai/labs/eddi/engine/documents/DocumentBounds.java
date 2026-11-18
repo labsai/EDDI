@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.documents;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -40,9 +41,10 @@ public final class DocumentBounds {
 
     private static final DocumentBounds NONE = new DocumentBounds(Map.of());
 
-    private final Map<String, Double> bounds;
+    /** Exact decimals: a byte bound above 2^53 must not round to its neighbour. */
+    private final Map<String, BigDecimal> bounds;
 
-    private DocumentBounds(Map<String, Double> bounds) {
+    private DocumentBounds(Map<String, BigDecimal> bounds) {
         this.bounds = Map.copyOf(bounds);
     }
 
@@ -55,19 +57,20 @@ public final class DocumentBounds {
         if (BOUND_PROPERTIES.isEmpty()) {
             return NONE;
         }
-        Map<String, Double> read = new LinkedHashMap<>();
+        Map<String, BigDecimal> read = new LinkedHashMap<>();
         var config = ConfigProvider.getConfig();
         BOUND_PROPERTIES.forEach((path, property) -> {
             try {
-                config.getOptionalValue(property, Double.class).ifPresent(value -> {
-                    if (isValidBound(value)) {
+                config.getOptionalValue(property, String.class).ifPresent(text -> {
+                    BigDecimal value = parseBound(text);
+                    if (value != null) {
                         read.put(path, value);
                     } else {
                         LOGGER.warnf("%s must be a non-negative number; the bound is ignored", property);
                     }
                 });
             } catch (RuntimeException e) {
-                LOGGER.warnf("%s is not a number; the bound is ignored", property);
+                LOGGER.warnf("%s cannot be read; the bound is ignored", property);
             }
         });
         return read.isEmpty() ? NONE : new DocumentBounds(read);
@@ -79,17 +82,26 @@ public final class DocumentBounds {
      * (zero is a valid bound).
      */
     public static DocumentBounds of(Map<String, ? extends Number> bounds) {
-        Map<String, Double> copy = new LinkedHashMap<>();
+        Map<String, BigDecimal> copy = new LinkedHashMap<>();
         bounds.forEach((path, value) -> {
-            if (value != null && isValidBound(value.doubleValue())) {
-                copy.put(path, value.doubleValue());
+            // toString keeps a Long exact and turns NaN / Infinity into text parseBound
+            // refuses
+            BigDecimal parsed = value == null ? null : parseBound(value.toString());
+            if (parsed != null) {
+                copy.put(path, parsed);
             }
         });
         return new DocumentBounds(copy);
     }
 
-    private static boolean isValidBound(double value) {
-        return Double.isFinite(value) && value >= 0;
+    /** A non-negative decimal, exactly as written; null for anything else. */
+    private static BigDecimal parseBound(String text) {
+        try {
+            BigDecimal value = new BigDecimal(text.strip());
+            return value.signum() >= 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public static DocumentBounds none() {
@@ -97,8 +109,15 @@ public final class DocumentBounds {
     }
 
     /** The bound on {@code path}, if the operator set one. */
-    public Optional<Double> boundFor(String path) {
+    public Optional<BigDecimal> boundFor(String path) {
         return Optional.ofNullable(bounds.get(path));
+    }
+
+    /**
+     * A bound as an operator wrote it, for messages ({@code 6000}, {@code 5.5}).
+     */
+    public static String format(BigDecimal bound) {
+        return bound.stripTrailingZeros().toPlainString();
     }
 
     /** The operator property that bounds {@code path}, for messages. */
