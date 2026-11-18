@@ -36,6 +36,13 @@ Phase 2 of the email channel v2 plan: before EDDI starts ignoring mail it was no
   `use-email-log.ts`, `lib/api/email-log.ts`); a "Daily mail digest" select in the email settings. i18n in all 11
   locales, MSW handlers (`MOCK_EMAIL_LOG`), the two operations added to `openapi-operations.json` by hand in the
   generator's order (regenerating needs a backend built from this branch), tests in `email-mail-log.test.tsx`.
+  A 403 from the log or the lookup (edit access withdrawn) is handled in the hooks: it records a per-channel denial
+  in the query cache and drops every cached page of the log, also when the section is not mounted; rows and the
+  lookup stay hidden until a successful read sent after the denial (Retry). The channel page opens a link without
+  `?version` (the digest's) at the current version, with one lookup per visit and a retryable error instead of a
+  silent fallback to version 1; the mail log follows the integration's current type (case-insensitive).
+- IMAP: a refused login names the server's own reply (e.g. Gmail's `[AUTHENTICATIONFAILED] Invalid credentials`)
+  in the poll failure.
 - Platform Operator: `GET /channelstore/channels/{id}/email-log` on the read allow-list and a "why didn't the
   platform answer my mail?" paragraph in the prompt; revision 81 → 83. The `POST …/lookup` is deliberately not
   granted: it only reads, but the gate decides by method and `READ_ENDPOINTS` means GETs — the listing's filters
