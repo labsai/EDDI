@@ -82,9 +82,16 @@ the tags as text, as the Chat UI widget has since 6.7.0.
   never moved; nothing runs while the transcript is idle; the observers are released with the
   container. Tests in `ui/manager/src/hooks/__tests__/use-smart-auto-scroll.test.tsx` drive a fake
   observer and animation frame.
-- **No placeholder character is forgeable.** `formatMarkdownText` stashes protected regions behind
-  U+E000 and math spans behind U+E001; only U+E000 was stripped from the input, so a literal U+E001
-  in a reply (`a and $x$ **b **(y`) took the real `$x$` and the span itself was deleted. Every
-  placeholder character (`RESERVED_MARKS` in `team/group-utils.ts`) is now removed on entry; a new one
-  must be added there. Tests in `team/format-markdown-text.table.test.ts` cover the review's trigger, a
-  literal mark without any math span, several spans, and forged stash placeholders.
+- **No placeholder character is forgeable, and none is removed.** `formatMarkdownText` stood U+E000 in
+  for protected regions and U+E001 for math spans, and only U+E000 was stripped from the input, so a
+  literal U+E001 in a reply (`a` U+E001 ` and $x$ **b **(y`) took the real `$x$` and the span itself was
+  deleted. Stripping both (the first attempt) deleted user content instead, such as a U+E001 inside a
+  JSON example in a code fence. The placeholders are now chosen per input (`chooseMarks` in
+  `team/group-utils.ts`): two Private Use Area characters the input does not contain, U+E000/U+E001
+  when it holds none (one regex test, no allocation); an input holding all 6,400 is returned
+  unrepaired. A literal mark is ordinary text and comes back as written, and text without `**` is
+  returned as it is. Nothing but whitespace next to a repaired `**` changes. Tests in
+  `team/format-markdown-text.table.test.ts` cover the review's trigger (mark and span kept, bold
+  repaired), a mark without any math span, several spans, forged stash placeholders, a fence holding
+  U+E000-U+E003 byte for byte, the all-PUA input, and 400 generated inputs that must lose no
+  non-whitespace character; the Manager's `format-markdown-text.test.ts` no longer pins the stripping.

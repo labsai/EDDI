@@ -129,35 +129,108 @@ describe("formatMarkdownText repairs inside structure", () => {
 });
 
 /**
- * Every Private Use Area character the repair uses as a placeholder must be
- * unforgeable: agent output can contain any of them, and a literal one must
- * never be read as ours.
+ * The masking stands placeholder characters (Unicode Private Use Area) in for
+ * protected regions and math spans. Agent output can contain any such
+ * character, so the placeholders are chosen per input from those it does NOT
+ * contain: a literal one is ordinary text, never read as ours and never
+ * removed. A display repair must not delete content.
  */
-describe("formatMarkdownText cannot be tricked by a literal placeholder character", () => {
+describe("formatMarkdownText with literal placeholder characters in the input", () => {
   const STASH_MARK = String.fromCharCode(0xe000);
   const MATH_MARK = String.fromCharCode(0xe001);
 
-  it("a literal math mark before a real math span keeps the span (the review's trigger)", () => {
-    expect(formatMarkdownText(`a${MATH_MARK} and $x$ **b **(y`)).toBe("a and $x$ **b** (y");
+  it("keeps a literal math mark and the real math span, and repairs the bold (the review's trigger)", () => {
+    // The literal mark is plain text here; the line's `**` pair is repaired as
+    // on any other line, and `$x$` is masked by a mark the input does not hold.
+    expect(formatMarkdownText(`a${MATH_MARK} and $x$ **b **(y`)).toBe(`a${MATH_MARK} and $x$ **b** (y`);
   });
 
-  it("a literal math mark with no math span at all is dropped, the rest repaired", () => {
-    expect(formatMarkdownText(`a${MATH_MARK} **b **(y`)).toBe("a **b** (y");
+  it("keeps a literal math mark when there is no math span at all", () => {
+    expect(formatMarkdownText(`a${MATH_MARK} **b **(y`)).toBe(`a${MATH_MARK} **b** (y`);
   });
 
-  it("literal math marks around several math spans keep every span in its place", () => {
-    expect(formatMarkdownText(`${MATH_MARK}$p$ ${MATH_MARK} **q **(r $s$${MATH_MARK}`)).toBe("$p$  **q** (r $s$");
+  it("keeps literal math marks around several math spans, every span in its place", () => {
+    expect(formatMarkdownText(`${MATH_MARK}$p$ ${MATH_MARK} **q **(r $s$${MATH_MARK}`)).toBe(
+      `${MATH_MARK}$p$ ${MATH_MARK} **q** (r $s$${MATH_MARK}`,
+    );
   });
 
-  it("a forged stash placeholder next to a real code span keeps the code span once", () => {
-    expect(formatMarkdownText(`${STASH_MARK}0${STASH_MARK} and \`code\` **b **(y`)).toBe("0 and `code` **b** (y");
+  it("keeps a forged stash placeholder as text and the real code span once", () => {
+    expect(formatMarkdownText(`${STASH_MARK}0${STASH_MARK} and \`code\` **b **(y`)).toBe(
+      `${STASH_MARK}0${STASH_MARK} and \`code\` **b** (y`,
+    );
   });
 
-  it("a forged stash placeholder with nothing stashed loses no text", () => {
-    expect(formatMarkdownText(`keep ${STASH_MARK}7${STASH_MARK} **b **(y`)).toBe("keep 7 **b** (y");
+  it("keeps a forged out-of-range stash placeholder in full", () => {
+    expect(formatMarkdownText(`keep ${STASH_MARK}7${STASH_MARK} **b **(y`)).toBe(
+      `keep ${STASH_MARK}7${STASH_MARK} **b** (y`,
+    );
   });
 
-  it("text with a literal placeholder character and no bold comes out without it", () => {
-    expect(formatMarkdownText(`plain ${MATH_MARK}${STASH_MARK} text`)).toBe("plain  text");
+  it("returns a fenced block holding the placeholder characters byte for byte", () => {
+    const pua = [0xe000, 0xe001, 0xe002, 0xe003].map((c) => String.fromCharCode(c)).join("");
+    const input = `Example:\n\n\`\`\`json\n{"mark": "${pua}", "bold": "** x **"}\n\`\`\`\n\nThen **done **(ok`;
+    expect(formatMarkdownText(input)).toBe(input.replace("**done **(ok", "**done** (ok"));
+    const fenceOnly = `\`\`\`json\n{"mark": "${pua}", "n": "a ** b"}\n\`\`\``;
+    expect(formatMarkdownText(fenceOnly)).toBe(fenceOnly);
+  });
+
+  it("returns text without bold delimiters as it is, placeholder characters included", () => {
+    const input = `plain ${MATH_MARK}${STASH_MARK} text $x$ \`c\``;
+    expect(formatMarkdownText(input)).toBe(input);
+  });
+
+  it("returns the input unrepaired when it holds every placeholder character there is", () => {
+    let all = "";
+    for (let c = 0xe000; c <= 0xf8ff; c++) all += String.fromCharCode(c);
+    const input = `${all} **b **(y`;
+    expect(formatMarkdownText(input)).toBe(input);
+  });
+
+  it("loses no character on generated inputs mixing marks, math, code, fences and bold", () => {
+    // A small deterministic PRNG (mulberry32), so a failure reproduces.
+    let seed = 0x5eed;
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pieces = [
+      STASH_MARK,
+      MATH_MARK,
+      `${STASH_MARK}0${STASH_MARK}`,
+      `${STASH_MARK}3${STASH_MARK}`,
+      "$x$",
+      "$a **b ** c$",
+      "`",
+      "`code`",
+      "```\n",
+      "**",
+      "** ",
+      " **",
+      "b",
+      "word",
+      " ",
+      "\n",
+      "7",
+      "(",
+      "|",
+      "https://x.test/a",
+    ];
+    // Only whitespace next to a repaired delimiter may move or change.
+    const nonSpace = (s: string) => s.replace(/\s/g, "");
+    let repaired = 0;
+    for (let n = 0; n < 400; n++) {
+      let input = "";
+      const length = 1 + Math.floor(random() * 24);
+      for (let i = 0; i < length; i++) input += pieces[Math.floor(random() * pieces.length)];
+      const out = formatMarkdownText(input);
+      expect(nonSpace(out), JSON.stringify(input)).toBe(nonSpace(input));
+      if (!input.includes("**")) expect(out, JSON.stringify(input)).toBe(input);
+      if (out !== input) repaired++;
+    }
+    // The generator does reach the repair, not only the inputs it leaves alone.
+    expect(repaired).toBeGreaterThan(0);
   });
 });

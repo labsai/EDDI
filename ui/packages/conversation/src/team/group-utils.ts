@@ -71,23 +71,61 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
- * Sentinel wrapping a stash index, using a Unicode Private Use Area character.
- * PUA code points carry no meaning in real text, so the placeholder can never
- * collide with agent output — unlike a space- or bracket-delimited token, which
- * would swallow ordinary numbers ("in 5 minutes").
+ * The placeholder characters of one repair: `stash` wraps a stash index
+ * (`stash + index + stash`), `math` stands in for one `$…$` span while a line's
+ * bold is repaired. Both are Unicode Private Use Area characters, chosen per
+ * input so that NEITHER occurs in it (see {@link chooseMarks}): a placeholder in
+ * the working text was then always put there by us, and a literal one in agent
+ * output — which prompt injection can shape — is ordinary text that is kept as
+ * it is. Removing such characters instead would delete user content (a JSON
+ * example in a code fence whose string holds one).
+ *
+ * A PUA character rather than a space- or bracket-delimited token, which would
+ * swallow ordinary numbers ("in 5 minutes").
  */
-const SENTINEL = String.fromCharCode(0xe000);
-const PLACEHOLDER = new RegExp(SENTINEL + "(\\d+)" + SENTINEL, "g");
-/** Stands in for one stashed `$…$` math span while a line's bold is repaired. */
-const MATH_MARK = String.fromCharCode(0xe001);
+interface Marks {
+  stash: string;
+  /** `stash(\d+)stash`, global. */
+  placeholder: RegExp;
+  math: string;
+  /** `math`, global. */
+  mathAll: RegExp;
+}
+
+function makeMarks(stashCode: number, mathCode: number): Marks {
+  const stash = String.fromCharCode(stashCode);
+  const math = String.fromCharCode(mathCode);
+  return {
+    stash,
+    placeholder: new RegExp(stash + "(\\d+)" + stash, "g"),
+    math,
+    mathAll: new RegExp(math, "g"),
+  };
+}
+
+const PUA_FIRST = 0xe000;
+const PUA_LAST = 0xf8ff;
+/** Any BMP Private Use Area character. */
+const PRIVATE_USE = /[\uE000-\uF8FF]/;
+const PRIVATE_USE_ALL = /[\uE000-\uF8FF]/g;
+/** The marks of every input without a PUA character — nearly all of them. */
+const DEFAULT_MARKS = makeMarks(PUA_FIRST, PUA_FIRST + 1);
+
 /**
- * Every Private Use Area character this module uses as a placeholder. Each is
- * removed from the input before any masking starts (see
- * {@link maskProtectedRegions}), so a placeholder in the working text was always
- * put there by us — a literal one in agent output can never be mistaken for it.
- * A new placeholder character goes in here, or it is forgeable.
+ * Two PUA characters that do not occur in `text`, or null when there are none
+ * (an input holding all 6,400 of them, which no repair is worth). One `test`
+ * and no allocation when `text` has no PUA character at all.
  */
-const RESERVED_MARKS = new RegExp("[" + SENTINEL + MATH_MARK + "]", "g");
+function chooseMarks(text: string): Marks | null {
+  if (!PRIVATE_USE.test(text)) return DEFAULT_MARKS;
+  const used = new Set<number>();
+  for (const m of text.matchAll(PRIVATE_USE_ALL)) used.add(m[0].charCodeAt(0));
+  const free: number[] = [];
+  for (let c = PUA_FIRST; c <= PUA_LAST && free.length < 2; c++) {
+    if (!used.has(c)) free.push(c);
+  }
+  return free.length === 2 ? makeMarks(free[0]!, free[1]!) : null;
+}
 
 /**
  * Replace every protected region with an opaque placeholder, returning the
@@ -172,24 +210,20 @@ function maskIndentedCode(text: string, push: (m: string) => string): string {
   });
 }
 
-function maskProtectedRegions(text: string): {
+function maskProtectedRegions(
+  text: string,
+  marks: Marks,
+): {
   masked: string;
   restore: (s: string) => string;
 } {
   const stash: string[] = [];
-  // Strip every placeholder character already in the input FIRST. Agent output
-  // is attacker-influenceable via prompt injection, and a literal
-  // U+E000<digits>U+E000 would otherwise be indistinguishable from a real
-  // placeholder — restore would substitute an unrelated stashed region into the
-  // message (duplicating it) or, for an out-of-range index, delete the text. A
-  // literal U+E001 would take the place of a real `$…$` span in the bold repair:
-  // the forged mark got the math back and the real span was deleted. Both are
-  // Private Use Area and carry no meaning in real content, so dropping them
-  // loses nothing.
-  let masked = text.replace(RESERVED_MARKS, "");
+  // `marks.stash` does not occur in `text` (chooseMarks), so every placeholder
+  // restore finds below is one `push` made; nothing is removed from the input.
+  let masked = text;
   const push = (match: string): string => {
     stash.push(match);
-    return SENTINEL + (stash.length - 1) + SENTINEL;
+    return marks.stash + (stash.length - 1) + marks.stash;
   };
   for (const pattern of PROTECTED_PATTERNS) {
     masked = masked.replace(pattern, push);
@@ -203,8 +237,8 @@ function maskProtectedRegions(text: string): {
     let out = s;
     // One pass per masking stage that can nest, plus one to settle.
     const maxPasses = PROTECTED_PATTERNS.length + 2;
-    for (let i = 0; i < maxPasses && out.includes(SENTINEL); i++) {
-      out = out.replace(PLACEHOLDER, (_m, idx: string) => stash[Number(idx)] ?? "");
+    for (let i = 0; i < maxPasses && out.includes(marks.stash); i++) {
+      out = out.replace(marks.placeholder, (m, idx: string) => stash[Number(idx)] ?? m);
     }
     return out;
   };
@@ -241,15 +275,14 @@ const CLOSER_AFTER = /^(?:$|[\s\u00a0.,;:!?)\]}|"'([{])/;
  *   exponent notation (`x ** 2 and y ** 2`);
  * - `$…$` math is never touched.
  */
-function repairBoldText(text: string, contentStart: number): string {
+function repairBoldText(text: string, contentStart: number, marks: Marks): string {
   if (!text.includes("**")) return text;
-  // `text` holds no literal MATH_MARK: it is reached only through
-  // formatMarkdownText, whose masking strips RESERVED_MARKS on entry, so every
-  // mark below stands for exactly one span in `math`, in order.
+  // `marks.math` does not occur in the input (chooseMarks), so every mark below
+  // stands for exactly one span in `math`, in order.
   const math: string[] = [];
   const work = text.replace(MATH_SPAN, (m) => {
     math.push(m);
-    return MATH_MARK;
+    return marks.math;
   });
   const segments = work.split("**");
   // segments.length is odd exactly when the delimiter count is even.
@@ -285,19 +318,19 @@ function repairBoldText(text: string, contentStart: number): string {
     }
   }
   let k = 0;
-  return segments.join("**").replace(new RegExp(MATH_MARK, "g"), () => math[k++] ?? "");
+  return segments.join("**").replace(marks.mathAll, (m) => math[k++] ?? m);
 }
 
 /** Repair ONE line; a table row cell by cell, so a `|` is never crossed. */
-function repairBoldLine(line: string): string {
+function repairBoldLine(line: string, marks: Marks): string {
   if (!line.includes("**")) return line;
   if (TABLE_ROW.test(line)) {
     return line
       .split("|")
-      .map((cell) => repairBoldText(cell, /^[ \t]*/.exec(cell)?.[0].length ?? 0))
+      .map((cell) => repairBoldText(cell, /^[ \t]*/.exec(cell)?.[0].length ?? 0, marks))
       .join("|");
   }
-  return repairBoldText(line, LINE_CONTENT_START.exec(line)?.[0].length ?? 0);
+  return repairBoldText(line, LINE_CONTENT_START.exec(line)?.[0].length ?? 0, marks);
 }
 
 /**
@@ -314,12 +347,26 @@ function repairBoldLine(line: string): string {
  * autolinks and bare URLs are masked first, and a table row is repaired cell by cell, so the
  * repair applies to prose only. Unterminated constructs while a reply streams are
  * masked too.
+ *
+ * Nothing but whitespace next to a repaired `**` ever changes: every other
+ * character of the input comes back, in order. The placeholders the masking
+ * uses are characters the input does not contain ({@link chooseMarks}); an
+ * input for which none can be found is returned unrepaired.
  */
 export function formatMarkdownText(text: string): string {
   if (!text) return "";
-  const { masked, restore } = maskProtectedRegions(text);
-  if (!masked.includes("**")) return restore(masked);
-  return restore(masked.split("\n").map(repairBoldLine).join("\n"));
+  // The only repair is of `**` delimiters: without one there is nothing to do.
+  if (!text.includes("**")) return text;
+  const marks = chooseMarks(text);
+  if (!marks) return text;
+  const { masked, restore } = maskProtectedRegions(text, marks);
+  if (!masked.includes("**")) return text;
+  return restore(
+    masked
+      .split("\n")
+      .map((line) => repairBoldLine(line, marks))
+      .join("\n"),
+  );
 }
 
 // ─── Content Parsing ─────────────────────────────────────────────

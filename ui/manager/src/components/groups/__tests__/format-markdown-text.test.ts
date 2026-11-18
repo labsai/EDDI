@@ -167,21 +167,20 @@ describe("formatMarkdownText", () => {
     const SENTINEL = String.fromCharCode(0xe000);
 
     it("does not substitute stashed content for a sentinel in the input", () => {
-      // Agent output is attacker-influenceable via prompt injection. Without
-      // stripping the sentinel first this returned "`code` and `code`" — the code
-      // span duplicated into where the agent's own text had been. Only the
-      // meaningless PUA character is dropped; the surrounding text survives.
-      const out = formatMarkdownText("`code` and " + SENTINEL + "0" + SENTINEL);
-      expect(out).toBe("`code` and 0");
-      expect(out).not.toContain(SENTINEL);
+      // Agent output is attacker-influenceable via prompt injection. A literal
+      // sentinel once made this "`code` and `code`" — the code span duplicated
+      // into where the agent's own text had been. The masking now uses a
+      // placeholder the input does not contain, so the literal is ordinary text
+      // and comes back as written, while the bold is still repaired.
+      const input = "`code` and " + SENTINEL + "0" + SENTINEL + " **b **(y";
+      expect(formatMarkdownText(input)).toBe("`code` and " + SENTINEL + "0" + SENTINEL + " **b** (y");
     });
 
     it("does not let an out-of-range forged index delete surrounding text", () => {
-      // Previously the forged placeholder resolved to `stash[99] ?? ""`, deleting
-      // the run outright. The digits are ordinary content and must survive.
-      const out = formatMarkdownText("before " + SENTINEL + "99" + SENTINEL + " after");
-      expect(out).toBe("before 99 after");
-      expect(out).not.toContain(SENTINEL);
+      // A forged placeholder once resolved to `stash[99] ?? ""`, deleting the
+      // run outright. It is ordinary content and survives in full.
+      const input = "before " + SENTINEL + "99" + SENTINEL + " after **b **(y";
+      expect(formatMarkdownText(input)).toBe("before " + SENTINEL + "99" + SENTINEL + " after **b** (y");
     });
 
     it("keeps ordinary text containing digits intact", () => {
