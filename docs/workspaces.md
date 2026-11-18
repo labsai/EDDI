@@ -236,8 +236,8 @@ recorded user".
 **Grants are not affected.** Whether somebody can reach a resource is decided
 against their *live* token on every request, never against the directory: a
 person with a stale entry keeps every grant their token still qualifies for,
-and a removed team member loses team access on their next request whether or
-not a window is set.
+and a removed team member loses team access as soon as the token they present
+no longer carries the team, whether or not a window is set.
 
 **Administrators still see everybody.** `eddi-admin`'s search is not windowed,
 and shows a stale person with their email as before — the directory is theirs
